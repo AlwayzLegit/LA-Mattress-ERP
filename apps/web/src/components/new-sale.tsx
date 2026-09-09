@@ -83,6 +83,12 @@ interface Line {
   deliveryDate: string;
   availableHere?: number;
   atpDate?: string | null;
+  /**
+   * The product's own tax rate (tax class), null/undefined = the store
+   * rate. 0 marks an untaxed line — installation, services (owner
+   * 2026-09-06). Mirrors what the server charges on the written order.
+   */
+  taxRateBps?: number | null;
 }
 interface PaymentLine {
   key: string;
@@ -466,13 +472,32 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     const delivery = parseDollars(deliveryFee);
     const afterLines = merchandise - lineDiscount;
     const orderDisc = Math.min(parseDollars(orderDiscount), Math.max(0, afterLines));
-    // Tax applies to taxable merchandise only — custom lines (fees,
-    // removal) are untaxed server-side; mirror that here.
-    const taxableBase = lines
+    // Tax mirrors sales/totals.ts: custom lines (fees, removal) are
+    // untaxed; every product line taxes at its own rate — the product's
+    // tax class when it has one (0 for an untaxed service like power
+    // base installation), else the store rate — on its net less its
+    // pro-rata share of the order discount.
+    const taxableLines = lines
       .filter((l) => l.lineType !== 'custom')
-      .reduce((sum, l) => sum + l.quantity * l.unitPriceCents - l.lineDiscountCents, 0);
-    const taxable = Math.max(0, taxableBase - orderDisc);
-    const taxCents = Math.round((taxable * taxRateBps) / 10000);
+      .map((l) => ({
+        net: Math.max(0, l.quantity * l.unitPriceCents - l.lineDiscountCents),
+        rate: l.taxRateBps ?? taxRateBps,
+      }));
+    const taxableNet = taxableLines.reduce((sum, l) => sum + l.net, 0);
+    const discountOnTaxable = Math.min(orderDisc, taxableNet);
+    let allocated = 0;
+    let taxCents = 0;
+    taxableLines.forEach((l, i) => {
+      const share =
+        taxableNet === 0
+          ? 0
+          : i === taxableLines.length - 1
+            ? discountOnTaxable - allocated
+            : Math.floor((discountOnTaxable * l.net) / taxableNet);
+      allocated += share;
+      taxCents += Math.round(((l.net - share) * l.rate) / 10000);
+    });
+    const untaxedLines = taxableLines.filter((l) => l.rate === 0 && l.net > 0).length;
     const totalCents =
       merchandise + recycling - lineDiscount - orderDisc + taxCents + install + delivery;
     const paidCents = payments.reduce((s, p) => s + p.amountCents, 0);
@@ -486,6 +511,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       install,
       delivery,
       taxCents,
+      untaxedLines,
       totalCents,
       paidCents,
       balanceCents: Math.max(0, totalCents - paidCents),
@@ -522,6 +548,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           deliveryDate: '',
           availableHere: row.availableHere,
           atpDate: row.atpDate,
+          taxRateBps: row.taxRateBps ?? null,
         });
       }
       return next;
@@ -572,6 +599,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           unitPriceCents: number;
           discountCents: number;
           lineType: string;
+          taxRateBps?: number | null;
           fulfillmentMethod: string | null;
           sourceLocationId: string | null;
           deliveryDate: string | null;
@@ -599,6 +627,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           fulfillmentMethod: (l.fulfillmentMethod as Line['fulfillmentMethod']) ?? '',
           sourceLocationId: l.sourceLocationId ?? '',
           deliveryDate: l.deliveryDate ?? '',
+          // The written line's rate (its tax class at write time); the
+          // availability refresh below overrides it with the live one.
+          taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
         })),
       );
       setResumedDraftId(id);
@@ -610,7 +641,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         const loc = l.sourceLocationId ?? o.locationId;
         byLoc.set(loc, [...(byLoc.get(loc) ?? []), l.variantId]);
       }
-      const avail = new Map<string, { availableHere: number; atpDate: string | null }>();
+      const avail = new Map<
+        string,
+        { availableHere: number; atpDate: string | null; taxRateBps: number | null }
+      >();
       await Promise.all(
         [...byLoc.entries()].map(async ([loc, ids]) => {
           try {
@@ -621,6 +655,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               avail.set(`${loc}:${r.variantId}`, {
                 availableHere: r.availableHere,
                 atpDate: r.atpDate,
+                taxRateBps: r.taxRateBps ?? null,
               });
           } catch {
             // availability refresh is best-effort — the draft still loads
@@ -632,7 +667,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           prev.map((l) => {
             if (!l.variantId) return l;
             const hit = avail.get(`${l.sourceLocationId || o.locationId}:${l.variantId}`);
-            return hit ? { ...l, availableHere: hit.availableHere, atpDate: hit.atpDate } : l;
+            return hit
+              ? {
+                  ...l,
+                  availableHere: hit.availableHere,
+                  atpDate: hit.atpDate,
+                  taxRateBps: hit.taxRateBps,
+                }
+              : l;
           }),
         );
       }
@@ -1733,7 +1775,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               <div>
                 <TotalRow label="Recycling" cents={totals.recycling} />
                 <TotalRow
-                  label={`Tax (${(taxRateBps / 100).toFixed(2)}%)`}
+                  label={
+                    `Tax (${(taxRateBps / 100).toFixed(2)}%)` +
+                    (totals.untaxedLines
+                      ? ` · ${totals.untaxedLines} untaxed line${totals.untaxedLines === 1 ? '' : 's'}`
+                      : '')
+                  }
                   cents={totals.taxCents}
                 />
               </div>

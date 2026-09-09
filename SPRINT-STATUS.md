@@ -4903,3 +4903,23 @@ Owner requested implementation after a live workflow review. First patch:
   apply the API migration before the new web features are considered available.
   Explicit fee classification and readiness/customer-message automation remain
   subsequent slices; no live data or external messages changed during this work.
+
+### Checkpoint — 2026-09-07 (untaxed services: "Power base installation needs to be non taxed")
+
+Owner screenshot: New Sale taxing POWER BASE INSTALLATION. The written
+order already honours the product's tax class (a 0% class → the line
+carries `tax_rate_bps 0`), but the register preview taxed every product
+line at the store rate and the Add Product search never said what a
+product's own rate was.
+
+- `/v1/pos/product-search` rows gain `taxRateBps`: the tax-class override
+  for the selling store, else the class fallback, else null (store rate).
+- New Sale keeps `taxRateBps` per line (from the search row; a reopened
+  draft takes the written line's rate, refreshed by the availability
+  re-check), and its tax preview mirrors `sales/totals.ts`: per-line rate
+  on net less the line's pro-rata share of the order discount. The Tax
+  row says how many lines are untaxed.
+- `product-filters.int.spec.ts` +1 (0% class, store override, no class).
+- **Ops (owner):** Settings → Tax classes → add "Non-taxable" at 0.00%,
+  then on each service product (Power base installation, …) set Tax
+  class to it. Nothing else to configure.

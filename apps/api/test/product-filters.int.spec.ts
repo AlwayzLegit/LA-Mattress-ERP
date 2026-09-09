@@ -59,6 +59,7 @@ const CATALOG: {
   brand?: string;
   preferredVendor?: 'helix' | 'purple';
   onHand?: number;
+  taxClass?: 'untaxed' | 'override';
 }[] = [
   // Shopify-shaped Helix names: size first, firmness inside, no vendor link.
   { sku: 'HX-TW-DUSK', name: 'Twin Helix Dusk 12" Medium Firm Hybrid Mattress', onHand: 3 },
@@ -81,6 +82,10 @@ const CATALOG: {
   { sku: 'PR-K-XF', name: 'Purple Extra Firm King Mattress', preferredVendor: 'purple' },
   // A second import of the Queen Twilight: same name, different SKU, no stock.
   { sku: 'HELIX-SLEEP-TWILIGHT-Q-3DA9', name: 'Queen Helix Twilight 11.5" Firm Hybrid Mattress' },
+  // Services are untaxed (owner 2026-09-06): a 0% tax class on the product.
+  { sku: 'SVC-PB-INSTALL', name: 'POWER BASE INSTALLATION', taxClass: 'untaxed' },
+  // A product on a class with a per-store override (no size / vendor / stock, so the other filters ignore it).
+  { sku: 'ACC-PROTECTOR', name: 'MATTRESS PROTECTOR', taxClass: 'override' },
 ];
 
 async function seed() {
@@ -169,6 +174,20 @@ async function seed() {
       .insert(schema.brands)
       .values({ businessId, name: 'Purple' })
       .returning();
+    const [untaxed, overridden] = await db
+      .insert(schema.taxClasses)
+      .values([
+        { businessId, name: 'Non-taxable', rateBps: 0 },
+        { businessId, name: 'Furniture', rateBps: 875 },
+      ])
+      .returning();
+    await db.insert(schema.taxClassRates).values({
+      businessId,
+      taxClassId: overridden!.id,
+      locationId,
+      rateBps: 950,
+    });
+    const taxClassIds = { untaxed: untaxed!.id, override: overridden!.id };
 
     for (const item of CATALOG) {
       const [p] = await db
@@ -178,6 +197,7 @@ async function seed() {
           sku: item.sku,
           name: item.name,
           brandId: item.brand === 'Purple' ? purpleBrand!.id : null,
+          taxClassId: item.taxClass ? taxClassIds[item.taxClass] : null,
         })
         .returning();
       const [v] = await db
@@ -263,7 +283,12 @@ async function search(params: Record<string, string>) {
     .set('Cookie', cookie)
     .set('x-business-id', businessId)
     .expect(200);
-  return res.body as { sku: string; size: string | null; firmness: string | null }[];
+  return res.body as {
+    sku: string;
+    size: string | null;
+    firmness: string | null;
+    taxRateBps: number | null;
+  }[];
 }
 const skus = (rows: { sku: string }[]) => rows.map((r) => r.sku.replace(/-V$/, '')).sort();
 
@@ -346,6 +371,23 @@ describe('Add Product filters', () => {
       'HX-Q-TWI',
     ]);
     expect(await search({ size: 'Twin XL', inStock: '1' })).toEqual([]);
+  });
+
+  it("carries each product's own tax rate so the register can preview an untaxed service", async () => {
+    const rows = await search({});
+    const by = new Map(rows.map((r) => [r.sku.replace(/-V$/, ''), r]));
+    // 0% class → untaxed; class with a store override → the override; no class → null (store rate).
+    expect(by.get('SVC-PB-INSTALL')).toMatchObject({ taxRateBps: 0 });
+    expect(by.get('ACC-PROTECTOR')).toMatchObject({ taxRateBps: 950 });
+    expect(by.get('HX-Q-TWI')).toMatchObject({ taxRateBps: null });
+    // Without a location the override cannot apply: the class fallback shows.
+    const qs = new URLSearchParams({ limit: '50', q: 'PROTECTOR' }).toString();
+    const res = await request(app.getHttpServer())
+      .get(`/v1/pos/product-search?${qs}`)
+      .set('Cookie', cookie)
+      .set('x-business-id', businessId)
+      .expect(200);
+    expect(res.body[0]).toMatchObject({ sku: 'ACC-PROTECTOR-V', taxRateBps: 875 });
   });
 
   it('rejects an unknown size or firmness', async () => {

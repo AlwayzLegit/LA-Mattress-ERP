@@ -272,6 +272,13 @@ export class SalesController {
       availableHere: number;
       availableTotal: number;
       atpDate: string | null;
+      /**
+       * The product's own tax rate at the selling location (tax class
+       * override for `locationId`, else the class fallback), or null when
+       * the product has no tax class and the store rate applies. 0 means
+       * the line is untaxed (owner 2026-09-06: installation is a service).
+       */
+      taxRateBps: number | null;
     }[]
   > {
     const query = (q ?? '').trim();
@@ -326,6 +333,14 @@ export class SalesController {
         vendorName: schema.vendors.name,
         size: sql<string | null>`${SIZE_EXPR}`,
         firmness: sql<string | null>`${FIRMNESS_EXPR}`,
+        taxRateBps: sql<number | null>`coalesce(
+          ${
+            locationId
+              ? sql`(SELECT r.rate_bps FROM tax_class_rates r WHERE r.tax_class_id = ${schema.products.taxClassId} AND r.location_id = ${locationId} LIMIT 1)`
+              : sql`NULL::int`
+          },
+          (SELECT c.rate_bps FROM tax_classes c WHERE c.id = ${schema.products.taxClassId})
+        )::int`,
         availableHere: locationId
           ? sql<number>`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}) FILTER (WHERE ${schema.inventoryLevels.locationId} = ${locationId}), 0)::int`
           : sql<number>`0`,

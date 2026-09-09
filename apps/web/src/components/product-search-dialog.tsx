@@ -33,6 +33,8 @@ export interface SearchRow {
   availableHere: number;
   availableTotal: number;
   atpDate: string | null;
+  /** Product's own rate at the store (0 = untaxed), null = the store rate applies. */
+  taxRateBps?: number | null;
 }
 interface VendorRow {
   id: string;
