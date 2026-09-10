@@ -956,7 +956,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
               : 'no count posted yet'
           }
           testid="wh-counts"
-          link={{ href: '/inventory/counts', label: 'Counts' }}
+          link={{ href: '/products/counts', label: 'Counts' }}
           style={{ gridColumn: 'span 2' }}
         >
           <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -970,7 +970,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
                         {summary.counts.open.length}
                       </span>{' '}
                       {summary.counts.open.length === 1 ? 'count' : 'counts'} open —{' '}
-                      <Link href="/inventory/counts">continue counting</Link>
+                      <Link href="/products/counts">continue counting</Link>
                     </>
                   ) : (
                     'No counts in progress.'

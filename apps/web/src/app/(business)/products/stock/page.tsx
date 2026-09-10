@@ -5,6 +5,7 @@ import { ClipboardList, PackageCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { CsvImport } from '@/components/csv-import';
+import { ProductsNav } from '@/components/products-nav';
 import {
   Alert,
   Button,
@@ -113,7 +114,7 @@ export default function InventoryPage() {
       const rows = await api<Location[]>('/v1/business/locations');
       const active = rows.filter((l) => l.isActive);
       setLocations(active);
-      // Vendor door (owner 2026-09-02): /inventory?vendorId=…&locationId=all
+      // Vendor door (owner 2026-09-02): /products/stock?vendorId=…&locationId=all
       // from the vendors page's "in inventory" count.
       const sp = new URLSearchParams(window.location.search);
       const vendorId = sp.get('vendorId');
@@ -248,14 +249,15 @@ export default function InventoryPage() {
   return (
     <div>
       <PageHeader
-        title="Inventory"
+        title="Stock by location"
         actions={
           <>
-            <LinkButton href="/inventory/counts" variant="secondary" size="sm">
+            <LinkButton href="/products/counts" variant="secondary" size="sm">
               <ClipboardList size={14} />
+              <ProductsNav />
               Count stock
             </LinkButton>
-            <LinkButton href="/inventory/receive" variant="primary">
+            <LinkButton href="/products/receive" variant="primary">
               <PackageCheck size={14} />
               Receive
             </LinkButton>
@@ -295,7 +297,7 @@ export default function InventoryPage() {
                 size="sm"
                 onClick={() => {
                   setVendor(null);
-                  window.history.replaceState(null, '', '/inventory');
+                  window.history.replaceState(null, '', '/products/stock');
                   void loadLevels(locationId, q, null);
                 }}
               >
@@ -338,7 +340,7 @@ export default function InventoryPage() {
             <EmptyState
               title="No stock at this location yet"
               action={
-                <LinkButton size="sm" href="/inventory/receive">
+                <LinkButton size="sm" href="/products/receive">
                   Receive
                 </LinkButton>
               }

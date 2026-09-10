@@ -184,7 +184,7 @@ export default function PhysicalCountDetailPage() {
   return (
     <div>
       <PageHeader
-        eyebrow={<BackLink href="/inventory/counts">All counts</BackLink>}
+        eyebrow={<BackLink href="/products/counts">All counts</BackLink>}
         title={count ? `Count — ${count.locationName}` : 'Physical count'}
         meta={count ? <StatusBadge status={count.status} /> : undefined}
         sub={

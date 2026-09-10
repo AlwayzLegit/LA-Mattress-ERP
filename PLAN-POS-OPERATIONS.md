@@ -827,6 +827,64 @@ lines|products` (review sheets with `confirm` / `override_sku` / `adjust_stock`
   turning the Shopify product sync off (B1) and the import-lookup hardening (B2).
   Until the connector is disconnected, "Sync now" recreates the listings.
 
+### 12.15 Products absorbs Inventory — STORIS product screens (amendment A19, owner 2026-09-10)
+
+Owner ask: "we can merge Products/Inventory into only Products. When you first enter
+into products the rows must be displayed like [the STORIS product browser]. After
+entering into a product the display must include what the rest of the images from
+STORIS contain" — Advanced Product Settings (Descriptive, Purchase Status, Packing)
+and View Product Activity (Inventory Quantities, Merchandising, Location Availability).
+
+- **One section.** The Inventory nav entry goes; its screens live under Products as a
+  tab strip: `/products` (browser), `/products/stock` (the former `/inventory` — stock
+  by location, bins, reservations, adjust, floor samples), `/products/counts`,
+  `/products/receive`. `/inventory*` redirects permanently. `g i` jumps to Stock by
+  location. Products renders at the wide content width.
+- **Browser columns (the STORIS strip):** Product · Vendor model · Vendor · Description
+  · On hand · Available · Net on PO · Sales margin cost · As-Is on hand · As-Is
+  available · Price · Status · As-Is non-sellable · Product group · Brand, with a
+  Location picker (All locations, or one store — every stock column narrows to it).
+  Rows open the product. `GET /v1/products` returns them (`locationId` query);
+  the search branch carries the same columns. Cost is null without
+  `products.cost.view`.
+- **Definitions (the ones the register, replenishment and reports already use):**
+  available = Σ max(0, on hand − reserved − floor sample) per level; net on PO =
+  Σ (ordered − accepted − rejected) over live, non-direct-ship purchase orders in
+  `ordered` / `partially_received` (drafts are not on order), total PO = Σ ordered on
+  the same; as-is on hand = pieces still in review (`pending_review` — restocked ones
+  are ordinary stock, vendor returns and scrap are gone), as-is non-sellable = those in
+  condition `damaged` or `parts`, as-is available = the rest; layaway reserved =
+  `qty_reserved` on open layaway order lines at the line's stock location. Code:
+  `apps/api/src/catalog/product-stock.ts`.
+- **Product page:** header shows Product number, second description, vendor and brand
+  names, product status and (when not active) purchase status. Then: Inventory
+  Quantities tiles (On hand, Net available with reserved / floor, As-Is, As-Is
+  available with non-sellable, Net PO, Total PO); Merchandising (selling price, sales
+  margin cost, purchase status, product status, layaway reserved); Descriptive
+  (Description = `name`, Second description, Brand, Vendor model = variant
+  `vendor_sku`, Vendor = preferred vendor, Group = variant `group` attribute,
+  Category); Location availability — one row per active variant per active location,
+  zeros included, with Adjust and Floor sample (the Stock by location endpoints) and
+  the reserved count linking to the reservations drill-down; Purchase status &
+  packing. The existing Tax class, Brand & collection, Variants, Reorder automation
+  and Images cards stay below.
+- **New product fields** (`products`, migration `0089_product_storis_fields`):
+  `second_description`, `purchase_status` (`active` | `discontinued` |
+  `special_order` | `closeout`, `PRODUCT_PURCHASE_STATUSES` in `@jetnine/shared`;
+  independent of `is_active`, which stays the selling switch), `boxes_per_product`,
+  `logistical_carton_qty`, `purchase_carton_qty` (whole numbers ≥ 1),
+  `logistical_carton_transfers`. `GET /v1/products/:id` returns them plus
+  `brandName`, `categoryName`, `vendorName`, `vendorModel`, `group`, `serialTracked`
+  and `stock { totals, byLocation }`; `PATCH /v1/products/:id` (`products.update`)
+  accepts them, validates, and audits before/after as `product.update`.
+- **Not modelled (STORIS fields with no ERP counterpart yet):** Available-to-Promise
+  date / quantity by desired quantity (no lead-time engine — Net PO and the PO's
+  expected date on Purchasing stand in), Suggested retail price, inventory type,
+  as-is reserved. Purchase status is informational for now: it does not yet block a
+  purchase order line.
+- Tests: `product-stock.int.spec.ts` (8, CI db `jetnine_product_stock`); the
+  Playwright orders flow reaches the stock table through the `/inventory` redirect.
+
 ### 12.3 Cashier dashboard — "My Day" (amendment A7, owner 2026-09-01)
 
 Fixed by role, like Operations and Warehouse: `cashier.dashboard.view` is the

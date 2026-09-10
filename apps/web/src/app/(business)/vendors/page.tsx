@@ -242,7 +242,7 @@ export default function VendorsPage() {
                         <CountLink
                           n={v.stats.inStockProducts}
                           sub={`· ${v.stats.inStockUnits} units`}
-                          href={`/inventory?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}&locationId=all`}
+                          href={`/products/stock?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}&locationId=all`}
                           testid="vendor-in-stock"
                         />
                       </td>

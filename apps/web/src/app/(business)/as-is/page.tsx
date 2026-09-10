@@ -217,9 +217,9 @@ export default function AsIsPage() {
               <>
                 Restock puts units back into the same SKU at the same location. To sell a unit as
                 As-Is at a discount, restock it and adjust it onto the matching <code>-AS</code> SKU
-                from <Link href="/inventory">Inventory</Link>. Scrapping is a write-off: it needs
-                its own permission (or a manager&apos;s approval), a coded reason, and lands on the
-                write-off register at cost.
+                from <Link href="/products/stock">Stock by location</Link>. Scrapping is a
+                write-off: it needs its own permission (or a manager&apos;s approval), a coded
+                reason, and lands on the write-off register at cost.
               </>
             }
           >

@@ -5038,3 +5038,32 @@ dispatches of **Ops — catalog import** against `la-mattress`:
   the critical path).
 - `deploy-api.yml` also fires on `docs/imports/**` (a corrected file must
   reach the deployed checkout the job reads).
+
+### Checkpoint — 2026-09-10 (A19: Products absorbs Inventory; STORIS product screens)
+
+Owner ask (with STORIS screenshots): one Products section; the list laid out
+like the STORIS product browser; the product page carrying Advanced Product
+Settings and View Product Activity. Built as PLAN-POS-OPERATIONS §12.15.
+
+- Nav: Inventory entry removed; `/products` tab strip (Products · Stock by
+  location · Counts · Receive); the three inventory pages moved to
+  `/products/stock|counts|receive` with permanent redirects from `/inventory*`;
+  dashboards, vendors, as-is and the command palette repointed.
+- `GET /v1/products`: STORIS columns (vendor model, vendor, on hand, available,
+  net on PO, cost, as-is on hand / available / non-sellable, price, purchase
+  status, group, brand) with `locationId`; `GET /v1/products/:id`: names, the
+  new fields, `stock.totals` and `stock.byLocation` (variant × active
+  location, zeros included, layaway reserved, bin); `PATCH` takes the new
+  fields. Shared helper `apps/api/src/catalog/product-stock.ts`.
+- Schema: `products.second_description`, `purchase_status`,
+  `boxes_per_product`, `logistical_carton_qty`, `purchase_carton_qty`,
+  `logistical_carton_transfers` (migration 0089; columns only, no RLS change).
+- Web: products browser rewritten (location picker, click-through rows, the
+  delete/CSV/vendor-chip behaviours kept); product page gains the quantity
+  tiles, Merchandising, Descriptive, Location availability (Adjust / Floor
+  sample per row) and Purchase status & packing cards above the existing ones.
+- Tests: `product-stock.int.spec.ts` (8; CI db `jetnine_product_stock`);
+  catalog (24) and product-filters (12) specs still green.
+- Open: ATP date/qty, suggested retail and inventory type have no ERP
+  counterpart (§12.15 "Not modelled"); purchase status does not yet block a
+  PO line.
