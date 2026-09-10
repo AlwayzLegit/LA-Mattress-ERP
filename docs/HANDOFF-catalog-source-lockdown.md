@@ -114,6 +114,19 @@ B6. Optional `mode: 'bindByLegacySku'` on the remap for imported sale lines with
 
 ## 3. Production run order (Phase C — the egress session)
 
+**Update 2026-09-10 — no API key and no egress session needed.** C4 and C5 now run as
+Render one-off jobs dispatched by `.github/workflows/ops-catalog-import.yml`, which runs
+`apps/api/src/ops/catalog-import.ts` inside the API service (DATABASE_URL is already
+there). The script enforces the C4/C5 gates itself (0 invalid, valid = committed =
+rowCount = `expect_rows`, replace kept = rowCount, connector sync not running) and
+fails the run otherwise, leaving the batch for `GET /v1/import/batches/:id?rows=invalid`.
+B2's commit-side hardening shipped with it: replace refuses while a physical count is
+open or counting, is skipped when any row failed, retires (never deletes) a product that
+still holds stock, and records `deletedSkus` / `deactivatedSkus` in the `import.commit`
+audit row. The sequence is rehearsed on the real files in
+`apps/api/test/catalog-import.int.spec.ts`. The original API-key procedure is kept below
+for reference only.
+
 Auth: create an API key in Settings → API keys (or `POST /v1/business/api-keys
 {name, scopes:['import.run','integrations.manage','products.update','products.merge',
 'products.view'], livemode:'live'}`, needs `api_keys.manage`). Send

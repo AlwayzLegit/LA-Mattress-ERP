@@ -511,7 +511,14 @@ describe('catalog replacement (owner 2026-09-03)', () => {
     expect(committed.body.failed).toBe(0);
     return committed.body as {
       committed: number;
-      replaced: { kept: number; deleted: number; deactivated: number } | null;
+      replaced: {
+        kept: number;
+        deleted: number;
+        deactivated: number;
+        deletedSkus: string[];
+        deactivatedSkus: string[];
+      } | null;
+      replaceSkipped: string | null;
     };
   }
 
@@ -627,6 +634,13 @@ KEEP-1,Main Warehouse,5,1,3`,
       .from(schema.orderLines)
       .where(eq(schema.orderLines.variantId, matVariant!.id));
     expect(linesBefore.length).toBeGreaterThan(0);
+    // TMP-DEL-1 was counted at 4 above; stock is history, so zero it out
+    // to make it the genuinely history-free SKU this case is about.
+    await commitBatch(
+      'inventory',
+      `SKU,LOCATION,ON_HAND,AS_IS,MIN_STOCK
+TMP-DEL-1,Main Warehouse,0,0,0`,
+    );
 
     const before = await verifyDb
       .select({ id: schema.products.id })
@@ -700,6 +714,121 @@ KEEP-1,QUEEN AURORA HYBRID,HELIX,MATT,QUEEN,DIAMO,650.00
 NEW-2,KING AURORA HYBRID,HELIX,MATT,KING,DIAMO,900.00`,
       { replaceCatalog: true },
     );
-    expect(again.replaced).toEqual({ kept: 2, deleted: 0, deactivated: 0 });
+    expect(again.replaced).toEqual({
+      kept: 2,
+      deleted: 0,
+      deactivated: 0,
+      deletedSkus: [],
+      deactivatedSkus: [],
+    });
+  });
+
+  it('replace catalog: a product holding stock is retired, not deleted, and names its SKU', async () => {
+    // STOCKED-1 has no document history but units on hand; a hard delete
+    // would cascade its ledger away.
+    await commitBatch(
+      'product',
+      `SKU,DESCRIPTION,BRAND,CATG,GROUP,VENDOR,REPLACE_COST
+KEEP-1,QUEEN AURORA HYBRID,HELIX,MATT,QUEEN,DIAMO,650.00
+NEW-2,KING AURORA HYBRID,HELIX,MATT,KING,DIAMO,900.00
+STOCKED-1,TWIN AURORA HYBRID,HELIX,MATT,TWIN,DIAMO,400.00`,
+    );
+    await commitBatch(
+      'inventory',
+      `SKU,LOCATION,ON_HAND,AS_IS,MIN_STOCK
+STOCKED-1,Main Warehouse,3,0,0`,
+    );
+    const [stocked] = await verifyDb
+      .select({ id: schema.productVariants.id, productId: schema.productVariants.productId })
+      .from(schema.productVariants)
+      .where(eq(schema.productVariants.sku, 'STOCKED-1'));
+
+    const result = await commitBatch(
+      'product',
+      `SKU,DESCRIPTION,BRAND,CATG,GROUP,VENDOR,REPLACE_COST
+KEEP-1,QUEEN AURORA HYBRID,HELIX,MATT,QUEEN,DIAMO,650.00
+NEW-2,KING AURORA HYBRID,HELIX,MATT,KING,DIAMO,900.00`,
+      { replaceCatalog: true },
+    );
+    expect(result.replaced).toEqual({
+      kept: 2,
+      deleted: 0,
+      deactivated: 1,
+      deletedSkus: [],
+      deactivatedSkus: ['STOCKED-1'],
+    });
+    const [product] = await verifyDb
+      .select({ isActive: schema.products.isActive })
+      .from(schema.products)
+      .where(eq(schema.products.id, stocked!.productId));
+    expect(product?.isActive).toBe(false);
+    const levels = await verifyDb
+      .select({ onHand: schema.inventoryLevels.onHand })
+      .from(schema.inventoryLevels)
+      .where(eq(schema.inventoryLevels.variantId, stocked!.id));
+    expect(levels.map((l) => l.onHand)).toEqual([3]);
+  });
+
+  it('replace catalog: retires nothing when a row failed, and refuses during a physical count', async () => {
+    const before = await verifyDb
+      .select({ id: schema.products.id, isActive: schema.products.isActive })
+      .from(schema.products)
+      .where(eq(schema.products.businessId, businessId));
+
+    // One bad money value: the file did not land whole, so nothing goes.
+    const partial = await commitBatch(
+      'product',
+      `SKU,DESCRIPTION,BRAND,CATG,GROUP,VENDOR,REPLACE_COST
+KEEP-1,QUEEN AURORA HYBRID,HELIX,MATT,QUEEN,DIAMO,650.00
+BROKEN-1,BROKEN ROW,HELIX,MATT,QUEEN,DIAMO,ABC`,
+      { replaceCatalog: true },
+      1,
+    );
+    expect(partial.replaced).toBeNull();
+    expect(partial.replaceSkipped).toMatch(/1 of 2 committed/);
+    const after = await verifyDb
+      .select({ id: schema.products.id, isActive: schema.products.isActive })
+      .from(schema.products)
+      .where(eq(schema.products.businessId, businessId));
+    expect(after).toEqual(before);
+
+    // A count in progress blocks the replace before any row commits.
+    const [warehouse] = await verifyDb
+      .select({ id: schema.locations.id })
+      .from(schema.locations)
+      .where(
+        and(
+          eq(schema.locations.businessId, businessId),
+          eq(schema.locations.name, 'Main Warehouse'),
+        ),
+      );
+    const [count] = await verifyDb
+      .insert(schema.physicalCounts)
+      .values({
+        businessId,
+        locationId: warehouse!.id,
+        status: 'counting',
+        countDate: '2026-09-03',
+      })
+      .returning({ id: schema.physicalCounts.id });
+    const staged = await api()
+      .post('/v1/import/batches')
+      .send({
+        entity: 'product',
+        csv: `SKU,DESCRIPTION,BRAND,CATG,GROUP,VENDOR,REPLACE_COST
+KEEP-1,QUEEN AURORA HYBRID,HELIX,MATT,QUEEN,DIAMO,650.00`,
+      });
+    await api().post(`/v1/import/batches/${staged.body.id}/validate`).send({});
+    const refused = await api()
+      .post(`/v1/import/batches/${staged.body.id}/commit`)
+      .send({ replaceCatalog: true });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toMatch(/physical count is counting/);
+    const [batch] = await verifyDb
+      .select({ status: schema.importBatches.status })
+      .from(schema.importBatches)
+      .where(eq(schema.importBatches.id, staged.body.id));
+    expect(batch?.status).toBe('validated');
+    await verifyDb.delete(schema.physicalCounts).where(eq(schema.physicalCounts.id, count!.id));
   });
 });

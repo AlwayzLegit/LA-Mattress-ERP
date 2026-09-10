@@ -121,6 +121,7 @@ export class ImportController {
         committed: result.committed,
         failed: result.failed,
         ...(result.replaced ? { replaced: result.replaced } : {}),
+        ...(result.replaceSkipped ? { replaceSkipped: result.replaceSkipped } : {}),
       },
     });
     return result;
