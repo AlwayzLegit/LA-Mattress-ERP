@@ -67,6 +67,21 @@ the job log. The script mirrors the console's "Mark as agency" (businesses +
 subscriptions rows, audit row with `actor_type = 'system'`). Add further admin scripts
 the same way: a script under `packages/db/src/` and a workflow with validated inputs.
 
+**The catalog import runs the same way** (2026-09-10):
+`.github/workflows/ops-catalog-import.yml` dispatches
+`node apps/api/dist/ops/catalog-import.js` as a Render one-off job. Inputs: `business`
+slug, `entity` product | inventory, `file` (one of the two CSVs under
+`docs/imports/2026-09-03/`), `mode` validate | commit, `expect_rows` (must equal the
+file's data-row count on the ref), `replace_catalog`. The script stages, validates and
+commits through `ImportService` with the Phase C gates of
+`docs/HANDOFF-catalog-source-lockdown.md` §3 enforced (0 invalid, valid = committed =
+rowCount, replace kept = rowCount) and exits non-zero otherwise, leaving the batch for
+inspection. The job runs the **deployed** build, so the script must be on `main` and
+live before the first dispatch. Run order: products validate → products commit with
+`replace_catalog` → inventory validate → inventory commit; the job log carries the
+deleted / deactivated SKU lists. The whole sequence is rehearsed on the real files in
+`apps/api/test/catalog-import.int.spec.ts`.
+
 ---
 
 ## 3. Open Ops items (owner's, not yours — flag, never silently block on)
@@ -147,6 +162,12 @@ from the members page and use the copy-link.
 ---
 
 ## 5. Known-real problems that are NOT fixed
+
+**The 2026-09-03 catalog files are not loaded yet.** Products and inventory are in
+`docs/imports/2026-09-03/`; the loader and its workflow exist (§2) but nothing has been
+dispatched against production. Owner prerequisites before the commit runs: a verified
+database backup, registers' offline queues drained, no physical count open. Note the
+inventory file carries `MIN_STOCK = 0` on every row, so every reorder point becomes 0.
 
 **The cutover blocker: every STORIS-imported variant has `priceCents: 0`.** This is D12
 behaving as designed (register-side price entry), but it means the catalog cannot sell

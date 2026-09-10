@@ -12,6 +12,15 @@ import {
   type RowError,
 } from './import-spec';
 
+/** What `commit({ replaceCatalog: true })` retired; the SKU lists land in the audit row. */
+export interface ReplaceCatalogResult {
+  kept: number;
+  deleted: number;
+  deactivated: number;
+  deletedSkus: string[];
+  deactivatedSkus: string[];
+}
+
 interface StageInput {
   entity: string;
   filename?: string;
@@ -421,6 +430,27 @@ export class ImportService {
     if (!['validated', 'committed'].includes(batch.status)) {
       throw new BadRequestException('Validate the batch before committing');
     }
+    const replacing = options.replaceCatalog === true && batch.entity === 'product';
+    if (replacing) {
+      // A count in progress froze on-hand snapshots of variants this run
+      // may retire; posting it afterwards would write to rows that no
+      // longer exist. Refuse before a single row commits.
+      const [openCount] = await this.db
+        .select({ id: schema.physicalCounts.id, status: schema.physicalCounts.status })
+        .from(schema.physicalCounts)
+        .where(
+          and(
+            eq(schema.physicalCounts.businessId, businessId),
+            inArray(schema.physicalCounts.status, ['open', 'counting']),
+          ),
+        )
+        .limit(1);
+      if (openCount) {
+        throw new BadRequestException(
+          `A physical count is ${openCount.status}; post or cancel it before replacing the catalog`,
+        );
+      }
+    }
     const rows = await this.db
       .select()
       .from(schema.importRows)
@@ -475,12 +505,19 @@ export class ImportService {
       .returning();
     // Owner 2026-09-03 catalog load: this file IS the catalog. Everything
     // it did not touch goes — deleted where nothing references it,
-    // deactivated where sales, purchasing or returns history does.
-    const replaced =
-      options.replaceCatalog && batch.entity === 'product'
-        ? await this.replaceCatalog(businessId, batchId)
-        : null;
-    return { batch: updated, committed, failed, replaced };
+    // deactivated where sales, purchasing or returns history does. Only a
+    // file that landed whole may retire anything: a row that failed is a
+    // SKU that would otherwise vanish because of a typo in its own line.
+    let replaced: ReplaceCatalogResult | null = null;
+    let replaceSkipped: string | null = null;
+    if (replacing) {
+      if (failed > 0 || committed !== batch.rowCount) {
+        replaceSkipped = `${failed} row(s) failed and ${committed} of ${batch.rowCount} committed — nothing was retired`;
+      } else {
+        replaced = await this.replaceCatalog(businessId, batchId);
+      }
+    }
+    return { batch: updated, committed, failed, replaced, replaceSkipped };
   }
 
   /**
@@ -492,10 +529,7 @@ export class ImportService {
    * foreign keys are read live from the catalog so a new table can never
    * be forgotten.
    */
-  async replaceCatalog(
-    businessId: string,
-    batchId: string,
-  ): Promise<{ kept: number; deleted: number; deactivated: number }> {
+  async replaceCatalog(businessId: string, batchId: string): Promise<ReplaceCatalogResult> {
     const keptRows = await this.db
       .select({ id: schema.importRows.jetnineId })
       .from(schema.importRows)
@@ -506,6 +540,7 @@ export class ImportService {
     const candidates = await this.db
       .select({
         productId: schema.products.id,
+        productSku: schema.products.sku,
         variantId: schema.productVariants.id,
         isActive: schema.products.isActive,
       })
@@ -513,15 +548,19 @@ export class ImportService {
       .leftJoin(schema.productVariants, eq(schema.productVariants.productId, schema.products.id))
       .where(eq(schema.products.businessId, businessId));
     const byProduct = new Map<string, string[]>();
+    const skuOf = new Map<string, string>();
     const wasActive = new Set<string>();
     for (const c of candidates) {
       if (keep.has(c.productId)) continue;
       const arr = byProduct.get(c.productId) ?? [];
       if (c.variantId) arr.push(c.variantId);
       byProduct.set(c.productId, arr);
+      skuOf.set(c.productId, c.productSku ?? c.productId);
       if (c.isActive) wasActive.add(c.productId);
     }
-    if (byProduct.size === 0) return { kept: keep.size, deleted: 0, deactivated: 0 };
+    if (byProduct.size === 0) {
+      return { kept: keep.size, deleted: 0, deactivated: 0, deletedSkus: [], deactivatedSkus: [] };
+    }
 
     // Stock ledger tables follow the product out; everything else is history.
     const ledger = new Set([
@@ -564,6 +603,22 @@ export class ImportService {
         blocked.add(fk.target === 'products' ? r.id : (variantToProduct.get(r.id) ?? r.id));
       }
     }
+    // Stock is history too: a variant with units on hand, reserved or on
+    // the floor keeps its ledger (movements, cost layers) by being retired
+    // instead of deleted, so nothing is cascaded away that a count or a
+    // valuation report could still need.
+    if (variantIds.length > 0) {
+      const stocked = await this.db
+        .select({ variantId: schema.inventoryLevels.variantId })
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            inArray(schema.inventoryLevels.variantId, variantIds),
+            sql`(${schema.inventoryLevels.onHand} <> 0 OR ${schema.inventoryLevels.reserved} <> 0 OR ${schema.inventoryLevels.floorSample} <> 0)`,
+          ),
+        );
+      for (const r of stocked) blocked.add(variantToProduct.get(r.variantId) ?? r.variantId);
+    }
     const toDelete = productIds.filter((id) => !blocked.has(id));
     const toDeactivate = productIds.filter((id) => blocked.has(id));
     if (toDelete.length > 0) {
@@ -590,10 +645,14 @@ export class ImportService {
         .where(inArray(schema.productVariants.productId, toDeactivate));
     }
     // Re-running the same file is a no-op: only newly retired products count.
+    const newlyDeactivated = toDeactivate.filter((id) => wasActive.has(id));
+    const skus = (ids: string[]) => ids.map((id) => skuOf.get(id) ?? id).sort();
     return {
       kept: keep.size,
       deleted: toDelete.length,
-      deactivated: toDeactivate.filter((id) => wasActive.has(id)).length,
+      deactivated: newlyDeactivated.length,
+      deletedSkus: skus(toDelete),
+      deactivatedSkus: skus(newlyDeactivated),
     };
   }
 

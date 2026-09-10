@@ -94,6 +94,7 @@ jobs:
       VENDOR_SETTINGS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_vendor_settings
       OWNER_DASHBOARD_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_owner_dashboard
       CATALOG_CLEANUP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_catalog_cleanup
+      CATALOG_IMPORT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_catalog_import
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -164,6 +165,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_vendor_settings
           createdb -h localhost -U postgres jetnine_owner_dashboard
           createdb -h localhost -U postgres jetnine_catalog_cleanup
+          createdb -h localhost -U postgres jetnine_catalog_import
 
       - name: Format check
         run: pnpm format:check

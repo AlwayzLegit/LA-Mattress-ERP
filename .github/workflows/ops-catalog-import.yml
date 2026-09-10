@@ -1,0 +1,166 @@
+name: Ops — catalog import
+
+# Loads one STORIS catalog file from docs/imports/ into production through
+# apps/api/src/ops/catalog-import.ts, run as a Render one-off job inside the
+# jetnine-api service (same build, same env vars — DATABASE_URL included).
+# The job runs the code of the *deployed* build, so the script and the file
+# must already be on main and live. Inputs are validated here; the script
+# enforces the Phase C gates (docs/HANDOFF-catalog-source-lockdown.md §3) and
+# exits non-zero when any of them fails, which fails this run.
+#
+# Order for the 2026-09-03 files: products validate → products commit with
+# replace_catalog → inventory validate → inventory commit.
+#
+# Needs the RENDER_API_KEY repository secret (same one deploy-api.yml uses).
+
+on:
+  workflow_dispatch:
+    inputs:
+      business:
+        description: Business slug
+        required: true
+        type: string
+        default: la-mattress
+      entity:
+        description: Which file type to load
+        required: true
+        type: choice
+        options: [product, inventory]
+      file:
+        description: Repo-relative CSV path
+        required: true
+        type: choice
+        options:
+          - docs/imports/2026-09-03/products.csv
+          - docs/imports/2026-09-03/inventory.csv
+      mode:
+        description: validate stops after validation; commit writes the rows
+        required: true
+        type: choice
+        options: [validate, commit]
+      expect_rows:
+        description: Exact data-row count the file must have (products.csv 1948, inventory.csv 3246)
+        required: true
+        type: string
+      replace_catalog:
+        description: Products only — retire every product the file does not carry
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ops-catalog-import
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: ${{ inputs.mode }} ${{ inputs.entity }} ${{ inputs.file }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RENDER_SERVICE_ID: srv-da4tua3m8hqs73apsflg
+      RENDER_OWNER_ID: tea-da4l4hgjo6nc73db7i10
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      BUSINESS: ${{ inputs.business }}
+      ENTITY: ${{ inputs.entity }}
+      FILE: ${{ inputs.file }}
+      MODE: ${{ inputs.mode }}
+      EXPECT_ROWS: ${{ inputs.expect_rows }}
+      REPLACE_CATALOG: ${{ inputs.replace_catalog }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::RENDER_API_KEY is not set (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          if ! [[ "$BUSINESS" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+            echo "::error::business must be lowercase letters, digits and dashes"; exit 1
+          fi
+          case "$ENTITY" in product|inventory) ;; *) echo "::error::entity must be product or inventory"; exit 1 ;; esac
+          case "$MODE" in validate|commit) ;; *) echo "::error::mode must be validate or commit"; exit 1 ;; esac
+          if ! [[ "$FILE" =~ ^docs/imports/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-z_-]+\.csv$ ]]; then
+            echo "::error::file must be a CSV under docs/imports/<date>/"; exit 1
+          fi
+          if [ ! -f "$FILE" ]; then
+            echo "::error::$FILE does not exist on this ref"; exit 1
+          fi
+          if ! [[ "$EXPECT_ROWS" =~ ^[0-9]{1,6}$ ]]; then
+            echo "::error::expect_rows must be a whole number"; exit 1
+          fi
+          actual=$(( $(wc -l < "$FILE") - 1 ))
+          if [ "$actual" != "$EXPECT_ROWS" ]; then
+            echo "::error::$FILE has $actual data rows on this ref, expect_rows says $EXPECT_ROWS"; exit 1
+          fi
+          if [ "$REPLACE_CATALOG" = "true" ] && [ "$ENTITY" != "product" ]; then
+            echo "::error::replace_catalog applies to entity=product only"; exit 1
+          fi
+          cmd="node apps/api/dist/ops/catalog-import.js --business $BUSINESS --entity $ENTITY --file $FILE --mode $MODE --expect-rows $EXPECT_ROWS"
+          if [ "$REPLACE_CATALOG" = "true" ]; then cmd="$cmd --replace-catalog"; fi
+          echo "Will run: $cmd"
+          echo "CMD=$cmd" >> "$GITHUB_ENV"
+
+      - name: Start Render job
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          job=$(curl -sSf -X POST -H "$auth" -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg c "$CMD" '{startCommand: $c}')" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/jobs")
+          id=$(echo "$job" | jq -r '.id')
+          echo "Job $id created"
+          echo "JOB_ID=$id" >> "$GITHUB_ENV"
+          echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Wait for job
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          api="https://api.render.com/v1/services/$RENDER_SERVICE_ID/jobs/$JOB_ID"
+          final=""
+          for i in $(seq 1 300); do
+            status=$(curl -sSf -H "$auth" "$api" | jq -r '.status // "pending"')
+            echo "[$i] $status"
+            case "$status" in
+              succeeded) final=ok; break ;;
+              failed|canceled) final=bad; break ;;
+            esac
+            sleep 10
+          done
+          echo "JOB_RESULT=$final" >> "$GITHUB_ENV"
+          if [ -z "$final" ]; then
+            echo "::error::Timed out waiting for job $JOB_ID"
+            exit 1
+          fi
+
+      - name: Job log
+        if: always() && env.JOB_ID != ''
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          # Logs land a few seconds after the job finishes; page forward
+          # from the job start so the SKU lists are not cut off.
+          sleep 8
+          start="$JOB_STARTED_AT"
+          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          for page in $(seq 1 60); do
+            body=$(curl -sS -H "$auth" \
+              "https://api.render.com/v1/logs?ownerId=$RENDER_OWNER_ID&resource=$JOB_ID&limit=100&direction=forward&startTime=$start&endTime=$end") || {
+              echo "(could not fetch logs; see the Render dashboard)"; break; }
+            echo "$body" | jq -r '.logs[]? | "\(.timestamp)  \(.message)"'
+            more=$(echo "$body" | jq -r '.hasMore // false')
+            [ "$more" = "true" ] || break
+            start=$(echo "$body" | jq -r '.nextStartTime')
+            end=$(echo "$body" | jq -r '.nextEndTime')
+          done
+          echo "Dashboard: https://dashboard.render.com/web/$RENDER_SERVICE_ID/jobs"
+          if [ "${JOB_RESULT:-}" != "ok" ]; then
+            echo "::error::Job $JOB_ID did not succeed"
+            exit 1
+          fi

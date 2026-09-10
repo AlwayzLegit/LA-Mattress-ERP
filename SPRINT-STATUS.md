@@ -4923,3 +4923,45 @@ product's own rate was.
 - **Ops (owner):** Settings → Tax classes → add "Non-taxable" at 0.00%,
   then on each service product (Power base installation, …) set Tax
   class to it. Nothing else to configure.
+
+### Checkpoint — 2026-09-10 (catalog import: production loader + B2 commit hardening)
+
+Owner ask: "run the catalog import." Production (API host and database) is
+unreachable from a session, so the run is packaged as the same kind of
+Render one-off job as `set-account-kind`, with the Phase C gates in code:
+
+- `apps/api/src/ops/catalog-import.ts`: stage → validate → commit one file
+  through `ImportService` against `DATABASE_URL`; gates on required
+  columns, `--expect-rows`, 0 invalid, 0 failed, committed = rowCount,
+  replace kept = rowCount, no connector sync running; prints the mapping,
+  validation `byMessage`, the deleted / deactivated SKU lists and (for
+  inventory) recon gates 1–2; writes the `import.commit` audit row with
+  `actor_type = 'system'`. Non-zero exit leaves the batch for inspection.
+- `.github/workflows/ops-catalog-import.yml` (manual dispatch; validated
+  inputs `business`, `entity`, `file`, `mode`, `expect_rows`,
+  `replace_catalog`; `expect_rows` is checked against the file on the ref
+  before anything reaches Render); pages the full job log.
+- B2 (lockdown plan) commit-side hardening in `ImportService.commit` /
+  `replaceCatalog`: refuse replace while a physical count is open or
+  counting; skip replace when any row failed (`replaceSkipped` in the
+  result and the audit row); a product holding stock (on hand, reserved
+  or floor sample) is deactivated instead of deleted; result carries
+  `deletedSkus` / `deactivatedSkus`. `loadLookups` active-first binding
+  (the other half of B2) is still open.
+- Tests: `import.int.spec.ts` +2 (stocked product retired not deleted;
+  failed-row skip + open-count refusal); new
+  `catalog-import.int.spec.ts` runs the ops script on the real
+  `docs/imports/2026-09-03/` files (products validate → commit with
+  replace → inventory commit): 1,948 products, 3,246 levels, recon gates
+  1–2 match the file, ~45 s locally. CI gets `jetnine_catalog_import`.
+- **Not run against production yet** — the job executes the deployed
+  build, so this must merge and deploy first. **Ops (owner), in order:**
+  (1) verified backup of `jetnine-db`, registers' offline queues drained,
+  no physical count open; (2) merge + confirm the Render boot line;
+  (3) dispatch Ops — catalog import: `product` / `products.csv` /
+  `validate` / 1948 → same with `commit` + `replace_catalog` → `inventory`
+  / `inventory.csv` / `validate` / 3246 → `commit`; (4) read the deleted /
+  deactivated SKU lists in the run log. Decisions still open from the
+  lockdown plan: Q3 (`MIN_STOCK = 0` on all 3,246 rows sets every reorder
+  point to 0 — turn auto-replenishment off first or accept), B1 (Shopify
+  sync stays connected; the import does not disconnect it).
