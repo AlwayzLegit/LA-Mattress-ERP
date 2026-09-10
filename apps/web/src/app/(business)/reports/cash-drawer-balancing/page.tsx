@@ -1,6 +1,6 @@
 'use client';
 
-import { Download, Play, Printer } from 'lucide-react';
+import { Download, FileText, Play, Printer } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -259,12 +259,13 @@ export default function CashDrawerBalancingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeReady, paramsReady]);
 
-  async function exportCsv() {
+  /** CSV for a spreadsheet; PDF is the STORIS "Basic PDF" spool, line for line. */
+  async function exportAs(format: 'csv' | 'pdf') {
     setExporting(true);
     try {
       await downloadFile(
-        `/v1/reports/cash-drawer-balancing?${query()}&format=csv`,
-        `cash-drawer-balancing-${range.start}-to-${range.end}.csv`,
+        `/v1/reports/cash-drawer-balancing?${query()}&format=${format}`,
+        `cash-drawer-balancing-${range.start}-to-${range.end}.${format}`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -291,7 +292,16 @@ export default function CashDrawerBalancingPage() {
               <Printer size={14} />
               Print
             </Button>
-            <Button variant="secondary" onClick={() => void exportCsv()} disabled={exporting}>
+            <Button
+              variant="secondary"
+              onClick={() => void exportAs('pdf')}
+              disabled={exporting}
+              title="Download the STORIS-layout Basic PDF"
+            >
+              <FileText size={14} />
+              PDF
+            </Button>
+            <Button variant="secondary" onClick={() => void exportAs('csv')} disabled={exporting}>
               <Download size={14} />
               {exporting ? 'Exporting…' : 'Export CSV'}
             </Button>
