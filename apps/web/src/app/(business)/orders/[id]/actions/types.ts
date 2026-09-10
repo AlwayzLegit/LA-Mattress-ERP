@@ -156,17 +156,19 @@ export interface CommissionTable {
     name: string;
     shareBps: number;
     plan: { id: string; name: string; basis: string; rateBps: number } | null;
+    basisCents: number | null;
+    commissionCents: number | null;
   }[];
   lines: {
     id: string;
     description: string;
     quantity: number;
     merchandiseCents: number;
-    commissionableCents: number;
-    commissionCents: number[];
+    commissionCents: (number | null)[];
     spiffCents: null;
   }[];
-  totals: { merchandiseCents: number; commissionCents: number[] };
+  totals: { merchandiseCents: number; commissionCents: (number | null)[] };
+  costHidden: boolean;
 }
 
 export interface LinkedDocuments {

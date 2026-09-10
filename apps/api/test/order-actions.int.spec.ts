@@ -412,6 +412,17 @@ describe('A20 — Enter a Sales Order actions', () => {
     let o = await detail();
     expect(o.lines.find((l) => l.id === sofaLineId)!.discountCents).toBe(30_000);
     expect(o.discountCents).toBe(30_000);
+    // G6/A10: the discount went through the price monitor — 10% and $300
+    // off list is past tier 1, so the exception register has it.
+    const flagged = await withDb((db) =>
+      db
+        .select({ type: schema.exceptionEvents.type, summary: schema.exceptionEvents.summary })
+        .from(schema.exceptionEvents)
+        .where(eq(schema.exceptionEvents.entityId, orderId)),
+    );
+    expect(
+      flagged.some((f) => f.type === 'price_override' && /Discount lines/.test(f.summary)),
+    ).toBe(true);
 
     // Split one unit off: reservations and discount follow the units.
     const split = (
@@ -441,6 +452,36 @@ describe('A20 — Enter a Sales Order actions', () => {
       .post(`/v1/orders/${orderId}/lines/${split.newLineId}/split`)
       .send({ quantity: 1 })
       .expect(400);
+
+    // A line on a scheduled delivery cannot be split (its delivery rows
+    // would be left over-allocated), and the truck counts pieces per unit.
+    const today = new Date().toISOString().slice(0, 10);
+    const deliveryId = await withDb(async (db) => {
+      const [d] = await db
+        .insert(schema.deliveries)
+        .values({ businessId, locationId, orderId, scheduledDate: today, status: 'scheduled' })
+        .returning({ id: schema.deliveries.id });
+      await db.insert(schema.deliveryLines).values({
+        businessId,
+        deliveryId: d!.id,
+        orderLineId: sofaLineId,
+        quantity: 2,
+      });
+      return d!.id;
+    });
+    await as(cashierCookie)
+      .post(`/v1/orders/${orderId}/lines/${sofaLineId}/split`)
+      .send({ quantity: 1 })
+      .expect(400);
+    const capacity = (
+      await as(ownerCookie).get(`/v1/deliveries/capacity?from=${today}&to=${today}`).expect(200)
+    ).body as { days: { date: string; pieces: number }[] };
+    // 2 units × 2 pieces per unit (set on the line earlier) = 4 pieces.
+    expect(capacity.days.find((d) => d.date === today)?.pieces).toBe(4);
+    await withDb(async (db) => {
+      await db.delete(schema.deliveryLines).where(eq(schema.deliveryLines.deliveryId, deliveryId));
+      await db.delete(schema.deliveries).where(eq(schema.deliveries.id, deliveryId));
+    });
 
     // A price override + order discount, then Remove All Price Overrides and Discounts.
     await as(cashierCookie)
@@ -494,22 +535,54 @@ describe('A20 — Enter a Sales Order actions', () => {
       marginPct: 60,
     });
 
+    // Projected like accrual: 5% of the order total ($3,010.50 + 7% tax on
+    // the merchandise = $3,220.50 → $161.03), spread over the sofa lines.
+    interface Comm {
+      salespeople: {
+        membershipId: string;
+        name: string;
+        shareBps: number;
+        basisCents: number | null;
+        commissionCents: number | null;
+      }[];
+      lines: { id: string; commissionCents: (number | null)[]; spiffCents: null }[];
+      totals: { merchandiseCents: number; commissionCents: (number | null)[] };
+      costHidden: boolean;
+    }
     const comm = (await as(cashierCookie).get(`/v1/orders/${orderId}/commission-table`).expect(200))
-      .body as {
-      salespeople: { name: string; shareBps: number; plan: { rateBps: number } | null }[];
-      lines: { id: string; commissionCents: number[]; spiffCents: null }[];
-      totals: { merchandiseCents: number; commissionCents: number[] };
-    };
-    expect(comm.salespeople).toEqual([
-      {
-        membershipId: cashierMembershipId,
-        name: 'Cass Hier',
-        shareBps: 10_000,
-        plan: expect.objectContaining({ rateBps: 500, basis: 'percent_of_sale' }),
-      },
-    ]);
-    expect(comm.lines.find((l) => l.id === sofaLineId)!.commissionCents).toEqual([10_000]);
-    expect(comm.totals).toEqual({ merchandiseCents: 300_000, commissionCents: [15_000] });
+      .body as Comm;
+    expect(comm.costHidden).toBe(false);
+    expect(comm.salespeople).toHaveLength(1);
+    expect(comm.salespeople[0]).toMatchObject({
+      membershipId: cashierMembershipId,
+      name: 'Cass Hier',
+      shareBps: 10_000,
+      basisCents: 322_050,
+      commissionCents: 16_103,
+    });
+    expect(comm.totals).toEqual({ merchandiseCents: 300_000, commissionCents: [16_103] });
+    expect(comm.lines.find((l) => l.id === sofaLineId)!.commissionCents).toEqual([10_735]);
+    expect(comm.lines.reduce((n, l) => n + (l.commissionCents[0] ?? 0), 0)).toBe(16_103);
+    expect(comm.lines.every((l) => l.spiffCents === null)).toBe(true);
+
+    // A margin plan reveals cost: hidden from a cashier, shown to the owner.
+    await withDb((db) =>
+      db
+        .update(schema.commissionPlans)
+        .set({ basis: 'percent_of_margin' })
+        .where(eq(schema.commissionPlans.name, 'Floor 5%')),
+    );
+    const hidden = (
+      await as(cashierCookie).get(`/v1/orders/${orderId}/commission-table`).expect(200)
+    ).body as Comm;
+    expect(hidden.costHidden).toBe(true);
+    expect(hidden.salespeople[0]).toMatchObject({ basisCents: null, commissionCents: null });
+    expect(hidden.lines.every((l) => l.commissionCents[0] === null)).toBe(true);
+    const shown = (await as(ownerCookie).get(`/v1/orders/${orderId}/commission-table`).expect(200))
+      .body as Comm;
+    // $3,220.50 − 3 × $400 cost = $2,020.50 → 5% = $101.03.
+    expect(shown.costHidden).toBe(false);
+    expect(shown.salespeople[0]).toMatchObject({ basisCents: 202_050, commissionCents: 10_103 });
 
     const linked = (await as(cashierCookie).get(`/v1/orders/${orderId}/linked`).expect(200))
       .body as {

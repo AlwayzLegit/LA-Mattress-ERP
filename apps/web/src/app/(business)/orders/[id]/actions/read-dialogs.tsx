@@ -201,6 +201,7 @@ export function CommissionTableDialog({
   onClose: () => void;
 }) {
   const { data, error } = useFetch<CommissionTable>(`/v1/orders/${order.id}/commission-table`);
+  const cell = (c: number | null) => (c == null ? '—' : money(c));
   return (
     <ActionDialog title={`Price / Spiff / Commission — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
@@ -215,11 +216,18 @@ export function CommissionTableDialog({
                 label: sp.name,
                 value: sp.plan
                   ? `${sp.plan.name} — ${(sp.plan.rateBps / 100).toFixed(2)}% of ${
-                      sp.plan.basis === 'percent_of_margin' ? 'margin' : 'sale'
-                    } · ${sp.shareBps / 100}% share`
+                      sp.plan.basis === 'percent_of_margin' ? 'margin' : 'the order total'
+                    } · ${sp.shareBps / 100}% share · basis ${cell(sp.basisCents)} → ${cell(
+                      sp.commissionCents,
+                    )}`
                   : 'No commission plan assigned',
               }))}
             />
+          )}
+          {data.costHidden && (
+            <Alert tone="warning">
+              A margin-based plan is on this order; its projection needs product cost access.
+            </Alert>
           )}
           <TableWrap>
             <table className="table" data-testid="commission-table">
@@ -227,7 +235,6 @@ export function CommissionTableDialog({
                 <tr>
                   <th>Line</th>
                   <th className="num">Merchandise</th>
-                  <th className="num">Commissionable</th>
                   {data.salespeople.map((sp) => (
                     <th key={sp.membershipId} className="num">
                       {sp.name}
@@ -243,10 +250,9 @@ export function CommissionTableDialog({
                       {l.description} × {l.quantity}
                     </td>
                     <td className="num">{money(l.merchandiseCents)}</td>
-                    <td className="num">{money(l.commissionableCents)}</td>
                     {l.commissionCents.map((c, i) => (
                       <td key={i} className="num">
-                        {money(c)}
+                        {cell(c)}
                       </td>
                     ))}
                     <td className="num muted">—</td>
@@ -259,10 +265,9 @@ export function CommissionTableDialog({
                   <td className="num">
                     <strong>{money(data.totals.merchandiseCents)}</strong>
                   </td>
-                  <td />
                   {data.totals.commissionCents.map((c, i) => (
                     <td key={i} className="num">
-                      <strong>{money(c)}</strong>
+                      <strong>{cell(c)}</strong>
                     </td>
                   ))}
                   <td className="num muted">—</td>
@@ -271,8 +276,9 @@ export function CommissionTableDialog({
             </table>
           </TableWrap>
           <p className="muted" style={{ marginTop: 8 }}>
-            Projected at today&apos;s plan rates; commission accrues on completion (§9). Spiffs are
-            not modeled.
+            Projected the way commission accrues at completion (§9): the order total — minus catalog
+            cost on a margin plan — split by share, at today&apos;s plan rate, spread over the
+            merchandise lines. Spiffs are not modeled.
           </p>
         </>
       )}

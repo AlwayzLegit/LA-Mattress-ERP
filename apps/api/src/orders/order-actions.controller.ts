@@ -17,6 +17,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
+import { PriceVarianceService, type PriceControlBody } from '../controls/price-variance.service';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
@@ -69,7 +70,7 @@ interface AttachmentBody {
   note?: string | null;
 }
 
-interface MultiLineDiscountBody {
+interface MultiLineDiscountBody extends PriceControlBody {
   lineIds?: string[];
   /** 'amount' = cents off each line; 'percent' = % of each line's price. */
   mode?: 'amount' | 'percent';
@@ -120,26 +121,38 @@ export interface CostedLines {
   linesWithoutCost: number;
 }
 
+/**
+ * Projected the way accrual works at completion (CommissionsService.
+ * accrueForOrder): the basis is the order total — minus catalog cost on a
+ * percent_of_margin plan — split by share, times the plan rate; the
+ * projection is then spread over the merchandise lines pro rata so the
+ * table reads per line. Margin-plan figures reveal cost, so they are null
+ * for a caller without `products.cost.view`.
+ */
 export interface CommissionTable {
   salespeople: {
     membershipId: string;
     name: string;
     shareBps: number;
     plan: { id: string; name: string; basis: string; rateBps: number } | null;
+    /** This salesperson's share of the basis; null when hidden. */
+    basisCents: number | null;
+    /** Projected commission for the whole order; null when hidden. */
+    commissionCents: number | null;
   }[];
   lines: {
     id: string;
     description: string;
     quantity: number;
     merchandiseCents: number;
-    /** Merchandise (percent_of_sale) or merchandise − cost (percent_of_margin). */
-    commissionableCents: number;
-    /** Per salesperson, in salespeople order. */
-    commissionCents: number[];
+    /** Per salesperson, in salespeople order; null when hidden. */
+    commissionCents: (number | null)[];
     /** STORIS spiffs are not modeled — always null. */
     spiffCents: null;
   }[];
-  totals: { merchandiseCents: number; commissionCents: number[] };
+  totals: { merchandiseCents: number; commissionCents: (number | null)[] };
+  /** True when a margin-plan projection was withheld from this caller. */
+  costHidden: boolean;
 }
 
 export interface LinkedDocuments {
@@ -202,6 +215,7 @@ export class OrderActionsController {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OrdersService) private readonly orders: OrdersService,
+    @Inject(PriceVarianceService) private readonly priceVariance: PriceVarianceService,
   ) {}
 
   // ---------------------------------------------------------------- attachments
@@ -355,20 +369,53 @@ export class OrderActionsController {
       throw new BadRequestException('amount is in whole cents');
     }
     const lines = await this.db
-      .select()
+      .select({
+        line: schema.orderLines,
+        listPriceCents: schema.productVariants.priceCents,
+        costCents: schema.productVariants.costCents,
+      })
       .from(schema.orderLines)
+      .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderLines.variantId))
       .where(and(eq(schema.orderLines.orderId, id), inArray(schema.orderLines.id, ids)));
     if (lines.length !== ids.length)
       throw new NotFoundException('One of the lines is not on this order');
 
+    const planned = lines
+      .map(({ line, listPriceCents, costCents }) => {
+        const gross = line.quantity * line.unitPriceCents;
+        const next =
+          mode === 'amount'
+            ? Math.min(value, gross)
+            : Math.min(gross, Math.round((gross * value) / 100));
+        return { line, listPriceCents, costCents, next };
+      })
+      .filter((p) => p.next !== p.line.discountCents);
+
+    // G6 / A10 price monitor: a discount taken this way is logged against
+    // list price exactly like a line edit on the order page (never
+    // blocked; a volunteered reason rides along).
+    if (planned.length > 0 && order.status !== 'draft') {
+      await this.priceVariance.enforce(
+        order.businessId,
+        planned
+          .filter((p) => p.line.variantId && p.listPriceCents != null)
+          .map((p) => ({
+            quantity: p.line.quantity,
+            unitPriceCents: p.line.unitPriceCents,
+            lineDiscountCents: p.next,
+            lineType: p.line.lineType,
+            listPriceCents: p.listPriceCents!,
+            costCents: p.costCents ?? null,
+            description: p.line.description,
+          })),
+        0,
+        body,
+        { action: `Discount lines on ${order.number}`, entityType: 'order', entityId: id },
+      );
+    }
+
     const changes: { lineId: string; before: number; after: number }[] = [];
-    for (const line of lines) {
-      const gross = line.quantity * line.unitPriceCents;
-      const next =
-        mode === 'amount'
-          ? Math.min(value, gross)
-          : Math.min(gross, Math.round((gross * value) / 100));
-      if (next === line.discountCents) continue;
+    for (const { line, next } of planned) {
       await this.db
         .update(schema.orderLines)
         .set({ discountCents: next })
@@ -419,6 +466,36 @@ export class OrderActionsController {
     if (line.qtyFulfilled > keeping) {
       throw new BadRequestException(
         `${line.qtyFulfilled} units are already fulfilled and stay on this line — split at most ${line.quantity - line.qtyFulfilled}`,
+      );
+    }
+    // Linked rows stay whole on one line: a PO allocation or a scheduled
+    // delivery written against this line would be left over-allocated
+    // against the shrunken quantity. Split before ordering / booking, or
+    // remove the line from the delivery first.
+    const [alloc] = await this.db
+      .select({ id: schema.poLineAllocations.id })
+      .from(schema.poLineAllocations)
+      .where(eq(schema.poLineAllocations.orderLineId, line.id))
+      .limit(1);
+    if (alloc) {
+      throw new BadRequestException(
+        'This line is allocated to a purchase order — it cannot be split while the PO carries it',
+      );
+    }
+    const [onDelivery] = await this.db
+      .select({ id: schema.deliveryLines.id })
+      .from(schema.deliveryLines)
+      .innerJoin(schema.deliveries, eq(schema.deliveries.id, schema.deliveryLines.deliveryId))
+      .where(
+        and(
+          eq(schema.deliveryLines.orderLineId, line.id),
+          inArray(schema.deliveries.status, ['scheduled', 'loaded', 'out_for_delivery']),
+        ),
+      )
+      .limit(1);
+    if (onDelivery) {
+      throw new BadRequestException(
+        'This line is on a scheduled delivery — take it off the delivery before splitting it',
       );
     }
     const keepReserved = Math.min(line.qtyReserved, keeping);
@@ -648,7 +725,7 @@ export class OrderActionsController {
     };
   }
 
-  /** STORIS "Price/Spiff/Commission Table": what each line earns at the plan rate. */
+  /** STORIS "Price/Spiff/Commission Table": the accrual-basis projection, per line. */
   @Get('commission-table')
   @RequirePermission('orders.view')
   async commissionTable(
@@ -656,6 +733,7 @@ export class OrderActionsController {
     @Param('id') id: string,
   ): Promise<CommissionTable> {
     const order = await this.loadOrder(tenant, id);
+    const canSeeCost = tenant.permissions.has('products.cost.view');
     const ids = [order.salespersonMembershipId, order.secondSalespersonMembershipId].filter(
       (x): x is string => !!x,
     );
@@ -681,15 +759,9 @@ export class OrderActionsController {
     const ordered = ids
       .map((mid) => people.find((p) => p.membershipId === mid))
       .filter((p): p is NonNullable<typeof p> => !!p);
-    const primaryShare = ordered.length > 1 ? (order.splitBps ?? 5000) : 10000;
-    const salespeople = ordered.map((p, i) => ({
-      membershipId: p.membershipId,
-      name: p.name ?? p.email ?? '(unknown)',
-      shareBps: i === 0 ? primaryShare : 10000 - primaryShare,
-      plan: p.planId
-        ? { id: p.planId, name: p.planName!, basis: p.basis!, rateBps: p.rateBps! }
-        : null,
-    }));
+    // Same share rule as accrual: a split only when a second salesperson
+    // and a split are both set; otherwise the primary takes it all.
+    const split = ordered.length > 1 && order.splitBps != null ? order.splitBps : 10000;
     const lines = await this.db
       .select({
         id: schema.orderLines.id,
@@ -704,37 +776,69 @@ export class OrderActionsController {
       .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderLines.variantId))
       .where(eq(schema.orderLines.orderId, id))
       .orderBy(asc(schema.orderLines.createdAt));
-    const totals = { merchandiseCents: 0, commissionCents: salespeople.map(() => 0) };
-    const rows = lines
+    // CommissionsService.marginCents: total minus catalog cost of every unit.
+    const catalogCost = lines.reduce((n, l) => n + l.quantity * (l.unitCostCents ?? 0), 0);
+    const marginBasis = Math.max(0, order.totalCents - catalogCost);
+
+    let costHidden = false;
+    const salespeople = ordered.map((p, i) => {
+      const shareBps = i === 0 ? split : 10000 - split;
+      const plan = p.planId
+        ? { id: p.planId, name: p.planName!, basis: p.basis!, rateBps: p.rateBps! }
+        : null;
+      const hidden = plan?.basis === 'percent_of_margin' && !canSeeCost;
+      if (hidden) costHidden = true;
+      const fullBasis = plan
+        ? plan.basis === 'percent_of_margin'
+          ? marginBasis
+          : order.totalCents
+        : 0;
+      const basisCents = plan && !hidden ? Math.round((fullBasis * shareBps) / 10000) : null;
+      const commissionCents =
+        basisCents == null ? null : plan ? Math.round((basisCents * plan.rateBps) / 10000) : null;
+      return {
+        membershipId: p.membershipId,
+        name: p.name ?? p.email ?? '(unknown)',
+        shareBps,
+        plan,
+        basisCents,
+        commissionCents: plan ? commissionCents : null,
+      };
+    });
+
+    // Spread each salesperson's projection over the merchandise lines pro
+    // rata; rounding remainder lands on the last line so the column sums.
+    const merch = lines
       .filter((l) => l.lineType !== 'custom')
-      .map((l) => {
-        const merchandiseCents = l.quantity * l.unitPriceCents - l.discountCents;
-        const commissionCents = salespeople.map((sp, i) => {
-          if (!sp.plan) return 0;
-          const base =
-            sp.plan.basis === 'percent_of_margin'
-              ? merchandiseCents - (l.unitCostCents ?? 0) * l.quantity
-              : merchandiseCents;
-          const cents = Math.round((Math.max(0, base) * sp.shareBps * sp.plan.rateBps) / 1e8);
-          totals.commissionCents[i]! += cents;
-          return cents;
-        });
-        totals.merchandiseCents += merchandiseCents;
-        const firstPlan = salespeople[0]?.plan;
-        return {
-          id: l.id,
-          description: l.description,
-          quantity: l.quantity,
-          merchandiseCents,
-          commissionableCents:
-            firstPlan?.basis === 'percent_of_margin'
-              ? Math.max(0, merchandiseCents - (l.unitCostCents ?? 0) * l.quantity)
-              : merchandiseCents,
-          commissionCents,
-          spiffCents: null as null,
-        };
+      .map((l) => ({ ...l, merchandiseCents: l.quantity * l.unitPriceCents - l.discountCents }));
+    const merchTotal = merch.reduce((n, l) => n + l.merchandiseCents, 0);
+    const perLine = salespeople.map((sp) => {
+      if (sp.commissionCents == null) return merch.map(() => null as number | null);
+      let allocated = 0;
+      return merch.map((l, i) => {
+        if (i === merch.length - 1) return sp.commissionCents! - allocated;
+        const c =
+          merchTotal > 0 ? Math.round((sp.commissionCents! * l.merchandiseCents) / merchTotal) : 0;
+        allocated += c;
+        return c;
       });
-    return { salespeople, lines: rows, totals };
+    });
+    return {
+      salespeople,
+      lines: merch.map((l, i) => ({
+        id: l.id,
+        description: l.description,
+        quantity: l.quantity,
+        merchandiseCents: l.merchandiseCents,
+        commissionCents: salespeople.map((_, s) => perLine[s]![i] ?? null),
+        spiffCents: null as null,
+      })),
+      totals: {
+        merchandiseCents: merchTotal,
+        commissionCents: salespeople.map((sp) => (sp.plan ? sp.commissionCents : null)),
+      },
+      costHidden,
+    };
   }
 
   /** STORIS "Line Item Linked Document Display" + "View Linked Transfers". */

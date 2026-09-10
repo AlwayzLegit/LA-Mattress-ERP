@@ -5230,8 +5230,13 @@ Phase 1 (this branch):
 - [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
       _2026-09-10: `order-actions.int.spec.ts` (5; CI db
       `jetnine_order_actions`); `orders.int.spec.ts` (101),
-      `order-detail-extras` (4) and `customers` (16) still green; PR
-      pending._
+      `order-detail-extras` (4) and `customers` (16) still green; PR #154.
+      Codex round 1 (six findings, all fixed): multi-line discounts run
+      through the price monitor; the commission table projects on the
+      accrual basis and hides margin-plan figures without cost access; a
+      split refuses lines on a PO or a scheduled delivery; pieces per unit
+      count toward truck capacity; line comments / room / pieces / prep /
+      install / COM and custom order information print on the documents._
 
 Phase 2: protection plans + extended warranty (D8); discount codes on
 orders / automated line discounting (D7). Phase 3: signature capture (D9,

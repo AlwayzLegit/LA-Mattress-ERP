@@ -248,7 +248,8 @@ export class DeliveriesController {
       .select({
         date: schema.deliveries.scheduledDate,
         booked: sql<number>`count(distinct ${schema.deliveries.id})::int`,
-        pieces: sql<number>`coalesce(sum(${schema.deliveryLines.quantity}), 0)::int`,
+        // A20 "Assign Pieces": a unit can be several pieces on the truck.
+        pieces: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1)), 0)::int`,
         units: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.productVariants.capacityUnits}, 1)), 0)::int`,
       })
       .from(schema.deliveries)
@@ -339,6 +340,7 @@ export class DeliveriesController {
         qtyFulfilled: schema.orderLines.qtyFulfilled,
         lineType: schema.orderLines.lineType,
         fulfillmentMethod: schema.orderLines.fulfillmentMethod,
+        pieces: schema.orderLines.pieces,
       })
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, orderId));
@@ -411,7 +413,7 @@ export class DeliveriesController {
     let incomingUnits = 0;
     for (const step of plan.steps) {
       const line = orderLines.find((l) => l.id === step.orderLineId);
-      incomingPieces += step.quantity;
+      incomingPieces += step.quantity * (line?.pieces ?? 1);
       incomingUnits +=
         step.quantity * (line?.variantId ? (capUnitsByVariant.get(line.variantId) ?? 1) : 1);
     }
@@ -1170,7 +1172,8 @@ export class DeliveriesController {
     const [row] = await this.db
       .select({
         stops: sql<number>`count(distinct ${schema.deliveries.id})::int`,
-        pieces: sql<number>`coalesce(sum(${schema.deliveryLines.quantity}), 0)::int`,
+        // A20 "Assign Pieces": a unit can be several pieces on the truck.
+        pieces: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1)), 0)::int`,
         units: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.productVariants.capacityUnits}, 1)), 0)::int`,
       })
       .from(schema.deliveries)
