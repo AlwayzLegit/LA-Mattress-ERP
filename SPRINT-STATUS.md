@@ -4973,3 +4973,35 @@ Render one-off job as `set-account-kind`, with the Phase C gates in code:
   lockdown plan: Q3 (`MIN_STOCK = 0` on all 3,246 rows sets every reorder
   point to 0 — turn auto-replenishment off first or accept), B1 (Shopify
   sync stays connected; the import does not disconnect it).
+
+### Checkpoint — 2026-09-10 (catalog import: first production runs)
+
+PR #147 merged (`26d7880`), Render deploy live, boot line
+`Schema migrations: 89/89 applied, head=0088_team_workflows`. First two
+dispatches of **Ops — catalog import** against `la-mattress`
+("LA Mattress Stores", `b819c499-…`), both validate-only:
+
+- Run 1, `products.csv`: batch `d3ac24bd-f379-4c40-8604-e705522ab856` —
+  1,948 staged, **1,948 valid, 0 invalid**, every column mapped. Ready to
+  commit.
+- Run 2, `inventory.csv`: batch `d916bbb2-89a0-49bd-9de5-ed66306877be` —
+  3,246 staged, **2,506 valid, 740 invalid**, gate failed as designed:
+  - 405 × unknown location "201 Western", 326 × unknown location
+    "Hancock Park". Production locations are Koreatown, West LA, La Brea,
+    Studio City, Warehouse, Glendale Store; the file's West LA / Studio
+    City / Warehouse match, the other two do not, and Glendale Store has
+    no rows in the file. The resolver matches exact name, order prefix or
+    substring (`resolveLocation`), so this needs a decision, not code.
+  - 11 × unknown SKU (801.0, OSKSSW, BT9000-QN ×3, DMRWXF-1070,
+    DMRWXF-1080, HEBS46-5475, HEXDUC50-6080, BBS13M_FP-7680) — all present
+    in `products.csv`; they resolve once the products commit runs.
+- Shopify connector: `connected`, sync `idle` (B1 still open). Render's
+  Postgres record exposes no backup state; the commit step is on hold
+  until the owner confirms a backup.
+- Owner (2026-09-10): "201 Western is Koreatown and Hancock Park is La
+  Brea." Applied to the converted file — `inventory.csv` now carries the
+  ERP names for those 731 rows (row count unchanged at 3,246); the
+  rehearsal spec seeds the ERP names. Glendale Store has no rows in the
+  STORIS export. **Ops (owner):** confirm the `jetnine-db` backup and
+  drained registers; then products commit + `replace_catalog` (1948) →
+  inventory validate (3246) → inventory commit.

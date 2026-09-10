@@ -31,7 +31,9 @@ const dbPackageRoot = join(__dirname, '..', '..', '..', 'packages', 'db');
 const PRODUCTS = 'docs/imports/2026-09-03/products.csv';
 const INVENTORY = 'docs/imports/2026-09-03/inventory.csv';
 const SLUG = 'la-mattress-rehearsal';
-const LOCATIONS = ['201 Western', 'Hancock Park', 'Studio City', 'Warehouse', 'West LA'];
+// The ERP store names (owner 2026-09-10: STORIS "201 Western" is Koreatown,
+// "Hancock Park" is La Brea); the converted file carries these.
+const LOCATIONS = ['Koreatown', 'La Brea', 'Studio City', 'Warehouse', 'West LA'];
 
 let sql: ReturnType<typeof postgres>;
 let db: ReturnType<typeof drizzle>;
