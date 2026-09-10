@@ -7,18 +7,18 @@ import { Alert, LinkButton, Select } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
   EmptyRow,
-  KpiStrip,
   Panel,
   ShimmerRows,
   StatusPill,
   orderStatusMeta,
-  pctDelta,
   shortDay,
   usdShort,
   usdWhole,
-  type KpiTile,
   type Tone,
 } from './owner/owner-kit';
+import { StaffSchedule } from './shared/staff-schedule';
+import { StoresSection } from './shared/stores-section';
+import { TimeClockStrip } from './shared/time-clock-strip';
 
 interface QueueRow {
   id: string;
@@ -143,16 +143,6 @@ const PIPELINE_COLORS: Record<string, string> = {
 };
 const PIPELINE_DEFAULT_COLOR = 'var(--accent)';
 
-/** The design's KPI tile labels — rendered while the first fetch is in flight. */
-const KPI_PLACEHOLDERS: KpiTile[] = [
-  { key: 'mine', label: 'My sales today', sub: '', href: '/orders?mine=1', testid: 'kpi-my-sales' },
-  { key: 'store', label: 'Store today', sub: '', href: '/orders', testid: 'kpi-store-sales' },
-  { key: 'goal', label: 'My month vs goal', sub: '', href: '/orders?mine=1', testid: 'kpi-goal' },
-  { key: 'comm', label: 'My commission', sub: '', href: '/commissions', testid: 'kpi-commission' },
-  { key: 'open', label: 'My open sales', sub: '', href: '/orders?mine=1', testid: 'kpi-my-open' },
-  { key: 'attn', label: 'Needs attention', sub: '', href: '/exceptions', testid: 'kpi-attention' },
-].map((t) => ({ ...t, value: '' }));
-
 function ageDays(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
 }
@@ -179,13 +169,14 @@ const SWATCH = (color: string): CSSProperties => ({
 
 /**
  * The store-manager home (owner decisions 2026-08-30, Claude Design
- * hand-off 2026-09-04): everything scoped to ONE store picked from the
- * member's approved list, "today" in that store's local time, written
- * business leading. KPI strip, sales-by-day vs the store, this week's
- * board + open pipeline, the open-sales queue (mine / whole store), then
- * the store-operations grid (deliveries, backorders, aging carts, low
- * stock, plus returns, incoming stock, drawer & tenders, activity) and
- * the "my day" section (call-backs, deliveries, wins, follow-up money).
+ * hand-off 2026-09-04, reworked 2026-09-10): everything scoped to ONE
+ * store picked from the member's approved list, "today" in that store's
+ * local time, written business leading. The store's own card
+ * (salespeople, money received, cash awaiting pickup) leads, then this
+ * week's board + open pipeline, the open-sales queue (mine / whole
+ * store), the store-operations grid (deliveries, backorders, aging
+ * carts, returns, incoming stock, drawer & tenders, activity) and the
+ * "my day" section (call-backs, deliveries, wins, follow-up money).
  */
 export default function ManagerDashboardView({ userName }: { userName: string }) {
   const router = useRouter();
@@ -270,6 +261,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <TimeClockStrip />
         {header}
         <Alert tone="error">{error}</Alert>
       </div>
@@ -281,18 +273,14 @@ export default function ManagerDashboardView({ userName }: { userName: string })
         style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
         data-testid="manager-dashboard"
       >
+        <TimeClockStrip />
         {header}
-        <div data-testid="manager-kpi-row">
-          <KpiStrip tiles={KPI_PLACEHOLDERS} loading />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-          <Panel title="Sales by day">
-            <ShimmerRows rows={4} />
-          </Panel>
-          <Panel title="This week's board">
-            <ShimmerRows rows={4} />
-          </Panel>
-        </div>
+        <section className="panel">
+          <ShimmerRows rows={4} />
+        </section>
+        <Panel title="This week's board">
+          <ShimmerRows rows={4} />
+        </Panel>
         <Panel title="Open sales">
           <ShimmerRows rows={6} />
         </Panel>
@@ -309,81 +297,12 @@ export default function ManagerDashboardView({ userName }: { userName: string })
     r.salespersonMembershipId === data.membershipId ||
     r.secondSalespersonMembershipId === data.membershipId;
 
-  // Delta vs the same weekday last week: series index 13 is today,
-  // index 6 is exactly seven store-local days earlier.
-  const lastWeekStore = data.salesByDay[6]?.storeCents ?? 0;
-  const lastWeekMine = data.salesByDay[6]?.mineCents ?? 0;
-  const attention = kpis.exceptionsOpen + kpis.pastDuePromises + kpis.unpaidAging;
   const queueRows = queueTab === 'mine' ? queues.myOpen : queues.storeOpen;
   const myCallbacks = queues.staleCarts.filter(mineOf);
   const myDeliveries = queues.todaysDeliveries.filter(mineOf);
   const myWins = queues.recentlyClosed.filter(mineOf);
   const myReturns = data.returnsInFlight.filter(mineOf);
   const myCredit = data.creditHolders.filter(mineOf);
-  const goal = kpis.mine.monthlyGoalCents;
-  const goalPct =
-    goal && goal > 0 ? Math.min(100, Math.round((kpis.mine.monthWrittenCents / goal) * 100)) : null;
-
-  const mineDelta = delta(kpis.mine.writtenCents, lastWeekMine);
-  const storeDelta = delta(kpis.store.writtenCents, lastWeekStore);
-  const tiles: KpiTile[] = [
-    {
-      key: 'mine',
-      label: 'My sales today',
-      testid: 'kpi-my-sales',
-      href: '/orders?mine=1',
-      value: usdWhole(kpis.mine.writtenCents),
-      delta: mineDelta.text,
-      deltaTone: mineDelta.tone,
-      sub: `${kpis.mine.writtenCount} written · ${usdWhole(kpis.mine.collectedCents)} collected`,
-    },
-    {
-      key: 'store',
-      label: `${store} today`,
-      testid: 'kpi-store-sales',
-      href: '/orders',
-      value: usdWhole(kpis.store.writtenCents),
-      delta: storeDelta.text,
-      deltaTone: storeDelta.tone,
-      sub: `${kpis.store.writtenCount} written · ${usdWhole(kpis.store.collectedCents)} collected`,
-    },
-    {
-      key: 'goal',
-      label: 'My month vs goal',
-      testid: 'kpi-goal',
-      href: '/orders?mine=1',
-      value: usdWhole(kpis.mine.monthWrittenCents),
-      sub:
-        goal && goal > 0 ? `${goalPct}% of ${usdShort(goal)} goal` : 'no goal set — ask a manager',
-      barPct: goalPct ?? undefined,
-    },
-    {
-      key: 'commission',
-      label: 'My commission',
-      testid: 'kpi-commission',
-      href: '/commissions',
-      value: usdWhole(kpis.mine.commissionPeriodCents),
-      sub: 'accrued this period',
-    },
-    {
-      key: 'open',
-      label: 'My open sales',
-      testid: 'kpi-my-open',
-      href: '/orders?mine=1',
-      value: String(kpis.mine.openCount),
-      sub: `${usdWhole(kpis.mine.openBalanceCents)} still owed`,
-    },
-    {
-      key: 'attention',
-      label: 'Needs attention',
-      testid: 'kpi-attention',
-      href: '/exceptions',
-      tone: attention > 0 ? 'danger' : undefined,
-      value: String(attention),
-      sub: `${kpis.pastDuePromises} past promise · ${kpis.unpaidAging} unpaid 14d+ · ${kpis.exceptionsOpen} exception${kpis.exceptionsOpen === 1 ? '' : 's'}`,
-    },
-  ];
-
   const openOrder = (id: string) => router.push(`/orders/${id}`);
 
   return (
@@ -391,40 +310,12 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
       data-testid="manager-dashboard"
     >
+      <TimeClockStrip />
       {header}
 
-      <div data-testid="manager-kpi-row">
-        <KpiStrip tiles={tiles} />
-      </div>
+      <StoresSection locationIds={[data.location.id]} single />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-        <Panel
-          title="Sales by day"
-          sub={`14 days · mine vs ${store}`}
-          actions={
-            <div
-              style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                gap: 12,
-                fontSize: 12,
-                color: 'var(--muted)',
-              }}
-            >
-              <span>
-                <span style={SWATCH('var(--accent)')} />
-                Mine
-              </span>
-              <span>
-                <span style={SWATCH('var(--border2)')} />
-                Store
-              </span>
-            </div>
-          }
-        >
-          <SalesByDayChart points={data.salesByDay} />
-        </Panel>
-
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
         <Panel title="This week's board" sub={store}>
           <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {data.leaderboardWeek.length === 0 ? (
@@ -541,24 +432,6 @@ export default function ManagerDashboardView({ userName }: { userName: string })
             c: `${orderStatusMeta(r.status).label} · ${ageDays(r.createdAt)}d`,
             title: r.salespersonName ? `rep ${r.salespersonName}` : undefined,
             d: usdWhole(r.totalCents),
-          }))}
-        />
-
-        <OpsPanel
-          title="Low stock here"
-          count={data.lowStock.length}
-          link={{ href: '/products/stock', label: 'Stock' }}
-          testid="store-low-stock"
-          empty="Nothing at or below 5 available here."
-          rows={data.lowStock.map((r) => ({
-            key: r.variantId,
-            href: '/products/stock',
-            a: r.sku ?? '—',
-            b: r.variantName ? `${r.productName} — ${r.variantName}` : r.productName,
-            c: '',
-            d: `${r.available} avail`,
-            dColor:
-              r.available <= 0 ? 'var(--danger)' : r.available <= 2 ? 'var(--warn)' : undefined,
           }))}
         />
 
@@ -695,6 +568,8 @@ export default function ManagerDashboardView({ userName }: { userName: string })
         </Panel>
       </div>
 
+      <StaffSchedule lockedLocationId={data.location.id} readOnly />
+
       <SectionRow title="My day" sub={`${firstName} · ${store}`} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 18 }}>
         <OpsPanel
@@ -806,15 +681,6 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       </div>
     </div>
   );
-}
-
-/** "+12%" vs the same weekday last week (null when there is no base) plus its direction. */
-function delta(
-  todayCents: number,
-  lastWeekCents: number,
-): { text: string | null; tone: 'up' | 'down' } {
-  const text = lastWeekCents > 0 ? pctDelta(todayCents, lastWeekCents) : null;
-  return { text, tone: todayCents < lastWeekCents ? 'down' : 'up' };
 }
 
 function customerLine(r: { customerName: string | null; customerPhone: string | null }): string {
@@ -1153,81 +1019,6 @@ function QueueTable({
         )}
       </tbody>
     </table>
-  );
-}
-
-/** 14 stacked bars: the store's day in `--border2`, my share of it in `--accent`. */
-function SalesByDayChart({
-  points,
-}: {
-  points: { day: string; mineCents: number; storeCents: number }[];
-}) {
-  const max = Math.max(1, ...points.map((p) => p.storeCents));
-  const first = points[0];
-  const last = points[points.length - 1];
-  return (
-    <div className="panel-body">
-      <div
-        data-testid="sales-by-day"
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 5,
-          height: 130,
-          borderBottom: '1px solid var(--border)',
-        }}
-      >
-        {points.map((p) => (
-          <div
-            key={p.day}
-            title={`${shortDay(p.day)}: store ${usdWhole(p.storeCents)} · mine ${usdWhole(p.mineCents)}`}
-            style={{
-              flex: 1,
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                borderRadius: '2px 2px 0 0',
-                background: 'var(--border2)',
-                height: `${Math.round((p.storeCents / max) * 100)}%`,
-                minHeight: p.storeCents > 0 ? 3 : 0,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-end',
-              }}
-            >
-              <div
-                style={{
-                  width: '100%',
-                  background: 'var(--accent)',
-                  height:
-                    p.storeCents > 0 ? `${Math.round((p.mineCents / p.storeCents) * 100)}%` : 0,
-                  borderRadius: p.mineCents >= p.storeCents ? '2px 2px 0 0' : 0,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div
-        className="mono"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 11,
-          color: 'var(--muted)',
-          marginTop: 6,
-        }}
-      >
-        <span>{first ? shortDay(first.day) : ''}</span>
-        <span>{last ? shortDay(last.day) : ''}</span>
-      </div>
-    </div>
   );
 }
 

@@ -118,6 +118,8 @@ export const PERMISSIONS = {
   'pos.cash.open': 'Open cash drawer',
   'pos.cash.reconcile': 'Reconcile cash drawer',
   'pos.cash.approve': 'Approve an out-of-tolerance or suspended drawer count',
+  'pos.cash.pickup_confirm':
+    'Tick a cash payment as physically picked up from the store (dashboard store cards)',
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',
@@ -140,6 +142,11 @@ export const PERMISSIONS = {
     'See the warehouse dashboard — inbound POs, the dock, load-out, pickups, transfers',
   'cashier.dashboard.view':
     'See the My Day dashboard — own sales, drawer, call-backs, balances due, commission',
+
+  // Staff schedule + time clock (owner hand-off 2026-09-10, step 2).
+  'schedule.view': 'See the staff schedule',
+  'schedule.edit': 'Set shifts and publish the week (Owner and Operations)',
+  'timeclock.punch': 'Clock in and out, take breaks, on the dashboard time clock',
 
   'reason_codes.manage': 'Manage the reason-code registry (add / deactivate / restrict codes)',
   'security_overrides.view': 'View the security-override register',
@@ -211,6 +218,7 @@ const GROUP_DEFS: { key: string; label: string; prefixes: string[] }[] = [
   { key: 'gl', label: 'General ledger', prefixes: ['gl'] },
   { key: 'team', label: 'Team & roles', prefixes: ['users', 'roles'] },
   { key: 'business', label: 'Business settings', prefixes: ['business', 'locations'] },
+  { key: 'schedule', label: 'Schedule & time clock', prefixes: ['schedule', 'timeclock'] },
   {
     key: 'security',
     label: 'Audit & security',

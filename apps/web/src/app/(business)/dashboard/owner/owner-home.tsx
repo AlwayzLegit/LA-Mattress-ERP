@@ -1,20 +1,17 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
 import { presetLabel } from '@/lib/date-range';
-import { ago, toneOf, type NotificationRow } from '@/components/shell/notifications-drawer';
+import { ChangesCard } from '../shared/changes-card';
+import { StaffSchedule } from '../shared/staff-schedule';
+import { StoresSection } from '../shared/stores-section';
 import { MorningBriefCard, type MorningBrief } from './morning-brief';
-import { OrdersTable } from './orders-table';
-import { OrderQuickView } from './order-quick-view';
 import {
   CardHandle,
   KpiStrip,
   Panel,
-  ShimmerRows,
   pctDelta,
   usdShort,
   usdWhole,
@@ -23,11 +20,13 @@ import {
 import { WrittenBusinessChart, type TrendPoint } from './written-business';
 
 /**
- * The owner home (Claude Design hand-off, 2026-09-04): KPI strip,
- * written-business chart, morning brief, the orders table, low stock and
- * order changes — every card following the topbar's period, store scope
- * and compare-to. Cards can be reordered / hidden per browser
- * ("Customize").
+ * The owner home (Claude Design hand-off 2026-09-04, reworked 2026-09-10):
+ * KPI strip, written-business chart and morning brief following the
+ * topbar's period, store scope and compare-to; then one card per store
+ * (salespeople, money received, cash pickup ticks) and the full-width
+ * Changes log — both scoped to the topbar's stores, with their own
+ * month-to-date / today toggle — and the editable staff schedule. Cards
+ * can be reordered / hidden per browser ("Customize").
  */
 interface OwnerData {
   date: string;
@@ -52,16 +51,8 @@ interface OwnerData {
   compareTrend: TrendPoint[];
 }
 
-interface LowStockRow {
-  variantId: string;
-  productName: string;
-  variantName: string | null;
-  sku: string | null;
-  available: number;
-}
-
-type CardId = 'revenue' | 'brief' | 'orders' | 'lowstock' | 'changes';
-const CARD_IDS: CardId[] = ['revenue', 'brief', 'orders', 'lowstock', 'changes'];
+type CardId = 'revenue' | 'brief' | 'stores' | 'changes' | 'schedule';
+const CARD_IDS: CardId[] = ['revenue', 'brief', 'stores', 'changes', 'schedule'];
 const LAYOUT_KEY = 'jetnine.dashboard.layout';
 interface Layout {
   order: CardId[];
@@ -75,16 +66,12 @@ function greeting(): string {
 
 export default function OwnerHome({ userName, email }: { userName: string; email: string }) {
   const f = useDashboardFilters();
-  const router = useRouter();
   const [data, setData] = useState<OwnerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
   const [error, setError] = useState(false);
   const [brief, setBrief] = useState<MorningBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
-  const [lowStock, setLowStock] = useState<LowStockRow[] | null | undefined>(undefined);
-  const [changes, setChanges] = useState<NotificationRow[] | null | undefined>(undefined);
-  const [orderId, setOrderId] = useState<string | null>(null);
   const [customize, setCustomize] = useState(false);
   const [layout, setLayout] = useState<Layout>({ order: CARD_IDS, hidden: {} });
 
@@ -135,20 +122,6 @@ export default function OwnerHome({ userName, email }: { userName: string; email
       .then(setBrief)
       .catch(() => setBrief(null))
       .finally(() => setBriefLoading(false));
-    void api<LowStockRow[]>('/v1/reports/inventory/on-hand?lowStock=5')
-      .then((rows) => setLowStock(rows.slice(0, 6)))
-      .catch(() => setLowStock(null));
-    void api<{ data: NotificationRow[] }>('/v1/notifications?limit=6')
-      .then((r) => setChanges(r.data))
-      .catch(() => setChanges(null));
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOrderId(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const compareLabel = f.compare === 'year' ? 'Last year' : f.compare === 'prior' ? 'Prior' : null;
@@ -475,175 +448,23 @@ export default function OwnerHome({ userName, email }: { userName: string; email
           />
         </div>
 
-        <div style={{ gridColumn: 'span 6', ...card('orders').style, flexDirection: 'column' }}>
-          <OrdersTable
-            onOpen={setOrderId}
-            handle={card('orders').handle}
-            onNewSale={() => router.push('/pos')}
-          />
-        </div>
+        <StoresSection
+          locationIds={f.storeIds}
+          handle={card('stores').handle}
+          style={{ gridColumn: 'span 6', ...card('stores').style }}
+        />
 
-        {lowStock !== null && (
-          <Panel
-            title="Low stock"
-            sub={`≤ 5 available · ${f.storeLabel}`}
-            link={{ href: '/products/stock', label: 'Stock' }}
-            style={{ gridColumn: 'span 3', ...card('lowstock').style }}
-            actions={card('lowstock').handle}
-            testid="low-stock"
-          >
-            {lowStock === undefined ? (
-              <ShimmerRows rows={5} />
-            ) : lowStock.length === 0 ? (
-              <div
-                style={{
-                  padding: '28px var(--pad)',
-                  textAlign: 'center',
-                  color: 'var(--muted)',
-                  fontSize: 12.5,
-                }}
-              >
-                Nothing at or below 5 available. Shelves look healthy.
-              </div>
-            ) : (
-              <table className="dt dt-static">
-                <thead>
-                  <tr>
-                    <th className="first">Product</th>
-                    <th>SKU</th>
-                    <th className="last" style={{ textAlign: 'right' }}>
-                      Avail
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lowStock.map((l) => (
-                    <tr key={l.variantId}>
-                      <td className="first" style={{ whiteSpace: 'normal' }}>
-                        {l.productName}
-                        {l.variantName && (
-                          <span style={{ color: 'var(--muted)' }}> — {l.variantName}</span>
-                        )}
-                      </td>
-                      <td className="mono" style={{ color: 'var(--muted)', fontSize: 11.5 }}>
-                        {l.sku ?? '—'}
-                      </td>
-                      <td
-                        className="num last"
-                        style={{
-                          fontWeight: 600,
-                          color:
-                            l.available <= 0
-                              ? 'var(--danger)'
-                              : l.available <= 2
-                                ? 'var(--warn)'
-                                : 'var(--text)',
-                        }}
-                      >
-                        {l.available}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Panel>
-        )}
+        <ChangesCard
+          locationIds={f.storeIds}
+          handle={card('changes').handle}
+          style={{ gridColumn: 'span 6', ...card('changes').style }}
+        />
 
-        {changes !== null && (
-          <Panel
-            title="Order changes"
-            sub="post-creation edits"
-            link={{ href: '/audit', label: 'Audit log' }}
-            style={{ gridColumn: 'span 3', ...card('changes').style }}
-            actions={card('changes').handle}
-          >
-            {changes === undefined ? (
-              <ShimmerRows rows={5} />
-            ) : changes.length === 0 ? (
-              <div
-                style={{
-                  padding: '28px var(--pad)',
-                  textAlign: 'center',
-                  color: 'var(--muted)',
-                  fontSize: 12.5,
-                }}
-              >
-                No order changes recorded yet.
-              </div>
-            ) : (
-              <div
-                style={{ display: 'flex', flexDirection: 'column' }}
-                data-testid="notifications-feed"
-              >
-                {changes.map((n) => {
-                  const tone = toneOf(n.action);
-                  const inner = (
-                    <>
-                      <span className="mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                        {ago(n.createdAt)}
-                      </span>
-                      <span
-                        style={{
-                          minWidth: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontWeight: 500,
-                            color: tone === 'danger' ? 'var(--danger)' : undefined,
-                          }}
-                        >
-                          {n.label}
-                        </span>{' '}
-                        {n.orderNumber && (
-                          <>
-                            <span style={{ color: 'var(--muted)' }}>on</span>{' '}
-                            <span className="mono">{n.orderNumber}</span>
-                          </>
-                        )}
-                      </span>
-                      <span style={{ color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        {n.actorName ?? n.actorEmail ?? 'system'}
-                      </span>
-                    </>
-                  );
-                  const style: React.CSSProperties = {
-                    display: 'grid',
-                    gridTemplateColumns: '52px 1fr auto',
-                    gap: 10,
-                    alignItems: 'center',
-                    padding: 'var(--rowy) var(--pad)',
-                    borderBottom: '1px solid var(--border)',
-                    fontSize: 12.5,
-                    color: 'inherit',
-                    textDecoration: 'none',
-                  };
-                  return n.orderId ? (
-                    <Link
-                      key={n.id}
-                      href={`/orders/${n.orderId}`}
-                      style={style}
-                      className="hover:bg-surface-2"
-                    >
-                      {inner}
-                    </Link>
-                  ) : (
-                    <div key={n.id} style={style}>
-                      {inner}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Panel>
-        )}
+        <StaffSchedule
+          handle={card('schedule').handle}
+          style={{ gridColumn: 'span 6', ...card('schedule').style }}
+        />
       </div>
-
-      {orderId && <OrderQuickView orderId={orderId} onClose={() => setOrderId(null)} />}
     </div>
   );
 }

@@ -29,6 +29,11 @@ const managerExclusions = new Set<Permission>([
   'users.disable',
   // Owner 2026-09-02: removing a member is the owner's call.
   'users.delete',
+  // Owner 2026-09-10: confirming a cash pickup is the owner's or
+  // Operations' tick, never the store's own manager's; likewise the
+  // schedule is set by the owner and Operations — the manager reads it.
+  'pos.cash.pickup_confirm',
+  'schedule.edit',
 ]);
 
 const managerPermissions: Permission[] = businessPermissions.filter(
@@ -47,9 +52,17 @@ const managerPermissions: Permission[] = businessPermissions.filter(
  * no quota and no commission permission.
  */
 const operationsPermissions: Permission[] = [
-  // The dashboard and its sign-off verb.
+  // The dashboard and its sign-off verbs.
   'ops.dashboard.view',
   'ops.review.clear',
+  // Owner 2026-09-10: the tick that says the cash was physically handed
+  // over, stamped with the member who confirmed it.
+  'pos.cash.pickup_confirm',
+  // Step 2 (2026-09-10): sets and publishes the staff schedule; punches
+  // their own clock like everyone else.
+  'schedule.view',
+  'schedule.edit',
+  'timeclock.punch',
 
   // The audit surfaces the feed links into.
   'audit.view',
@@ -95,6 +108,9 @@ const operationsPermissions: Permission[] = [
 const cashierPermissions: Permission[] = [
   // My Day (owner 2026-09-01, §12.3): the register's own home.
   'cashier.dashboard.view',
+  // Reads the schedule, punches the clock (2026-09-10).
+  'schedule.view',
+  'timeclock.punch',
   // Store list (owner report 2026-09-02): Inventory, Receive, Counts,
   // Returns, Exchanges, Replenishment and the order page all load
   // /v1/business/locations first — without this the page dies on a 403
@@ -133,6 +149,9 @@ const cashierPermissions: Permission[] = [
  */
 const warehousePermissions: Permission[] = [
   'warehouse.dashboard.view',
+  // Reads the schedule, punches the clock (2026-09-10).
+  'schedule.view',
+  'timeclock.punch',
   // Store list (owner report 2026-09-02): Inventory, Receive, Counts,
   // Returns, Exchanges, Replenishment and the order page all load
   // /v1/business/locations first — without this the page dies on a 403
@@ -163,6 +182,7 @@ const warehousePermissions: Permission[] = [
 const bookkeeperPermissions: Permission[] = [
   // Store list — see the cashier note; the books read per-store too.
   'locations.view',
+  'schedule.view',
   // In-house GL (owner 2026-08-28): the books own the ledger.
   'gl.view',
   'gl.post',

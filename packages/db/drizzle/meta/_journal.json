@@ -631,6 +631,20 @@
       "when": 1789018921295,
       "tag": "0089_product_storis_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1789037396221,
+      "tag": "0090_store_dashboard_ledgers",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1789039834358,
+      "tag": "0091_staff_schedule_time_clock",
+      "breakpoints": true
     }
   ]
 }
