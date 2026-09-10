@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { Barcode39, type OrderDocumentPayload } from '@/components/order-documents';
+import {
+  Barcode39,
+  type OrderDocumentPayload,
+  LineInstructions,
+} from '@/components/order-documents';
 import { TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../../print-toolbar';
 
@@ -79,6 +83,7 @@ export default function PickListPrintPage() {
                     {l.lineType === 'special_order' && (
                       <span style={{ fontWeight: 700 }}> — SPECIAL ORDER</span>
                     )}
+                    <LineInstructions l={l} />
                   </td>
                   <td style={{ padding: '10px 6px' }}>
                     {l.model ?? '—'}

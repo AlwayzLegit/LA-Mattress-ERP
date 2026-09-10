@@ -10,12 +10,16 @@ import { PrintToolbar } from '../../../print-toolbar';
 export default function InvoicePrintPage() {
   const params = useParams<{ id: string }>();
   const id = (params?.id ?? '') as string;
+  // A20 "Print Order" prints this piece alone; "Print Cumulative Sales
+  // Order" (the default) prints the whole split family as one invoice.
+  const [scope, setScope] = useState<'order' | 'family'>('family');
   const [doc, setDoc] = useState<OrderDocumentPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [printedAt] = useState(() => new Date());
 
   useEffect(() => {
     if (!id) return;
+    if (new URLSearchParams(window.location.search).get('scope') === 'order') setScope('order');
     api<OrderDocumentPayload>(`/v1/orders/${id}/document`)
       .then(setDoc)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -29,7 +33,12 @@ export default function InvoicePrintPage() {
         label="Print invoice"
       />
       {error && <p style={{ color: '#b00', padding: 16 }}>{error}</p>}
-      {doc && <InvoiceDoc doc={doc} printedAt={printedAt} />}
+      {doc && (
+        <InvoiceDoc
+          doc={scope === 'order' ? { ...doc, familyInvoice: null } : doc}
+          printedAt={printedAt}
+        />
+      )}
     </div>
   );
 }

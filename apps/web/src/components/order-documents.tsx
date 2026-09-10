@@ -39,6 +39,8 @@ export interface OrderDocumentPayload {
   order: {
     id: string;
     number: string;
+    /** A20 "Custom Order Information" rows, printed under the lines. */
+    customInfoJson?: { label: string; value: string }[] | null;
     status: string;
     orderKind: string;
     fulfillmentType: string;
@@ -86,6 +88,13 @@ export interface OrderDocumentPayload {
     model: string | null;
     brand: string | null;
     bin: string | null;
+    /** A20 line details — comment prints on every document; the rest on the truck's. */
+    comment?: string | null;
+    room?: string | null;
+    pieces?: number | null;
+    prepCodes?: string[] | null;
+    comJson?: { supplied?: boolean; description?: string | null } | null;
+    needsInstall?: boolean;
   }[];
   /**
    * Owner 2026-08-31: a split family prints ONE invoice — every piece's
@@ -327,6 +336,38 @@ function ShipTo({ doc }: { doc: OrderDocumentPayload }) {
   );
 }
 
+/**
+ * A20 line details for the warehouse and the truck: room, pieces per
+ * unit, prep codes, installation, customer's own material, the comment.
+ */
+export function LineInstructions({
+  l,
+}: {
+  l: {
+    comment?: string | null;
+    room?: string | null;
+    pieces?: number | null;
+    prepCodes?: string[] | null;
+    comJson?: { supplied?: boolean; description?: string | null } | null;
+    needsInstall?: boolean;
+  };
+}) {
+  const bits = [
+    l.room ? `Room: ${l.room}` : null,
+    l.pieces && l.pieces > 1 ? `${l.pieces} pieces per unit` : null,
+    l.prepCodes?.length ? `Prep: ${l.prepCodes.join(', ')}` : null,
+    l.needsInstall ? 'INSTALL' : null,
+    l.comJson?.supplied ? `COM${l.comJson.description ? `: ${l.comJson.description}` : ''}` : null,
+  ].filter(Boolean);
+  if (bits.length === 0 && !l.comment) return null;
+  return (
+    <div style={{ fontSize: 9 }} data-testid="doc-line-instructions">
+      {bits.length > 0 && <div style={{ fontWeight: 700 }}>{bits.join(' · ')}</div>}
+      {l.comment && <div style={{ fontStyle: 'italic' }}>{l.comment}</div>}
+    </div>
+  );
+}
+
 /** §11 Invoice / Sales Order. */
 export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; printedAt: Date }) {
   const o = doc.order;
@@ -501,6 +542,17 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
                   {l.takenWith && (
                     <span style={{ fontSize: 9 }}> — TAKEN WITH ({l.pieceNumber})</span>
                   )}
+                  {l.comJson?.supplied && (
+                    <span style={{ fontSize: 9 }}> — CUSTOMER&apos;S OWN MATERIAL</span>
+                  )}
+                  {l.comment && (
+                    <div
+                      style={{ fontSize: 9, fontStyle: 'italic' }}
+                      data-testid="doc-line-comment"
+                    >
+                      {l.comment}
+                    </div>
+                  )}
                 </td>
                 <td style={{ ...cell, textAlign: 'right' }}>{l.quantity}</td>
                 <td style={{ ...cell, textAlign: 'right' }}>{usd(l.unitPriceCents)}</td>
@@ -510,6 +562,19 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
           </tbody>
         </table>
       </TableWrap>
+
+      {(o.customInfoJson ?? []).length > 0 && (
+        <div style={{ ...box, marginTop: 8 }} data-testid="doc-custom-info">
+          <div style={label}>Custom Order Information</div>
+          {(o.customInfoJson ?? []).map((row, i) => (
+            <div key={i} style={{ fontSize: 10 }}>
+              <strong>{row.label}</strong>
+              {row.label && row.value ? ': ' : ''}
+              {row.value}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Totals + payments */}
       <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
@@ -717,7 +782,10 @@ export function DeliveryTicketDoc({
                 <tr key={l.id}>
                   <td style={{ ...cell, width: 40, textAlign: 'right' }}>{l.quantity}</td>
                   <td style={{ ...cell, width: 140 }}>{l.model ?? '—'}</td>
-                  <td style={cell}>{l.description}</td>
+                  <td style={cell}>
+                    {l.description}
+                    <LineInstructions l={l} />
+                  </td>
                 </tr>
               ))}
           </tbody>

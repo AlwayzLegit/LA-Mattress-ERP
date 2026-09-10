@@ -34,6 +34,9 @@ interface CustomerRow {
   email: string | null;
   phone: string | null;
   phone2: string | null;
+  /** A20 (STORIS Billing Information): work phone + extension. */
+  workPhone: string | null;
+  workPhoneExt: string | null;
   firstName: string | null;
   lastName: string | null;
   notes: string | null;
@@ -47,6 +50,8 @@ interface CreateBody {
   email?: string | null;
   phone?: string | null;
   phone2?: string | null;
+  workPhone?: string | null;
+  workPhoneExt?: string | null;
   firstName?: string | null;
   lastName?: string | null;
   notes?: string | null;
@@ -272,6 +277,8 @@ export class CustomersController {
         email: normalize(body.email),
         phone: normalize(body.phone),
         phone2: normalize(body.phone2),
+        workPhone: normalize(body.workPhone),
+        workPhoneExt: normalize(body.workPhoneExt),
         firstName: normalize(body.firstName),
         lastName: normalize(body.lastName),
         notes: normalize(body.notes),
@@ -327,6 +334,8 @@ export class CustomersController {
       'email',
       'phone',
       'phone2',
+      'workPhone',
+      'workPhoneExt',
       'firstName',
       'lastName',
       'notes',
@@ -537,6 +546,10 @@ export class CustomersController {
     const backfill: Record<string, unknown> = {};
     if (!target.phone && source.phone) backfill.phone = source.phone;
     if (!target.phone2 && source.phone2) backfill.phone2 = source.phone2;
+    if (!target.workPhone && source.workPhone) {
+      backfill.workPhone = source.workPhone;
+      backfill.workPhoneExt = source.workPhoneExt;
+    }
     if (!target.email && source.email) backfill.email = source.email;
     if (!target.firstName && source.firstName) backfill.firstName = source.firstName;
     if (!target.lastName && source.lastName) backfill.lastName = source.lastName;
@@ -634,6 +647,8 @@ const SELECT_COLS = {
   email: schema.customers.email,
   phone: schema.customers.phone,
   phone2: schema.customers.phone2,
+  workPhone: schema.customers.workPhone,
+  workPhoneExt: schema.customers.workPhoneExt,
   firstName: schema.customers.firstName,
   lastName: schema.customers.lastName,
   notes: schema.customers.notes,

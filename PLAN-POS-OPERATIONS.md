@@ -918,6 +918,125 @@ and View Product Activity (Inventory Quantities, Merchandising, Location Availab
 - Tests: `product-stock.int.spec.ts` (8, CI db `jetnine_product_stock`); the
   Playwright orders flow reaches the stock table through the `/inventory` redirect.
 
+### 12.16 Enter a Sales Order — every STORIS section and action (amendment A20, owner 2026-09-10)
+
+Owner ask (four STORIS screenshots — the empty and filled "Enter a Sales
+Order" screen with its Step 1–4 sidebar, and both Actions menus): "In orders
+tab we need all of these."
+
+**Where they live.** A3 stands: the order stays one screen. The STORIS step
+names become the section order of the order page (Customer → Merchandise →
+Fulfillment → Payment), and the two STORIS Actions menus become one
+**Actions ▾** menu in the order-page header, grouped Order · Customer ·
+Merchandise · Documents. A line-scoped action asks for the line inside its
+dialog. Every item below is either mapped to something that exists, built,
+or scheduled; nothing on the list is dropped.
+
+**Step 1 — Customer (header card + Customer card)**
+
+| STORIS                                                                                            | Jetnine                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Order Number (search / +)                                                                         | Order number, `STORIS #` legacy number; the orders list is the search                                                                             |
+| Order Type                                                                                        | Sales order / Layaway / Sales quote / Exchange (§3); quote → order on the page                                                                    |
+| Date                                                                                              | Written date (`createdAt`); no backdating (deferred 2026-08-25)                                                                                   |
+| Salesperson (+ 2nd, split)                                                                        | Editable on the page (was writer-only)                                                                                                            |
+| Fulfillment Method                                                                                | Editable on the page                                                                                                                              |
+| Store                                                                                             | Selling location (read-only after write); fulfill-from location editable                                                                          |
+| Customer Number or Last Name or Email or Phone                                                    | Universal customer search (writer); Change customer on the page                                                                                   |
+| Billing: Primary Name, Primary Email, Home / Cell / Work phone + Ext, Address 1/2, City State Zip | Customer record edit from the order (`Enter Customer Name`, `Update a Customer Address`); customers gain `work_phone` + `work_phone_ext`          |
+| Marketing Code 1 / 2                                                                              | `marketing_code` (existing column, now on the page) + new `marketing_code_2`; both pick from the `ops.marketingCodes` list with free text allowed |
+
+**Step 2 — Merchandise (Lines card)**: exists (add product with vendor / size /
+firmness / stock filters, qty, price override, line discount, per-line
+fulfillment incl. Direct Ship, per-line source, stock + PO state, split
+orders, fee lines). Lines gain: `comment` (prints on documents), `room`,
+`pieces`, `prep_codes[]` (from `ops.prepCodes`), `com_json` (Customer's Own
+Material: flag + description), `direct_ship_json` (vendor, vendor order
+ref, tracking, expected date), `needs_install`, description override.
+
+**Step 3 — Fulfillment**: exists (Deliveries & fulfillment card: book,
+reschedule, capacity, pickup hand-over; per-line delivery date; split
+tickets).
+
+**Step 4 — Payment**
+
+| STORIS               | Jetnine                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Discounts            | Per-line discounts (exists) + **Enter a Discount on Multiple Lines**                                                                     |
+| Additional Discounts | Order discount (exists, now editable on the page) + discount codes on orders (phase 2, D7)                                               |
+| Protection Plans     | Phase 2 (D8)                                                                                                                             |
+| Charges and Fees     | **Miscellaneous Fees** dialog: delivery, installation, other fee (label + amount); recycling / removal / declined-foundation lines exist |
+| Payments             | Exists (nine tenders + store credit)                                                                                                     |
+| Deposits             | Deposit required editable on the page; deposit payments exist                                                                            |
+| Financing            | Payment form gains provider + reference (Synchrony / Acima; API already carried them). In-house financing stays excluded (§13)           |
+| Signature            | Phase 3 (D9) — reverses the §13 / §4 "no signature at POS" exclusion by this ask; flagged for veto                                       |
+| Totals               | Money card (exists)                                                                                                                      |
+| Receivables          | New Receivables section: balance due, deposit required vs paid, plan installments due / overdue, days outstanding                        |
+
+**Actions ▾ (both STORIS menus, merged)**
+
+| STORIS action                                                                             | Jetnine                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Additional Order Detail                                                                   | Order header dialog: order type, fulfillment, fulfill-from, salespeople + split, requested date, delivery status, pickup location, delivery instructions, marketing codes, order source, payment terminal, printed notes                                  |
+| Additional Comments                                                                       | Internal notes editor (never printed)                                                                                                                                                                                                                     |
+| Audit Comments Log                                                                        | Change history + Notes cards (anchor)                                                                                                                                                                                                                     |
+| Miscellaneous Fees                                                                        | Fees dialog (above)                                                                                                                                                                                                                                       |
+| Order Source Entry                                                                        | `order_source` from `ops.orderSources` (Walk-in, Phone, Web, Referral, …) with free text                                                                                                                                                                  |
+| Order Tax Information                                                                     | Dialog: store rate, per-line tax class / rate / taxable amount / tax, order tax; the tax-exempt question stays an open [DECIDE]                                                                                                                           |
+| Print Order / Print Cumulative Sales Order                                                | Invoice `?scope=order` (this piece alone) / `?scope=family` (the split family, today's default per the 2026-08-31 amendment)                                                                                                                              |
+| Add / Edit / View Attachments                                                             | `order_attachments` (order- or line-scoped; PDF, images, office docs; ≤ 5 MB each; bytes stored in Postgres, served through the API with auth); paperclip count in the header                                                                             |
+| Assign Payment Terminal                                                                   | `payment_terminal` label from `ops.paymentTerminals` (which reader took the card). Stripe Terminal readers stay the Day 1 Ops item                                                                                                                        |
+| Custom Order Information                                                                  | `custom_info_json` — label / value rows (fabric, dimensions, monogram, …) printed on the invoice                                                                                                                                                          |
+| Enter Customer Name · Update a Customer Address                                           | Customer edit dialog (name, email, phones, billing address) + order ship-to edit                                                                                                                                                                          |
+| Trade / Designer Information                                                              | `trade_designer_json` — name, company, phone, email, note. Trade pricing tiers stay the open [DECIDE]                                                                                                                                                     |
+| View Signature                                                                            | Phase 3 with D9                                                                                                                                                                                                                                           |
+| Advanced Line Item Display · Toggle Line Display                                          | Compact ↔ advanced lines toggle (advanced adds SKU, source, tax rate, reserved, room, pieces, prep codes, comment, COM, install)                                                                                                                          |
+| Additional Line Item Details                                                              | Line details dialog (description, comment, room, pieces, prep codes, COM, direct-ship details, installation)                                                                                                                                              |
+| Assign Rooms to Order · Assign Pieces                                                     | Line details: room, pieces (pieces per unit — delivery capacity, day load and booking count `quantity × pieces`; §13 serial tracking still excluded)                                                                                                      |
+| Convert Line to Direct Ship · Direct Ship Details                                         | Line type select (exists) + direct-ship details in the line dialog                                                                                                                                                                                        |
+| Costed Line Item Display · Sales Margin Scratchpad                                        | Cost / margin / margin % columns and a target-margin → price calculator, gated by `products.cost.view`                                                                                                                                                    |
+| Customer's Own Material (COM)                                                             | Line details: COM flag + description; a COM line is $0 merchandise the customer supplies                                                                                                                                                                  |
+| Enter a Discount on Multiple Lines · Group Pricing                                        | One dialog: pick lines, $ per line or % of price; writes line discounts through the G6/A10 price monitor (logged against list, never blocked)                                                                                                             |
+| Extended Warranty Detail · Protection Plan Selection                                      | Phase 2 (D8): `protection_plans` catalog (name, term, price or % of covered price) sold as a line linked to the covered line                                                                                                                              |
+| Line Comments                                                                             | Line details: comment — prints under the line on the invoice, delivery ticket and pick list (room, pieces, prep codes, install and COM print on the truck's documents)                                                                                    |
+| Line Item Linked Document Display                                                         | Per-line dialog: PO, deliveries, transfers, RMAs, exchange orders                                                                                                                                                                                         |
+| Line Stock Availability                                                                   | Per-location on hand / reserved / available for the line's variant                                                                                                                                                                                        |
+| Maintain Linked Installation Line                                                         | Installation stays the order-level fee; `needs_install` marks the lines it covers (prints on the delivery ticket)                                                                                                                                         |
+| Prep Codes                                                                                | Line details: prep codes from `ops.prepCodes`                                                                                                                                                                                                             |
+| Price / Spiff / Commission Table                                                          | Projected the way accrual works (§9): order total — minus catalog cost on a margin plan — split by share at the plan rate, spread over the merchandise lines; margin-plan figures need `products.cost.view`; spiffs are not modeled — the column prints — |
+| Product Benefit Inquiry                                                                   | Product card dialog: brand, description, attributes, warranty text from the catalog                                                                                                                                                                       |
+| Purchase Order                                                                            | Opens the line's PO; a special-order / direct-ship line without one opens the to-order queue (Generate PO lives there)                                                                                                                                    |
+| Remove All Price Overrides and Discounts                                                  | Restores the catalog price on every variant line and zeroes every discount (order + lines); audited                                                                                                                                                       |
+| Split Merchandise Lines                                                                   | Order split (exists) + split one line's quantity into two lines — refused while the line is allocated to a PO or on a scheduled delivery                                                                                                                  |
+| View Discount Schedule Applied to this Order · Start / Suspend Automated Line Discounting | Phase 2 (D7): a discount code applied to the order is the schedule; Start / Suspend toggles it. Until then the actions open View Order Discounts                                                                                                          |
+| View Linked Transfers                                                                     | Transfers whose `order_id` is this order (auto transfers for shortfalls)                                                                                                                                                                                  |
+| View Order Discounts                                                                      | Dialog: order discount, every line discount, applied code                                                                                                                                                                                                 |
+| View / Edit Exception Comments                                                            | `exception_notes` on the order; the exception register shows them on the order's rows                                                                                                                                                                     |
+
+**Decisions**
+
+- D1 Single screen + one Actions menu (above).
+- D2 Settings lists (`ops.marketingCodes`, `ops.orderSources`,
+  `ops.prepCodes`, `ops.rooms`, `ops.paymentTerminals`) are admin-edited
+  string lists; the pickers accept free text so a missing entry never
+  blocks a sale.
+- D3 Attachments live in Postgres (no object store is provisioned); 5 MB
+  per file, 25 files per order.
+- D4 Costed display and the scratchpad are hidden without
+  `products.cost.view`.
+- D5 Phase 2 = protection plans + discount codes on orders. Phase 3 =
+  signature capture (reverses a §13 exclusion — owner to confirm).
+- D6 Nothing here changes order money rules: derived balances stay
+  derived, price changes still pass the G6 variance controls.
+
+Build order: schema + settings lists → order/line fields + attachments API →
+Actions menu + dialogs → Step-1 header card, Receivables, financing fields
+→ tests + docs; then phase 2, then phase 3.
+
+Tests: `order-actions.int.spec.ts` (5 — header + line fields, attachments
+within limits, multi-line discount + split + remove overrides, the six
+reads, customer work phone).
+
 ### 12.3 Cashier dashboard — "My Day" (amendment A7, owner 2026-09-01)
 
 Fixed by role, like Operations and Warehouse: `cashier.dashboard.view` is the

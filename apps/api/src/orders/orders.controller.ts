@@ -113,6 +113,77 @@ interface AddressInput {
   phone?: string | null;
 }
 
+/** A20 "Trade/Designer Information". */
+interface TradeDesignerInput {
+  name?: string | null;
+  company?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  note?: string | null;
+}
+
+/** A20 "Custom Order Information": one printed label/value row. */
+interface CustomInfoRow {
+  label: string;
+  value: string;
+}
+
+const A20_TEXT_MAX = 200;
+
+function a20Text(field: string, v: unknown, max = A20_TEXT_MAX): string | null {
+  if (v == null) return null;
+  if (typeof v !== 'string') throw new BadRequestException(`${field} must be text`);
+  const t = v.trim();
+  if (t.length > max) throw new BadRequestException(`${field} must be ≤ ${max} characters`);
+  return t || null;
+}
+
+function a20TradeDesigner(v: unknown): TradeDesignerInput | null {
+  if (v == null) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    throw new BadRequestException('tradeDesigner must be an object or null');
+  }
+  const o = v as Record<string, unknown>;
+  const out: TradeDesignerInput = {
+    name: a20Text('tradeDesigner.name', o.name),
+    company: a20Text('tradeDesigner.company', o.company),
+    phone: a20Text('tradeDesigner.phone', o.phone, 40),
+    email: a20Text('tradeDesigner.email', o.email),
+    note: a20Text('tradeDesigner.note', o.note, 1000),
+  };
+  return Object.values(out).some((x) => x) ? out : null;
+}
+
+function a20CustomInfo(v: unknown): CustomInfoRow[] | null {
+  if (v == null) return null;
+  if (!Array.isArray(v)) throw new BadRequestException('customInfo must be a list or null');
+  if (v.length > 40) throw new BadRequestException('customInfo holds at most 40 rows');
+  const rows: CustomInfoRow[] = [];
+  for (const raw of v) {
+    if (!raw || typeof raw !== 'object')
+      throw new BadRequestException('customInfo rows are objects');
+    const r = raw as Record<string, unknown>;
+    const label = a20Text('customInfo.label', r.label, 80);
+    const value = a20Text('customInfo.value', r.value, 500);
+    if (!label && !value) continue;
+    rows.push({ label: label ?? '', value: value ?? '' });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
+/** A20 "Prep Codes": a short list of short labels. */
+function a20Codes(field: string, v: unknown): string[] | null {
+  if (v == null) return null;
+  if (!Array.isArray(v)) throw new BadRequestException(`${field} must be a list or null`);
+  const out: string[] = [];
+  for (const raw of v) {
+    const t = a20Text(field, raw, 60);
+    if (t && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  if (out.length > 20) throw new BadRequestException(`${field} holds at most 20 entries`);
+  return out.length > 0 ? out : null;
+}
+
 interface StepThreeFees {
   deliveryFeeCents?: number;
   installFeeCents?: number;
@@ -175,6 +246,13 @@ interface UpdateOrderBody extends StepThreeFees {
   stockLocationId?: string | null;
   billingAddress?: AddressInput | null;
   marketingCode?: string | null;
+  /** A20 header fields — metadata, never money. */
+  marketingCode2?: string | null;
+  orderSource?: string | null;
+  paymentTerminal?: string | null;
+  exceptionNotes?: string | null;
+  tradeDesigner?: TradeDesignerInput | null;
+  customInfo?: CustomInfoRow[] | null;
   requestedDate?: string | null;
   address?: AddressInput;
   notes?: string | null;
@@ -201,6 +279,44 @@ interface OrderPaymentBody {
   financingProvider?: string;
   financingRef?: string;
 }
+
+/** Body of PATCH /orders/:id/lines/:lineId (money fields + A20 line details). */
+interface LineEditBody {
+  quantity?: number;
+  unitPriceCents?: number;
+  lineDiscountCents?: number;
+  fulfillmentMethod?: string | null;
+  sourceLocationId?: string | null;
+  deliveryDate?: string | null;
+  priceReasonCodeId?: string;
+  priceReason?: string;
+  /** A20 line details. */
+  description?: string;
+  comment?: string | null;
+  room?: string | null;
+  pieces?: number | null;
+  prepCodes?: string[] | null;
+  com?: { description?: string | null } | null;
+  directShip?: {
+    vendorName?: string | null;
+    vendorOrderRef?: string | null;
+    trackingNumber?: string | null;
+    expectedDate?: string | null;
+  } | null;
+  needsInstall?: boolean;
+}
+
+/** Line fields that pass the A1 print lock (metadata, never money or stock). */
+const LINE_METADATA_FIELDS = new Set([
+  'description',
+  'comment',
+  'room',
+  'pieces',
+  'prepCodes',
+  'com',
+  'directShip',
+  'needsInstall',
+]);
 
 interface CancelOrderBody {
   reason?: string | null;
@@ -238,6 +354,14 @@ interface OrderLineRow {
   fulfillmentMethod: string | null;
   sourceLocationId: string | null;
   deliveryDate: string | null;
+  /** A20 line details (STORIS Step 2 actions). */
+  comment: string | null;
+  room: string | null;
+  pieces: number | null;
+  prepCodes: string[] | null;
+  comJson: unknown;
+  directShipJson: unknown;
+  needsInstall: boolean;
 }
 
 interface OrderPaymentRow {
@@ -283,6 +407,13 @@ interface OrderDetail extends OrderListRow {
   pickupLocationId: string | null;
   billingAddressJson: unknown;
   marketingCode: string | null;
+  /** A20 (STORIS Step 1 + Actions): attribution, source, terminal, comments. */
+  marketingCode2: string | null;
+  orderSource: string | null;
+  paymentTerminal: string | null;
+  exceptionNotes: string | null;
+  tradeDesignerJson: unknown;
+  customInfoJson: unknown;
   deliveryFeeCents: number;
   installFeeCents: number;
   otherFeeCents: number;
@@ -1812,6 +1943,15 @@ export class OrdersController {
       'notes',
       'internalNotes',
       'address',
+      // A20 metadata — attribution, source, terminal, comments never
+      // touch money or the truck.
+      'marketingCode',
+      'marketingCode2',
+      'orderSource',
+      'paymentTerminal',
+      'exceptionNotes',
+      'tradeDesigner',
+      'customInfo',
     ]);
     const touchesGuardedFields = Object.keys(body).some((k) => !SAFE_WHILE_LOCKED.has(k));
     if (touchesGuardedFields) {
@@ -1845,6 +1985,22 @@ export class OrdersController {
     if (body.deliveryInstructions !== undefined)
       patch.deliveryInstructions = body.deliveryInstructions;
     if (body.marketingCode !== undefined) patch.marketingCode = body.marketingCode;
+    if (body.marketingCode2 !== undefined) {
+      patch.marketingCode2 = a20Text('marketingCode2', body.marketingCode2, 60);
+    }
+    if (body.orderSource !== undefined)
+      patch.orderSource = a20Text('orderSource', body.orderSource, 60);
+    if (body.paymentTerminal !== undefined) {
+      patch.paymentTerminal = a20Text('paymentTerminal', body.paymentTerminal, 60);
+    }
+    if (body.exceptionNotes !== undefined) {
+      patch.exceptionNotes = a20Text('exceptionNotes', body.exceptionNotes, 4000);
+    }
+    if (body.tradeDesigner !== undefined) {
+      patch.tradeDesignerJson = a20TradeDesigner(body.tradeDesigner) as never;
+    }
+    if (body.customInfo !== undefined)
+      patch.customInfoJson = a20CustomInfo(body.customInfo) as never;
     if (body.billingAddress !== undefined) patch.billingAddressJson = body.billingAddress as never;
     if (body.pickupLocationId !== undefined) {
       if (body.pickupLocationId) {
@@ -2619,21 +2775,17 @@ export class OrdersController {
     @Param('id') id: string,
     @Param('lineId') lineId: string,
     @Body()
-    body: {
-      lineType?: string;
-      quantity?: number;
-      unitPriceCents?: number;
-      lineDiscountCents?: number;
-      fulfillmentMethod?: string | null;
-      sourceLocationId?: string | null;
-      deliveryDate?: string | null;
-      priceReasonCodeId?: string;
-      priceReason?: string;
-    },
+    body: LineEditBody & { lineType?: string },
   ): Promise<OrderDetail> {
     const order = await this.requireLiveOrder(id);
-    this.assertUnlocked(order);
-    await this.assertNotOnOpenRun(id);
+    // A20: line details (comment, room, pieces, prep codes, COM, direct-ship
+    // details, install flag, description) are truck-safe metadata — they
+    // pass the print lock the way notes do (G9).
+    const metadataOnly = Object.keys(body).every((k) => LINE_METADATA_FIELDS.has(k));
+    if (!metadataOnly) {
+      this.assertUnlocked(order);
+      await this.assertNotOnOpenRun(id);
+    }
     const [line] = await this.db
       .select()
       .from(schema.orderLines)
@@ -2709,22 +2861,76 @@ export class OrdersController {
     actor: CurrentUserPayload,
     order: typeof schema.orders.$inferSelect,
     line: typeof schema.orderLines.$inferSelect,
-    body: {
-      quantity?: number;
-      unitPriceCents?: number;
-      lineDiscountCents?: number;
-      fulfillmentMethod?: string | null;
-      sourceLocationId?: string | null;
-      deliveryDate?: string | null;
-      priceReasonCodeId?: string;
-      priceReason?: string;
-    },
+    body: LineEditBody,
   ): Promise<OrderDetail> {
     const patch: Partial<typeof schema.orderLines.$inferInsert> = {};
     const before: Record<string, unknown> = { lineId: line.id };
     const after: Record<string, unknown> = {};
     let repriced = false;
     let sourceChanged = false;
+
+    // A20 line details — metadata only, never money.
+    const setMeta = <K extends keyof typeof patch>(key: K, next: (typeof patch)[K]) => {
+      const prev = (line as Record<string, unknown>)[key as string];
+      if (JSON.stringify(prev ?? null) === JSON.stringify(next ?? null)) return;
+      patch[key] = next;
+      before[key as string] = prev ?? null;
+      after[key as string] = next ?? null;
+    };
+    if (body.description !== undefined) {
+      const d = a20Text('description', body.description, 300);
+      if (!d) throw new BadRequestException('description cannot be blank');
+      setMeta('description', d);
+    }
+    if (body.comment !== undefined) setMeta('comment', a20Text('comment', body.comment, 1000));
+    if (body.room !== undefined) setMeta('room', a20Text('room', body.room, 60));
+    if (body.pieces !== undefined) {
+      if (
+        body.pieces !== null &&
+        (!Number.isInteger(body.pieces) || body.pieces < 1 || body.pieces > 99)
+      ) {
+        throw new BadRequestException('pieces must be 1–99 or null');
+      }
+      setMeta('pieces', body.pieces);
+    }
+    if (body.prepCodes !== undefined) setMeta('prepCodes', a20Codes('prepCodes', body.prepCodes));
+    if (body.com !== undefined) {
+      const com = body.com;
+      if (com != null && (typeof com !== 'object' || Array.isArray(com))) {
+        throw new BadRequestException('com must be an object or null');
+      }
+      const desc = com ? a20Text('com.description', com.description, 500) : null;
+      setMeta('comJson', com ? ({ supplied: true, description: desc } as never) : null);
+    }
+    if (body.directShip !== undefined) {
+      const ds = body.directShip;
+      if (ds != null && (typeof ds !== 'object' || Array.isArray(ds))) {
+        throw new BadRequestException('directShip must be an object or null');
+      }
+      const o = (ds ?? {}) as Record<string, unknown>;
+      const expected = a20Text('directShip.expectedDate', o.expectedDate, 10);
+      if (expected && !/^\d{4}-\d{2}-\d{2}$/.test(expected)) {
+        throw new BadRequestException('directShip.expectedDate must be YYYY-MM-DD');
+      }
+      const next = ds
+        ? {
+            vendorName: a20Text('directShip.vendorName', o.vendorName, 120),
+            vendorOrderRef: a20Text('directShip.vendorOrderRef', o.vendorOrderRef, 80),
+            trackingNumber: a20Text('directShip.trackingNumber', o.trackingNumber, 80),
+            expectedDate: expected,
+          }
+        : null;
+      setMeta(
+        'directShipJson',
+        next && Object.values(next).some((x) => x) ? (next as never) : null,
+      );
+    }
+    if (body.needsInstall !== undefined) {
+      if (typeof body.needsInstall !== 'boolean') {
+        throw new BadRequestException('needsInstall must be a boolean');
+      }
+      setMeta('needsInstall', body.needsInstall);
+    }
 
     if (body.quantity !== undefined) {
       if (!Number.isInteger(body.quantity) || body.quantity < 1) {
@@ -4825,6 +5031,12 @@ export class OrdersController {
       pickupLocationId: order.pickupLocationId,
       billingAddressJson: order.billingAddressJson,
       marketingCode: order.marketingCode,
+      marketingCode2: order.marketingCode2,
+      orderSource: order.orderSource,
+      paymentTerminal: order.paymentTerminal,
+      exceptionNotes: order.exceptionNotes,
+      tradeDesignerJson: order.tradeDesignerJson,
+      customInfoJson: order.customInfoJson,
       deliveryFeeCents: order.deliveryFeeCents,
       installFeeCents: order.installFeeCents,
       otherFeeCents: order.otherFeeCents,
@@ -4853,6 +5065,13 @@ export class OrdersController {
         fulfillmentMethod: l.fulfillmentMethod,
         sourceLocationId: l.sourceLocationId,
         deliveryDate: l.deliveryDate,
+        comment: l.comment,
+        room: l.room,
+        pieces: l.pieces,
+        prepCodes: l.prepCodes ?? null,
+        comJson: l.comJson,
+        directShipJson: l.directShipJson,
+        needsInstall: l.needsInstall,
       })),
       family,
       payments: payments.map((p) => ({

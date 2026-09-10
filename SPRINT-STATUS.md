@@ -5191,3 +5191,53 @@ operatorName` (the PDF's parameter echo; the page is unchanged).
   VISA payment types — Jetnine payments carry the processor, not the card
   brand, so those lines print as `CARD - STRIPE`; Mgr (manager override)
   and Batch (deposit batch) print blank.
+
+### Checkpoint — 2026-09-10 (Enter a Sales Order: every STORIS section and action, A20)
+
+Owner sent the STORIS "Enter a Sales Order" screen (Step 1–4 sidebar, both
+Actions menus): "In orders tab we need all of these." Amendment A20 (§12.16)
+maps every item; the order stays one screen (A3) with one Actions ▾ menu.
+
+Phase 1 (this branch):
+
+- [x] Schema 0092: order fields (`marketing_code_2`, `order_source`,
+      `payment_terminal`, `exception_notes`, `trade_designer_json`,
+      `custom_info_json`), line fields (`comment`, `room`, `pieces`,
+      `prep_codes`, `com_json`, `direct_ship_json`, `needs_install`),
+      `order_attachments`, customers `work_phone` + `work_phone_ext`; RLS
+      — _2026-09-10: `0092_a20_order_entry_storis_actions`._
+- [x] Settings lists (`ops.marketingCodes`, `orderSources`, `prepCodes`,
+      `rooms`, `paymentTerminals`): registry + validation + settings page —
+      _2026-09-10: one label per line on the Store operations card; exposed
+      through the POS settings read so the order page can suggest them._
+- [x] API: order PATCH + line PATCH accept the new fields; attachments
+      (list / upload / fetch / delete); multi-line discount; line quantity
+      split; remove all overrides; tax info; costed lines + commission
+      table; linked documents; stock availability; product benefits —
+      _2026-09-10: `orders/order-actions.controller.ts` under
+      `/v1/orders/:id/…`; metadata fields pass the A1 print lock, money
+      edits keep the live / unlocked / off-the-truck guards; every edit
+      audited._
+- [x] Web: Actions ▾ menu with every STORIS action; order header dialog;
+      customer edit; fees; tax info; attachments; line details; multi-line
+      discount; remove overrides; costed / advanced line display; margin
+      scratchpad; linked docs; stock availability; product benefits; order
+      discounts; print scope; Receivables section; deposit required +
+      financing fields; exception comments; trade / designer; custom order
+      info; payment terminal — _2026-09-10: `orders/[id]/actions/` (menu +
+      dialogs), Order details card, ⋯ per line, `?scope=order` invoice;
+      phase-2/3 items stay on the menu and say so instead of hiding._
+- [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
+      _2026-09-10: `order-actions.int.spec.ts` (5; CI db
+      `jetnine_order_actions`); `orders.int.spec.ts` (101),
+      `order-detail-extras` (4) and `customers` (16) still green; PR #154.
+      Codex round 1 (six findings, all fixed): multi-line discounts run
+      through the price monitor; the commission table projects on the
+      accrual basis and hides margin-plan figures without cost access; a
+      split refuses lines on a PO or a scheduled delivery; pieces per unit
+      count toward truck capacity; line comments / room / pieces / prep /
+      install / COM and custom order information print on the documents._
+
+Phase 2: protection plans + extended warranty (D8); discount codes on
+orders / automated line discounting (D7). Phase 3: signature capture (D9,
+reverses a §13 exclusion — owner to confirm).
