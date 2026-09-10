@@ -5123,3 +5123,36 @@ never had Schedule / Time clock / Timesheets items).
   payment voids, tender changes and restocking-fee waivers have no audit
   action yet and cannot appear until those flows write one. Salesperson
   rows attribute an order in full to its primary salesperson (no split).
+
+### Checkpoint — 2026-09-10 (dashboard rework step 2: staff schedule + time clock)
+
+Second half of the `design_handoff_dashboards_sep10` hand-off. Nothing for
+this existed in the live app, so it is a full slice: two tables, three
+permissions, a schedule module, and the strip + card on the homes.
+
+- Schema: `staff_shifts` (member × day, minutes from store-local midnight,
+  `published_at`; NULL times = a pending day off) and `time_punches`
+  (append-only clock_in / break_start / break_end / clock_out), migration
+  0091, RLS registered.
+- Permissions: `schedule.edit` — Owner + Operations (Manager excluded);
+  `schedule.view` + `timeclock.punch` — every business role (Bookkeeper view
+  only). Group "Schedule & time clock" on the roles page.
+- API (`apps/api/src/schedule/`): `GET /v1/schedule?week=&locationId=` (Mon–Sun,
+  people in scope with their cells, `canEdit`, unpublished count); `PUT
+/v1/schedule/shifts`, `POST /v1/schedule/shifts/off`, `POST
+/v1/schedule/publish` (drafts stamped, pending day-offs dropped; audited);
+  `GET /v1/timeclock/me` + `POST /v1/timeclock/punch` (only a punch that moves
+  the status is accepted; audited). Hours are derived every read by
+  `timeclock-math.ts`: clocked-in segments clamped at zero, the open one
+  accruing to now, breaks excluded; week = Monday to now.
+- Web: `dashboard/shared/{time-clock-strip, staff-schedule,
+shift-editor-dialog}`. Strip first on Manager, Operations and Warehouse
+  (hidden for a member who cannot punch); schedule card on all four homes —
+  Owner and Operations edit (cell → dialog, Publish week), Manager and
+  Warehouse read-only and locked to their location (Warehouse in
+  "All locations" mode reads every location).
+- Tests: `timeclock-math.spec.ts` (6), `schedule.int.spec.ts` (9; CI db
+  `jetnine_schedule`).
+- Publishing is a stamp + audit row today (readers see drafts as soon as
+  they are set); a notification on publish is the natural follow-up. The
+  sidebar still has no Timesheets item — there is no timesheets page.

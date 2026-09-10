@@ -16,7 +16,9 @@ import {
   usdWhole,
   type Tone,
 } from './owner/owner-kit';
+import { StaffSchedule } from './shared/staff-schedule';
 import { StoresSection } from './shared/stores-section';
+import { TimeClockStrip } from './shared/time-clock-strip';
 
 interface QueueRow {
   id: string;
@@ -259,6 +261,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <TimeClockStrip />
         {header}
         <Alert tone="error">{error}</Alert>
       </div>
@@ -270,6 +273,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
         style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
         data-testid="manager-dashboard"
       >
+        <TimeClockStrip />
         {header}
         <section className="panel">
           <ShimmerRows rows={4} />
@@ -306,6 +310,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
       data-testid="manager-dashboard"
     >
+      <TimeClockStrip />
       {header}
 
       <StoresSection locationIds={[data.location.id]} single />
@@ -562,6 +567,8 @@ export default function ManagerDashboardView({ userName }: { userName: string })
           )}
         </Panel>
       </div>
+
+      <StaffSchedule lockedLocationId={data.location.id} readOnly />
 
       <SectionRow title="My day" sub={`${firstName} · ${store}`} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 18 }}>

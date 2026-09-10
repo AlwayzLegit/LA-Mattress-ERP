@@ -97,6 +97,7 @@ jobs:
       CATALOG_IMPORT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_catalog_import
       PRODUCT_STOCK_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_product_stock
       STORE_DASHBOARD_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_store_dashboard
+      SCHEDULE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_schedule
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -170,6 +171,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_catalog_import
           createdb -h localhost -U postgres jetnine_product_stock
           createdb -h localhost -U postgres jetnine_store_dashboard
+          createdb -h localhost -U postgres jetnine_schedule
 
       - name: Format check
         run: pnpm format:check

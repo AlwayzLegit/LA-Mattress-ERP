@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
 import { presetLabel } from '@/lib/date-range';
 import { ChangesCard } from '../shared/changes-card';
+import { StaffSchedule } from '../shared/staff-schedule';
 import { StoresSection } from '../shared/stores-section';
 import { MorningBriefCard, type MorningBrief } from './morning-brief';
 import {
@@ -24,8 +25,8 @@ import { WrittenBusinessChart, type TrendPoint } from './written-business';
  * topbar's period, store scope and compare-to; then one card per store
  * (salespeople, money received, cash pickup ticks) and the full-width
  * Changes log — both scoped to the topbar's stores, with their own
- * month-to-date / today toggle. Cards can be reordered / hidden per
- * browser ("Customize").
+ * month-to-date / today toggle — and the editable staff schedule. Cards
+ * can be reordered / hidden per browser ("Customize").
  */
 interface OwnerData {
   date: string;
@@ -50,8 +51,8 @@ interface OwnerData {
   compareTrend: TrendPoint[];
 }
 
-type CardId = 'revenue' | 'brief' | 'stores' | 'changes';
-const CARD_IDS: CardId[] = ['revenue', 'brief', 'stores', 'changes'];
+type CardId = 'revenue' | 'brief' | 'stores' | 'changes' | 'schedule';
+const CARD_IDS: CardId[] = ['revenue', 'brief', 'stores', 'changes', 'schedule'];
 const LAYOUT_KEY = 'jetnine.dashboard.layout';
 interface Layout {
   order: CardId[];
@@ -457,6 +458,11 @@ export default function OwnerHome({ userName, email }: { userName: string; email
           locationIds={f.storeIds}
           handle={card('changes').handle}
           style={{ gridColumn: 'span 6', ...card('changes').style }}
+        />
+
+        <StaffSchedule
+          handle={card('schedule').handle}
+          style={{ gridColumn: 'span 6', ...card('schedule').style }}
         />
       </div>
     </div>

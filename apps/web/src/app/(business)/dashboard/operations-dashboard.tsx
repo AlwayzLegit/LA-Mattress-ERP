@@ -9,7 +9,9 @@ import { api } from '@/lib/api';
 import { formatRange, presetLabel, type DateRange } from '@/lib/date-range';
 import { usd } from './dashboard-kit';
 import { EmptyRow, Panel, ShimmerRows, usdWhole } from './owner/owner-kit';
+import { StaffSchedule } from './shared/staff-schedule';
 import { StoresSection } from './shared/stores-section';
+import { TimeClockStrip } from './shared/time-clock-strip';
 
 /**
  * The Operations home (owner 2026-08-31; Claude Design hand-off 2026-09-04).
@@ -331,6 +333,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <TimeClockStrip />
         {header}
         <Alert tone="error">{error}</Alert>
       </div>
@@ -342,6 +345,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
       style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
       data-testid="operations-dashboard"
     >
+      <TimeClockStrip />
       {header}
 
       {/* ---- Store cards (hand-off 2026-09-10): every store, month to date or today ---- */}
@@ -677,6 +681,9 @@ export default function OperationsDashboardView({ userName }: { userName: string
           )}
         </Panel>
       </div>
+
+      {/* ---- Staff schedule (step 2): every location, editable ---- */}
+      <StaffSchedule />
 
       {confirmClear && (
         <ConfirmDialog

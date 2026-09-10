@@ -143,6 +143,11 @@ export const PERMISSIONS = {
   'cashier.dashboard.view':
     'See the My Day dashboard — own sales, drawer, call-backs, balances due, commission',
 
+  // Staff schedule + time clock (owner hand-off 2026-09-10, step 2).
+  'schedule.view': 'See the staff schedule',
+  'schedule.edit': 'Set shifts and publish the week (Owner and Operations)',
+  'timeclock.punch': 'Clock in and out, take breaks, on the dashboard time clock',
+
   'reason_codes.manage': 'Manage the reason-code registry (add / deactivate / restrict codes)',
   'security_overrides.view': 'View the security-override register',
 
@@ -213,6 +218,7 @@ const GROUP_DEFS: { key: string; label: string; prefixes: string[] }[] = [
   { key: 'gl', label: 'General ledger', prefixes: ['gl'] },
   { key: 'team', label: 'Team & roles', prefixes: ['users', 'roles'] },
   { key: 'business', label: 'Business settings', prefixes: ['business', 'locations'] },
+  { key: 'schedule', label: 'Schedule & time clock', prefixes: ['schedule', 'timeclock'] },
   {
     key: 'security',
     label: 'Audit & security',

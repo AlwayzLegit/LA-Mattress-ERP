@@ -119,3 +119,56 @@ export interface ChangesResponse {
   counts: { all: number; money: number; unseen: number };
   viewer: { membershipId: string | null };
 }
+
+// ---- Step 2: staff schedule + time clock ----------------------------------
+
+export interface ShiftCell {
+  date: string;
+  /** null = pending day off (an unpublished removal). */
+  startMinutes: number | null;
+  endMinutes: number | null;
+  published: boolean;
+}
+
+export interface SchedulePerson {
+  membershipId: string;
+  name: string;
+  roleName: string | null;
+  locationId: string | null;
+  locationName: string;
+  isLead: boolean;
+  shifts: ShiftCell[];
+}
+
+export interface ScheduleWeek {
+  today: string;
+  timezone: string;
+  week: { start: string; end: string; days: { date: string; dow: string; isToday: boolean }[] };
+  locations: { id: string; name: string; locationType: string }[];
+  canEdit: boolean;
+  people: SchedulePerson[];
+  unpublishedCount: number;
+  lastPublishedAt: string | null;
+}
+
+export type PunchType = 'clock_in' | 'break_start' | 'break_end' | 'clock_out';
+export type ClockStatus = 'out' | 'in' | 'break';
+
+export interface TimeClockMe {
+  date: string;
+  timezone: string;
+  member: {
+    membershipId: string;
+    name: string;
+    roleName: string | null;
+    locationId: string | null;
+    locationName: string;
+  };
+  status: ClockStatus;
+  since: string | null;
+  punchesToday: { id: string; type: PunchType; at: string }[];
+  hoursToday: number;
+  hoursWeek: number;
+  scheduledToday: { startMinutes: number; endMinutes: number } | null;
+  allowed: PunchType[];
+}

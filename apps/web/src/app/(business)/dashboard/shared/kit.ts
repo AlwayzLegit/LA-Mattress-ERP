@@ -122,3 +122,67 @@ export function writeLocal(key: string, value: unknown): void {
     // Storage unavailable — the choice just won't stick.
   }
 }
+
+// ---- Step 2: schedule + time clock ----------------------------------------
+
+/** Minutes from midnight → "9:00 AM". */
+export function minutesLabel(m: number): string {
+  const h24 = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(mm).padStart(2, '0')} ${h24 < 12 ? 'AM' : 'PM'}`;
+}
+
+/** Minutes → the grid's compact "10a" / "9:30p". */
+export function minutesCompact(m: number): string {
+  const h24 = Math.floor(m / 60) % 24;
+  const mm = m % 60;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}${mm ? `:${String(mm).padStart(2, '0')}` : ''}${h24 < 12 ? 'a' : 'p'}`;
+}
+
+/** "10a–6p" */
+export function shiftCompact(start: number, end: number): string {
+  return `${minutesCompact(start)}–${minutesCompact(end)}`;
+}
+
+/** "9:00 AM – 5:00 PM" */
+export function shiftLabel(start: number, end: number): string {
+  return `${minutesLabel(start)} – ${minutesLabel(end)}`;
+}
+
+/** Hours with one decimal: "8.0". */
+export function hours1(h: number): string {
+  return h.toFixed(1);
+}
+
+/** "Aug 31 – Sep 6" */
+export function weekLabel(start: string, end: string): string {
+  return `${ymdShort(start)} – ${ymdShort(end)}`;
+}
+
+/** "Mon, Aug 31" */
+export function dowDate(dow: string, day: string): string {
+  return `${dow}, ${ymdShort(day)}`;
+}
+
+/** The week's Monday for a `YYYY-MM-DD` day, shifted by whole weeks. */
+export function mondayOf(day: string, weekOffset = 0): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const dow = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - ((dow + 6) % 7) + weekOffset * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Today as `YYYY-MM-DD` in the browser's clock. */
+export function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export const PUNCH_LABELS: Record<string, string> = {
+  clock_in: 'Clock in',
+  break_start: 'Break start',
+  break_end: 'Break end',
+  clock_out: 'Clock out',
+};

@@ -15,6 +15,8 @@ import {
   type KpiTile,
   type Tone,
 } from './owner/owner-kit';
+import { StaffSchedule } from './shared/staff-schedule';
+import { TimeClockStrip } from './shared/time-clock-strip';
 
 /**
  * The Warehouse home (owner 2026-09-01, §12.2; Claude Design hand-off
@@ -389,6 +391,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <TimeClockStrip />
         <PageHead title="Warehouse" sub={who} />
         <Alert tone="error">{error}</Alert>
       </div>
@@ -397,6 +400,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   if (!summary) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <TimeClockStrip />
         <PageHead title="Warehouse" sub={<>Loading… {who}</>} />
         <KpiStrip
           loading
@@ -509,6 +513,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
       data-testid="warehouse-dashboard"
     >
+      <TimeClockStrip />
       <PageHead
         title={locationLabel}
         sub={
@@ -1023,6 +1028,9 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
           </div>
         </Panel>
       </div>
+
+      {/* ---- Staff schedule (step 2): read-only, this location ---- */}
+      <StaffSchedule lockedLocationId={allMode ? null : summary.location.id} readOnly />
     </div>
   );
 }
