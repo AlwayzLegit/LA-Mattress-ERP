@@ -121,8 +121,6 @@ interface Changes {
 interface DescribeCtx {
   memberName: (id: unknown) => string | null;
   variantLabel: (id: unknown) => string | null;
-  lineTotal: (lineId: unknown) => number | null;
-  lineQuantity: (lineId: unknown) => number | null;
 }
 
 function usd(cents: unknown): string | null {
@@ -296,7 +294,9 @@ export function describeChange(action: string, changes: Changes, ctx: DescribeCt
         label: 'Line added',
         moneyRelated: true,
         now: `${label} ×${qty} added`,
-        impactCents: ctx.lineTotal(after.lineId),
+        // The event records what was added, not its price; reading the
+        // live line would let later edits rewrite this row's history.
+        impactCents: null,
       };
     }
     case 'order.line.remove': {
@@ -316,7 +316,10 @@ export function describeChange(action: string, changes: Changes, ctx: DescribeCt
       if (has('unitPriceCents')) {
         const b = num(before.unitPriceCents);
         const a = num(after.unitPriceCents);
-        const qty = ctx.lineQuantity(before.lineId) ?? num(after.quantity) ?? 1;
+        // Only the event's own quantity may scale the delta — never the
+        // line's current quantity, which later edits move.
+        const qty = num(after.quantity) ?? num(before.quantity);
+        const perUnit = a != null && b != null ? a - b : null;
         return {
           ...base,
           type: 'price_override',
@@ -325,7 +328,8 @@ export function describeChange(action: string, changes: Changes, ctx: DescribeCt
           moneyRelated: true,
           was: b != null ? `${usd(b)} unit price` : null,
           now: a != null ? `${usd(a)} approved price` : null,
-          impactCents: a != null && b != null ? (a - b) * qty : null,
+          reason: perUnit != null && qty == null ? `${usd(perUnit)} per unit` : null,
+          impactCents: perUnit != null && qty != null ? perUnit * qty : null,
         };
       }
       if (has('lineDiscountCents')) {
@@ -600,10 +604,9 @@ export class OrderChangesController {
       );
     const orderById = new Map(orders.map((o) => [o.id, o] as const));
 
-    // Lookups the descriptions need: member names, variant labels, line totals.
+    // Lookups the descriptions need: member names and variant labels.
     const memberIds = new Set<string>();
     const variantIds = new Set<string>();
-    const lineIds = new Set<string>();
     for (const r of raw) {
       const c = (r.changesJson ?? {}) as Changes;
       for (const side of [c.before, c.after]) {
@@ -612,8 +615,6 @@ export class OrderChangesController {
         if (typeof sp === 'string' && isUuid(sp)) memberIds.add(sp);
         const v = side.variantId;
         if (typeof v === 'string' && isUuid(v)) variantIds.add(v);
-        const l = side.lineId;
-        if (typeof l === 'string' && isUuid(l)) lineIds.add(l);
       }
     }
     const memberNames = new Map<string, string>();
@@ -647,23 +648,9 @@ export class OrderChangesController {
         );
       }
     }
-    const lines = new Map<string, { totalCents: number; quantity: number }>();
-    if (lineIds.size > 0) {
-      const rows = await this.db
-        .select({
-          id: schema.orderLines.id,
-          totalCents: schema.orderLines.totalCents,
-          quantity: schema.orderLines.quantity,
-        })
-        .from(schema.orderLines)
-        .where(inArray(schema.orderLines.id, [...lineIds]));
-      for (const l of rows) lines.set(l.id, { totalCents: l.totalCents, quantity: l.quantity });
-    }
     const ctx: DescribeCtx = {
       memberName: (id) => (typeof id === 'string' ? (memberNames.get(id) ?? null) : null),
       variantLabel: (id) => (typeof id === 'string' ? (variantLabels.get(id) ?? null) : null),
-      lineTotal: (id) => (typeof id === 'string' ? (lines.get(id)?.totalCents ?? null) : null),
-      lineQuantity: (id) => (typeof id === 'string' ? (lines.get(id)?.quantity ?? null) : null),
     };
 
     // Approvals: a second-user override on the same order within the

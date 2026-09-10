@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -9,7 +10,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { and, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -29,6 +30,11 @@ import { addDays, isDay, mondayOf, weekDays } from './week';
  * week is published. A cleared shift on a row that was published stays
  * as a pending day off (NULL times) so the count is honest; publishing
  * drops those rows and stamps the rest.
+ *
+ * Scope: a member whose store access is restricted (`scopeLocationIds`)
+ * sees and edits only their own locations — the locations list, the
+ * people and the shifts are cut down server-side, a location outside the
+ * scope is refused, and shifts at other locations never leave the API.
  */
 
 export interface ShiftCell {
@@ -68,6 +74,17 @@ function isUuid(s: unknown): s is string {
     typeof s === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   );
+}
+
+/** The locations a member may see; null = unrestricted. */
+function allowedLocations(tenant: RequestTenantContext): string[] | null {
+  return tenant.scopeLocationIds;
+}
+
+function assertAllowed(allowed: string[] | null, locationId: string | null): void {
+  if (allowed && (locationId == null || !allowed.includes(locationId))) {
+    throw new ForbiddenException('That location is outside your store access');
+  }
 }
 
 function minutes(v: unknown, what: string): number {
@@ -183,6 +200,25 @@ export class ScheduleController {
     const start = mondayOf(isDay(weekQ) ? weekQ : today);
     const end = addDays(start, 6);
     const locationId = isUuid(locationIdQ) ? locationIdQ : null;
+    const allowed = allowedLocations(tenant);
+    if (locationId) assertAllowed(allowed, locationId);
+    if (allowed && allowed.length === 0) {
+      return {
+        today,
+        timezone: tz,
+        week: {
+          start,
+          end,
+          days: weekDays(start).map((d) => ({ ...d, isToday: d.date === today })),
+        },
+        locations: [],
+        canEdit: false,
+        people: [],
+        unpublishedCount: 0,
+        lastPublishedAt: null,
+      };
+    }
+    const inScope = (loc: string | null) => !allowed || (loc != null && allowed.includes(loc));
 
     const [locations, people, shifts] = await Promise.all([
       this.db
@@ -193,7 +229,11 @@ export class ScheduleController {
         })
         .from(schema.locations)
         .where(
-          and(eq(schema.locations.businessId, businessId), eq(schema.locations.isActive, true)),
+          and(
+            eq(schema.locations.businessId, businessId),
+            eq(schema.locations.isActive, true),
+            allowed ? inArray(schema.locations.id, allowed) : undefined,
+          ),
         )
         .orderBy(schema.locations.name),
       this.people(businessId),
@@ -224,14 +264,19 @@ export class ScheduleController {
     }
 
     // A store's grid: members with access to it, plus anyone already
-    // rostered there this week. "All locations": everyone.
+    // rostered there this week. "All locations": everyone the viewer may
+    // see — every member for an unrestricted viewer, otherwise those who
+    // share (or are rostered at) one of the viewer's locations.
     const rows: SchedulePerson[] = [];
     for (const p of people.values()) {
-      const mine = shiftsByMember.get(p.membershipId) ?? [];
+      const mine = (shiftsByMember.get(p.membershipId) ?? []).filter((s) => inScope(s.locationId));
       if (locationId) {
         const scoped = p.scopeIds.includes(locationId);
         const rostered = mine.some((s) => s.locationId === locationId);
         if (!scoped && !rostered) continue;
+      } else if (allowed) {
+        const shares = p.scopeIds.some((id) => allowed.includes(id));
+        if (!shares && mine.length === 0) continue;
       }
       rows.push({
         membershipId: p.membershipId,
@@ -241,7 +286,9 @@ export class ScheduleController {
         locationName: p.locationName,
         isLead: !!p.roleName && LEAD_ROLES.has(p.roleName),
         shifts: mine
-          .filter((s) => !locationId || s.locationId === locationId || s.locationId == null)
+          .filter(
+            (s) => !locationId || s.locationId === locationId || (!allowed && s.locationId == null),
+          )
           .map((s) => ({
             date: s.date,
             startMinutes: s.startMinutes,
@@ -255,10 +302,12 @@ export class ScheduleController {
 
     const visible = rows.flatMap((r) => r.shifts);
     const unpublishedCount = visible.filter((s) => !s.published).length;
-    const lastPublishedAt = shifts.reduce<Date | null>(
-      (m, s) => (s.publishedAt && (!m || s.publishedAt > m) ? s.publishedAt : m),
-      null,
-    );
+    const lastPublishedAt = shifts
+      .filter((s) => inScope(s.locationId) || (!allowed && s.locationId == null))
+      .reduce<Date | null>(
+        (m, s) => (s.publishedAt && (!m || s.publishedAt > m) ? s.publishedAt : m),
+        null,
+      );
 
     return {
       today,
@@ -322,6 +371,8 @@ export class ScheduleController {
     } else {
       locationId = (await this.people(businessId)).get(membershipId)?.locationId ?? null;
     }
+    const allowed = allowedLocations(tenant);
+    if (allowed) assertAllowed(allowed, locationId);
     const now = new Date();
     await this.db
       .insert(schema.staffShifts)
@@ -367,7 +418,11 @@ export class ScheduleController {
     const membershipId = await this.memberOrThrow(businessId, body.membershipId);
     if (!isDay(body.date)) throw new BadRequestException('date must be YYYY-MM-DD');
     const [existing] = await this.db
-      .select({ id: schema.staffShifts.id, publishedAt: schema.staffShifts.publishedAt })
+      .select({
+        id: schema.staffShifts.id,
+        publishedAt: schema.staffShifts.publishedAt,
+        locationId: schema.staffShifts.locationId,
+      })
       .from(schema.staffShifts)
       .where(
         and(
@@ -378,6 +433,8 @@ export class ScheduleController {
       )
       .limit(1);
     if (!existing) return { membershipId, date: body.date, pending: false };
+    const allowed = allowedLocations(tenant);
+    if (allowed) assertAllowed(allowed, existing.locationId);
     if (existing.publishedAt) {
       // Was published: keep a pending day-off row so the change is counted.
       await this.db
@@ -419,11 +476,20 @@ export class ScheduleController {
     const start = mondayOf(body.week);
     const end = addDays(start, 6);
     const locationId = isUuid(body.locationId) ? body.locationId : null;
+    const allowed = allowedLocations(tenant);
+    if (locationId) assertAllowed(allowed, locationId);
+    if (allowed && allowed.length === 0) {
+      throw new ForbiddenException('That location is outside your store access');
+    }
     const inWeek = and(
       eq(schema.staffShifts.businessId, businessId),
       gte(schema.staffShifts.date, start),
       lte(schema.staffShifts.date, end),
-      locationId ? eq(schema.staffShifts.locationId, locationId) : undefined,
+      locationId
+        ? eq(schema.staffShifts.locationId, locationId)
+        : allowed
+          ? inArray(schema.staffShifts.locationId, allowed)
+          : undefined,
     );
     const removed = await this.db
       .delete(schema.staffShifts)

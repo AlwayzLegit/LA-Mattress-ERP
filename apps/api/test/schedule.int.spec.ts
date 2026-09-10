@@ -205,8 +205,8 @@ describe('the schedule permissions', () => {
 });
 
 describe('GET /v1/schedule', () => {
-  it('shows this week, Monday to Sunday, to a read-only manager', async () => {
-    const res = await as('manager').get('/v1/schedule').expect(200);
+  it('shows this week, Monday to Sunday, to a read-only unrestricted member', async () => {
+    const res = await as('wh').get('/v1/schedule').expect(200);
     expect(res.body.canEdit).toBe(false);
     expect(res.body.today).toBe(localDay());
     expect(res.body.week.days).toHaveLength(7);
@@ -229,6 +229,25 @@ describe('GET /v1/schedule', () => {
     const walt = (res.body.people as Person[]).find((p) => p.name === 'Walt House')!;
     expect(walt).toMatchObject({ locationName: 'All locations', isLead: false });
     expect(res.body.unpublishedCount).toBe(0);
+  });
+
+  it('cuts a store-restricted member down to their own locations', async () => {
+    // The manager's access lists A Store only: no B Store in the picker,
+    // no B Store people, and asking for B Store outright is refused.
+    const res = await as('manager').get('/v1/schedule').expect(200);
+    expect(res.body.canEdit).toBe(false);
+    expect(res.body.locations.map((l: { name: string }) => l.name)).toEqual(['A Store']);
+    expect((res.body.people as Person[]).map((p) => p.name).sort()).toEqual([
+      'Maya Torres',
+      'Priya Nair',
+    ]);
+    const a = await as('manager').get(`/v1/schedule?locationId=${aStoreId}`).expect(200);
+    expect((a.body.people as Person[]).map((p) => p.name).sort()).toEqual([
+      'Maya Torres',
+      'Priya Nair',
+    ]);
+    await as('manager').get(`/v1/schedule?locationId=${bStoreId}`).expect(403);
+    await as('rep').get(`/v1/schedule?locationId=${bStoreId}`).expect(403);
   });
 
   it('narrows a store to the members with access to it', async () => {

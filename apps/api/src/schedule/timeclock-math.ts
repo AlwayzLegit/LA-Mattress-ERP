@@ -62,6 +62,36 @@ export function workedMs(punches: Punch[], now: Date): number {
   return total;
 }
 
+/**
+ * Milliseconds on the clock inside `[from, to)` only — the part of every
+ * clocked-in segment that overlaps the window. A shift that started
+ * before midnight keeps counting after it, and a Sunday clock-in still
+ * carries the open segment into Monday.
+ */
+export function workedMsBetween(punches: Punch[], from: Date, to: Date): number {
+  const a = from.getTime();
+  const b = to.getTime();
+  if (b <= a) return 0;
+  let total = 0;
+  let open: number | null = null;
+  const add = (start: number, end: number) => {
+    const s = Math.max(start, a);
+    const e = Math.min(end, b);
+    if (e > s) total += e - s;
+  };
+  for (const p of sorted(punches)) {
+    const t = p.at.getTime();
+    if (p.type === 'clock_in' || p.type === 'break_end') {
+      if (open == null) open = t;
+    } else if (open != null) {
+      add(open, t);
+      open = null;
+    }
+  }
+  if (open != null) add(open, b);
+  return total;
+}
+
 /** The punches that make sense from a status — what the strip offers as buttons. */
 export function allowedPunches(status: ClockStatus): PunchType[] {
   switch (status) {

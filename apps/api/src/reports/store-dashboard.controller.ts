@@ -11,8 +11,8 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
+import { and, desc, eq, gt, inArray, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { alias, type PgColumn } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -36,12 +36,18 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
  *                 order's primary salesperson.
  *  - Delivered  = orders with a delivery that reached `delivered` in the
  *                 window; each order counts once at its full total.
- *  - Money received = every succeeded payment in the window on a document
- *                 written at the store — orders, POS sales and service
- *                 tickets alike — grouped by the live tender methods.
+ *  - Money received = every positive succeeded payment in the window on a
+ *                 document written at the store — orders, POS sales and
+ *                 service tickets alike — grouped by the live tender
+ *                 methods. Refunds are the negative payment rows the
+ *                 return / price-adjustment flows write; they count only
+ *                 under "Refunds paid out", never as money received or as
+ *                 cash awaiting pickup.
  *  - Cash awaiting pickup = cash payments in the window with no receipt.
  * Legacy-imported documents are excluded throughout (sprint decision D8).
- * Windows are store-local days in the business's working timezone.
+ * The window's dates come from the business clock; each store's day
+ * boundaries are then taken in that store's own timezone, so a store in
+ * another zone never picks up the neighbouring day's money.
  */
 
 export type StorePeriod = 'mtd' | 'today';
@@ -166,6 +172,31 @@ function parseLocationIds(raw?: string): string[] | null {
 
 function isUuid(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+interface StoreRef {
+  id: string;
+  timezone: string;
+}
+
+/**
+ * `col` falls inside `range` for the store `loc` points at, with the day
+ * boundaries taken in that store's timezone: one OR-branch per store.
+ */
+function storeWindow(
+  stores: StoreRef[],
+  range: DayRange,
+  col: PgColumn | SQL,
+  loc: PgColumn | SQL,
+): SQL {
+  if (stores.length === 0) return sql`false`;
+  return sql`(${sql.join(
+    stores.map(
+      (s) =>
+        sql`(${loc} = ${s.id}::uuid AND ${col} >= ${tzDayStart(range.start, s.timezone)} AND ${col} < ${tzDayEndExclusive(range.end, s.timezone)})`,
+    ),
+    sql` OR `,
+  )})`;
 }
 
 /** Human label for a payment's kind, given the document it sits on. */
@@ -330,15 +361,12 @@ export class StoreDashboardController {
   private async paymentsIn(
     tenant: RequestTenantContext,
     businessId: string,
-    storeIds: string[],
+    stores: StoreRef[],
     range: DayRange,
-    tz: string,
     members: Map<string, MemberInfo>,
     extra?: { method?: string; paymentId?: string },
   ): Promise<PaymentRecord[]> {
-    if (storeIds.length === 0) return [];
-    const from = tzDayStart(range.start, tz);
-    const to = tzDayEndExclusive(range.end, tz);
+    if (stores.length === 0) return [];
     const receiptMember = alias(schema.memberships, 'receipt_member');
     const receiptUser = alias(schema.users, 'receipt_user');
     const receiptRole = alias(schema.roles, 'receipt_role');
@@ -392,17 +420,20 @@ export class StoreDashboardController {
         and(
           eq(schema.payments.businessId, businessId),
           eq(schema.payments.status, 'succeeded'),
+          // Money in only: the return and price-adjustment flows write
+          // negative rows for money paid back.
+          gt(schema.payments.amountCents, 0),
           extra?.paymentId ? eq(schema.payments.id, extra.paymentId) : undefined,
-          extra?.paymentId ? undefined : gte(schema.payments.createdAt, from),
-          extra?.paymentId ? undefined : lt(schema.payments.createdAt, to),
+          extra?.paymentId
+            ? sql`${locationExpr} IN (${sql.join(
+                stores.map((s) => sql`${s.id}::uuid`),
+                sql`, `,
+              )})`
+            : storeWindow(stores, range, schema.payments.createdAt, locationExpr),
           extra?.method ? eq(schema.payments.method, extra.method) : undefined,
           isNull(schema.sales.importedAt),
           isNull(schema.orders.importedAt),
           isNull(schema.serviceOrders.importedAt),
-          sql`${locationExpr} IN (${sql.join(
-            storeIds.map((id) => sql`${id}::uuid`),
-            sql`, `,
-          )})`,
           salesScopeCond(tenant, locationExpr),
         ),
       )
@@ -466,7 +497,7 @@ export class StoreDashboardController {
     @Query('locationId') locationIdQ?: string,
   ): Promise<StoresResponse> {
     const businessId = tenant.businessId!;
-    const { tz, today } = await this.clock(businessId);
+    const { today } = await this.clock(businessId);
     const period = this.periodOf(periodQ);
     const range = this.rangeFor(period, today);
     const requested =
@@ -476,8 +507,7 @@ export class StoreDashboardController {
     const members = await this.members(businessId);
     const managers = await this.managersByStore(businessId, members);
 
-    const from = tzDayStart(range.start, tz);
-    const to = tzDayEndExclusive(range.end, tz);
+    const refundLocation = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const liveOrder = and(
       eq(schema.orders.businessId, businessId),
       sql`${schema.orders.status} NOT IN ('draft', 'quote', 'cancelled')`,
@@ -499,7 +529,10 @@ export class StoreDashboardController {
             })
             .from(schema.orders)
             .where(
-              and(liveOrder, gte(schema.orders.createdAt, from), lt(schema.orders.createdAt, to)),
+              and(
+                liveOrder,
+                storeWindow(stores, range, schema.orders.createdAt, schema.orders.locationId),
+              ),
             ),
       storeIds.length === 0
         ? Promise.resolve([])
@@ -516,11 +549,10 @@ export class StoreDashboardController {
               and(
                 liveOrder,
                 eq(schema.deliveries.status, 'delivered'),
-                gte(schema.deliveries.completedAt, from),
-                lt(schema.deliveries.completedAt, to),
+                storeWindow(stores, range, schema.deliveries.completedAt, schema.orders.locationId),
               ),
             ),
-      this.paymentsIn(tenant, businessId, storeIds, range, tz, members),
+      this.paymentsIn(tenant, businessId, stores, range, members),
       storeIds.length === 0
         ? Promise.resolve([])
         : this.db
@@ -533,35 +565,41 @@ export class StoreDashboardController {
             .where(
               and(
                 eq(schema.refunds.businessId, businessId),
-                gte(schema.refunds.createdAt, from),
-                lt(schema.refunds.createdAt, to),
+                storeWindow(stores, range, schema.refunds.createdAt, schema.sales.locationId),
                 isNull(schema.sales.importedAt),
-                inArray(schema.sales.locationId, storeIds),
                 salesScopeCond(tenant, schema.sales.locationId),
               ),
             )
             .groupBy(schema.sales.locationId),
+      // Order and service refunds: the negative payment rows the return
+      // and price-adjustment flows write when money goes back out.
       storeIds.length === 0
         ? Promise.resolve([])
         : this.db
             .select({
-              locationId: schema.orders.locationId,
-              cents: sql<number>`COALESCE(SUM(${schema.orderReturns.amountCents}), 0)::int`,
+              locationId: refundLocation,
+              cents: sql<number>`COALESCE(SUM(-${schema.payments.amountCents}), 0)::int`,
             })
-            .from(schema.orderReturns)
-            .innerJoin(schema.orders, eq(schema.orders.id, schema.orderReturns.orderId))
+            .from(schema.payments)
+            .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
+            .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
+            .leftJoin(
+              schema.serviceOrders,
+              eq(schema.serviceOrders.id, schema.payments.serviceOrderId),
+            )
             .where(
               and(
-                eq(schema.orderReturns.businessId, businessId),
-                gte(schema.orderReturns.authorizedAt, from),
-                lt(schema.orderReturns.authorizedAt, to),
-                sql`${schema.orderReturns.status} <> 'cancelled'`,
+                eq(schema.payments.businessId, businessId),
+                eq(schema.payments.status, 'succeeded'),
+                lt(schema.payments.amountCents, 0),
+                storeWindow(stores, range, schema.payments.createdAt, refundLocation),
+                isNull(schema.sales.importedAt),
                 isNull(schema.orders.importedAt),
-                inArray(schema.orders.locationId, storeIds),
-                salesScopeCond(tenant, schema.orders.locationId),
+                isNull(schema.serviceOrders.importedAt),
+                salesScopeCond(tenant, refundLocation),
               ),
             )
-            .groupBy(schema.orders.locationId),
+            .groupBy(refundLocation),
     ]);
 
     const refundsByStore = new Map<string, number>();
@@ -731,12 +769,10 @@ export class StoreDashboardController {
     }
     const [store] = await this.storesFor(tenant, businessId, [locationId]);
     if (!store) throw new NotFoundException('Store not found');
-    const { tz, today } = await this.clock(businessId);
+    const { today } = await this.clock(businessId);
     const range = this.rangeFor(this.periodOf(periodQ), today);
     const members = await this.members(businessId);
-    const rows = await this.paymentsIn(tenant, businessId, [store.id], range, tz, members, {
-      method,
-    });
+    const rows = await this.paymentsIn(tenant, businessId, [store], range, members, { method });
     const list = rows.map(({ method: _m, locationId: _l, salespersonMembershipId: _s, ...r }) => r);
     return {
       location: { id: store.id, name: store.name },
@@ -756,14 +792,13 @@ export class StoreDashboardController {
   ): Promise<PaymentRecord> {
     if (!isUuid(paymentId)) throw new BadRequestException('paymentId must be a uuid');
     const stores = await this.storesFor(tenant, businessId, null);
-    const { tz, today } = await this.clock(businessId);
+    const { today } = await this.clock(businessId);
     const members = await this.members(businessId);
     const [row] = await this.paymentsIn(
       tenant,
       businessId,
-      stores.map((s) => s.id),
+      stores,
       { start: today, end: today },
-      tz,
       members,
       { paymentId },
     );

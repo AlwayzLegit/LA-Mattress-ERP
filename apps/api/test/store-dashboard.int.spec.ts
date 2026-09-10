@@ -254,6 +254,10 @@ async function seed() {
     fx.cardPaymentId = (
       await pay({ orderId: o1.id, kind: 'balance', method: 'card', amountCents: 70_000 })
     ).id;
+    // A $100 cash refund on O1, the way the return flow records it: a
+    // negative payment row. Money out — never money received, never cash
+    // awaiting pickup.
+    await pay({ orderId: o1.id, kind: 'refund', method: 'cash', amountCents: -10_000 });
 
     const o2 = await mkOrder({
       salespersonMembershipId: members.manager.membershipId,
@@ -470,6 +474,8 @@ describe('GET /v1/dashboard/stores', () => {
     expect(tender('card')).toMatchObject({ cents: 70_000, count: 1 });
     expect(tender('check')).toMatchObject({ cents: 200_000, count: 1 });
     expect(tender('financing')).toMatchObject({ cents: 0, count: 0 });
+    // The refund shows only as money out.
+    expect(a.refundsCents).toBe(10_000);
     // Cash awaiting pickup: both cash payments, nothing ticked yet.
     expect(a.cashTotalCents).toBe(50_000);
     expect(a.cashPendingCents).toBe(50_000);

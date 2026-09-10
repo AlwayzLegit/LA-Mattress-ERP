@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { allowedPunches, hoursFromMs, statusOf, workedMs, type Punch } from './timeclock-math';
+import {
+  allowedPunches,
+  hoursFromMs,
+  statusOf,
+  workedMs,
+  workedMsBetween,
+  type Punch,
+} from './timeclock-math';
 
 const t = (h: number, m = 0) => new Date(Date.UTC(2026, 8, 10, h, m));
 const p = (type: Punch['type'], h: number, m = 0): Punch => ({ type, at: t(h, m) });
@@ -48,6 +55,39 @@ describe('workedMs', () => {
     expect(workedMs([p('clock_in', 9), p('clock_in', 10), p('clock_out', 11)], t(12))).toBe(
       2 * 3_600_000,
     );
+  });
+});
+
+describe('workedMsBetween', () => {
+  it('counts only the part of each segment inside the window', () => {
+    // Clocked in 22:00 the day before, out 02:00 today: today gets 2h.
+    const yesterday = new Date(Date.UTC(2026, 8, 9, 22));
+    const punches: Punch[] = [
+      { type: 'clock_in', at: yesterday },
+      { type: 'clock_out', at: t(2) },
+    ];
+    expect(workedMsBetween(punches, t(0), t(12))).toBe(2 * 3_600_000);
+    // The same segment seen from yesterday's window is the other 2h.
+    expect(workedMsBetween(punches, new Date(Date.UTC(2026, 8, 9)), t(0))).toBe(2 * 3_600_000);
+  });
+  it('carries an open segment across the boundary to now', () => {
+    const sunday = new Date(Date.UTC(2026, 8, 6, 23));
+    const punches: Punch[] = [{ type: 'clock_in', at: sunday }];
+    const monday = new Date(Date.UTC(2026, 8, 7));
+    const now = new Date(Date.UTC(2026, 8, 7, 1, 30));
+    expect(workedMsBetween(punches, monday, now)).toBe(1.5 * 3_600_000);
+    expect(statusOf(punches).status).toBe('in');
+  });
+  it('leaves breaks and out-of-window time alone', () => {
+    const punches: Punch[] = [
+      p('clock_in', 9),
+      p('break_start', 12),
+      p('break_end', 13),
+      p('clock_out', 17),
+    ];
+    expect(workedMsBetween(punches, t(10), t(14))).toBe(3 * 3_600_000);
+    expect(workedMsBetween(punches, t(18), t(20))).toBe(0);
+    expect(workedMsBetween(punches, t(12), t(11))).toBe(0);
   });
 });
 

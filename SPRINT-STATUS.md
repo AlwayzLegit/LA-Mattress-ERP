@@ -5119,7 +5119,9 @@ never had Schedule / Time clock / Timesheets items).
 - Tests: `store-dashboard.int.spec.ts` (17; CI db `jetnine_store_dashboard`);
   `e2e/operations.spec.ts` now asserts the store cards instead of the tiles.
 - Known limits of the audit-derived log: `order.update` records no prior
-  discount/fee value, so those rows show the new value with "—" for impact;
+  discount/fee value and `order.line.add` no price, so those rows show the
+  new value with "—" for impact (never derived from the live line — later
+  edits would rewrite history);
   payment voids, tender changes and restocking-fee waivers have no audit
   action yet and cannot appear until those flows write one. Salesperson
   rows attribute an order in full to its primary salesperson (no split).

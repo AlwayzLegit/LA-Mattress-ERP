@@ -7,7 +7,7 @@ import {
   Inject,
   Post,
 } from '@nestjs/common';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -21,7 +21,7 @@ import {
   hoursFromMs,
   isPunchType,
   statusOf,
-  workedMs,
+  workedMsBetween,
   type ClockStatus,
   type Punch,
   type PunchType,
@@ -113,23 +113,43 @@ export class TimeClockController {
       .limit(1);
     const today = day!.today;
     const weekStart = mondayOf(today);
+    // Store-local instants for the two windows, resolved once so the
+    // chips, today's hours and the week's hours all agree.
+    const [bounds] = await this.db
+      .select({
+        dayStart: sql<Date>`${tzDayStart(today, tz)}`,
+        weekStart: sql<Date>`${tzDayStart(weekStart, tz)}`,
+      })
+      .from(schema.businesses)
+      .where(eq(schema.businesses.id, businessId))
+      .limit(1);
+    const asDate = (v: Date | string) => (v instanceof Date ? v : new Date(v));
+    const dayStart = asDate(bounds!.dayStart);
+    const weekStartAt = asDate(bounds!.weekStart);
 
-    const [punches, [shift]] = await Promise.all([
+    const mine = and(
+      eq(schema.timePunches.businessId, businessId),
+      eq(schema.timePunches.membershipId, membershipId),
+    );
+    const punchCols = {
+      id: schema.timePunches.id,
+      type: schema.timePunches.type,
+      at: schema.timePunches.at,
+    };
+    const [weekPunches, [seed], [shift]] = await Promise.all([
       this.db
-        .select({
-          id: schema.timePunches.id,
-          type: schema.timePunches.type,
-          at: schema.timePunches.at,
-        })
+        .select(punchCols)
         .from(schema.timePunches)
-        .where(
-          and(
-            eq(schema.timePunches.businessId, businessId),
-            eq(schema.timePunches.membershipId, membershipId),
-            gte(schema.timePunches.at, tzDayStart(weekStart, tz)),
-          ),
-        )
+        .where(and(mine, gte(schema.timePunches.at, weekStartAt)))
         .orderBy(schema.timePunches.at),
+      // The last punch before the week began seeds the state, so a
+      // shift that ran through Sunday midnight is still open on Monday.
+      this.db
+        .select(punchCols)
+        .from(schema.timePunches)
+        .where(and(mine, lt(schema.timePunches.at, weekStartAt)))
+        .orderBy(desc(schema.timePunches.at))
+        .limit(1),
       this.db
         .select({
           startMinutes: schema.staffShifts.startMinutes,
@@ -147,17 +167,9 @@ export class TimeClockController {
     ]);
 
     const now = new Date();
+    const punches = seed ? [seed, ...weekPunches] : weekPunches;
     const all: Punch[] = punches.map((p) => ({ type: p.type as PunchType, at: p.at }));
-    // Today's punches: store-local day boundary, computed once here so
-    // the arithmetic below and the chips agree.
-    const [bound] = await this.db
-      .select({ start: sql<Date>`${tzDayStart(today, tz)}` })
-      .from(schema.businesses)
-      .where(eq(schema.businesses.id, businessId))
-      .limit(1);
-    const dayStart = bound!.start instanceof Date ? bound!.start : new Date(bound!.start);
-    const todays = punches.filter((p) => p.at >= dayStart);
-    const todayPunches: Punch[] = todays.map((p) => ({ type: p.type as PunchType, at: p.at }));
+    const todays = weekPunches.filter((p) => p.at >= dayStart);
     const { status, since } = statusOf(all);
 
     return {
@@ -173,8 +185,8 @@ export class TimeClockController {
       status,
       since,
       punchesToday: todays.map((p) => ({ id: p.id, type: p.type as PunchType, at: p.at })),
-      hoursToday: hoursFromMs(workedMs(todayPunches, now)),
-      hoursWeek: hoursFromMs(workedMs(all, now)),
+      hoursToday: hoursFromMs(workedMsBetween(all, dayStart, now)),
+      hoursWeek: hoursFromMs(workedMsBetween(all, weekStartAt, now)),
       scheduledToday:
         shift && shift.startMinutes != null && shift.endMinutes != null
           ? { startMinutes: shift.startMinutes, endMinutes: shift.endMinutes }
