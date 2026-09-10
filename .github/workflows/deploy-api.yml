@@ -22,6 +22,8 @@ on:
       - 'apps/api/**'
       - 'packages/db/**'
       - 'packages/shared/**'
+      # The catalog-import one-off job reads these from the deployed checkout.
+      - 'docs/imports/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
       - 'pnpm-workspace.yaml'
