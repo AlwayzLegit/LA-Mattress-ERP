@@ -4973,3 +4973,34 @@ Render one-off job as `set-account-kind`, with the Phase C gates in code:
   lockdown plan: Q3 (`MIN_STOCK = 0` on all 3,246 rows sets every reorder
   point to 0 — turn auto-replenishment off first or accept), B1 (Shopify
   sync stays connected; the import does not disconnect it).
+
+### Checkpoint — 2026-09-10 (catalog import: first production runs)
+
+PR #147 merged (`26d7880`), Render deploy live, boot line
+`Schema migrations: 89/89 applied, head=0088_team_workflows`. First two
+dispatches of **Ops — catalog import** against `la-mattress`
+("LA Mattress Stores", `b819c499-…`), both validate-only:
+
+- Run 1, `products.csv`: batch `d3ac24bd-f379-4c40-8604-e705522ab856` —
+  1,948 staged, **1,948 valid, 0 invalid**, every column mapped. Ready to
+  commit.
+- Run 2, `inventory.csv`: batch `d916bbb2-89a0-49bd-9de5-ed66306877be` —
+  3,246 staged, **2,506 valid, 740 invalid**, gate failed as designed:
+  - 405 × unknown location "201 Western", 326 × unknown location
+    "Hancock Park". Production locations are Koreatown, West LA, La Brea,
+    Studio City, Warehouse, Glendale Store; the file's West LA / Studio
+    City / Warehouse match, the other two do not, and Glendale Store has
+    no rows in the file. The resolver matches exact name, order prefix or
+    substring (`resolveLocation`), so this needs a decision, not code.
+  - 11 × unknown SKU (801.0, OSKSSW, BT9000-QN ×3, DMRWXF-1070,
+    DMRWXF-1080, HEBS46-5475, HEXDUC50-6080, BBS13M_FP-7680) — all present
+    in `products.csv`; they resolve once the products commit runs.
+- Shopify connector: `connected`, sync `idle` (B1 still open). Render's
+  Postgres record exposes no backup state; the commit step is on hold
+  until the owner confirms a backup.
+- **Ops (owner):** (1) say which ERP store "201 Western" and "Hancock
+  Park" are (rename the ERP locations to the STORIS names, or regenerate
+  `inventory.csv` with the ERP names) and whether Glendale Store really
+  has no STORIS stock; (2) confirm the `jetnine-db` backup and drained
+  registers; then dispatch products commit + `replace_catalog` (1948) →
+  inventory validate (3246) → inventory commit.
