@@ -5191,3 +5191,25 @@ operatorName` (the PDF's parameter echo; the page is unchanged).
   VISA payment types — Jetnine payments carry the processor, not the card
   brand, so those lines print as `CARD - STRIPE`; Mgr (manager override)
   and Batch (deposit batch) print blank.
+
+### Checkpoint — 2026-09-10 (West LA "Subscription required" report — verified lifted)
+
+Owner forwarded two photos of Ronnie's West LA session with every write
+refused by "Subscription required. Visit Settings → Billing…" (402 from
+`SubscriptionGuard`). The photos are stamped 9/5/2026 6:55 PM — 23 minutes
+after the trial lockout of the 2026-09-06 checkpoints began — so they show
+the incident already fixed there, not a new one.
+
+- First production run of `ops-set-account-kind.yml` (action `list`, run
+  34538880555) read the live DB through the API service:
+  `la-mattress "LA Mattress Stores" kind=agency status=active sub=active
+  trial_ends=-`. The guard passes agency accounts before it looks at any
+  subscription state, so no LA Mattress session can receive that 402 today.
+  (`qa-probe-store` is a SaaS trial that expired 2026-09-05 and stays
+  read-only by design.)
+- The live web origin proxies `/v1/*` to the same API (`/health` uptime
+  matches), Vercel runtime logs show no 4xx in 24 h, and the API deploy
+  runs 108–112 on `main` are green.
+- Nothing to change in code. If a store still sees the message, capture the
+  current date/time, the user, and the request (it is not this guard for
+  `la-mattress`).
