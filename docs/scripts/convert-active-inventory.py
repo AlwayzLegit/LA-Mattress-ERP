@@ -10,9 +10,10 @@ Columns in the export: Location, Brand, Type, Stock, Quantity As-Is,
 Min Stock, Description, ?, SKU, Group, Vendor, Cost, Catg, …
 
 Mapping decisions (PLAN-POS-OPERATIONS §12.12):
-  - Store codes → ERP locations: 01 201 Western · 02 West LA · 03 Hancock
-    Park / La Brea · 04 Studio City · 88 Warehouse. Other codes carry no
-    stock rows (the SKUs still become products).
+  - Store codes → ERP locations (the names the ERP uses; owner 2026-09-10:
+    STORIS "201 Western" is Koreatown, "Hancock Park" is La Brea):
+    01 Koreatown · 02 West LA · 03 La Brea · 04 Studio City · 88 Warehouse.
+    Other codes carry no stock rows (the SKUs still become products).
   - ON_HAND = Stock + Quantity As-Is (Jetnine counts as-is pieces in on
     hand); AS_IS = Quantity As-Is; MIN_STOCK = Min Stock.
   - Vendor codes are the vendor names; Group is the variant attribute.
@@ -30,9 +31,9 @@ from pathlib import Path
 import openpyxl
 
 STORE_NAMES = {
-    "01": "201 Western",
+    "01": "Koreatown",
     "02": "West LA",
-    "03": "Hancock Park",
+    "03": "La Brea",
     "04": "Studio City",
     "88": "Warehouse",
 }
