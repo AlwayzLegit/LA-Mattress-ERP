@@ -46,6 +46,9 @@ RUN corepack enable
 COPY --from=builder /pruned/package.json ./package.json
 COPY --from=builder /pruned/node_modules ./node_modules
 COPY --from=builder /pruned/dist ./dist
+# STORIS catalog files for the one-off import job (ops-catalog-import.yml);
+# the script resolves them relative to the working directory.
+COPY docs/imports ./docs/imports
 
 EXPOSE 4000
 CMD ["node", "dist/main.js"]

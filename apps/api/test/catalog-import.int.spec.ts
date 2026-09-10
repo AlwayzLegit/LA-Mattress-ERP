@@ -104,6 +104,32 @@ beforeAll(async () => {
       reserved: 0,
     });
   }
+  // Another tenant's committed import rows share legacy ids with ours;
+  // the recon for our business must not read them.
+  const [other] = await db
+    .insert(schema.businesses)
+    .values({ slug: 'other-tenant', name: 'Other Tenant', status: 'active' })
+    .returning({ id: schema.businesses.id });
+  const [noise] = await db
+    .insert(schema.importBatches)
+    .values({
+      businessId: other!.id,
+      entity: 'inventory',
+      status: 'committed',
+      rowCount: 1,
+      committedRowCount: 1,
+      committedAt: new Date(),
+    })
+    .returning({ id: schema.importBatches.id });
+  await db.insert(schema.importRows).values({
+    businessId: other!.id,
+    batchId: noise!.id,
+    rowNumber: 1,
+    rawJson: { SKU: '7703-6/6', LOCATION: 'Warehouse', ON_HAND: '999' },
+    normalizedJson: { sku: '7703-6/6', location: 'Warehouse', onHand: 999, unitCostCents: 1 },
+    legacyId: '7703-6/6@Warehouse',
+    status: 'committed',
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -177,6 +203,7 @@ describe('catalog-import ops script on the 2026-09-03 files', () => {
     });
     expect(summary.committed).toBe(1948);
     expect(summary.failed).toBe(0);
+    expect(logLines).toContain('Landed: 1948 active products for 1948 rows');
     expect(summary.replaced).toEqual({
       kept: 1948,
       deleted: 1,
@@ -257,7 +284,10 @@ describe('catalog-import ops script on the 2026-09-03 files', () => {
     expect(summary.failed).toBe(0);
     const recon = summary.recon as {
       gate1_rowCounts: { entity: string; source: number; db: number; match: boolean }[];
-      gate2_inventory: { units: { source: number; db: number; match: boolean } };
+      gate2_inventory: {
+        units: { source: number; db: number; match: boolean };
+        valuationCents: { source: number; db: number; match: boolean };
+      };
     };
     expect(recon.gate1_rowCounts.find((g) => g.entity === 'product')).toMatchObject({
       source: 1948,
@@ -271,7 +301,13 @@ describe('catalog-import ops script on the 2026-09-03 files', () => {
     });
     const fileUnits = dataRows(INVENTORY).reduce((sum, r) => sum + Number(r[2]), 0);
     expect(recon.gate2_inventory.units).toEqual({ source: fileUnits, db: fileUnits, match: true });
-    expect(logLines).toContain(`Recon gate 2 units: source ${fileUnits} db ${fileUnits} OK`);
+    expect(logLines).toContain(
+      `Landed: 3246 levels holding ${fileUnits} units for 3246 rows carrying ${fileUnits} units`,
+    );
+    expect(logLines).toContain(
+      `Recon (all imports to date) gate 2 units: source ${fileUnits} db ${fileUnits} OK`,
+    );
+    expect(recon.gate2_inventory.valuationCents.match).toBe(true);
 
     // Spot check: 7703-6/6 has 2 on hand at the Warehouse, one of them as-is.
     const [variant] = await db

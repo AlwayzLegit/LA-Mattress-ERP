@@ -3,6 +3,9 @@ name: Ops — catalog import
 # Loads one STORIS catalog file from docs/imports/ into production through
 # apps/api/src/ops/catalog-import.ts, run as a Render one-off job inside the
 # jetnine-api service (same build, same env vars — DATABASE_URL included).
+# Works under both service layouts: the native Node runtime the service uses
+# today (repo checkout + apps/api/dist) and the Dockerfile image (/app/dist,
+# docs/imports copied in).
 # The job runs the code of the *deployed* build, so the script and the file
 # must already be on main and live. Inputs are validated here; the script
 # enforces the Phase C gates (docs/HANDOFF-catalog-source-lockdown.md §3) and
@@ -101,8 +104,12 @@ jobs:
           if [ "$REPLACE_CATALOG" = "true" ] && [ "$ENTITY" != "product" ]; then
             echo "::error::replace_catalog applies to entity=product only"; exit 1
           fi
-          cmd="node apps/api/dist/ops/catalog-import.js --business $BUSINESS --entity $ENTITY --file $FILE --mode $MODE --expect-rows $EXPECT_ROWS"
-          if [ "$REPLACE_CATALOG" = "true" ]; then cmd="$cmd --replace-catalog"; fi
+          # The live service is Render's native Node runtime (repo checkout,
+          # apps/api/dist); the Dockerfile layout puts the same build at
+          # /app/dist with docs/imports copied alongside. Pick whichever exists.
+          args="--business $BUSINESS --entity $ENTITY --file $FILE --mode $MODE --expect-rows $EXPECT_ROWS"
+          if [ "$REPLACE_CATALOG" = "true" ]; then args="$args --replace-catalog"; fi
+          cmd="s=apps/api/dist/ops/catalog-import.js; [ -f \$s ] || s=dist/ops/catalog-import.js; node \$s $args"
           echo "Will run: $cmd"
           echo "CMD=$cmd" >> "$GITHUB_ENV"
 

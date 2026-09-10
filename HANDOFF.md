@@ -77,7 +77,10 @@ commits through `ImportService` with the Phase C gates of
 `docs/HANDOFF-catalog-source-lockdown.md` §3 enforced (0 invalid, valid = committed =
 rowCount, replace kept = rowCount) and exits non-zero otherwise, leaving the batch for
 inspection. The job runs the **deployed** build, so the script must be on `main` and
-live before the first dispatch. Run order: products validate → products commit with
+live before the first dispatch. Note the live service is Render's **native Node
+runtime** (dashboard build/start commands, repo checkout on disk — verified via the
+Render API 2026-09-10), not the Docker blueprint in `render.yaml`; the job command
+handles both layouts and the Dockerfile now copies `docs/imports` in. Run order: products validate → products commit with
 `replace_catalog` → inventory validate → inventory commit; the job log carries the
 deleted / deactivated SKU lists. The whole sequence is rehearsed on the real files in
 `apps/api/test/catalog-import.int.spec.ts`.

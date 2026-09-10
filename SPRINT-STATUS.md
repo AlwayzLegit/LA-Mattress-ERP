@@ -4948,6 +4948,14 @@ Render one-off job as `set-account-kind`, with the Phase C gates in code:
   or floor sample) is deactivated instead of deleted; result carries
   `deletedSkus` / `deactivatedSkus`. `loadLookups` active-first binding
   (the other half of B2) is still open.
+- Review fixes (PR #147, Codex): `ImportService.recon` source rows and the
+  deposit / AR gates are now scoped to the business (they read every
+  tenant's committed rows before); the script adds a batch-scoped
+  post-commit gate (active products = rows; levels = rows and units =
+  file units) that fails the job, while the cumulative §7 recon is printed
+  for the record; the job command works under both the native Node
+  runtime the service uses today and the Dockerfile layout, which now
+  copies `docs/imports` in.
 - Tests: `import.int.spec.ts` +2 (stocked product retired not deleted;
   failed-row skip + open-count refusal); new
   `catalog-import.int.spec.ts` runs the ops script on the real

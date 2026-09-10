@@ -1399,7 +1399,12 @@ export class ImportService {
       })
       .from(schema.importRows)
       .innerJoin(schema.importBatches, eq(schema.importRows.batchId, schema.importBatches.id))
-      .where(eq(schema.importRows.status, 'committed'));
+      .where(
+        and(
+          eq(schema.importRows.businessId, businessId),
+          eq(schema.importRows.status, 'committed'),
+        ),
+      );
     const latest = new Map<string, Map<string, Record<string, unknown>>>();
     const at = new Map<string, number>();
     for (const r of committedRows) {
@@ -1481,6 +1486,7 @@ export class ImportService {
       .innerJoin(schema.orders, eq(schema.payments.orderId, schema.orders.id))
       .where(
         and(
+          eq(schema.orders.businessId, businessId),
           isNotNull(schema.orders.importedAt),
           eq(schema.payments.kind, 'deposit'),
           eq(schema.payments.status, 'succeeded'),
@@ -1493,13 +1499,15 @@ export class ImportService {
         total: sql<number>`coalesce(sum(${schema.orders.totalCents}), 0)::bigint - coalesce((
           select sum(p.amount_cents) from payments p
           join orders o2 on o2.id = p.order_id
-          where o2.imported_at is not null and p.status = 'succeeded'
+          where o2.business_id = ${businessId}
+            and o2.imported_at is not null and p.status = 'succeeded'
             and o2.status not in ('quote', 'cancelled', 'completed')
         ), 0)::bigint`,
       })
       .from(schema.orders)
       .where(
         and(
+          eq(schema.orders.businessId, businessId),
           isNotNull(schema.orders.importedAt),
           sql`${schema.orders.status} not in ('quote', 'cancelled', 'completed')`,
         ),

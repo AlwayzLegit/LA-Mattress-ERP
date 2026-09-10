@@ -24,12 +24,16 @@
  *   - validate: 0 invalid rows, valid = rowCount = --expect-rows
  *   - commit: 0 failed rows, committed = rowCount
  *   - --replace-catalog: the replace ran and kept exactly rowCount products
+ *   - post-commit, scoped to this batch: every committed product row is an
+ *     active product; every inventory row is a level, and the levels hold
+ *     exactly the units the file carries (the cumulative §7 recon gates are
+ *     printed for the record, not gated — see the inventory branch)
  * `--mode validate` stops after validation. A commit writes the same
  * `import.commit` audit row the wizard writes, with actor_type 'system'.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { schema } from '@jetnine/db';
@@ -95,8 +99,8 @@ export async function runCatalogImport(opts: CatalogImportOptions): Promise<Cata
   const path = resolveImportFile(opts.file);
   const csv = readFileSync(path, 'utf8');
 
-  const sql = postgres(opts.databaseUrl, { max: 1, prepare: false });
-  const db = drizzle(sql);
+  const pg = postgres(opts.databaseUrl, { max: 1, prepare: false });
+  const db = drizzle(pg);
   const service = new ImportService(db);
   let batchId: string | null = null;
   try {
@@ -268,7 +272,59 @@ export async function runCatalogImport(opts: CatalogImportOptions): Promise<Cata
       }
     }
 
-    if (opts.entity === 'inventory') {
+    // --- post-commit check, scoped to this batch ---
+    // Deterministic: what this file's rows point at must be there, whole.
+    const landedRows = await db
+      .select({
+        jetnineId: schema.importRows.jetnineId,
+        normalized: schema.importRows.normalizedJson,
+      })
+      .from(schema.importRows)
+      .where(
+        and(eq(schema.importRows.batchId, batchId), eq(schema.importRows.status, 'committed')),
+      );
+    const landedIds = landedRows
+      .map((r) => r.jetnineId)
+      .filter((id): id is string => typeof id === 'string');
+    if (opts.entity === 'product') {
+      const [row] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.products)
+        .where(and(inArray(schema.products.id, landedIds), eq(schema.products.isActive, true)));
+      const count = row?.count ?? 0;
+      log(`Landed: ${count} active products for ${rowCount} rows`);
+      if (count !== rowCount) {
+        throw new CatalogImportGateError(
+          `Post-commit gate failed: ${count} active products for ${rowCount} committed rows (data is committed — investigate before running anything else)`,
+          batchId,
+        );
+      }
+    } else {
+      const fileUnits = landedRows.reduce((sum, r) => {
+        const onHand = (r.normalized as { onHand?: unknown } | null)?.onHand;
+        return sum + (typeof onHand === 'number' ? onHand : 0);
+      }, 0);
+      const [row] = await db
+        .select({
+          count: sql<number>`count(*)::int`,
+          units: sql<number>`coalesce(sum(${schema.inventoryLevels.onHand}), 0)::int`,
+        })
+        .from(schema.inventoryLevels)
+        .where(inArray(schema.inventoryLevels.id, landedIds));
+      const count = row?.count ?? 0;
+      const units = Number(row?.units ?? 0);
+      log(
+        `Landed: ${count} levels holding ${units} units for ${rowCount} rows carrying ${fileUnits} units`,
+      );
+      if (count !== rowCount || units !== fileUnits) {
+        throw new CatalogImportGateError(
+          `Post-commit gate failed: ${count} levels / ${units} units for ${rowCount} rows / ${fileUnits} units (data is committed — investigate before running anything else)`,
+          batchId,
+        );
+      }
+      // The §7 recon gates span every import committed to date for this
+      // business, so stale rows from earlier files can legitimately differ
+      // from today's ledger; reported, not gated.
       const recon = await service.recon(biz.id);
       summary.recon = recon as unknown as Record<string, unknown>;
       const gate1 = recon.gate1_rowCounts.filter(
@@ -276,20 +332,22 @@ export async function runCatalogImport(opts: CatalogImportOptions): Promise<Cata
       );
       for (const g of gate1) {
         log(
-          `Recon gate 1 ${g.entity}: source ${g.source} db ${g.db} ${g.match ? 'OK' : 'MISMATCH'}`,
+          `Recon (all imports to date) gate 1 ${g.entity}: source ${g.source} db ${g.db} ${g.match ? 'OK' : 'MISMATCH'}`,
         );
       }
       const u = recon.gate2_inventory.units;
       const v = recon.gate2_inventory.valuationCents;
-      log(`Recon gate 2 units: source ${u.source} db ${u.db} ${u.match ? 'OK' : 'MISMATCH'}`);
       log(
-        `Recon gate 2 valuation (cents): source ${v.source} db ${v.db} ${v.match ? 'OK' : 'MISMATCH'}`,
+        `Recon (all imports to date) gate 2 units: source ${u.source} db ${u.db} ${u.match ? 'OK' : 'MISMATCH'}`,
+      );
+      log(
+        `Recon (all imports to date) gate 2 valuation (cents): source ${v.source} db ${v.db} ${v.match ? 'OK' : 'MISMATCH'}`,
       );
     }
     log(`Done in ${elapsed()}.`);
     return summary;
   } finally {
-    await sql.end({ timeout: 5 });
+    await pg.end({ timeout: 5 });
   }
 }
 
