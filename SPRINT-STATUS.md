@@ -5177,7 +5177,8 @@ Total  :`, the reconciliation block at 42, and the closing parameter
   page (`Balance By: S`, `Store: 02`, `Bal Drawer Ref: All`). The writer
   `reports/text-pdf.ts` is a dependency-free one-font PDF (no new package).
 - Codes: Customer Code now prints the STORIS customer number from
-  `legacy_refs` (entity `customer`) when the customer was migrated, else
+  `legacy_refs` (entity `customer`, STORIS-sourced batch only — connector
+  refs like `shp-…` fall through) when the customer was migrated, else
   the 8-character id as before; the store code is the location's order
   prefix. JSON adds `group.code`, `filters.locationCode / locationName /
 operatorName` (the PDF's parameter echo; the page is unchanged).

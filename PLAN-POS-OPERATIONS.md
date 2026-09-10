@@ -593,8 +593,9 @@ Ref: All`, …). `format=txt` is the same pages form-feed separated. The
   batch in Jetnine); card brand is not captured, so STORIS's AMEX / MC /
   VISA payment types collapse to `CARD - <processor>`.
 - **Codes**: Customer Code is the STORIS customer number when the customer
-  came over in the migration (`legacy_refs` entity `customer`), else the
-  first 8 characters of the Jetnine id; Store code is the location's order
+  came over in the migration (`legacy_refs` entity `customer` whose import
+  batch is STORIS-sourced — Shopify / WooCommerce / Wix connector refs are
+  not STORIS numbers), else the first 8 characters of the Jetnine id; Store code is the location's order
   prefix (`02`); the JSON carries `group.code` and `filters.locationCode /
 locationName / operatorName` for the echoes.
 - Tests: `cash-drawer-balancing.int.spec.ts` (8),

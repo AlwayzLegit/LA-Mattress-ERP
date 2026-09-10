@@ -42,6 +42,7 @@ let bStoreId = '';
 let erinUserId = '';
 let gusUserId = '';
 let gusMembershipId = '';
+let zoeCustomerId = '';
 let ownerCookie = '';
 let cashierCookie = '';
 let saleNumber = '';
@@ -190,6 +191,24 @@ async function seed() {
       legacyId: '02108572',
       jetnineId: cust!.id,
     });
+    // Zoë was pulled in by the Shopify connector: her ref is not a STORIS
+    // number, and her name carries a WinAnsi character for the PDF.
+    const [zoe] = await db
+      .insert(schema.customers)
+      .values({ businessId, firstName: 'Zoë', lastName: 'Dubois', phone: '3105550101' })
+      .returning();
+    zoeCustomerId = zoe!.id;
+    const [shopifyBatch] = await db
+      .insert(schema.importBatches)
+      .values({ businessId, entity: 'customer', source: 'shopify', status: 'committed' })
+      .returning();
+    await db.insert(schema.legacyRefs).values({
+      businessId,
+      entity: 'customer',
+      legacyId: 'shp-77',
+      jetnineId: zoe!.id,
+      importBatchId: shopifyBatch!.id,
+    });
 
     // Drawer 1: Erin at A Store, balanced (closed) at 17:00, on the money.
     const [s1] = await db
@@ -278,7 +297,7 @@ async function seed() {
         locationId: bStoreId,
         number: 'SO-DR-001',
         status: 'open',
-        customerId: cust!.id,
+        customerId: zoe!.id,
         salespersonMembershipId: gusMembershipId,
         subtotalCents: 65_000,
         totalCents: 65_000,
@@ -539,6 +558,12 @@ describe('Report Cash Drawer Balancing Totals', () => {
     expect(a.code).toBe('02');
     const line = a.payClasses.flatMap((pc) => pc.paymentTypes).flatMap((pt) => pt.lines)[0]!;
     expect(line.customerCode).toBe('02108572');
+    // A connector-sourced ref is not a STORIS number: the id fallback applies.
+    const b = group((await get({ locationId: bStoreId }).expect(200)).body, 'B Store');
+    const check = b.payClasses[0]!.paymentTypes[0]!.lines[0]!;
+    expect(check.customerName).toBe('DUBOIS ZOË');
+    expect(check.customerCode).toBe(zoeCustomerId.slice(0, 8).toUpperCase());
+    expect(check.customerCode).not.toBe('shp-77');
     const byOp = (await get({ balanceBy: 'operator', operatorId: erinUserId }).expect(200))
       .body as CashDrawerBalancingReport;
     expect(byOp.filters.operatorName).toBe('Erin Miller');
@@ -563,6 +588,16 @@ describe('Report Cash Drawer Balancing Totals', () => {
     expect(raw).toContain('/BaseFont /Courier');
     expect(raw).toContain('(Reference: AR.317.RPT');
     expect(raw).toContain('Total For Store 02:');
+    // WinAnsi characters survive as octal bytes (Ë = 0xCB).
+    const bPdf = await get({ format: 'pdf', locationId: bStoreId })
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect((bPdf.body as Buffer).toString('latin1')).toContain('DUBOIS ZO\\313');
 
     const txt = await get({ format: 'txt', locationId: aStoreId }).expect(200);
     expect(txt.headers['content-type']).toContain('text/plain');

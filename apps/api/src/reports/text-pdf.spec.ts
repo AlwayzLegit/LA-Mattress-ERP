@@ -32,9 +32,11 @@ describe('textPagesToPdf', () => {
     });
   });
 
-  it('replaces characters Courier cannot show and fits 52 lines on a landscape page', () => {
-    const s = textPagesToPdf([['café — ok']]).toString('latin1');
-    expect(s).toContain('(caf? ? ok) Tj');
+  it('writes WinAnsi characters as octal bytes, `?` for the rest, 52 lines per landscape page', () => {
+    const s = textPagesToPdf([['café — ok', 'ZOË DUBOIS €5 ☃']]).toString('latin1');
+    // é = 0xE9, em dash = 0x97 (cp1252), Ë = 0xCB, € = 0x80; the snowman has no glyph.
+    expect(s).toContain('(caf\\351 \\227 ok) Tj');
+    expect(s).toContain('(ZO\\313 DUBOIS \\2005 ?) Tj');
     expect(textPdfLinesPerPage()).toBe(52);
     expect(textPdfLinesPerPage({ landscape: false })).toBe(69);
   });

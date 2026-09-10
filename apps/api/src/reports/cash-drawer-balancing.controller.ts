@@ -40,8 +40,10 @@ import { textPagesToPdf } from './text-pdf';
  * - Imported legacy documents are excluded (D8): their money never
  *   touched a Jetnine drawer.
  * - Customer Code: the STORIS customer number when the customer came
- *   over in the migration (`legacy_refs`, entity `customer`); otherwise
- *   the first 8 characters of the Jetnine id. Store code is the
+ *   over in the migration (`legacy_refs`, entity `customer`, from a STORIS
+ *   import batch — connector imports map Shopify / WooCommerce / Wix ids
+ *   there too and are not STORIS numbers); otherwise the first 8
+ *   characters of the Jetnine id. Store code is the
  *   location's order prefix ("02" in the STORIS output).
  *
  * Output: JSON for the page, `format=csv`, and — matching the STORIS
@@ -394,17 +396,25 @@ export class CashDrawerBalancingController {
     };
 
     // STORIS customer numbers for migrated customers (D7 identity map).
+    // The source lives on the import batch (the ref's own column is the
+    // 'storis' default), so a Shopify / WooCommerce / Wix customer ref
+    // (`shp-…`, `woo-…`) is never mistaken for a STORIS number.
     const customerIds = [...new Set(rows.map((r) => r.customerId).filter((c): c is string => !!c))];
     const legacyCustomerCode = new Map<string, string>();
     if (customerIds.length > 0) {
       const refs = await this.db
         .select({ jetnineId: schema.legacyRefs.jetnineId, legacyId: schema.legacyRefs.legacyId })
         .from(schema.legacyRefs)
+        .leftJoin(
+          schema.importBatches,
+          eq(schema.importBatches.id, schema.legacyRefs.importBatchId),
+        )
         .where(
           and(
             eq(schema.legacyRefs.businessId, businessId),
             eq(schema.legacyRefs.entity, 'customer'),
             inArray(schema.legacyRefs.jetnineId, customerIds),
+            sql`COALESCE(${schema.importBatches.source}, ${schema.legacyRefs.source}) = 'storis'`,
           ),
         );
       for (const ref of refs) legacyCustomerCode.set(ref.jetnineId, ref.legacyId);
