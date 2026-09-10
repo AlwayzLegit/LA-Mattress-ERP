@@ -4998,9 +4998,10 @@ dispatches of **Ops — catalog import** against `la-mattress`
 - Shopify connector: `connected`, sync `idle` (B1 still open). Render's
   Postgres record exposes no backup state; the commit step is on hold
   until the owner confirms a backup.
-- **Ops (owner):** (1) say which ERP store "201 Western" and "Hancock
-  Park" are (rename the ERP locations to the STORIS names, or regenerate
-  `inventory.csv` with the ERP names) and whether Glendale Store really
-  has no STORIS stock; (2) confirm the `jetnine-db` backup and drained
-  registers; then dispatch products commit + `replace_catalog` (1948) →
+- Owner (2026-09-10): "201 Western is Koreatown and Hancock Park is La
+  Brea." Applied to the converted file — `inventory.csv` now carries the
+  ERP names for those 731 rows (row count unchanged at 3,246); the
+  rehearsal spec seeds the ERP names. Glendale Store has no rows in the
+  STORIS export. **Ops (owner):** confirm the `jetnine-db` backup and
+  drained registers; then products commit + `replace_catalog` (1948) →
   inventory validate (3246) → inventory commit.
