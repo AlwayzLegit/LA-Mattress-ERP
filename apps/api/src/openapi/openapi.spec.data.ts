@@ -11,6 +11,7 @@
  * `/v1/docs` (browsable Swagger UI). Both are @Public(); the spec
  * itself isn't sensitive.
  */
+import { PRODUCT_PURCHASE_STATUSES } from '@jetnine/shared';
 
 const PageEnvelope = (itemsRef: string) => ({
   type: 'object',
@@ -248,7 +249,54 @@ export const openapiSpec = {
           id: { type: 'string', format: 'uuid' },
           sku: { type: 'string', nullable: true },
           name: { type: 'string' },
-          isActive: { type: 'boolean' },
+          isActive: {
+            type: 'boolean',
+            description:
+              'The selling switch. Inactive products are omitted unless includeInactive.',
+          },
+          purchaseStatus: {
+            type: 'string',
+            enum: [...PRODUCT_PURCHASE_STATUSES],
+            description: 'Whether the buyer may still order it; independent of isActive.',
+          },
+          brandName: { type: 'string', nullable: true },
+          vendorName: {
+            type: 'string',
+            nullable: true,
+            description: "The primary variant's preferred vendor.",
+          },
+          vendorModel: {
+            type: 'string',
+            nullable: true,
+            description: "The primary variant's vendor SKU.",
+          },
+          group: {
+            type: 'string',
+            nullable: true,
+            description: "STORIS size / product group, from the variant's attributes.",
+          },
+          priceCents: { type: 'integer', nullable: true },
+          costCents: {
+            type: 'integer',
+            nullable: true,
+            description: 'Only returned if your key has products.cost.view scope.',
+          },
+          onHand: { type: 'integer', description: 'Units on hand, summed over locations.' },
+          available: {
+            type: 'integer',
+            description: 'Σ max(0, on hand − reserved − floor sample) per location.',
+          },
+          netOnPo: {
+            type: 'integer',
+            description:
+              'Σ (ordered − accepted − rejected) over live, non-direct-ship purchase orders that are ordered or partially received.',
+          },
+          asIsOnHand: { type: 'integer', description: 'As-is pieces still in review.' },
+          asIsAvailable: { type: 'integer' },
+          asIsNonSellable: {
+            type: 'integer',
+            description: 'As-is pieces in condition damaged or parts.',
+          },
         },
       },
       ProductDetail: {
@@ -262,8 +310,59 @@ export const openapiSpec = {
               taxClassId: { type: 'string', format: 'uuid', nullable: true },
               variants: { type: 'array', items: { $ref: '#/components/schemas/Variant' } },
               images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
+              secondDescription: { type: 'string', nullable: true },
+              categoryName: { type: 'string', nullable: true },
+              serialTracked: { type: 'boolean' },
+              boxesPerProduct: { type: 'integer' },
+              logisticalCartonQty: { type: 'integer' },
+              purchaseCartonQty: { type: 'integer' },
+              logisticalCartonTransfers: { type: 'boolean' },
+              stock: {
+                type: 'object',
+                description: 'Quantities in total and per (variant, location).',
+                properties: {
+                  totals: { $ref: '#/components/schemas/StockTotals' },
+                  byLocation: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/LocationStock' },
+                  },
+                },
+              },
               createdAt: { type: 'string', format: 'date-time' },
               updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        ],
+      },
+      StockTotals: {
+        type: 'object',
+        properties: {
+          onHand: { type: 'integer' },
+          reserved: { type: 'integer' },
+          floorSample: { type: 'integer' },
+          available: { type: 'integer' },
+          netOnPo: { type: 'integer' },
+          totalPo: { type: 'integer' },
+          asIsOnHand: { type: 'integer' },
+          asIsAvailable: { type: 'integer' },
+          asIsNonSellable: { type: 'integer' },
+          layawayReserved: { type: 'integer' },
+        },
+      },
+      LocationStock: {
+        allOf: [
+          { $ref: '#/components/schemas/StockTotals' },
+          {
+            type: 'object',
+            properties: {
+              variantId: { type: 'string', format: 'uuid' },
+              variantSku: { type: 'string', nullable: true },
+              variantActive: { type: 'boolean' },
+              locationId: { type: 'string', format: 'uuid' },
+              locationName: { type: 'string' },
+              locationActive: { type: 'boolean' },
+              storageBinId: { type: 'string', format: 'uuid', nullable: true },
+              storageBinCode: { type: 'string', nullable: true },
             },
           },
         ],
@@ -571,12 +670,26 @@ export const openapiSpec = {
             name: 'categoryId',
             schema: { type: 'string', format: 'uuid' },
           },
+          {
+            in: 'query',
+            name: 'locationId',
+            schema: { type: 'string', format: 'uuid' },
+            description:
+              'Narrow every stock column (onHand, available, netOnPo, as-is) to one location. Omit to sum across all of them.',
+          },
+          {
+            in: 'query',
+            name: 'includeInactive',
+            schema: { type: 'string', enum: ['1', 'true'] },
+            description:
+              'By default only active products are listed. Set to 1 to include deactivated ones (they keep every document they appear on).',
+          },
           limitParam,
           cursorParam,
         ],
         responses: {
           '200': {
-            description: 'A page of products.',
+            description: 'A page of products. Active products only unless includeInactive is set.',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ProductListPage' },

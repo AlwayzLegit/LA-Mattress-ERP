@@ -847,6 +847,13 @@ and View Product Activity (Inventory Quantities, Merchandising, Location Availab
   Rows open the product. `GET /v1/products` returns them (`locationId` query);
   the search branch carries the same columns. Cost is null without
   `products.cost.view`.
+- **Inactive products are hidden by default (owner 2026-09-10).** `GET /v1/products`
+  lists only `is_active` products unless `includeInactive=1`; the browser's "Show
+  inactive" tick turns them back on, and the empty state says so. The catalog replace
+  retired 733 listings and they crowded out the live ones. (The same call fixed a
+  latent precedence bug: the search predicate's `… @@ tsq OR EXISTS (variant match)`
+  was unparenthesised inside `and()`, so a variant match slipped a row past the
+  vendor, category — and now active — filters.)
 - **Definitions (the ones the register, replenishment and reports already use):**
   available = Σ max(0, on hand − reserved − floor sample) per level; net on PO =
   Σ (ordered − accepted − rejected) over live, non-direct-ship purchase orders in
