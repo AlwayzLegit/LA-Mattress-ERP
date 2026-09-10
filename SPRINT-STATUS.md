@@ -5206,8 +5206,8 @@ Phase 1 (this branch):
       `prep_codes`, `com_json`, `direct_ship_json`, `needs_install`),
       `order_attachments`, customers `work_phone` + `work_phone_ext`; RLS
       — _2026-09-10: `0092_a20_order_entry_storis_actions`._
-- [x] Settings lists: `ops.marketingCodes / orderSources / prepCodes / rooms /
-  paymentTerminals` (registry + validation + settings page) —
+- [x] Settings lists (`ops.marketingCodes`, `orderSources`, `prepCodes`,
+      `rooms`, `paymentTerminals`): registry + validation + settings page —
       _2026-09-10: one label per line on the Store operations card; exposed
       through the POS settings read so the order page can suggest them._
 - [x] API: order PATCH + line PATCH accept the new fields; attachments
