@@ -5158,3 +5158,35 @@ shift-editor-dialog}`. Strip first on Manager, Operations and Warehouse
 - Publishing is a stamp + audit row today (readers see drafts as soon as
   they are set); a notification on publish is the natural follow-up. The
   sidebar still has no Timesheets item — there is no timesheets page.
+
+### Checkpoint — 2026-09-10 (Cash Drawer Balancing: STORIS Basic PDF)
+
+Owner sent the AR.317 parameter screen again with the real spool
+(`REPORT_CASH_DRAWER_BALANCING_TOTALS_OUTPUT_3.pdf`, Send Output to "S Basic
+PDF"): "Work on this". The report itself has been live since 2026-09-02
+(§12.8); this slice makes it print the way STORIS does so the two spools
+can be laid side by side during the parallel run.
+
+- API: `GET /v1/reports/cash-drawer-balancing?format=pdf` (Courier 9pt
+  landscape, `application/pdf`) and `format=txt` (same pages, form-feed
+  separated). Layout in `reports/cash-drawer-balancing.text.ts` is measured
+  off the STORIS file column for column — header banner and clock, the
+  two-line column header on every page, `Store 02 - NAME` / `Pay Class` /
+  `Payment Type` headings, tender lines, `Total For …` at 78/89, `Grand
+Total  :`, the reconciliation block at 42, and the closing parameter
+  page (`Balance By: S`, `Store: 02`, `Bal Drawer Ref: All`). The writer
+  `reports/text-pdf.ts` is a dependency-free one-font PDF (no new package).
+- Codes: Customer Code now prints the STORIS customer number from
+  `legacy_refs` (entity `customer`) when the customer was migrated, else
+  the 8-character id as before; the store code is the location's order
+  prefix. JSON adds `group.code`, `filters.locationCode / locationName /
+operatorName` (the PDF's parameter echo; the page is unchanged).
+- Web: a "PDF" button beside Print and Export CSV on
+  `/reports/cash-drawer-balancing`.
+- Tests: `cash-drawer-balancing.text.spec.ts` (5; the header and register
+  lines are asserted byte for byte against the owner's spool),
+  `text-pdf.spec.ts` (3), `cash-drawer-balancing.int.spec.ts` 6 → 8.
+- Not reproducible from Jetnine data: STORIS splits credit into AMEX / MC /
+  VISA payment types — Jetnine payments carry the processor, not the card
+  brand, so those lines print as `CARD - STRIPE`; Mgr (manager override)
+  and Batch (deposit batch) print blank.

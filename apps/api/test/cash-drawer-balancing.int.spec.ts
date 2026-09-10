@@ -158,8 +158,8 @@ async function seed() {
     const locs = await db
       .insert(schema.locations)
       .values([
-        { businessId, name: 'A Store', timezone: TZ },
-        { businessId, name: 'B Store', timezone: TZ },
+        { businessId, name: 'A Store', timezone: TZ, orderPrefix: '02' },
+        { businessId, name: 'B Store', timezone: TZ, orderPrefix: '05' },
       ])
       .returning();
     aStoreId = locs[0]!.id;
@@ -183,6 +183,13 @@ async function seed() {
       .insert(schema.customers)
       .values({ businessId, firstName: 'Abe', lastName: 'Clements', phone: '3105550100' })
       .returning();
+    // Abe came over from STORIS as customer 02108572 (D7 identity map).
+    await db.insert(schema.legacyRefs).values({
+      businessId,
+      entity: 'customer',
+      legacyId: '02108572',
+      jetnineId: cust!.id,
+    });
 
     // Drawer 1: Erin at A Store, balanced (closed) at 17:00, on the money.
     const [s1] = await db
@@ -521,5 +528,66 @@ describe('Report Cash Drawer Balancing Totals', () => {
     expect(text).toContain('3 - CREDIT,CARD - STRIPE');
     expect(text).toContain('Total deposit,,,,,,,350.00');
     expect(text).not.toContain('SO-LEGACY-1');
+  });
+
+  it('prints the STORIS customer number and store code', async () => {
+    const report = (await get({ locationId: aStoreId }).expect(200))
+      .body as CashDrawerBalancingReport;
+    expect(report.filters.locationCode).toBe('02');
+    expect(report.filters.locationName).toBe('A Store');
+    const a = group(report, 'A Store');
+    expect(a.code).toBe('02');
+    const line = a.payClasses.flatMap((pc) => pc.paymentTypes).flatMap((pt) => pt.lines)[0]!;
+    expect(line.customerCode).toBe('02108572');
+    const byOp = (await get({ balanceBy: 'operator', operatorId: erinUserId }).expect(200))
+      .body as CashDrawerBalancingReport;
+    expect(byOp.filters.operatorName).toBe('Erin Miller');
+    expect(byOp.groups.map((g) => g.code)).toEqual(['EM']);
+  });
+
+  it('spools the STORIS Basic PDF and the same pages as text', async () => {
+    const pdf = await get({ format: 'pdf', locationId: aStoreId })
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.headers['content-disposition']).toContain(
+      `cash-drawer-balancing-${day}-to-${day}.pdf`,
+    );
+    const raw = (pdf.body as Buffer).toString('latin1');
+    expect(raw.startsWith('%PDF-1.4')).toBe(true);
+    expect(raw).toContain('/BaseFont /Courier');
+    expect(raw).toContain('(Reference: AR.317.RPT');
+    expect(raw).toContain('Total For Store 02:');
+
+    const txt = await get({ format: 'txt', locationId: aStoreId }).expect(200);
+    expect(txt.headers['content-type']).toContain('text/plain');
+    const text = txt.text;
+    const lines = text.split('\n');
+    expect(lines[0]!.startsWith('Reference: AR.317.RPT')).toBe(true);
+    expect(lines[0]!).toContain('-=- Drawer Test Co -=-');
+    expect(lines[1]!).toContain('Report Cash Drawer Balancing Totals');
+    expect(lines[1]!.endsWith('Page: 1')).toBe(true);
+    expect(text).toContain('Store 02 - A STORE');
+    expect(text).toContain('Pay Class 3 - CREDIT');
+    expect(text).toContain('Payment Type CARD - STRIPE');
+    expect(text).toMatch(/^02108572 {5}CLEMENTS ABE {17}/m);
+    expect(text).toContain('Total For Payment Type CARD:');
+    expect(text).toContain('Total For Pay Class 3:');
+    expect(text).toContain('Total For Store 02:');
+    expect(text).toContain('Grand Total  :');
+    expect(text).toContain('Cash Drawer Reconciliation:');
+    expect(text).toContain('Total Deposit');
+    // The parameter page closes the spool.
+    expect(text).toContain('\f');
+    expect(text).toContain('   Balance By: S');
+    expect(text).toContain('   Store: 02');
+    expect(text).toContain('   Bal Drawer Ref: All');
+    expect(text).not.toContain('SO-LEGACY-1');
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(132);
   });
 });

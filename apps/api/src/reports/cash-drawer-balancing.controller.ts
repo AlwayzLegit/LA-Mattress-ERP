@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { and, asc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
@@ -10,7 +10,12 @@ import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
+import {
+  renderCashDrawerBalancingPages,
+  renderCashDrawerBalancingText,
+} from './cash-drawer-balancing.text';
 import { toCsv } from './csv';
+import { textPagesToPdf } from './text-pdf';
 
 /**
  * Report Cash Drawer Balancing Totals (STORIS AR.317, owner 2026-09-02):
@@ -34,6 +39,14 @@ import { toCsv } from './csv';
  *   been closed (counted); unbalanced = still open, or no drawer at all.
  * - Imported legacy documents are excluded (D8): their money never
  *   touched a Jetnine drawer.
+ * - Customer Code: the STORIS customer number when the customer came
+ *   over in the migration (`legacy_refs`, entity `customer`); otherwise
+ *   the first 8 characters of the Jetnine id. Store code is the
+ *   location's order prefix ("02" in the STORIS output).
+ *
+ * Output: JSON for the page, `format=csv`, and — matching the STORIS
+ * "S Basic PDF" spool line for line — `format=pdf` (Courier landscape)
+ * and `format=txt` (the same pages, form-feed separated).
  */
 
 export type BalanceBy = 'drawer' | 'operator' | 'store';
@@ -111,6 +124,8 @@ export interface Reconciliation {
 
 export interface BalanceGroup {
   key: string;
+  /** Store code (order prefix), drawer number, or operator initials. */
+  code: string | null;
   label: string;
   sublabel: string | null;
   count: number;
@@ -126,7 +141,10 @@ export interface CashDrawerBalancingReport {
   balanceBy: BalanceBy;
   filters: {
     locationId: string | null;
+    locationCode: string | null;
+    locationName: string | null;
     operatorId: string | null;
+    operatorName: string | null;
     drawerId: string | null;
     drawerState: DrawerState;
   };
@@ -232,7 +250,8 @@ export class CashDrawerBalancingController {
     const drawerFilter = drawerIdRaw?.trim() || null;
 
     const businessId = tenant.businessId!;
-    const toleranceCents = await this.toleranceCents(businessId);
+    const business = await this.business(businessId);
+    const toleranceCents = business.toleranceCents;
 
     const saleAssociate = alias(schema.users, 'sale_associate');
     const spMembership = alias(schema.memberships, 'sp_membership');
@@ -266,6 +285,7 @@ export class CashDrawerBalancingController {
         customerLast: schema.customers.lastName,
         locationId: docLocation,
         locationName: schema.locations.name,
+        locationCode: schema.locations.orderPrefix,
         timezone: schema.locations.timezone,
         day: sql<string>`to_char(${localTs}, 'YYYY-MM-DD')`,
         time: sql<string>`to_char(${localTs}, 'HH24:MI')`,
@@ -373,6 +393,27 @@ export class CashDrawerBalancingController {
       return drawerById.get((own ?? open[0]!).id) ?? null;
     };
 
+    // STORIS customer numbers for migrated customers (D7 identity map).
+    const customerIds = [...new Set(rows.map((r) => r.customerId).filter((c): c is string => !!c))];
+    const legacyCustomerCode = new Map<string, string>();
+    if (customerIds.length > 0) {
+      const refs = await this.db
+        .select({ jetnineId: schema.legacyRefs.jetnineId, legacyId: schema.legacyRefs.legacyId })
+        .from(schema.legacyRefs)
+        .where(
+          and(
+            eq(schema.legacyRefs.businessId, businessId),
+            eq(schema.legacyRefs.entity, 'customer'),
+            inArray(schema.legacyRefs.jetnineId, customerIds),
+          ),
+        );
+      for (const ref of refs) legacyCustomerCode.set(ref.jetnineId, ref.legacyId);
+    }
+    const customerCode = (id: string | null): string | null =>
+      id ? (legacyCustomerCode.get(id) ?? id.slice(0, 8).toUpperCase()) : null;
+    const storeCode = new Map<string, string | null>();
+    for (const r of rows) storeCode.set(r.locationId, r.locationCode);
+
     // Reference subtotal: all money on the same document inside the window.
     const docTotals = new Map<string, number>();
     for (const r of rows) {
@@ -407,7 +448,7 @@ export class CashDrawerBalancingController {
         documentId: docKey,
         reference: r.saleNumber ?? r.orderNumber ?? r.serviceNumber ?? '—',
         customerId: r.customerId,
-        customerCode: r.customerId ? r.customerId.slice(0, 8).toUpperCase() : null,
+        customerCode: customerCode(r.customerId),
         customerName: customerName ? customerName.toUpperCase() : null,
         paymentType: paymentTypeLabel(r),
         tenderRef: r.processorRef ?? r.financingRef ?? null,
@@ -427,10 +468,13 @@ export class CashDrawerBalancingController {
 
     // Group: store / operator / drawer → pay class → payment type.
     const groups = new Map<string, BalanceGroup & { methods: Map<string, PaymentLine[]> }>();
-    const groupKey = (l: PaymentLine): { key: string; label: string; sublabel: string | null } => {
+    const groupKey = (
+      l: PaymentLine,
+    ): { key: string; code: string | null; label: string; sublabel: string | null } => {
       if (balanceBy === 'operator') {
         return {
           key: l.operatorId ?? 'none',
+          code: l.operatorInitials,
           label: l.operatorName ?? 'No operator',
           sublabel: l.operatorInitials,
         };
@@ -438,11 +482,17 @@ export class CashDrawerBalancingController {
       if (balanceBy === 'drawer') {
         return {
           key: l.drawerId ?? `none:${l.locationId}`,
+          code: l.drawerNumber,
           label: l.drawerNumber ? `Drawer ${l.drawerNumber}` : 'No drawer',
           sublabel: l.locationName,
         };
       }
-      return { key: l.locationId, label: l.locationName, sublabel: null };
+      return {
+        key: l.locationId,
+        code: storeCode.get(l.locationId) ?? null,
+        label: l.locationName,
+        sublabel: null,
+      };
     };
     for (const l of lines) {
       const g = groupKey(l);
@@ -450,6 +500,7 @@ export class CashDrawerBalancingController {
       if (!group) {
         group = {
           key: g.key,
+          code: g.code,
           label: g.label,
           sublabel: g.sublabel,
           count: 0,
@@ -543,13 +594,45 @@ export class CashDrawerBalancingController {
     grand.depositCents = grand.cashCents + grand.checkCents;
     out.sort((a, b) => a.label.localeCompare(b.label));
 
+    // Echo the parameters the STORIS way: the store's code, the operator's name.
+    const filteredStore = locationId
+      ? ((
+          await this.db
+            .select({
+              name: schema.locations.name,
+              code: schema.locations.orderPrefix,
+              timezone: schema.locations.timezone,
+            })
+            .from(schema.locations)
+            .where(
+              and(eq(schema.locations.businessId, businessId), eq(schema.locations.id, locationId)),
+            )
+            .limit(1)
+        )[0] ?? null)
+      : null;
+    const filteredOperator = operatorId
+      ? ((
+          await this.db
+            .select({ name: schema.users.name, email: schema.users.email })
+            .from(schema.users)
+            .innerJoin(schema.memberships, eq(schema.memberships.userId, schema.users.id))
+            .where(
+              and(eq(schema.memberships.businessId, businessId), eq(schema.users.id, operatorId)),
+            )
+            .limit(1)
+        )[0] ?? null)
+      : null;
+
     const report: CashDrawerBalancingReport = {
       generatedAt: new Date().toISOString(),
       range: { ...range, startTime, endTime },
       balanceBy,
       filters: {
         locationId: locationId ?? null,
+        locationCode: filteredStore?.code ?? null,
+        locationName: filteredStore?.name ?? null,
         operatorId: operatorId ?? null,
+        operatorName: filteredOperator ? (filteredOperator.name ?? filteredOperator.email) : null,
         drawerId: drawerFilter,
         drawerState,
       },
@@ -613,12 +696,36 @@ export class CashDrawerBalancingController {
       res!.send(toCsv(headers, data));
       return;
     }
+    if (format === 'pdf' || format === 'txt') {
+      // The header clock runs on the store's time: the filtered store's,
+      // else the first store on the register, else the first store.
+      const timezone =
+        filteredStore?.timezone ??
+        rows[0]?.timezone ??
+        (await this.firstTimezone(businessId)) ??
+        'UTC';
+      const ctx = { businessName: business.name, generatedAt: new Date(), timezone };
+      const stem = `cash-drawer-balancing-${range.start}-to-${range.end}`;
+      if (format === 'pdf') {
+        const pdf = textPagesToPdf(renderCashDrawerBalancingPages(report, ctx), {
+          title: 'Report Cash Drawer Balancing Totals',
+        });
+        res!.setHeader('Content-Type', 'application/pdf');
+        res!.setHeader('Content-Disposition', `attachment; filename="${stem}.pdf"`);
+        res!.send(pdf);
+        return;
+      }
+      res!.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res!.setHeader('Content-Disposition', `attachment; filename="${stem}.txt"`);
+      res!.send(renderCashDrawerBalancingText(report, ctx));
+      return;
+    }
     return report;
   }
 
-  private async toleranceCents(businessId: string): Promise<number> {
+  private async business(businessId: string): Promise<{ name: string; toleranceCents: number }> {
     const [biz] = await this.db
-      .select({ opsSettingsJson: schema.businesses.opsSettingsJson })
+      .select({ name: schema.businesses.name, opsSettingsJson: schema.businesses.opsSettingsJson })
       .from(schema.businesses)
       .where(eq(schema.businesses.id, businessId))
       .limit(1);
@@ -626,6 +733,16 @@ export class CashDrawerBalancingController {
       cashBalancing?: { toleranceCents?: number | null } | null;
     };
     const t = ops.cashBalancing?.toleranceCents;
-    return typeof t === 'number' && t >= 0 ? t : 0;
+    return { name: biz?.name ?? '', toleranceCents: typeof t === 'number' && t >= 0 ? t : 0 };
+  }
+
+  private async firstTimezone(businessId: string): Promise<string | null> {
+    const [loc] = await this.db
+      .select({ timezone: schema.locations.timezone })
+      .from(schema.locations)
+      .where(eq(schema.locations.businessId, businessId))
+      .orderBy(asc(schema.locations.createdAt))
+      .limit(1);
+    return loc?.timezone ?? null;
   }
 }

@@ -549,7 +549,7 @@ Owner ask (STORIS AR.317 parameter screen + sample output): "create this too".
   minute, default 00:00–23:59), `balanceBy=drawer|operator|store` (default
   store), `locationId`, `operatorId` (user), `drawerId` (shift id or its
   8-character drawer number), `drawerState=all|balanced|unbalanced`,
-  `format=csv`.
+  `format=csv|pdf|txt`.
 - **Register** (the STORIS body): every succeeded payment in the window,
   grouped Balance-By group → pay class (1 CASH, 2 CHECK, 3 CREDIT, 4
   FINANCING, 5 GIFT CARD, 6 STORE CREDIT, 9 OTHER) → payment type (method,
@@ -572,9 +572,34 @@ Owner ask (STORIS AR.317 parameter screen + sample output): "create this too".
   register (the Z-report carries them).
 - **UI** `/reports/cash-drawer-balancing`, linked from Reports: the STORIS
   parameter card (date range picker, starting/ending time, Balance By,
-  store, operator, drawer, drawer reference), Run, Print, Export CSV; URL
-  carries the parameters.
-- Tests: `cash-drawer-balancing.int.spec.ts` (6).
+  store, operator, drawer, drawer reference), Run, Print, PDF, Export CSV;
+  URL carries the parameters.
+- **Basic PDF / text output** (owner 2026-09-10, from the real AR.317
+  spool `REPORT_CASH_DRAWER_BALANCING_TOTALS_OUTPUT_3.pdf`): `format=pdf`
+  is the STORIS "S Basic PDF" — Courier 9pt landscape, 132 columns, the
+  two-line page header (`Reference: AR.317.RPT`, the `-=- <business> -=-`
+  banner, clock in the store's timezone; `As of Date`, title, `Page: n`)
+  and two-line column header on every page, `Store 02 - NAME` / `Pay Class
+3 - CREDIT` / `Payment Type …` headings, the tender line at the STORIS
+  columns (code 0, name 13, reference 42, tender 59, amount →89, subtotal
+  →100, time 101, drawer 109, init 120), `Total For Payment Type` / `Pay
+Class` / `Store|Operator|Drawer` / `Grand Total  :` right-aligned at
+  78/89, the Cash Drawer Reconciliation block at column 42, and a closing
+  page echoing the parameters (`Balance By: S`, `Store: 02`, `Bal Drawer
+Ref: All`, …). `format=txt` is the same pages form-feed separated. The
+  writer (`apps/api/src/reports/text-pdf.ts`) is dependency-free and
+  mirrors the STORIS file structure so the two spools diff during the
+  parallel run. Mgr and Batch print blank (no manager override / deposit
+  batch in Jetnine); card brand is not captured, so STORIS's AMEX / MC /
+  VISA payment types collapse to `CARD - <processor>`.
+- **Codes**: Customer Code is the STORIS customer number when the customer
+  came over in the migration (`legacy_refs` entity `customer`), else the
+  first 8 characters of the Jetnine id; Store code is the location's order
+  prefix (`02`); the JSON carries `group.code` and `filters.locationCode /
+locationName / operatorName` for the echoes.
+- Tests: `cash-drawer-balancing.int.spec.ts` (8),
+  `cash-drawer-balancing.text.spec.ts` (5, byte-for-byte against the STORIS
+  header and register lines), `text-pdf.spec.ts` (3).
 
 ### 12.9 Report Written Sales Dollars (amendment A13, owner 2026-09-02)
 
