@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   BadgePercent,
-  Boxes,
   ClipboardList,
   CreditCard,
   Factory,
@@ -98,7 +97,6 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/products', label: 'Products', icon: Package },
       { href: '/categories', label: 'Categories', icon: Tags },
-      { href: '/inventory', label: 'Inventory', icon: Boxes },
       { href: '/warehouse', label: 'Warehouse', icon: Warehouse },
       { href: '/purchase-orders', label: 'Purchasing', icon: ClipboardList },
       { href: '/vendors', label: 'Vendors', icon: Factory },
@@ -144,7 +142,7 @@ export const NAV: NavGroup[] = [
 const GO_KEYS: Record<string, string> = {
   o: '/orders',
   d: '/deliveries',
-  i: '/inventory',
+  i: '/products/stock',
   c: '/customers',
   r: '/reports',
   h: '/dashboard',
@@ -175,6 +173,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // product's whole line shows without a sideways scroll.
   const wideContent =
     pathname.startsWith('/orders') ||
+    pathname.startsWith('/products') ||
     pathname.startsWith('/pos') ||
     pathname.startsWith('/deliveries') ||
     pathname.startsWith('/reports');

@@ -95,6 +95,7 @@ jobs:
       OWNER_DASHBOARD_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_owner_dashboard
       CATALOG_CLEANUP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_catalog_cleanup
       CATALOG_IMPORT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_catalog_import
+      PRODUCT_STOCK_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_product_stock
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -166,6 +167,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_owner_dashboard
           createdb -h localhost -U postgres jetnine_catalog_cleanup
           createdb -h localhost -U postgres jetnine_catalog_import
+          createdb -h localhost -U postgres jetnine_product_stock
 
       - name: Format check
         run: pnpm format:check

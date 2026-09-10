@@ -15,6 +15,7 @@ import {
 import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { PRODUCT_PURCHASE_STATUSES, type ProductPurchaseStatus } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import {
@@ -25,6 +26,12 @@ import {
 } from '../common/pagination';
 import { vendorMatchFor } from '../common/vendor-match';
 import { DRIZZLE } from '../database/database.module';
+import {
+  loadProductStockByLocation,
+  loadProductStockTotals,
+  type LocationStockRow,
+  type StockTotals,
+} from './product-stock';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -65,6 +72,35 @@ interface UpdateProductBody {
   isActive?: boolean;
   /** G7: variants of a serial-tracked product carry serial_units rows. */
   serialTracked?: boolean;
+  // STORIS Advanced Product Settings (A19).
+  secondDescription?: string | null;
+  purchaseStatus?: ProductPurchaseStatus;
+  boxesPerProduct?: number;
+  logisticalCartonQty?: number;
+  purchaseCartonQty?: number;
+  logisticalCartonTransfers?: boolean;
+}
+
+/** One row of the STORIS-shaped product list (A19). */
+interface ProductListRow {
+  id: string;
+  sku: string | null;
+  name: string;
+  isActive: boolean;
+  purchaseStatus: string;
+  brandName: string | null;
+  vendorName: string | null;
+  vendorModel: string | null;
+  group: string | null;
+  priceCents: number | null;
+  /** Sales margin cost — null when the viewer lacks products.cost.view. */
+  costCents: number | null;
+  onHand: number;
+  available: number;
+  netOnPo: number;
+  asIsOnHand: number;
+  asIsAvailable: number;
+  asIsNonSellable: number;
 }
 
 interface VariantOut {
@@ -96,6 +132,21 @@ interface ProductOut {
   updatedAt: Date;
   variants: VariantOut[];
   images: { id: string; storageKey: string; altText: string | null; position: number }[];
+  // STORIS screens (A19): names next to the ids, the descriptive /
+  // purchase-status / packing fields, and stock by location.
+  serialTracked: boolean;
+  secondDescription: string | null;
+  purchaseStatus: string;
+  boxesPerProduct: number;
+  logisticalCartonQty: number;
+  purchaseCartonQty: number;
+  logisticalCartonTransfers: boolean;
+  brandName: string | null;
+  categoryName: string | null;
+  vendorName: string | null;
+  vendorModel: string | null;
+  group: string | null;
+  stock: { totals: StockTotals; byLocation: LocationStockRow[] };
 }
 
 @TenantScoped()
@@ -119,9 +170,10 @@ export class CatalogProductsController {
     @Query('q') q?: string,
     @Query('categoryId') categoryId?: string,
     @Query('vendorId') vendorId?: string,
+    @Query('locationId') locationId?: string,
     @Query('limit') limitStr?: string,
     @Query('cursor') cursorStr?: string,
-  ): Promise<PageResponse<{ id: string; sku: string | null; name: string; isActive: boolean }>> {
+  ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
     const filters: ReturnType<typeof and>[] = [];
     if (categoryId) filters.push(eq(schema.products.categoryId, categoryId));
@@ -158,7 +210,7 @@ export class CatalogProductsController {
         )
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))
         .limit(limit);
-      return { data, nextCursor: null };
+      return { data: await this.listRows(tenant, data, locationId), nextCursor: null };
     }
 
     // Default browse: alphabetical by name, with id as the tiebreaker.
@@ -182,7 +234,84 @@ export class CatalogProductsController {
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(asc(schema.products.name), asc(schema.products.id))
       .limit(limit + 1);
-    return buildPage(rows, limit, (r) => r.name);
+    const page = buildPage(rows, limit, (r) => r.name);
+    return { ...page, data: await this.listRows(tenant, page.data, locationId) };
+  }
+
+  /**
+   * The STORIS "Products" columns for a page of products (A19): the
+   * primary variant's vendor model / price / cost / group, the brand and
+   * vendor names, and stock summed across locations (or one store when
+   * `locationId` is given).
+   */
+  private async listRows(
+    tenant: RequestTenantContext,
+    rows: { id: string; sku: string | null; name: string; isActive: boolean }[],
+    locationId?: string,
+  ): Promise<ProductListRow[]> {
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id);
+    const canSeeCost = tenant.isSuperAdmin || tenant.permissions.has('products.cost.view');
+    const products = await this.db
+      .select({
+        id: schema.products.id,
+        purchaseStatus: schema.products.purchaseStatus,
+        brandName: schema.brands.name,
+      })
+      .from(schema.products)
+      .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .where(inArray(schema.products.id, ids));
+    const variants = await this.db
+      .select({
+        productId: schema.productVariants.productId,
+        sku: schema.productVariants.sku,
+        vendorSku: schema.productVariants.vendorSku,
+        priceCents: schema.productVariants.priceCents,
+        costCents: schema.productVariants.costCents,
+        group: sql<string | null>`${schema.productVariants.attributesJson} ->> 'group'`,
+        vendorName: schema.vendors.name,
+        isActive: schema.productVariants.isActive,
+      })
+      .from(schema.productVariants)
+      .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
+      .where(inArray(schema.productVariants.productId, ids))
+      .orderBy(asc(schema.productVariants.createdAt));
+    const primary = new Map<string, (typeof variants)[number]>();
+    for (const v of variants) {
+      const cur = primary.get(v.productId);
+      // The variant that carries the product's own SKU wins; else the
+      // first active one; else the first.
+      const row = rows.find((r) => r.id === v.productId);
+      if (!cur || (v.sku && v.sku === row?.sku) || (!cur.isActive && v.isActive)) {
+        if (!cur || !(cur.sku && cur.sku === row?.sku)) primary.set(v.productId, v);
+      }
+    }
+    const extra = new Map(products.map((p) => [p.id, p]));
+    const totals = await loadProductStockTotals(this.db, tenant.businessId!, ids, locationId);
+    return rows.map((r) => {
+      const p = extra.get(r.id);
+      const v = primary.get(r.id);
+      const t = totals.get(r.id);
+      return {
+        id: r.id,
+        sku: r.sku,
+        name: r.name,
+        isActive: r.isActive,
+        purchaseStatus: p?.purchaseStatus ?? 'active',
+        brandName: p?.brandName ?? null,
+        vendorName: v?.vendorName ?? null,
+        vendorModel: v?.vendorSku ?? null,
+        group: v?.group ?? null,
+        priceCents: v?.priceCents ?? null,
+        costCents: canSeeCost ? (v?.costCents ?? null) : null,
+        onHand: t?.onHand ?? 0,
+        available: t?.available ?? 0,
+        netOnPo: t?.netOnPo ?? 0,
+        asIsOnHand: t?.asIsOnHand ?? 0,
+        asIsAvailable: t?.asIsAvailable ?? 0,
+        asIsNonSellable: t?.asIsNonSellable ?? 0,
+      };
+    });
   }
 
   /**
@@ -380,6 +509,37 @@ export class CatalogProductsController {
 
     const canSeeCost = tenant.isSuperAdmin || tenant.permissions.has('products.cost.view');
 
+    const [brand] = p.brandId
+      ? await this.db
+          .select({ name: schema.brands.name })
+          .from(schema.brands)
+          .where(eq(schema.brands.id, p.brandId))
+          .limit(1)
+      : [];
+    const [category] = p.categoryId
+      ? await this.db
+          .select({ name: schema.categories.name })
+          .from(schema.categories)
+          .where(eq(schema.categories.id, p.categoryId))
+          .limit(1)
+      : [];
+    const primary =
+      variants.find((v) => v.sku && v.sku === p.sku) ??
+      variants.find((v) => v.isActive) ??
+      variants[0];
+    const [vendor] = primary?.preferredVendorId
+      ? await this.db
+          .select({ name: schema.vendors.name })
+          .from(schema.vendors)
+          .where(eq(schema.vendors.id, primary.preferredVendorId))
+          .limit(1)
+      : [];
+    const group =
+      primary?.attributesJson && typeof primary.attributesJson === 'object'
+        ? ((primary.attributesJson as Record<string, unknown>).group ?? null)
+        : null;
+    const stock = await loadProductStockByLocation(this.db, tenant.businessId!, id);
+
     return {
       id: p.id,
       sku: p.sku ?? null,
@@ -412,6 +572,19 @@ export class CatalogProductsController {
         altText: i.altText ?? null,
         position: i.position,
       })),
+      serialTracked: p.serialTracked,
+      secondDescription: p.secondDescription ?? null,
+      purchaseStatus: p.purchaseStatus,
+      boxesPerProduct: p.boxesPerProduct,
+      logisticalCartonQty: p.logisticalCartonQty,
+      purchaseCartonQty: p.purchaseCartonQty,
+      logisticalCartonTransfers: p.logisticalCartonTransfers,
+      brandName: brand?.name ?? null,
+      categoryName: category?.name ?? null,
+      vendorName: vendor?.name ?? null,
+      vendorModel: primary?.vendorSku ?? null,
+      group: typeof group === 'string' ? group : null,
+      stock,
     };
   }
 
@@ -537,6 +710,45 @@ export class CatalogProductsController {
       update.isActive = body.isActive;
       before.isActive = existing.isActive;
       after.isActive = body.isActive;
+    }
+    // STORIS Advanced Product Settings (A19).
+    if (body.secondDescription !== undefined) {
+      const next = body.secondDescription?.trim() || null;
+      if (next !== existing.secondDescription) {
+        update.secondDescription = next;
+        before.secondDescription = existing.secondDescription;
+        after.secondDescription = next;
+      }
+    }
+    if (body.purchaseStatus !== undefined && body.purchaseStatus !== existing.purchaseStatus) {
+      if (!PRODUCT_PURCHASE_STATUSES.includes(body.purchaseStatus)) {
+        throw new BadRequestException(
+          `purchaseStatus must be one of ${PRODUCT_PURCHASE_STATUSES.join(', ')}`,
+        );
+      }
+      update.purchaseStatus = body.purchaseStatus;
+      before.purchaseStatus = existing.purchaseStatus;
+      after.purchaseStatus = body.purchaseStatus;
+    }
+    for (const key of ['boxesPerProduct', 'logisticalCartonQty', 'purchaseCartonQty'] as const) {
+      const value = body[key];
+      if (value === undefined) continue;
+      if (!Number.isInteger(value) || value < 1) {
+        throw new BadRequestException(`${key} must be a whole number of 1 or more`);
+      }
+      if (value !== existing[key]) {
+        update[key] = value;
+        before[key] = existing[key];
+        after[key] = value;
+      }
+    }
+    if (
+      body.logisticalCartonTransfers !== undefined &&
+      body.logisticalCartonTransfers !== existing.logisticalCartonTransfers
+    ) {
+      update.logisticalCartonTransfers = body.logisticalCartonTransfers;
+      before.logisticalCartonTransfers = existing.logisticalCartonTransfers;
+      after.logisticalCartonTransfers = body.logisticalCartonTransfers;
     }
 
     if (Object.keys(after).length > 0) {

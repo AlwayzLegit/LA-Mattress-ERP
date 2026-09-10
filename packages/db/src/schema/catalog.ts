@@ -99,6 +99,22 @@ export const products = pgTable(
     collectionId: uuid('collection_id').references(() => collections.id, { onDelete: 'set null' }),
     serialTracked: boolean('serial_tracked').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
+    // STORIS Advanced Product Settings (amendment A19, owner 2026-09-10).
+    // `name` is STORIS's Description; this is its Second Description.
+    secondDescription: text('second_description'),
+    /**
+     * STORIS Purchase Status — whether the buyer may still order it:
+     * 'active' | 'discontinued' | 'special_order' | 'closeout'
+     * (PRODUCT_PURCHASE_STATUSES in @jetnine/shared). Independent of
+     * `is_active`, which is the selling switch (Product Status).
+     */
+    purchaseStatus: text('purchase_status').notNull().default('active'),
+    // Packing: how many boxes one unit ships as, and the carton
+    // multiples purchasing and transfers move it in.
+    boxesPerProduct: integer('boxes_per_product').notNull().default(1),
+    logisticalCartonQty: integer('logistical_carton_qty').notNull().default(1),
+    purchaseCartonQty: integer('purchase_carton_qty').notNull().default(1),
+    logisticalCartonTransfers: boolean('logistical_carton_transfers').notNull().default(false),
     // Generated tsvector (set by the migration via GENERATED ALWAYS AS).
     // Drizzle's pg-core doesn't model generated columns directly, so the
     // column is declared here only so tools that introspect the schema know

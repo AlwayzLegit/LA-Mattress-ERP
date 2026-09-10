@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { ProductsNav } from '@/components/products-nav';
 import { LoadMore } from '@/components/load-more';
 import { useCursorList } from '@/lib/use-cursor-list';
 import {
@@ -74,7 +75,7 @@ export default function PhysicalCountsPage() {
         body: JSON.stringify({ locationId: newLocationId }),
       });
       toast.success(`Count started — ${res.lineCount} line(s) frozen`);
-      router.push(`/inventory/counts/${res.id}`);
+      router.push(`/products/counts/${res.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -85,9 +86,10 @@ export default function PhysicalCountsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow={<BackLink href="/inventory">Inventory</BackLink>}
+        eyebrow={<BackLink href="/products">Products</BackLink>}
         title="Physical counts"
       />
+      <ProductsNav />
 
       <Stack>
         <Card
@@ -148,7 +150,7 @@ export default function PhysicalCountsPage() {
                     <tr
                       key={c.id}
                       className="cursor-pointer"
-                      onClick={() => router.push(`/inventory/counts/${c.id}`)}
+                      onClick={() => router.push(`/products/counts/${c.id}`)}
                     >
                       <td>{new Date(`${c.countDate}T00:00:00`).toLocaleDateString()}</td>
                       <td>{c.locationName}</td>
@@ -163,7 +165,7 @@ export default function PhysicalCountsPage() {
                         <LinkButton
                           size="sm"
                           variant="ghost"
-                          href={`/inventory/counts/${c.id}`}
+                          href={`/products/counts/${c.id}`}
                           onClick={(e) => e.stopPropagation()}
                         >
                           Open

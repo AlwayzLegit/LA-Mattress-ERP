@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { PackageCheck, Search } from 'lucide-react';
 import { api } from '@/lib/api';
+import { ProductsNav } from '@/components/products-nav';
 import {
   Alert,
   BackLink,
@@ -156,9 +157,10 @@ export default function ReceivePage() {
   return (
     <div>
       <PageHeader
-        eyebrow={<BackLink href="/inventory">Inventory</BackLink>}
+        eyebrow={<BackLink href="/products">Products</BackLink>}
         title="Receive inventory"
       />
+      <ProductsNav />
 
       <Stack>
         <Card title="Receipt">

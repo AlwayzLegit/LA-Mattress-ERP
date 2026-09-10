@@ -547,12 +547,12 @@ export default function ManagerDashboardView({ userName }: { userName: string })
         <OpsPanel
           title="Low stock here"
           count={data.lowStock.length}
-          link={{ href: '/inventory', label: 'Inventory' }}
+          link={{ href: '/products/stock', label: 'Stock' }}
           testid="store-low-stock"
           empty="Nothing at or below 5 available here."
           rows={data.lowStock.map((r) => ({
             key: r.variantId,
-            href: '/inventory',
+            href: '/products/stock',
             a: r.sku ?? '—',
             b: r.variantName ? `${r.productName} — ${r.variantName}` : r.productName,
             c: '',

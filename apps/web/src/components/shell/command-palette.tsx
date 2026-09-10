@@ -39,7 +39,7 @@ export const PAGES: { label: string; href: string }[] = [
   { label: 'Deliveries', href: '/deliveries' },
   { label: 'Dispatch', href: '/deliveries/dispatch' },
   { label: 'At risk', href: '/jeopardy' },
-  { label: 'Inventory', href: '/inventory' },
+  { label: 'Stock by location', href: '/products/stock' },
   { label: 'Products', href: '/products' },
   { label: 'Customers', href: '/customers' },
   { label: 'Salespeople', href: '/salespeople' },

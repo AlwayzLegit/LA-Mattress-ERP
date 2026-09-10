@@ -18,6 +18,18 @@ const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'https://jetnine-api.onre
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@jetnine/shared', '@jetnine/ui'],
+  /**
+   * Inventory folded into Products (amendment A19, owner 2026-09-10): the
+   * old section's URLs keep working for bookmarks, saved nav and tests.
+   */
+  async redirects() {
+    return [
+      { source: '/inventory', destination: '/products/stock', permanent: true },
+      { source: '/inventory/counts', destination: '/products/counts', permanent: true },
+      { source: '/inventory/counts/:id', destination: '/products/counts/:id', permanent: true },
+      { source: '/inventory/receive', destination: '/products/receive', permanent: true },
+    ];
+  },
   async rewrites() {
     return [
       { source: '/v1/:path*', destination: `${apiProxyTarget}/v1/:path*` },

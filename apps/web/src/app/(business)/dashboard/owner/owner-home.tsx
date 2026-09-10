@@ -487,7 +487,7 @@ export default function OwnerHome({ userName, email }: { userName: string; email
           <Panel
             title="Low stock"
             sub={`≤ 5 available · ${f.storeLabel}`}
-            link={{ href: '/inventory', label: 'Inventory' }}
+            link={{ href: '/products/stock', label: 'Stock' }}
             style={{ gridColumn: 'span 3', ...card('lowstock').style }}
             actions={card('lowstock').handle}
             testid="low-stock"
