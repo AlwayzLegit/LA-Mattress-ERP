@@ -5200,10 +5200,9 @@ refused by "Subscription required. Visit Settings → Billing…" (402 from
 after the trial lockout of the 2026-09-06 checkpoints began — so they show
 the incident already fixed there, not a new one.
 
-- First production run of `ops-set-account-kind.yml` (action `list`, run
-  34538880555) read the live DB through the API service:
+- First production run of `ops-set-account-kind.yml` (action `list`, run 34538880555) read the live DB through the API service:
   `la-mattress "LA Mattress Stores" kind=agency status=active sub=active
-  trial_ends=-`. The guard passes agency accounts before it looks at any
+trial_ends=-`. The guard passes agency accounts before it looks at any
   subscription state, so no LA Mattress session can receive that 402 today.
   (`qa-probe-store` is a SaaS trial that expired 2026-09-05 and stays
   read-only by design.)
@@ -5213,3 +5212,18 @@ the incident already fixed there, not a new one.
 - Nothing to change in code. If a store still sees the message, capture the
   current date/time, the user, and the request (it is not this guard for
   `la-mattress`).
+
+### Checkpoint — 2026-09-10 (New Sale: "+ New customer" opened prefilled)
+
+Owner (West LA, Ronnie): every "+ New customer" opened with the previous
+shopper's name/phone/address and the dedupe banner already showing; only a
+reload cleared it.
+
+- Cause: `new-sale.tsx` kept the panel's fields (`newCust`, `newBill`,
+  `billDiffers`, `dupeWarn`, the ZIP memo) as component state that nothing
+  reset — Cancel, Create, "Use existing" and the post-sale `resetAll` all
+  left them behind, and the form stays mounted for the whole shift.
+- Fix: one `clearNewCustomer()` called on every exit and on open; empty
+  shapes hoisted to `EMPTY_NEW_CUSTOMER` / `EMPTY_ADDRESS`.
+- e2e: `orders.spec.ts` "new-customer panel opens blank after Cancel, Change
+  and a completed sale" (runs in CI; no local stack in this sandbox).
