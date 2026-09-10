@@ -254,7 +254,6 @@ export default function InventoryPage() {
           <>
             <LinkButton href="/products/counts" variant="secondary" size="sm">
               <ClipboardList size={14} />
-              <ProductsNav />
               Count stock
             </LinkButton>
             <LinkButton href="/products/receive" variant="primary">
@@ -264,6 +263,7 @@ export default function InventoryPage() {
           </>
         }
       />
+      <ProductsNav />
 
       <form
         onSubmit={(e) => {

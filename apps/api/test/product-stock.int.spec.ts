@@ -371,6 +371,37 @@ describe('GET /v1/products/:id — stock block and STORIS fields', () => {
     });
   });
 
+  it('a variant retired while it still held units keeps counting, marked inactive', async () => {
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql);
+    try {
+      const [retired] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId, sku: '7705-5/0-OLD', priceCents: 0, isActive: false })
+        .returning({ id: schema.productVariants.id });
+      await db.insert(schema.inventoryLevels).values({
+        businessId,
+        variantId: retired!.id,
+        locationId: warehouseId,
+        onHand: 2,
+        reserved: 0,
+        floorSample: 0,
+      });
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+    const res = await as(ownerCookie).get(`/v1/products/${productId}`).expect(200);
+    expect(res.body.stock.totals.onHand).toBe(8);
+    expect(res.body.stock.byLocation).toHaveLength(4);
+    const old = res.body.stock.byLocation.find(
+      (r: { variantSku: string; locationId: string }) =>
+        r.variantSku === '7705-5/0-OLD' && r.locationId === warehouseId,
+    );
+    expect(old).toMatchObject({ variantActive: false, locationActive: true, onHand: 2 });
+    const list = await as(ownerCookie).get('/v1/products?q=MICAH').expect(200);
+    expect(list.body.data.find((r: { id: string }) => r.id === productId).onHand).toBe(8);
+  });
+
   it('a product with no stock still lists every location at zero', async () => {
     const res = await as(ownerCookie).get(`/v1/products/${bareProductId}`).expect(200);
     expect(res.body.stock.totals.onHand).toBe(0);

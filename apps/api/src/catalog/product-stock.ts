@@ -40,8 +40,10 @@ export interface StockTotals {
 export interface LocationStockRow extends StockTotals {
   variantId: string;
   variantSku: string | null;
+  variantActive: boolean;
   locationId: string;
   locationName: string;
+  locationActive: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
 }
@@ -214,9 +216,12 @@ function finish(t: StockTotals): StockTotals {
 }
 
 /**
- * The product page's grid: one row per variant per active location (every
+ * The product page's grid: one row per variant per location — every active
  * store listed, zeros included, the way STORIS's Location Availability
- * does), plus totals across them.
+ * does — plus totals across them. Every variant counts, active or not: a
+ * variant retired while it still held units keeps its stock, and the
+ * browser's totals include it, so the page must agree. A retired
+ * location likewise appears when it still carries anything.
  */
 export async function loadProductStockByLocation(
   db: PostgresJsDatabase,
@@ -224,20 +229,27 @@ export async function loadProductStockByLocation(
   productId: string,
 ): Promise<{ totals: StockTotals; byLocation: LocationStockRow[] }> {
   const variants = await db
-    .select({ id: schema.productVariants.id, sku: schema.productVariants.sku })
+    .select({
+      id: schema.productVariants.id,
+      sku: schema.productVariants.sku,
+      isActive: schema.productVariants.isActive,
+    })
     .from(schema.productVariants)
     .where(
       and(
         eq(schema.productVariants.businessId, businessId),
         eq(schema.productVariants.productId, productId),
-        eq(schema.productVariants.isActive, true),
       ),
     )
     .orderBy(schema.productVariants.createdAt);
-  const locations = await db
-    .select({ id: schema.locations.id, name: schema.locations.name })
+  const allLocations = await db
+    .select({
+      id: schema.locations.id,
+      name: schema.locations.name,
+      isActive: schema.locations.isActive,
+    })
     .from(schema.locations)
-    .where(and(eq(schema.locations.businessId, businessId), eq(schema.locations.isActive, true)))
+    .where(eq(schema.locations.businessId, businessId))
     .orderBy(schema.locations.name);
   const bins = await db
     .select({
@@ -264,11 +276,14 @@ export async function loadProductStockByLocation(
     variants.map((v) => v.id),
   );
   const cellAt = new Map<string, StockTotals>();
+  const touchedLocations = new Set<string>();
   for (const c of cells) {
     if (!c.locationId) continue;
     const key = `${c.variantId}:${c.locationId}`;
     cellAt.set(key, add(cellAt.get(key) ?? EMPTY_TOTALS, c));
+    touchedLocations.add(c.locationId);
   }
+  const locations = allLocations.filter((l) => l.isActive || touchedLocations.has(l.id));
   const byLocation: LocationStockRow[] = [];
   let totals = { ...EMPTY_TOTALS };
   for (const v of variants) {
@@ -280,8 +295,10 @@ export async function loadProductStockByLocation(
       byLocation.push({
         variantId: v.id,
         variantSku: v.sku ?? null,
+        variantActive: v.isActive,
         locationId: l.id,
         locationName: l.name,
+        locationActive: l.isActive,
         storageBinId: bin?.storageBinId ?? null,
         storageBinCode: bin?.storageBinCode ?? null,
         ...t,

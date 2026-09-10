@@ -72,8 +72,10 @@ interface StockTotals {
 interface LocationStockRow extends StockTotals {
   variantId: string;
   variantSku: string | null;
+  variantActive: boolean;
   locationId: string;
   locationName: string;
+  locationActive: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
 }
@@ -565,9 +567,23 @@ export default function ProductDetailPage() {
                 )}
                 {p.stock.byLocation.map((row) => (
                   <tr key={`${row.variantId}:${row.locationId}`} data-testid="product-location-row">
-                    <td>{row.locationName}</td>
+                    <td>
+                      {row.locationName}
+                      {!row.locationActive && (
+                        <>
+                          {' '}
+                          <StatusBadge status="inactive" />
+                        </>
+                      )}
+                    </td>
                     <td>
                       <code>{row.variantSku ?? '—'}</code>
+                      {!row.variantActive && (
+                        <>
+                          {' '}
+                          <StatusBadge status="inactive" />
+                        </>
+                      )}
                     </td>
                     <td className="num">{row.onHand}</td>
                     <td className="num">{row.available}</td>
