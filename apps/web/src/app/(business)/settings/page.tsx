@@ -56,6 +56,28 @@ interface OpsSettings {
     tier1MaxCents?: number | null;
     tier2Pct?: number | null;
   } | null;
+  /** A20 order-page pick lists (one label per line in the editor). */
+  marketingCodes?: string[] | null;
+  orderSources?: string[] | null;
+  prepCodes?: string[] | null;
+  rooms?: string[] | null;
+  paymentTerminals?: string[] | null;
+}
+
+const OPS_LISTS: { key: keyof OpsSettings; label: string; hint: string }[] = [
+  { key: 'marketingCodes', label: 'Marketing codes', hint: 'Order page Marketing Code 1 / 2' },
+  { key: 'orderSources', label: 'Order sources', hint: 'Walk-in, Phone, Web, Referral…' },
+  { key: 'prepCodes', label: 'Prep codes', hint: 'Warehouse instructions on a line' },
+  { key: 'rooms', label: 'Rooms', hint: 'Where a piece goes in the home' },
+  { key: 'paymentTerminals', label: 'Payment terminals', hint: 'Card readers to assign' },
+];
+
+function linesToList(raw: FormDataEntryValue | null): string[] | null {
+  const items = String(raw ?? '')
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : null;
 }
 
 interface Settings {
@@ -379,6 +401,9 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
               tier1MaxCents: t1max === '' ? null : Math.round(Number(t1max) * 100),
               tier2Pct: t2 === '' ? null : Number(t2),
             };
+      for (const list of OPS_LISTS) {
+        (body as Record<string, unknown>)[list.key] = linesToList(data.get(`list-${list.key}`));
+      }
       const updated = await api<Settings>('/v1/business/settings', {
         method: 'PATCH',
         body: JSON.stringify({ ops: body }),
@@ -589,6 +614,18 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
               defaultValue={ops.priceVariance?.tier2Pct ?? ''}
             />
           </Field>
+          <SectionHeading as="h3" title="Order page pick lists (STORIS Enter a Sales Order)" />
+          {OPS_LISTS.map((list) => (
+            <Field key={list.key} label={`${list.label} — one per line (${list.hint})`}>
+              <textarea
+                name={`list-${list.key}`}
+                rows={4}
+                defaultValue={((ops[list.key] as string[] | null | undefined) ?? []).join('\n')}
+                data-testid={`ops-list-${list.key}`}
+                style={{ width: '100%', font: 'inherit', padding: 8, borderRadius: 6 }}
+              />
+            </Field>
+          ))}
         </FormGrid>
         {errorMsg && (
           <Alert tone="error" className="mt-3">

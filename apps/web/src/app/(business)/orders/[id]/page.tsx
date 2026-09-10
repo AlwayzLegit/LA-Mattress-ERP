@@ -37,6 +37,10 @@ import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { OrderNotesCard } from '@/components/order-notes-card';
 import { TeamTasks } from '@/components/team-tasks';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
+import { OrderActionsMenu } from './actions/actions-menu';
+import { OrderHeaderDialog } from './actions/header-dialog';
+import { LineDetailsDialog } from './actions/edit-dialogs';
+import type { CostedLines, OpsLists } from './actions/types';
 
 /**
  * Order detail (STORIS cutover Day 2): the working view of one sales
@@ -60,6 +64,20 @@ interface OrderLine {
   discountCents: number;
   taxCents: number;
   totalCents: number;
+  taxRateBps?: number;
+  /** A20 line details (STORIS Step 2 actions). */
+  comment?: string | null;
+  room?: string | null;
+  pieces?: number | null;
+  prepCodes?: string[] | null;
+  comJson?: { supplied?: boolean; description?: string | null } | null;
+  directShipJson?: {
+    vendorName?: string | null;
+    vendorOrderRef?: string | null;
+    trackingNumber?: string | null;
+    expectedDate?: string | null;
+  } | null;
+  needsInstall?: boolean;
   /** The PO this line rides on, when sourced through purchasing (owner 2026-09-02). */
   po: {
     poId: string;
@@ -133,6 +151,30 @@ interface OrderDetail {
   addressPhone: string | null;
   notes: string | null;
   internalNotes: string | null;
+  /** A20 header fields (STORIS Step 1 + Actions). */
+  marketingCode?: string | null;
+  marketingCode2?: string | null;
+  orderSource?: string | null;
+  paymentTerminal?: string | null;
+  exceptionNotes?: string | null;
+  tradeDesignerJson?: {
+    name?: string | null;
+    company?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    note?: string | null;
+  } | null;
+  customInfoJson?: { label: string; value: string }[] | null;
+  deliveryFeeCents?: number;
+  installFeeCents?: number;
+  otherFeeCents?: number;
+  otherFeeLabel?: string | null;
+  salespersonMembershipId?: string | null;
+  secondSalespersonMembershipId?: string | null;
+  splitBps?: number | null;
+  deliveryStatus?: string | null;
+  deliveryInstructions?: string | null;
+  pickupLocationId?: string | null;
   legacyNumber: string | null;
   lockedAt: string | null;
   onOpenRun: { runId: string; runDate: string } | null;
@@ -148,6 +190,19 @@ interface CustomerRow {
   lastName: string | null;
   email: string | null;
   phone: string | null;
+  phone2?: string | null;
+  workPhone?: string | null;
+  workPhoneExt?: string | null;
+  addressesJson?:
+    | {
+        label?: string | null;
+        line1?: string | null;
+        line2?: string | null;
+        city?: string | null;
+        region?: string | null;
+        postalCode?: string | null;
+      }[]
+    | null;
 }
 interface DeliveryRow {
   id: string;
@@ -250,6 +305,17 @@ export default function OrderDetailPage() {
   const [deliveryDate, setDeliveryDate] = useState('');
   const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
   const [unlockOpen, setUnlockOpen] = useState(false);
+  // A20 (§12.16): the STORIS Actions menu and the line display toggles.
+  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [opsLists, setOpsLists] = useState<OpsLists>({});
+  const [advanced, setAdvanced] = useState(false);
+  const [costed, setCosted] = useState(false);
+  const [costedData, setCostedData] = useState<CostedLines | null>(null);
+  const [headerOpen, setHeaderOpen] = useState(false);
+  const [lineDetailsId, setLineDetailsId] = useState<string | null>(null);
+  const [members, setMembers] = useState<
+    { membershipId: string; name: string | null; email: string }[]
+  >([]);
 
   // §7: the associate sees the day's remaining capacity while booking.
   useEffect(() => {
@@ -292,6 +358,10 @@ export default function OrderDetailPage() {
       void api<DeliveryRow[]>(`/v1/deliveries?orderId=${o.id}`)
         .then(setDeliveries)
         .catch(() => setDeliveries([]));
+      void api<{ id: string }[]>(`/v1/orders/${o.id}/attachments`)
+        .then((rows) => setAttachmentCount(rows.length))
+        .catch(() => undefined);
+      if (costed) void loadCosted(o.id);
       // The audit log is the order's timeline: every mutation the API
       // makes writes an entry with targetId = the order id.
       void api<{ data: AuditRow[]; nextCursor: string | null }>(
@@ -307,6 +377,69 @@ export default function OrderDetailPage() {
     if (id) void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  useEffect(() => {
+    // A20 pick lists and the salesperson names the Order details card shows.
+    void api<{ ops: OpsLists | null }>('/v1/business/settings/pos')
+      .then((s) => setOpsLists(s.ops ?? {}))
+      .catch(() => undefined);
+    void api<{ membershipId: string; name: string | null; email: string; status: string }[]>(
+      '/v1/business/members',
+    )
+      .then((rows) => setMembers(rows.filter((m) => m.status === 'active')))
+      .catch(() => setMembers([]));
+  }, []);
+
+  /** Costed line display (A20): cost + margin per line, gated by products.cost.view. */
+  async function loadCosted(orderId: string) {
+    try {
+      setCostedData(await api<CostedLines>(`/v1/orders/${orderId}/costed`));
+    } catch (err) {
+      setCosted(false);
+      setCostedData(null);
+      const status = (err as { status?: number }).status;
+      toast.error(
+        status === 403
+          ? 'You need product cost access to see costed lines'
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+    }
+  }
+
+  function lineExtras(l: OrderLine): string {
+    const parts: string[] = [];
+    parts.push(
+      `Source: ${l.sourceLocationId ? (locationNames.get(l.sourceLocationId) ?? '—') : 'order default'}`,
+    );
+    parts.push(`Tax ${((l.taxRateBps ?? 0) / 100).toFixed(2)}%`);
+    parts.push(`${l.qtyReserved}/${l.quantity} reserved`);
+    if (l.room) parts.push(`Room: ${l.room}`);
+    if (l.pieces) parts.push(`${l.pieces} piece${l.pieces === 1 ? '' : 's'}/unit`);
+    if (l.prepCodes?.length) parts.push(`Prep: ${l.prepCodes.join(', ')}`);
+    if (l.needsInstall) parts.push('Installation');
+    if (l.comJson?.supplied) {
+      parts.push(`COM${l.comJson.description ? `: ${l.comJson.description}` : ''}`);
+    }
+    const ds = l.directShipJson;
+    if (ds && (ds.vendorName || ds.trackingNumber || ds.vendorOrderRef)) {
+      parts.push(
+        `Direct ship: ${[ds.vendorName, ds.vendorOrderRef, ds.trackingNumber, ds.expectedDate]
+          .filter(Boolean)
+          .join(' · ')}`,
+      );
+    }
+    if (l.comment) parts.push(`“${l.comment}”`);
+    return parts.join(' · ');
+  }
+
+  function costedCell(lineId: string): string {
+    const c = costedData?.lines.find((x) => x.id === lineId);
+    if (!c) return costedData ? ' · Cost —' : ' · Cost loading…';
+    return ` · Cost ${c.costCents == null ? '—' : formatMoney(c.costCents)} · Margin ${
+      c.marginCents == null ? '—' : formatMoney(c.marginCents)
+    }${c.marginPct == null ? '' : ` (${c.marginPct.toFixed(1)}%)`}`;
+  }
 
   async function act(path: string, body?: unknown) {
     setBusy(true);
@@ -558,7 +691,16 @@ export default function OrderDetailPage() {
     await act('/payments', {
       method: payMethod,
       amountCents: cents,
-      ...(payRef.trim() ? { processorRef: payRef.trim() } : {}),
+      // A20 Step 4 Financing: Synchrony / Acima carry the provider and
+      // the account / approval number the API already stores.
+      ...(payMethod === 'synchrony' || payMethod === 'acima'
+        ? {
+            financingProvider: payMethod,
+            ...(payRef.trim() ? { financingRef: payRef.trim() } : {}),
+          }
+        : payRef.trim()
+          ? { processorRef: payRef.trim() }
+          : {}),
     });
     setPayAmount('');
     setPayRef('');
@@ -625,6 +767,39 @@ export default function OrderDetailPage() {
         }
         actions={
           <>
+            <OrderActionsMenu
+              order={order}
+              lines={order.lines}
+              customer={customer}
+              locations={locations}
+              lists={opsLists}
+              editable={editable}
+              live={live}
+              attachmentCount={attachmentCount}
+              advanced={advanced}
+              onToggleAdvanced={() => setAdvanced((v) => !v)}
+              costed={costed}
+              onToggleCosted={() => {
+                if (costed) {
+                  setCosted(false);
+                  setCostedData(null);
+                } else {
+                  setCosted(true);
+                  void loadCosted(order.id);
+                }
+              }}
+              onChanged={load}
+              onAttachmentsChanged={setAttachmentCount}
+              onAuditLog={() =>
+                document.getElementById('change-history')?.scrollIntoView({ behavior: 'smooth' })
+              }
+              onPrint={(scope) =>
+                window.open(
+                  `/print/orders/${id}/invoice${scope === 'order' ? '?scope=order' : ''}`,
+                  '_blank',
+                )
+              }
+            />
             <Button
               size="sm"
               variant="secondary"
@@ -678,6 +853,7 @@ export default function OrderDetailPage() {
                 >
                   {[
                     ['invoice', 'Invoice', 'print-invoice'],
+                    ['invoice?scope=order', 'Invoice (this order only)', 'print-invoice-single'],
                     ['delivery-ticket', 'Delivery ticket', 'print-delivery-ticket'],
                     ['pick-list', 'Pick list', 'print-pick-list'],
                   ].map(([slug, label, testid]) => (
@@ -706,6 +882,26 @@ export default function OrderDetailPage() {
         }
       />
       <NextStepBanner order={order} deliveries={deliveries} />
+      {headerOpen && (
+        <OrderHeaderDialog
+          order={order}
+          locations={locations}
+          lists={opsLists}
+          editable={editable}
+          onClose={() => setHeaderOpen(false)}
+          onSaved={load}
+        />
+      )}
+      {lineDetailsId && (
+        <LineDetailsDialog
+          order={order}
+          lines={order.lines}
+          initialLineId={lineDetailsId}
+          lists={opsLists}
+          onClose={() => setLineDetailsId(null)}
+          onSaved={load}
+        />
+      )}
 
       {order.onOpenRun && (
         <Alert
@@ -1189,6 +1385,18 @@ export default function OrderDetailPage() {
                           <Money cents={l.totalCents} />
                         </td>
                         <td className="actions">
+                          {live && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setLineDetailsId(l.id)}
+                              aria-label={`Details for ${l.description}`}
+                              title="Line details — comment, room, pieces, prep codes, COM, direct ship"
+                              data-testid="order-line-details"
+                            >
+                              ⋯
+                            </Button>
+                          )}
                           {editable && l.qtyFulfilled === 0 && (
                             <Button
                               size="sm"
@@ -1204,6 +1412,14 @@ export default function OrderDetailPage() {
                           )}
                         </td>
                       </tr>
+                      {(advanced || costed) && (
+                        <tr data-testid="line-extras">
+                          <td colSpan={10} className="muted" style={{ fontSize: 12 }}>
+                            {advanced ? lineExtras(l) : ''}
+                            {costed ? costedCell(l.id) : ''}
+                          </td>
+                        </tr>
+                      )}
                       {l.lineType === 'stock' &&
                         !l.po &&
                         l.quantity - l.qtyFulfilled - l.qtyReserved > 0 && (
@@ -1295,7 +1511,13 @@ export default function OrderDetailPage() {
                     />
                   </Field>
                   {payMethod !== 'cash' && (
-                    <Field label="Reference">
+                    <Field
+                      label={
+                        payMethod === 'synchrony' || payMethod === 'acima'
+                          ? 'Financing account / approval #'
+                          : 'Reference'
+                      }
+                    >
                       <Input
                         placeholder="Reference / last 4 / approval #"
                         value={payRef}
@@ -1547,7 +1769,7 @@ export default function OrderDetailPage() {
           <TeamTasks orderId={order.id} orderNumber={order.number} />
           <OrderNotesCard orderId={order.id} />
 
-          <Card title="Change history">
+          <Card title="Change history" id="change-history">
             {timeline.length === 0 ? (
               <p className="muted">No events recorded.</p>
             ) : (
@@ -1580,6 +1802,70 @@ export default function OrderDetailPage() {
 
         <Stack className="min-w-0">
           <BalanceStrip order={order} />
+          <Card
+            title="Order details"
+            actions={
+              live ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setHeaderOpen(true)}
+                  data-testid="order-details-edit"
+                >
+                  Edit…
+                </Button>
+              ) : undefined
+            }
+          >
+            <KeyValue
+              rows={[
+                { label: 'Order type', value: order.orderKind.replace(/_/g, ' ') },
+                { label: 'Written', value: new Date(order.createdAt).toLocaleDateString() },
+                { label: 'Store', value: locationNames.get(order.locationId) ?? '—' },
+                {
+                  label: 'Salesperson',
+                  value:
+                    [order.salespersonMembershipId, order.secondSalespersonMembershipId]
+                      .filter(Boolean)
+                      .map((mid) => {
+                        const m = members.find((x) => x.membershipId === mid);
+                        return m ? m.name || m.email : '—';
+                      })
+                      .join(' + ') || '—',
+                },
+                { label: 'Fulfillment', value: order.fulfillmentType.replace(/_/g, ' ') },
+                { label: 'Promised', value: order.requestedDate ?? '—' },
+                {
+                  label: 'Marketing codes',
+                  value:
+                    [order.marketingCode, order.marketingCode2].filter(Boolean).join(' · ') || '—',
+                },
+                { label: 'Order source', value: order.orderSource ?? '—' },
+                { label: 'Payment terminal', value: order.paymentTerminal ?? '—' },
+                ...(order.tradeDesignerJson?.name || order.tradeDesignerJson?.company
+                  ? [
+                      {
+                        label: 'Trade / designer',
+                        value: [order.tradeDesignerJson.name, order.tradeDesignerJson.company]
+                          .filter(Boolean)
+                          .join(' — '),
+                      },
+                    ]
+                  : []),
+                ...(order.customInfoJson?.length
+                  ? [
+                      {
+                        label: 'Custom info',
+                        value: `${order.customInfoJson.length} row${
+                          order.customInfoJson.length === 1 ? '' : 's'
+                        }`,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          </Card>
+
           <Card
             title="Customer"
             actions={
@@ -1676,6 +1962,48 @@ export default function OrderDetailPage() {
                         },
                       ]
                     : []),
+                ]}
+              />
+              <hr className="border-border" />
+              <KeyValue
+                data-testid="receivables"
+                rows={[
+                  {
+                    label: <strong>Receivables</strong>,
+                    value: order.balanceDueCents > 0 ? 'Open' : 'Settled',
+                  },
+                  {
+                    label: 'Deposit outstanding',
+                    value: <MoneyValue cents={depositOutstanding} />,
+                  },
+                  {
+                    label: 'Days outstanding',
+                    value:
+                      order.balanceDueCents > 0
+                        ? String(
+                            Math.max(
+                              0,
+                              Math.floor(
+                                (Date.now() -
+                                  new Date(order.completedAt ?? order.createdAt).getTime()) /
+                                  86_400_000,
+                              ),
+                            ),
+                          )
+                        : '—',
+                  },
+                  {
+                    label: 'Fees in total',
+                    value: (
+                      <MoneyValue
+                        cents={
+                          (order.deliveryFeeCents ?? 0) +
+                          (order.installFeeCents ?? 0) +
+                          (order.otherFeeCents ?? 0)
+                        }
+                      />
+                    ),
+                  },
                 ]}
               />
               {live &&
