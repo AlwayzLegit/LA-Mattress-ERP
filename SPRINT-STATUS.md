@@ -5005,3 +5005,36 @@ dispatches of **Ops — catalog import** against `la-mattress`
   STORIS export. **Ops (owner):** confirm the `jetnine-db` backup and
   drained registers; then products commit + `replace_catalog` (1948) →
   inventory validate (3246) → inventory commit.
+
+### Checkpoint — 2026-09-10 (catalog import: LOADED in production)
+
+PR #148 merged (`e254ec6`, store-name mapping), deploy live, then three
+dispatches of **Ops — catalog import** against `la-mattress`:
+
+| Run                           | Batch                                  | Result                                                                                                                 |
+| ----------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 3 · products commit + replace | `293a2ba2-0ad8-4ebb-aedb-710b72c1afb4` | 1,948 committed, 0 failed; replace kept 1,948, **deleted 6,013, deactivated 733**; post-commit gate 1,948 active; 96 s |
+| 4 · inventory validate        | `c6cc0ed9-81d8-4a5e-a618-a79e055a45e4` | 3,246 valid, 0 invalid (all five stores matched)                                                                       |
+| 5 · inventory commit          | `16459146-db96-404c-a5ec-ac682cdf1c87` | 3,246 committed, 0 failed; post-commit gate 3,246 levels holding 3,118 units = file 3,118; 146 s                       |
+
+- The deleted / deactivated SKU lists are in
+  `docs/imports/2026-09-03/prod-run/` (and in the `import.commit` audit rows).
+  Of the 6,013 deleted, 147 had lowercase (Shopify-style) names and 12 were
+  `shp-…` placeholders; the rest were stale STORIS SKUs from earlier files.
+- Cumulative §7 recon after run 5 (informational, spans every import to
+  date): inventory ids 4,154 / 4,154 OK; product ids source 8,692 vs db
+  2,682 (the 6,013 deleted products' refs are gone — expected); units
+  source 4,613 vs db 4,611; valuation source $831,570.82 vs db $831,446.82.
+  The unit / valuation deltas come from **908 levels (4,154 − 3,246) from
+  earlier imports at SKU@store combos today's file does not carry, still
+  holding 1,493 units (4,611 − 3,118)** — on the 733 deactivated products
+  (A18: Shopify stock not kept) and on kept SKUs at stores absent from
+  today's file. **Ops (owner) decision:** treat those as zero (a follow-up
+  job to zero levels of imported variants absent from the 2026-09-03 file)
+  or leave them.
+- Every reorder point is now 0 (`MIN_STOCK = 0` on all rows, Q3).
+- Shopify connector still `connected` / `idle` (B1 open); every imported
+  variant still has `priceCents 0` (HANDOFF §5 — the price source is now
+  the critical path).
+- `deploy-api.yml` also fires on `docs/imports/**` (a corrected file must
+  reach the deployed checkout the job reads).
