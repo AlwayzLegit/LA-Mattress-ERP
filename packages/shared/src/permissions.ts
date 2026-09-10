@@ -118,6 +118,8 @@ export const PERMISSIONS = {
   'pos.cash.open': 'Open cash drawer',
   'pos.cash.reconcile': 'Reconcile cash drawer',
   'pos.cash.approve': 'Approve an out-of-tolerance or suspended drawer count',
+  'pos.cash.pickup_confirm':
+    'Tick a cash payment as physically picked up from the store (dashboard store cards)',
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',

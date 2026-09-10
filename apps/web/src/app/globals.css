@@ -2427,3 +2427,255 @@ kbd.key {
     background: #fff;
   }
 }
+
+/* ---------- Dashboard store cards + Changes card (hand-off 2026-09-10) ---------- */
+/* One card per store: header, five-cell stat strip, two-column detail
+   (salesperson table / money received + cash pickup). Only tokens the
+   app already defines; the classes just keep the markup readable. */
+.store-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+.store-stat {
+  min-width: 0;
+  padding: 9px var(--pad);
+  border-right: 1px solid var(--border);
+}
+.store-stat:last-child {
+  border-right: 0;
+}
+.store-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.store-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.store-stat-sub {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.store-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
+  padding: var(--pad);
+}
+.store-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.store-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.store-table td {
+  padding: var(--rowy) 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.store-table tbody tr:hover td {
+  background: var(--surface2);
+}
+.store-table .num,
+.store-table th.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.manager-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.tender-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: var(--rowy) 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.tender-row:hover:not(:disabled) {
+  background: var(--surface2);
+}
+.tender-row:disabled {
+  cursor: default;
+}
+.tender-swatch {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.pickup-box {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.pickup-box.is-outstanding {
+  border-color: var(--warn);
+}
+.pickup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+.pickup-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.pickup-row:last-child {
+  border-bottom: 0;
+}
+.pickup-row.is-received {
+  background: var(--accent-soft);
+}
+.pickup-row.is-received .pickup-meta,
+.pickup-row.is-received .pickup-amount {
+  color: var(--accent-ink);
+}
+.pickup-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.pickup-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.stores-foot {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 10px var(--pad);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+.stores-foot-cell {
+  text-align: right;
+}
+.stores-foot-cell .cap {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stores-foot-cell .val {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.changes-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.changes-table th {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.changes-table td {
+  padding: var(--rowy) 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.changes-table tr.is-clickable {
+  cursor: pointer;
+}
+.changes-table tr.is-unseen td {
+  background: var(--surface2);
+}
+.changes-table tr.is-seen td {
+  opacity: 0.62;
+}
+.changes-table tbody tr:hover td {
+  background: var(--accent-soft);
+}
+@media (max-width: 1100px) {
+  .store-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .store-stat:nth-child(3n) {
+    border-right: 0;
+  }
+  .store-stat:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--border);
+  }
+  .store-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .store-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .store-stat:nth-child(3n) {
+    border-right: 1px solid var(--border);
+  }
+  .store-stat:nth-child(2n) {
+    border-right: 0;
+  }
+  .store-stat:nth-child(-n + 4) {
+    border-bottom: 1px solid var(--border);
+  }
+}

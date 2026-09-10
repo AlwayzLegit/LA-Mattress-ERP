@@ -33,11 +33,14 @@ export * from './jobs';
 export * from './exchanges';
 export * from './reporting';
 export * from './collaboration';
+export * from './store-dashboard';
 
 // List of tables that carry a `business_id` and need RLS. Kept in sync with
 // the migration script in src/migrations/rls.sql — when you add a new
 // tenant-scoped table, append it both here and in that file.
 export const TENANT_SCOPED_TABLES = [
+  'cash_pickup_receipts',
+  'order_change_acks',
   'order_tasks',
   'member_notifications',
   'order_notes',

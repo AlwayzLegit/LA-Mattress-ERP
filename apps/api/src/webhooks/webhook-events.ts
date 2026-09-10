@@ -41,6 +41,10 @@ export const WEBHOOK_EVENT_TYPES = [
   'exchange.cancelled',
   // Payload: { campaignId, name, segmentId, recipientCount }
   'campaign.sent',
+  // Payload: { paymentId, docKind, docId, docNumber, amountCents,
+  // locationId, receivedByMembershipId } — the owner's or Operations'
+  // tick that a cash payment was physically picked up (dashboard 2026-09-10).
+  'cash_pickup.confirmed',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

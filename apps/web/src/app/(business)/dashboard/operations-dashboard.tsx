@@ -1,23 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Alert, LinkButton } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { ConfirmDialog } from '@/components/shell/confirm-dialog';
 import { api } from '@/lib/api';
 import { formatRange, presetLabel, type DateRange } from '@/lib/date-range';
 import { usd } from './dashboard-kit';
-import {
-  EmptyRow,
-  KpiStrip,
-  Panel,
-  ShimmerRows,
-  StatusPill,
-  usdWhole,
-  type KpiTile,
-  type Tone,
-} from './owner/owner-kit';
+import { EmptyRow, Panel, ShimmerRows, usdWhole } from './owner/owner-kit';
+import { StoresSection } from './shared/stores-section';
 
 /**
  * The Operations home (owner 2026-08-31; Claude Design hand-off 2026-09-04).
@@ -28,11 +20,13 @@ import {
  * watching all of them at once. No goal or commission tiles: this
  * member sells occasionally and carries neither.
  *
- * Layout: KPI strip (money in / out / net / exchanges / flagged /
- * drawers), the feed panel (its border turns danger while a critical
- * row is on it), then "By store" beside "Open & close". The tender
- * split, the 14-day chart, the salesperson table, the by-person digest
- * and the store activity log sit below as panels.
+ * Layout (reworked 2026-09-10): one card per store — salespeople, money
+ * received by tender, cash awaiting pickup with the tick that says the
+ * cash was handed over — then the feed panel (its border turns danger
+ * while a critical row is on it). The tender split, the 14-day chart,
+ * the salesperson table, the by-person digest and the store activity
+ * log sit below as panels. Discount rows stay off this feed (owner
+ * 2026-09-10); the threshold still lives under Settings → Operations.
  *
  * Each card fetches on its own and hides itself on a 403, so a member
  * with a narrower grant sees a smaller page rather than an error.
@@ -172,10 +166,6 @@ function ago(iso: string): string {
 }
 
 /** "−$84.50" / "$12.00" — a signed exact amount for variances. */
-function signedUsd(cents: number): string {
-  return cents < 0 ? `−${usd(Math.abs(cents))}` : usd(cents);
-}
-
 /** The severity dot: colour is the data. */
 function SeverityDot({ severity }: { severity: Severity }) {
   return (
@@ -195,20 +185,6 @@ function SeverityDot({ severity }: { severity: Severity }) {
 }
 
 const MUTED_CELL: CSSProperties = { color: 'var(--text2)' };
-
-/** Drawer state → pill tone + label, per the design's Open & close list. */
-function drawerMeta(r: RitualRow): { label: string; tone: Tone } {
-  if (r.drawerSuspended) return { label: 'suspended', tone: 'danger' };
-  if (r.drawerOpen) return { label: 'open', tone: 'info' };
-  if (r.drawerClosed) return { label: 'closed', tone: 'ok' };
-  return { label: 'never opened', tone: 'muted' };
-}
-
-function closeoutNote(r: RitualRow): string {
-  if (r.drawerSuspended) return 'needs a manager close';
-  if (r.closeoutRan) return `close-out ran · ${r.closeoutExceptions} flagged`;
-  return 'close-out not run';
-}
 
 export default function OperationsDashboardView({ userName }: { userName: string }) {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -236,8 +212,11 @@ export default function OperationsDashboardView({ userName }: { userName: string
       const r = await api<{ rows: FeedRow[]; total: number; thresholds: Thresholds }>(
         '/v1/dashboard/operations/feed?limit=100',
       );
-      setFeed(r.rows);
-      setFeedTotal(r.total);
+      // Owner 2026-09-10: "Discount over N%" rows come off this home. The
+      // API still emits them for Settings and the exceptions page.
+      const rows = r.rows.filter((row) => row.subjectType !== 'discount');
+      setFeed(rows);
+      setFeedTotal(Math.max(0, r.total - (r.rows.length - rows.length)));
       setThresholds(r.thresholds);
     } catch {
       setFeed([]);
@@ -313,83 +292,9 @@ export default function OperationsDashboardView({ userName }: { userName: string
 
   const loading = !summary;
   const money = summary?.money;
-  const ritual = summary?.ritual ?? [];
 
-  // ---- KPI strip -------------------------------------------------------
   const critical = (feed ?? []).filter((r) => r.severity === 'critical').length;
-  const warning = (feed ?? []).filter((r) => r.severity === 'warning').length;
   const hasCritical = critical > 0;
-  const drawersOpen = ritual.filter((r) => r.drawerOpen).length;
-  const worstVariance = ritual
-    .filter((r) => r.varianceCents != null && r.varianceCents !== 0)
-    .sort((a, b) => Math.abs(b.varianceCents ?? 0) - Math.abs(a.varianceCents ?? 0))[0];
-
-  const tiles: KpiTile[] = [
-    {
-      key: 'in',
-      label: 'Money in',
-      value: money ? usdWhole(money.inCents) : '',
-      sub: money
-        ? `${money.byTender.length} tender${money.byTender.length === 1 ? '' : 's'} · every store`
-        : '',
-      href: '/sales',
-      testid: 'ops-kpi-in',
-    },
-    {
-      key: 'out',
-      label: 'Money out',
-      value: money ? usdWhole(money.outCents) : '',
-      sub: money
-        ? `${usdWhole(money.out.refundsCents)} refunds · ${usdWhole(money.out.returnsCents)} returns · ${usdWhole(money.out.writeOffsCents)} write-offs`
-        : '',
-      href: '/returns',
-      tone: money && money.outCents > 0 ? 'danger' : undefined,
-      testid: 'ops-kpi-out',
-    },
-    {
-      key: 'net',
-      label: 'Net',
-      value: money ? usdWhole(money.netCents) : '',
-      sub: 'in − out',
-      href: '/reports',
-      testid: 'ops-kpi-net',
-    },
-    {
-      key: 'exchanges',
-      label: 'Exchanges',
-      value: money ? String(money.exchanges.count) : '',
-      sub: money ? `${usdWhole(money.exchanges.restockingFeeCents)} restocking fees` : '',
-      href: '/exchanges',
-      testid: 'ops-kpi-exchanges',
-    },
-    {
-      key: 'flagged',
-      label: 'Flagged items',
-      value: String(feedTotal),
-      sub:
-        feed == null
-          ? 'loading…'
-          : feedTotal === 0
-            ? 'nothing to review'
-            : `${critical} critical · ${warning} warning`,
-      href: '/exceptions',
-      tone: feedTotal > 0 ? 'danger' : undefined,
-      testid: 'ops-kpi-flagged',
-    },
-    {
-      key: 'drawers',
-      label: 'Drawers open',
-      value: summary ? `${drawersOpen} / ${ritual.length}` : '',
-      sub: worstVariance
-        ? `${worstVariance.locationName} ${(worstVariance.varianceCents ?? 0) < 0 ? 'short' : 'over'} ${usd(Math.abs(worstVariance.varianceCents ?? 0))}`
-        : ritual.some((r) => r.drawerSuspended)
-          ? 'a drawer is suspended'
-          : 'no variances',
-      href: '/shifts',
-      testid: 'ops-kpi-drawers',
-    },
-  ];
-
   const feedTitle =
     feedTotal === 0
       ? 'Nothing needs you today'
@@ -439,8 +344,8 @@ export default function OperationsDashboardView({ userName }: { userName: string
     >
       {header}
 
-      {/* ---- KPI strip: money in the window, plus the feed and the drawers ---- */}
-      <KpiStrip tiles={tiles} loading={loading} />
+      {/* ---- Store cards (hand-off 2026-09-10): every store, month to date or today ---- */}
+      <StoresSection locationIds={null} />
 
       {/* ---- The feed. Everything else on this page is context for it. ---- */}
       <Panel
@@ -596,69 +501,6 @@ export default function OperationsDashboardView({ userName }: { userName: string
           </>
         )}
       </Panel>
-
-      {/* ---- By store beside Open & close ---- */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)',
-          gap: 18,
-        }}
-        className="ops-grid"
-      >
-        <Panel
-          title="By store"
-          sub={`${windowLabel(range)} · click a store for its orders`}
-          testid="ops-by-store-panel"
-        >
-          {loading ? <ShimmerRows rows={5} /> : <StoreTable rows={summary.byStore} />}
-        </Panel>
-
-        <Panel title="Open & close" sub="today" testid="ops-ritual-panel">
-          {loading ? (
-            <ShimmerRows rows={5} />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }} data-testid="ops-ritual">
-              {ritual.length === 0 && <EmptyRow>No stores yet.</EmptyRow>}
-              {ritual.map((r) => {
-                const drawer = drawerMeta(r);
-                const v = r.varianceCents;
-                return (
-                  <div
-                    key={r.locationId}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto',
-                      gap: 8,
-                      padding: 'var(--rowy) var(--pad)',
-                      borderBottom: '1px solid var(--border)',
-                      fontSize: 12.5,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{r.locationName}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{closeoutNote(r)}</div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span
-                        className="mono"
-                        style={{
-                          fontSize: 12,
-                          color: v != null && v < 0 ? 'var(--danger)' : 'var(--muted)',
-                        }}
-                      >
-                        {v == null ? '' : v === 0 ? 'balanced' : signedUsd(v)}
-                      </span>
-                      <StatusPill tone={drawer.tone}>{drawer.label}</StatusPill>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
-      </div>
 
       {/* ---- Tender split beside the 14-day written chart ---- */}
       <div
@@ -853,137 +695,6 @@ export default function OperationsDashboardView({ userName }: { userName: string
 
       <style>{`@media (max-width: 1000px) { .ops-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
     </div>
-  );
-}
-
-/**
- * By store — the window, with each store expandable to the orders and
- * register sales behind its Written number (owner 2026-09-02): order #,
- * written, profit, margin. Cost is standard cost of the lines; profit is
- * merchandise minus cost (tax, delivery and fees excluded); margin is
- * profit over written, per the design.
- */
-function StoreTable({ rows }: { rows: StoreRow[] }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const margin = (profit: number, written: number): number | null =>
-    written > 0 ? Math.round((profit / written) * 100) : null;
-  const marginCell = (m: number | null) => (
-    <span
-      style={{ color: m == null ? 'var(--muted)' : m < 33 ? 'var(--warn)' : 'var(--accent-ink)' }}
-    >
-      {m == null ? '—' : `${m}%`}
-    </span>
-  );
-  return (
-    <table className="dt dt-static" data-testid="ops-by-store">
-      <thead>
-        <tr>
-          <th className="first">Store</th>
-          <th className="num">Written</th>
-          <th className="num">Orders</th>
-          <th className="num">Profit</th>
-          <th className="num">Margin</th>
-          <th className="num last">Refunded</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 && <EmptyRow colSpan={6}>No stores yet.</EmptyRow>}
-        {rows.map((s) => {
-          const expandable = s.documents.length > 0;
-          const isOpen = !!open[s.locationId];
-          return (
-            <Fragment key={s.locationId}>
-              <tr
-                className={expandable ? 'is-clickable' : undefined}
-                style={isOpen ? { background: 'var(--surface2)' } : undefined}
-                onClick={() =>
-                  expandable && setOpen((o) => ({ ...o, [s.locationId]: !o[s.locationId] }))
-                }
-                data-testid="ops-store-row"
-                aria-expanded={expandable ? isOpen : undefined}
-                title={expandable ? undefined : 'Nothing written in the window'}
-              >
-                <td className="first" style={{ fontWeight: 500 }}>
-                  <span
-                    aria-hidden
-                    style={{
-                      display: 'inline-block',
-                      width: 14,
-                      color: 'var(--muted)',
-                      fontSize: 10,
-                      visibility: expandable ? 'visible' : 'hidden',
-                    }}
-                  >
-                    {isOpen ? '▼' : '▶'}
-                  </span>
-                  {s.locationName}
-                </td>
-                <td className="num">{usd(s.writtenCents)}</td>
-                <td className="num" style={{ color: 'var(--muted)' }}>
-                  {s.writtenCount}
-                </td>
-                <td
-                  className="num"
-                  style={{ color: s.profitCents < 0 ? 'var(--danger)' : undefined }}
-                  title={s.writtenCount > 0 ? `cost ${usd(s.costCents)}` : undefined}
-                >
-                  {s.writtenCount > 0 ? usd(s.profitCents) : '—'}
-                </td>
-                <td className="num">
-                  {marginCell(s.writtenCount > 0 ? margin(s.profitCents, s.writtenCents) : null)}
-                </td>
-                <td className="num last" style={{ color: 'var(--muted)' }}>
-                  {s.refundedCents > 0 ? usd(s.refundedCents) : '—'}
-                </td>
-              </tr>
-              {isOpen &&
-                s.documents.map((d) => (
-                  <tr
-                    key={d.id}
-                    style={{ background: 'var(--surface2)' }}
-                    data-testid="ops-store-doc"
-                  >
-                    <td
-                      className="first"
-                      style={{ paddingLeft: 38, paddingTop: 5, paddingBottom: 5 }}
-                    >
-                      <Link
-                        href={d.kind === 'sale' ? `/sales/${d.id}` : `/orders/${d.id}`}
-                        className="mono"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {d.number}
-                      </Link>{' '}
-                      <span style={{ color: 'var(--muted)' }}>
-                        {d.customerName ?? (d.kind === 'sale' ? 'Register sale' : 'Walk-in')}
-                      </span>
-                    </td>
-                    <td className="num" style={{ paddingTop: 5, paddingBottom: 5 }}>
-                      {usd(d.writtenCents)}
-                    </td>
-                    <td />
-                    <td
-                      className="num"
-                      style={{
-                        paddingTop: 5,
-                        paddingBottom: 5,
-                        color: d.profitCents < 0 ? 'var(--danger)' : undefined,
-                      }}
-                      title={`cost ${usd(d.costCents)}`}
-                    >
-                      {usd(d.profitCents)}
-                    </td>
-                    <td className="num" style={{ paddingTop: 5, paddingBottom: 5 }}>
-                      {marginCell(margin(d.profitCents, d.writtenCents))}
-                    </td>
-                    <td />
-                  </tr>
-                ))}
-            </Fragment>
-          );
-        })}
-      </tbody>
-    </table>
   );
 }
 

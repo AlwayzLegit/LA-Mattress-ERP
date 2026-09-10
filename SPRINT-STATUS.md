@@ -5079,3 +5079,47 @@ inside `and()`, and `AND` binds tighter than `OR`, so any variant match
 returned the row regardless of the vendor, category (and now active) filters —
 now bracketed. `product-stock.int.spec.ts` +1 (10); catalog (24),
 product-filters (12) and catalog-cleanup (11) specs still green.
+
+### Checkpoint — 2026-09-10 (dashboard rework step 1: store cards + Changes card)
+
+Owner hand-off `design_handoff_dashboards_sep10` (four role homes + nav),
+shipped in the README's order: step 1 = store cards + Changes card; step 2
+(staff schedule + time clock strip) waits on the schedule/punch tables and
+lands as its own PR. Owner decisions 2026-09-10: tender rows are the live
+`payments.method` values (one row each); the store manager is the member
+with the manager-dashboard toggle on whose store access lists the store
+(option B); the Changes card is derived from `audit_logs` (option A); the
+Warehouse home gets no store card; the sidebar is unchanged (the live nav
+never had Schedule / Time clock / Timesheets items).
+
+- Schema: `cash_pickup_receipts` (one per ticked cash payment: when, which
+  member) and `order_change_acks` (per-member seen tick keyed by audit row),
+  migration 0090, both in `TENANT_SCOPED_TABLES` + `rls.sql`.
+- Permission `pos.cash.pickup_confirm` — Owner + Operations only (Manager
+  excluded by name); existing tenants pick it up from the boot-time role sync.
+- API (`apps/api/src/reports/`): `GET /v1/dashboard/stores?period=mtd|today`
+  (per store: written / delivered / avg ticket / money received by tender /
+  cash awaiting pickup, salesperson rows with the manager badge, one row per
+  cash payment with its receipt, footer totals, `viewer.canConfirmCashPickup`);
+  `GET /v1/dashboard/stores/:id/payments?method=`; `PUT`/`DELETE
+/v1/dashboard/cash-pickups/:paymentId` + `POST …/bulk` (audited, webhook
+  `cash_pickup.confirmed`); `GET /v1/dashboard/changes?filter=all|money|unseen`
+  - `PUT`/`DELETE …/:id/seen` + `POST …/seen-all`. Written = orders created in
+    the window; Delivered = orders whose delivery reached `delivered` in the
+    window; money received = every succeeded payment on orders, POS sales and
+    service tickets at the store. Imported documents excluded (D8).
+- Web: `dashboard/shared/` — `stores-section`, `store-card`,
+  `payment-list-dialog`, `changes-card`, `kit`, `types`; owner home drops the
+  orders table (file deleted) and low-stock card for the store cards + the
+  full-width Changes card; manager home drops the KPI strip, Sales by day and
+  Low stock here for its own store card; operations home drops the KPI strip,
+  By store and Open & close for every store's card and no longer lists
+  "Discount over N%" feed rows. Card styling lives in `globals.css`
+  (`.store-*`, `.pickup-*`, `.changes-table`) on the existing tokens.
+- Tests: `store-dashboard.int.spec.ts` (17; CI db `jetnine_store_dashboard`);
+  `e2e/operations.spec.ts` now asserts the store cards instead of the tiles.
+- Known limits of the audit-derived log: `order.update` records no prior
+  discount/fee value, so those rows show the new value with "—" for impact;
+  payment voids, tender changes and restocking-fee waivers have no audit
+  action yet and cannot appear until those flows write one. Salesperson
+  rows attribute an order in full to its primary salesperson (no split).

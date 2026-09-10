@@ -150,6 +150,8 @@ DECLARE
     'order_notes',
     'order_tasks',
     'member_notifications',
+    'cash_pickup_receipts',
+    'order_change_acks',
     'delivery_runs',
     'serial_units',
     'payment_plans',

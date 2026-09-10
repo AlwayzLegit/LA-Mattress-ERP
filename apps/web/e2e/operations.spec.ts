@@ -133,12 +133,11 @@ test.describe('Operations dashboard', () => {
     await expect(writeDown).toHaveCount(1);
     await expect(writeDown).toContainText('Damage write-down');
 
-    // The money tiles render underneath, all stores, no store picker.
-    await expect(page.getByTestId('ops-kpi-in')).toBeVisible();
-    await expect(page.getByTestId('ops-kpi-out')).toBeVisible();
-    await expect(page.getByTestId('ops-kpi-net')).toBeVisible();
-    await expect(page.getByTestId('ops-kpi-exchanges')).toBeVisible();
-    await expect(page.getByTestId('ops-by-store')).toBeVisible();
+    // The store cards lead the page (hand-off 2026-09-10): every store,
+    // no store picker, each with its cash-pickup block.
+    await expect(page.getByTestId('stores-section')).toBeVisible();
+    await expect(page.getByTestId('store-card').first()).toBeVisible();
+    await expect(page.getByTestId('cash-pickup').first()).toBeVisible();
 
     // Read it, clear it.
     const before = await feedRows.count();

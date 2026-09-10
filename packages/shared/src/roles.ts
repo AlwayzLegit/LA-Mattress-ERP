@@ -29,6 +29,9 @@ const managerExclusions = new Set<Permission>([
   'users.disable',
   // Owner 2026-09-02: removing a member is the owner's call.
   'users.delete',
+  // Owner 2026-09-10: confirming a cash pickup is the owner's or
+  // Operations' tick, never the store's own manager's.
+  'pos.cash.pickup_confirm',
 ]);
 
 const managerPermissions: Permission[] = businessPermissions.filter(
@@ -47,9 +50,12 @@ const managerPermissions: Permission[] = businessPermissions.filter(
  * no quota and no commission permission.
  */
 const operationsPermissions: Permission[] = [
-  // The dashboard and its sign-off verb.
+  // The dashboard and its sign-off verbs.
   'ops.dashboard.view',
   'ops.review.clear',
+  // Owner 2026-09-10: the tick that says the cash was physically handed
+  // over, stamped with the member who confirmed it.
+  'pos.cash.pickup_confirm',
 
   // The audit surfaces the feed links into.
   'audit.view',
