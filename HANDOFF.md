@@ -166,11 +166,12 @@ from the members page and use the copy-link.
 
 ## 5. Known-real problems that are NOT fixed
 
-**The 2026-09-03 catalog files are not loaded yet.** Products and inventory are in
-`docs/imports/2026-09-03/`; the loader and its workflow exist (§2) but nothing has been
-dispatched against production. Owner prerequisites before the commit runs: a verified
-database backup, registers' offline queues drained, no physical count open. Note the
-inventory file carries `MIN_STOCK = 0` on every row, so every reorder point becomes 0.
+**The 2026-09-03 catalog is loaded (2026-09-10).** Products commit + replace: 1,948
+kept, 6,013 deleted, 733 deactivated; inventory: 3,246 levels, 3,118 units, gates
+matched. Batch ids and the SKU lists are in `SPRINT-STATUS.md` (2026-09-10 checkpoint)
+and `docs/imports/2026-09-03/prod-run/`. Open from that run: 908 levels from earlier
+imports at combos the file does not carry still hold 1,493 units (owner decision), every
+reorder point is 0 (`MIN_STOCK = 0`), and the Shopify connector is still connected.
 
 **The cutover blocker: every STORIS-imported variant has `priceCents: 0`.** This is D12
 behaving as designed (register-side price entry), but it means the catalog cannot sell
