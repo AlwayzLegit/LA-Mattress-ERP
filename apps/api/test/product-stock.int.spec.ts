@@ -307,6 +307,35 @@ describe('GET /v1/products — STORIS columns (A19)', () => {
     });
   });
 
+  it('hides deactivated products unless includeInactive is set (browse and search)', async () => {
+    await as(ownerCookie)
+      .patch(`/v1/products/${bareProductId}`)
+      .send({ isActive: false })
+      .expect(200);
+    const has = (body: { data: { id: string }[] }) => body.data.some((r) => r.id === bareProductId);
+    expect(has((await as(ownerCookie).get('/v1/products').expect(200)).body)).toBe(false);
+    expect(has((await as(ownerCookie).get('/v1/products?q=BARE').expect(200)).body)).toBe(false);
+    expect(
+      has((await as(ownerCookie).get('/v1/products?includeInactive=1').expect(200)).body),
+    ).toBe(true);
+    expect(
+      has((await as(ownerCookie).get('/v1/products?q=BARE&includeInactive=1').expect(200)).body),
+    ).toBe(true);
+    // The live product is unaffected either way.
+    const live = await as(ownerCookie).get('/v1/products').expect(200);
+    expect(live.body.data.some((r: { id: string }) => r.id === productId)).toBe(true);
+    // A variant match must not smuggle a row past the other filters either
+    // (the search predicate's OR needs its brackets).
+    const otherStore = await as(ownerCookie)
+      .get(`/v1/products?q=BARE&includeInactive=1&locationId=${storeId}`)
+      .expect(200);
+    expect(has(otherStore.body)).toBe(true);
+    await as(ownerCookie)
+      .patch(`/v1/products/${bareProductId}`)
+      .send({ isActive: true })
+      .expect(200);
+  });
+
   it('search results carry the same columns; cost is hidden without products.cost.view', async () => {
     const res = await as(cashierCookie).get('/v1/products?q=MICAH').expect(200);
     const row = res.body.data.find((r: { id: string }) => r.id === productId);

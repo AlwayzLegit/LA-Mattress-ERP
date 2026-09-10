@@ -161,6 +161,11 @@ export class CatalogProductsController {
    * List products. Query params:
    *   q         — full-text search across products + variants (tsvector)
    *   categoryId — restrict to a category
+   *   locationId — narrow every stock column to one store
+   *   includeInactive — '1' to include deactivated products; by default the
+   *                     browser lists only what is still sellable (owner
+   *                     2026-09-10: the catalog replace retired 733 listings
+   *                     and they crowded out the live ones)
    *   limit      — 1..200, default 50
    */
   @Get()
@@ -171,11 +176,14 @@ export class CatalogProductsController {
     @Query('categoryId') categoryId?: string,
     @Query('vendorId') vendorId?: string,
     @Query('locationId') locationId?: string,
+    @Query('includeInactive') includeInactiveStr?: string,
     @Query('limit') limitStr?: string,
     @Query('cursor') cursorStr?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
+    const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
     const filters: ReturnType<typeof and>[] = [];
+    if (!includeInactive) filters.push(eq(schema.products.isActive, true));
     if (categoryId) filters.push(eq(schema.products.categoryId, categoryId));
     // Vendor (owner 2026-09-02): the vendors page's "products we carry"
     // count opens here. Same rule as the Add Product popup.
@@ -200,12 +208,15 @@ export class CatalogProductsController {
         .where(
           and(
             ...filters,
-            sql`${schema.products.searchTsv} @@ ${tsq}
+            // Parenthesised: without the brackets the OR binds looser than
+            // the AND `and()` puts between the filters, so a variant match
+            // would smuggle a row past the active / vendor / category ones.
+            sql`(${schema.products.searchTsv} @@ ${tsq}
                 OR EXISTS (
                   SELECT 1 FROM ${schema.productVariants} v
                   WHERE v.product_id = ${schema.products.id}
                     AND v.search_tsv @@ ${tsq}
-                )`,
+                ))`,
           ),
         )
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))

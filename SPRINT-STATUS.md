@@ -5067,3 +5067,15 @@ Settings and View Product Activity. Built as PLAN-POS-OPERATIONS §12.15.
 - Open: ATP date/qty, suggested retail and inventory type have no ERP
   counterpart (§12.15 "Not modelled"); purchase status does not yet block a
   PO line.
+
+### Checkpoint — 2026-09-10 (products list hides inactive; search predicate bracketed)
+
+Owner: "hide inactive products." `GET /v1/products` now filters to
+`is_active` unless `includeInactive=1`; the browser gains a "Show inactive"
+tick (off by default) and an empty state that names it. Fixing it surfaced a
+latent bug in the same query: the search branch's
+`products.search_tsv @@ tsq OR EXISTS (variant match)` was unparenthesised
+inside `and()`, and `AND` binds tighter than `OR`, so any variant match
+returned the row regardless of the vendor, category (and now active) filters —
+now bracketed. `product-stock.int.spec.ts` +1 (10); catalog (24),
+product-filters (12) and catalog-cleanup (11) specs still green.

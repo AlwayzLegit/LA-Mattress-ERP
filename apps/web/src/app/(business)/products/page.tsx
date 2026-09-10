@@ -66,15 +66,19 @@ export default function ProductsPage() {
   const [q, setQ] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationId, setLocationId] = useState('');
+  // Owner 2026-09-10: the catalog replace retired 733 listings; the browser
+  // lists what is still sellable unless you ask for the rest.
+  const [includeInactive, setIncludeInactive] = useState(false);
   // Vendor door (owner 2026-09-02): /products?vendorId=…&vendor=Name from
   // the vendors page's "products we carry" count.
   const [vendor, setVendor] = useState<{ id: string; name: string } | null>(null);
   const { rows, error } = list;
 
-  const params = (query: string, v = vendor, loc = locationId) => ({
+  const params = (query: string, v = vendor, loc = locationId, inactive = includeInactive) => ({
     ...(query ? { q: query } : {}),
     ...(v ? { vendorId: v.id } : {}),
     ...(loc ? { locationId: loc } : {}),
+    ...(inactive ? { includeInactive: '1' } : {}),
   });
 
   useEffect(() => {
@@ -82,7 +86,7 @@ export default function ProductsPage() {
     const vendorId = sp.get('vendorId');
     const v = vendorId ? { id: vendorId, name: sp.get('vendor') ?? 'vendor' } : null;
     setVendor(v);
-    void list.load(params('', v, ''));
+    void list.load(params('', v, '', false));
     api<Location[]>('/v1/business/locations')
       .then((rows) => setLocations(rows.filter((l) => l.isActive)))
       .catch(() => setLocations([]));
@@ -97,6 +101,11 @@ export default function ProductsPage() {
   function changeLocation(loc: string) {
     setLocationId(loc);
     void list.load(params(q, vendor, loc));
+  }
+
+  function toggleInactive(next: boolean) {
+    setIncludeInactive(next);
+    void list.load(params(q, vendor, locationId, next));
   }
 
   // Owner 2026-08-31: delete straight from the list — same endpoint as
@@ -170,6 +179,15 @@ export default function ProductsPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
+          <label className="muted flex items-center gap-1.5 whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(e) => toggleInactive(e.target.checked)}
+              data-testid="products-include-inactive"
+            />
+            Show inactive
+          </label>
           <Button type="submit" variant="secondary" size="sm">
             Search
           </Button>
@@ -219,7 +237,13 @@ export default function ProductsPage() {
         ) : rows.length === 0 ? (
           <Card>
             <EmptyState
-              title={q ? `No products match "${q}"` : 'No products yet'}
+              title={
+                q
+                  ? `No products match "${q}"`
+                  : includeInactive
+                    ? 'No products yet'
+                    : 'No active products'
+              }
               action={
                 q ? (
                   <Button
@@ -240,7 +264,9 @@ export default function ProductsPage() {
                 )
               }
             >
-              Create a product or import a CSV below.
+              {includeInactive
+                ? 'Create a product or import a CSV below.'
+                : 'Tick "Show inactive" to include deactivated products, or create one below.'}
             </EmptyState>
           </Card>
         ) : (
