@@ -35,6 +35,7 @@ import {
   type StockTotals,
 } from './product-stock';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
+import { loadCategoryIndex } from './category-tree';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
 /** Connector syncs write import batches under their provider name. */
@@ -96,6 +97,8 @@ interface ProductListRow {
   brandName: string | null;
   /** A21 addendum: STORIS Search for a Product leads with the category and ends with the collection. */
   categoryName: string | null;
+  /** A22.1: the full nested name, "Mattresses › Hybrid". */
+  categoryPath: string | null;
   collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
@@ -154,6 +157,8 @@ interface ProductOut {
   shipping: ProductShipping;
   brandName: string | null;
   categoryName: string | null;
+  /** A22.1: the full nested name, "Mattresses › Hybrid". */
+  categoryPath: string | null;
   collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
@@ -285,7 +290,11 @@ export class CatalogProductsController {
     const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
     const filters: ReturnType<typeof and>[] = [];
     if (!includeInactive) filters.push(eq(schema.products.isActive, true));
-    if (categoryId) filters.push(eq(schema.products.categoryId, categoryId));
+    if (categoryId) {
+      // A22.1: categories nest — picking "Mattresses" returns the hybrids too.
+      const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+      filters.push(inArray(schema.products.categoryId, categoryIndex.treeIds(categoryId)));
+    }
     // Vendor (owner 2026-09-02): the vendors page's "products we carry"
     // count opens here. Same rule as the Add Product popup.
     if (vendorId) {
@@ -429,6 +438,7 @@ export class CatalogProductsController {
       .select({
         id: schema.products.id,
         purchaseStatus: schema.products.purchaseStatus,
+        categoryId: schema.products.categoryId,
         brandName: schema.brands.name,
         categoryName: schema.categories.name,
         collectionName: schema.collections.name,
@@ -465,6 +475,7 @@ export class CatalogProductsController {
       }
     }
     const extra = new Map(products.map((p) => [p.id, p]));
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
     const totals = await loadProductStockTotals(this.db, tenant.businessId!, ids, locationId);
     return rows.map((r) => {
       const p = extra.get(r.id);
@@ -478,6 +489,7 @@ export class CatalogProductsController {
         purchaseStatus: p?.purchaseStatus ?? 'active',
         brandName: p?.brandName ?? null,
         categoryName: p?.categoryName ?? null,
+        categoryPath: categoryIndex.pathOf(p?.categoryId),
         collectionName: p?.collectionName ?? null,
         vendorName: v?.vendorName ?? null,
         vendorModel: v?.vendorSku ?? null,
@@ -770,6 +782,9 @@ export class CatalogProductsController {
       shipping: parseShipping(p.shippingJson),
       brandName: brand?.name ?? null,
       categoryName: category?.name ?? null,
+      categoryPath: p.categoryId
+        ? (await loadCategoryIndex(this.db, tenant.businessId!)).pathOf(p.categoryId)
+        : null,
       collectionName: collection?.name ?? null,
       vendorName: vendor?.name ?? null,
       vendorModel: primary?.vendorSku ?? null,
