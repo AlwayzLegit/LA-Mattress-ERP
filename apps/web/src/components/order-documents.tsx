@@ -14,6 +14,8 @@ export interface OrderDocumentPayload {
   business: {
     name: string;
     logoUrl: string | null;
+    /** Settings → Branding accent (#rrggbb) — the invoice's brand color. */
+    accentColor: string | null;
     invoiceHeaderNote: string | null;
     invoiceFooterNote: string | null;
   };
@@ -368,6 +370,95 @@ export function LineInstructions({
   );
 }
 
+/**
+ * §11 Invoice / Sales Order — modern clean layout (owner 2026-09-11):
+ * tenant logo + brand accent, a balance callout the customer sees first,
+ * Sold to / Ship to / Order details cards, a rule-only line grid and a
+ * totals card. Same data as the STORIS replica it replaces (every field
+ * of §11 and its amendments still prints); Letter paper, multi-page safe
+ * (the grid header repeats, rows never split). The Exchange Order shares
+ * the shell (title, Original Invoice #, Credit Due).
+ */
+const DEFAULT_ACCENT = '#1f2937';
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+
+/** Brand accent from Settings → Branding, or a neutral slate. */
+export function invoiceAccent(hex: string | null | undefined): string {
+  return hex && HEX_RE.test(hex) ? hex.toLowerCase() : DEFAULT_ACCENT;
+}
+
+function hexRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+/** Light wash of the accent for notice bars (mixes toward white). */
+function tint(hex: string, amount = 0.9): string {
+  const [r, g, b] = hexRgb(hex);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
+
+/** Black or white text, whichever reads on the accent (WCAG luminance). */
+export function onAccent(hex: string): string {
+  const [r, g, b] = hexRgb(hex);
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return lum > 0.4 ? '#111111' : '#ffffff';
+}
+
+const INVOICE_CSS = `
+@page { size: letter; margin: 0.5in; }
+.inv { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.inv table { border-collapse: collapse; width: 100%; }
+.inv thead { display: table-header-group; }
+.inv tr, .inv .inv-card { break-inside: avoid; page-break-inside: avoid; }
+.inv .inv-lines tbody tr:nth-child(even) td { background: #f8f9fa; }
+.inv .inv-num { font-variant-numeric: tabular-nums; }
+@media print {
+  .inv { padding: 0 !important; max-width: none !important; }
+}
+`;
+
+const FONT = '-apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif';
+const MUTED = '#6b7280';
+const RULE = '#e5e7eb';
+
+const cardStyle: React.CSSProperties = {
+  border: `1px solid ${RULE}`,
+  borderRadius: 6,
+  padding: '10px 12px',
+  minWidth: 0,
+};
+const cardLabel: React.CSSProperties = {
+  fontSize: 9.5,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: MUTED,
+  marginBottom: 4,
+};
+const th: React.CSSProperties = {
+  fontSize: 9.5,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  textAlign: 'left',
+  padding: '6px 8px',
+};
+const td: React.CSSProperties = {
+  padding: '7px 8px',
+  borderBottom: `1px solid ${RULE}`,
+  verticalAlign: 'top',
+  fontSize: 11,
+};
+
 /** §11 Invoice / Sales Order. */
 export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; printedAt: Date }) {
   const o = doc.order;
@@ -391,183 +482,267 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
   const gridLines =
     fam?.lines ?? doc.lines.map((l) => ({ ...l, pieceNumber: o.number, takenWith: false }));
   const recyclingCents = gridLines.filter(isRecyclingLine).reduce((n, l) => n + l.totalCents, 0);
+  const accent = invoiceAccent(doc.business.accentColor);
+  const accentText = onAccent(accent);
+  const creditDue = !fam && o.creditDueCents > 0;
+  // The callout the customer reads first: what they still owe, what we
+  // owe them (exchange), or that the order is settled.
+  const callout = creditDue
+    ? { label: 'Credit due', value: usd(o.creditDueCents) }
+    : money.balanceDueCents > 0
+      ? { label: 'Amount due', value: usd(money.balanceDueCents) }
+      : { label: 'Paid in full', value: null };
+  const payments = o.payments.filter((p) => p.status === 'succeeded');
+
   return (
     <div
+      className="inv"
+      data-testid="invoice-doc"
       style={{
         background: '#fff',
-        color: '#000',
-        fontFamily: 'Arial, Helvetica, sans-serif',
-        fontSize: 12,
-        maxWidth: 780,
+        color: '#111',
+        fontFamily: FONT,
+        fontSize: 11.5,
+        lineHeight: 1.4,
+        maxWidth: 800,
         margin: '0 auto',
-        padding: 24,
+        padding: 32,
       }}
     >
-      {/* Header: logo + store block | header note | order # + date boxes */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
+      <style>{INVOICE_CSS}</style>
+
+      {/* Header: identity left, document right, accent rule beneath */}
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 24,
+          alignItems: 'flex-start',
+          paddingBottom: 14,
+          borderBottom: `3px solid ${accent}`,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
           {doc.business.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={doc.business.logoUrl}
               alt={doc.business.name}
-              style={{ maxHeight: 48, maxWidth: 200, marginBottom: 4 }}
+              style={{ maxHeight: 56, maxWidth: 220, display: 'block', marginBottom: 6 }}
             />
           ) : (
-            <div style={{ fontSize: 18, fontWeight: 700 }}>{doc.business.name}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: accent, marginBottom: 4 }}>
+              {doc.business.name}
+            </div>
           )}
-          <div style={{ fontSize: 11 }}>
-            {doc.location && <div style={{ fontWeight: 700 }}>{doc.location.name}</div>}
+          <div style={{ fontSize: 11, color: '#374151' }}>
+            {doc.location && (
+              <div style={{ fontWeight: 600, color: '#111' }}>{doc.location.name}</div>
+            )}
             <StoreAddress addressJson={doc.location?.addressJson} />
           </div>
         </div>
-        <div style={{ flex: 1, textAlign: 'center', paddingTop: 6 }}>
-          {doc.business.invoiceHeaderNote && (
-            <div style={{ fontWeight: 700, fontSize: 12, border: '1px solid #000', padding: 6 }}>
-              {doc.business.invoiceHeaderNote}
+        <div style={{ textAlign: 'right', flex: 'none' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em', color: accent }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 13, marginTop: 2 }} className="inv-num">
+            <span style={{ color: MUTED }}>№</span>{' '}
+            <strong data-testid="invoice-number">{docNumber}</strong>
+          </div>
+          {fam && (
+            <div style={{ fontSize: 9.5, color: MUTED }}>Covers {fam.numbers.join(' + ')}</div>
+          )}
+          {doc.originalOrderNumber && (
+            <div style={{ fontSize: 10.5, marginTop: 2 }}>
+              <span style={{ color: MUTED }}>Original invoice</span>{' '}
+              <strong>{doc.originalOrderNumber}</strong>
             </div>
           )}
-        </div>
-        <div style={{ width: 200 }}>
-          <div style={{ ...box, textAlign: 'center', marginBottom: 6 }}>
-            <div style={label}>{title} #</div>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>{docNumber}</div>
-            {fam && (
-              <div style={{ fontSize: 9, marginTop: 2 }}>Covers {fam.numbers.join(' + ')}</div>
+          <div style={{ fontSize: 10.5, color: MUTED, marginTop: 6 }} className="inv-num">
+            <div>
+              Document date{' '}
+              <span style={{ color: '#111' }}>{new Date(o.createdAt).toLocaleDateString()}</span>
+            </div>
+            <div>
+              Scheduled <span style={{ color: '#111' }}>{doc.scheduledDate ?? '—'}</span>
+            </div>
+          </div>
+          <div
+            data-testid="invoice-callout"
+            style={{
+              display: 'inline-block',
+              marginTop: 10,
+              padding: callout.value ? '8px 14px' : '6px 12px',
+              borderRadius: 6,
+              background: callout.value ? accent : tint(accent, 0.85),
+              color: callout.value ? accentText : '#111',
+              textAlign: 'right',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9.5,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                opacity: callout.value ? 0.85 : 1,
+              }}
+            >
+              {callout.label}
+            </div>
+            {callout.value && (
+              <div className="inv-num" style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
+                {callout.value}
+              </div>
             )}
           </div>
-          {doc.originalOrderNumber && (
-            <div style={{ ...box, textAlign: 'center', marginBottom: 6 }}>
-              <div style={label}>Original Invoice #</div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{doc.originalOrderNumber}</div>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <div style={{ ...box, flex: 1, textAlign: 'center' }}>
-              <div style={label}>Scheduled Date</div>
-              <div>{doc.scheduledDate ?? '—'}</div>
-            </div>
-            <div style={{ ...box, flex: 1, textAlign: 'center' }}>
-              <div style={label}>Document Date</div>
-              <div>{new Date(o.createdAt).toLocaleDateString()}</div>
-            </div>
-          </div>
         </div>
-      </div>
+      </header>
 
-      {/* Sold To / Ship To */}
-      <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-        <div style={{ ...box, flex: 1, minHeight: 70 }}>
-          <div style={label}>Sold To</div>
+      {doc.business.invoiceHeaderNote && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: '8px 12px',
+            background: tint(accent, 0.9),
+            borderLeft: `4px solid ${accent}`,
+            borderRadius: 4,
+            fontWeight: 600,
+            fontSize: 11.5,
+          }}
+        >
+          {doc.business.invoiceHeaderNote}
+        </div>
+      )}
+
+      {/* Parties + order details */}
+      <section
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 12,
+          marginTop: 16,
+        }}
+      >
+        <div className="inv-card" style={cardStyle}>
+          <div style={cardLabel}>Sold to</div>
           <div style={{ fontWeight: 700 }}>{doc.customer?.name ?? '—'}</div>
           <BillingAddress doc={doc} />
           {doc.customer?.phone && <div>Ph. {doc.customer.phone}</div>}
-          {doc.customer?.email && <div>{doc.customer.email}</div>}
+          {doc.customer?.email && <div style={{ color: '#374151' }}>{doc.customer.email}</div>}
         </div>
-        <div style={{ ...box, flex: 1, minHeight: 70 }}>
-          <div style={label}>Ship To</div>
+        <div className="inv-card" style={cardStyle}>
+          <div style={cardLabel}>Ship to</div>
           <ShipTo doc={doc} />
         </div>
-      </div>
-
-      {/* Info strip */}
-      <TableWrap style={{ ...sheet, marginTop: 10 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {/* BA-0030: no "Customer #" — we have no human-facing customer
-                  number, and a fragment of the internal id helps nobody. */}
-              {['Customer Ph.', 'Terms', 'Salesperson', 'Store'].map((h) => (
-                <th key={h} style={{ ...cell, ...label, textAlign: 'left' }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style={cell}>{doc.customer?.phone ?? '—'}</td>
-              <td style={cell}>{money.balanceDueCents > 0 ? 'Balance due' : 'Paid in full'}</td>
-              <td style={cell}>
-                {/* BA-0013: full names, not initials. */}
-                {doc.salespersonName ?? '—'}
-                {doc.secondSalespersonName ? ` / ${doc.secondSalespersonName}` : ''}
-              </td>
-              <td style={cell}>
-                {doc.location?.orderPrefix ?? ''} {doc.location?.name ?? '—'}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </TableWrap>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10 }}>
-        <div>
-          Fulfillment: <strong>{o.fulfillmentType.replace(/_/g, ' ')}</strong>
+        <div className="inv-card" style={cardStyle}>
+          <div style={cardLabel}>Order details</div>
+          <DetailRow label="Salesperson">
+            {/* BA-0013: full names, not initials. */}
+            {doc.salespersonName ?? '—'}
+            {doc.secondSalespersonName ? ` / ${doc.secondSalespersonName}` : ''}
+          </DetailRow>
+          <DetailRow label="Store">
+            {[doc.location?.orderPrefix, doc.location?.name ?? '—'].filter(Boolean).join(' ')}
+          </DetailRow>
+          <DetailRow label="Fulfillment">
+            <span style={{ textTransform: 'capitalize' }}>
+              {o.fulfillmentType.replace(/_/g, ' ')}
+            </span>
+          </DetailRow>
+          <DetailRow label="Terms">
+            {money.balanceDueCents > 0 ? 'Balance due' : 'Paid in full'}
+          </DetailRow>
+          {/* BA-0030: no "Customer #" — there is no human-facing customer number. */}
         </div>
-        <div>Printed {printedAt.toLocaleString()}</div>
-      </div>
+      </section>
+
       {o.notes && (
-        <div style={{ ...box, marginTop: 6, minHeight: 28 }}>
-          <div style={label}>Notes</div>
-          {o.notes}
+        <div className="inv-card" style={{ ...cardStyle, marginTop: 12 }}>
+          <div style={cardLabel}>Notes</div>
+          <div style={{ whiteSpace: 'pre-wrap' }}>{o.notes}</div>
         </div>
       )}
 
       {/* Line grid — $0.00 lines print too (§11) */}
-      <TableWrap style={{ ...sheet, marginTop: 10 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {['Ln#', 'F', 'Model', 'Brand', 'Description', 'Qty', 'Price', 'Amount'].map((h) => (
-                <th key={h} style={{ ...cell, ...label, textAlign: 'left' }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {gridLines.map((l, i) => (
+      <table className="inv-lines" style={{ marginTop: 18 }} data-testid="invoice-lines">
+        <thead>
+          <tr style={{ borderBottom: `2px solid ${accent}` }}>
+            <th style={{ ...th, color: accent, width: 28 }}>#</th>
+            <th style={{ ...th, color: accent }}>Item</th>
+            <th
+              style={{ ...th, color: accent, width: 34, textAlign: 'center' }}
+              title="Fulfillment"
+            >
+              Ful.
+            </th>
+            <th style={{ ...th, color: accent, width: 44, textAlign: 'right' }}>Qty</th>
+            <th style={{ ...th, color: accent, width: 84, textAlign: 'right' }}>Price</th>
+            <th style={{ ...th, color: accent, width: 92, textAlign: 'right' }}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {gridLines.map((l, i) => {
+            const meta = [l.model, l.brand].filter(Boolean).join(' · ');
+            return (
               <tr key={l.id}>
-                <td style={cell}>{i + 1}</td>
-                <td style={cell}>
-                  {l.takenWith
-                    ? 'T'
-                    : (FULFILLMENT_CODES[l.fulfillmentMethod ?? o.fulfillmentType] ?? '')}
+                <td style={{ ...td, color: MUTED }} className="inv-num">
+                  {i + 1}
                 </td>
-                <td style={cell}>{l.model ?? '—'}</td>
-                <td style={cell}>{l.brand ?? '—'}</td>
-                <td style={cell}>
-                  {l.description}
-                  {l.takenWith && (
-                    <span style={{ fontSize: 9 }}> — TAKEN WITH ({l.pieceNumber})</span>
-                  )}
-                  {l.comJson?.supplied && (
-                    <span style={{ fontSize: 9 }}> — CUSTOMER&apos;S OWN MATERIAL</span>
+                <td style={td}>
+                  <div style={{ fontWeight: 600 }}>{l.description}</div>
+                  {(meta || l.takenWith || l.comJson?.supplied) && (
+                    <div style={{ fontSize: 9.5, color: MUTED, marginTop: 1 }}>
+                      {meta}
+                      {l.takenWith && (
+                        <span>
+                          {meta ? ' · ' : ''}Taken with ({l.pieceNumber})
+                        </span>
+                      )}
+                      {l.comJson?.supplied && (
+                        <span>{meta || l.takenWith ? ' · ' : ''}Customer&apos;s own material</span>
+                      )}
+                    </div>
                   )}
                   {l.comment && (
                     <div
-                      style={{ fontSize: 9, fontStyle: 'italic' }}
+                      style={{ fontSize: 9.5, fontStyle: 'italic', marginTop: 1 }}
                       data-testid="doc-line-comment"
                     >
                       {l.comment}
                     </div>
                   )}
                 </td>
-                <td style={{ ...cell, textAlign: 'right' }}>{l.quantity}</td>
-                <td style={{ ...cell, textAlign: 'right' }}>{usd(l.unitPriceCents)}</td>
-                <td style={{ ...cell, textAlign: 'right' }}>{usd(l.totalCents)}</td>
+                <td style={{ ...td, textAlign: 'center', color: MUTED }}>
+                  {l.takenWith
+                    ? 'T'
+                    : (FULFILLMENT_CODES[l.fulfillmentMethod ?? o.fulfillmentType] ?? '')}
+                </td>
+                <td style={{ ...td, textAlign: 'right' }} className="inv-num">
+                  {l.quantity}
+                </td>
+                <td style={{ ...td, textAlign: 'right' }} className="inv-num">
+                  {usd(l.unitPriceCents)}
+                </td>
+                <td style={{ ...td, textAlign: 'right', fontWeight: 600 }} className="inv-num">
+                  {usd(l.totalCents)}
+                </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableWrap>
+            );
+          })}
+        </tbody>
+      </table>
 
       {(o.customInfoJson ?? []).length > 0 && (
-        <div style={{ ...box, marginTop: 8 }} data-testid="doc-custom-info">
-          <div style={label}>Custom Order Information</div>
+        <div
+          className="inv-card"
+          style={{ ...cardStyle, marginTop: 12 }}
+          data-testid="doc-custom-info"
+        >
+          <div style={cardLabel}>Custom order information</div>
           {(o.customInfoJson ?? []).map((row, i) => (
-            <div key={i} style={{ fontSize: 10 }}>
+            <div key={i} style={{ fontSize: 10.5 }}>
               <strong>{row.label}</strong>
               {row.label && row.value ? ': ' : ''}
               {row.value}
@@ -576,38 +751,38 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
         </div>
       )}
 
-      {/* Totals + payments */}
-      <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
-        <div style={{ flex: 1 }}>
-          {o.payments.length > 0 && (
-            <TableWrap style={sheet}>
-              <table style={{ borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    {['Payment', 'Date', 'Amount'].map((h) => (
-                      <th key={h} style={{ ...cell, ...label, textAlign: 'left' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
+      {/* Payments + totals */}
+      <section style={{ display: 'flex', gap: 24, marginTop: 18, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {payments.length > 0 && (
+            <div className="inv-card" style={cardStyle} data-testid="invoice-payments">
+              <div style={cardLabel}>Payments</div>
+              <table>
                 <tbody>
-                  {o.payments
-                    .filter((p) => p.status === 'succeeded')
-                    .map((p) => (
-                      <tr key={p.id}>
-                        <td style={cell}>{tenderLabel(p.method)}</td>
-                        <td style={cell}>{new Date(p.createdAt).toLocaleDateString()}</td>
-                        <td style={{ ...cell, textAlign: 'right' }}>{usd(p.amountCents)}</td>
-                      </tr>
-                    ))}
+                  {payments.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ padding: '3px 0', fontSize: 11 }}>{tenderLabel(p.method)}</td>
+                      <td
+                        style={{ padding: '3px 8px', fontSize: 11, color: MUTED }}
+                        className="inv-num"
+                      >
+                        {new Date(p.createdAt).toLocaleDateString()}
+                      </td>
+                      <td
+                        style={{ padding: '3px 0', fontSize: 11, textAlign: 'right' }}
+                        className="inv-num"
+                      >
+                        {usd(p.amountCents)}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </TableWrap>
+            </div>
           )}
         </div>
-        <TableWrap style={{ ...sheet, width: 260, flex: 'none' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <div className="inv-card" style={{ width: 280, flex: 'none' }} data-testid="invoice-totals">
+          <table>
             <tbody>
               <TotalRow label="Merchandise" value={usd(money.subtotalCents - recyclingCents)} />
               {recyclingCents > 0 && <TotalRow label="Recycling" value={usd(recyclingCents)} />}
@@ -627,30 +802,53 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
                 <TotalRow label={o.otherFeeLabel ?? 'Other'} value={usd(money.otherFeeCents)} />
               )}
               <TotalRow label="Tax" value={usd(money.taxCents)} />
-              <TotalRow label={`Total ${title}`} value={usd(money.totalCents)} bold />
-              <TotalRow label="Amount Paid" value={usd(money.paidCents)} />
-              {!fam && o.creditDueCents > 0 ? (
-                <TotalRow label="Credit Due" value={usd(o.creditDueCents)} bold boxed />
+              <TotalRow label={`Total ${title}`} value={usd(money.totalCents)} bold rule />
+              <TotalRow label="Amount paid" value={usd(money.paidCents)} />
+              {creditDue ? (
+                <TotalRow
+                  label="Credit due"
+                  value={usd(o.creditDueCents)}
+                  bold
+                  highlight={{ background: accent, color: accentText }}
+                />
               ) : (
-                <TotalRow label="Amount Due" value={usd(money.balanceDueCents)} bold boxed />
+                <TotalRow
+                  label="Amount due"
+                  value={usd(money.balanceDueCents)}
+                  bold
+                  highlight={{ background: accent, color: accentText }}
+                />
               )}
             </tbody>
           </table>
-        </TableWrap>
-      </div>
-
-      {doc.business.invoiceFooterNote && (
-        <div
-          style={{
-            marginTop: 'var(--space-4)',
-            fontSize: 10,
-            borderTop: '1px solid #000',
-            paddingTop: 8,
-          }}
-        >
-          {doc.business.invoiceFooterNote}
         </div>
-      )}
+      </section>
+
+      <footer
+        style={{
+          marginTop: 22,
+          paddingTop: 10,
+          borderTop: `1px solid ${RULE}`,
+          fontSize: 10,
+          color: '#374151',
+        }}
+      >
+        {doc.business.invoiceFooterNote && (
+          <div style={{ whiteSpace: 'pre-wrap' }}>{doc.business.invoiceFooterNote}</div>
+        )}
+        <div style={{ marginTop: doc.business.invoiceFooterNote ? 6 : 0, color: MUTED }}>
+          {title} {docNumber} · Printed {printedAt.toLocaleString()}
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function DetailRow({ label: l, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
+      <span style={{ color: MUTED, width: 78, flex: 'none' }}>{l}</span>
+      <span style={{ minWidth: 0 }}>{children}</span>
     </div>
   );
 }
@@ -659,24 +857,29 @@ function TotalRow({
   label: l,
   value,
   bold,
-  boxed,
+  rule,
+  highlight,
 }: {
   label: string;
   value: string;
   bold?: boolean;
-  boxed?: boolean;
+  /** A rule above the row (the order total). */
+  rule?: boolean;
+  /** Filled row (the amount / credit due). */
+  highlight?: { background: string; color: string };
 }) {
+  const base: React.CSSProperties = {
+    padding: highlight ? '8px 10px' : '3px 10px',
+    fontWeight: bold ? 700 : 400,
+    fontSize: highlight ? 13 : 11.5,
+    borderTop: rule ? `1px solid ${RULE}` : undefined,
+    background: highlight?.background,
+    color: highlight?.color,
+  };
   return (
     <tr>
-      <td style={{ padding: '2px 8px', fontWeight: bold ? 700 : 400 }}>{l}</td>
-      <td
-        style={{
-          padding: '2px 8px',
-          textAlign: 'right',
-          fontWeight: bold ? 700 : 400,
-          border: boxed ? '2px solid #000' : undefined,
-        }}
-      >
+      <td style={base}>{l}</td>
+      <td style={{ ...base, textAlign: 'right' }} className="inv-num">
         {value}
       </td>
     </tr>

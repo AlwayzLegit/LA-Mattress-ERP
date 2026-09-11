@@ -5469,3 +5469,20 @@ sends the return salesperson the API already accepts (slice 6).
   Postgres refused new clients (`sorry, too many clients already`) at 64
   integration specs. `DatabaseModule` now ends the pool in
   `onApplicationShutdown`; the full suite peaks at 10 connections.
+
+### Checkpoint — 2026-09-11 (Modern invoice: Invoice / Sales Order + Exchange Order)
+
+Owner asked to modernize the invoices the stores print; six questions settled it:
+modern clean layout, logo + brand accent, Letter laser output only, Invoice +
+Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment).
+
+- API: `GET /v1/orders/:id/document` → `business.accentColor` (Settings → Branding,
+  null until set). `orders.int.spec.ts` +1.
+- Web: `InvoiceDoc` rewritten — accent header rule + title, Amount due / Credit due /
+  Paid in full callout, header-note notice bar, Sold to / Ship to / Order details
+  cards, clean line grid (item + model · brand + comment), payments + totals card
+  with the due row filled in the accent, footer note + printed stamp. `@page letter`,
+  `print-color-adjust: exact`, repeating grid header, rows don't split. Readable
+  text on any accent (luminance), neutral slate fallback.
+- Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
+  JSX for web component tests).
