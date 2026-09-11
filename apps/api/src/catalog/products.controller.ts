@@ -27,6 +27,7 @@ import {
 } from '../common/pagination';
 import { vendorMatchFor } from '../common/vendor-match';
 import { DRIZZLE } from '../database/database.module';
+import { mergeShipping, parseShipping, type ProductShipping } from './product-shipping';
 import {
   loadProductStockByLocation,
   loadProductStockTotals,
@@ -80,6 +81,9 @@ interface UpdateProductBody {
   logisticalCartonQty?: number;
   purchaseCartonQty?: number;
   logisticalCartonTransfers?: boolean;
+  // A21 General Information (D9).
+  suggestedRetailCents?: number | null;
+  shipping?: Partial<Record<keyof ProductShipping, number | null>> | null;
 }
 
 /** One row of the STORIS-shaped product list (A19). */
@@ -142,8 +146,12 @@ interface ProductOut {
   logisticalCartonQty: number;
   purchaseCartonQty: number;
   logisticalCartonTransfers: boolean;
+  /** A21 D9: STORIS Suggested Retail Price and the Shipping Information block. */
+  suggestedRetailCents: number | null;
+  shipping: ProductShipping;
   brandName: string | null;
   categoryName: string | null;
+  collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -251,6 +259,15 @@ export class CatalogProductsController {
     @Query('cursor') cursorStr?: string,
     @Query('sort') sortRaw?: string,
     @Query('dir') dirRaw?: string,
+    // A21 D13 — the STORIS "Search for a Product" criteria.
+    @Query('sku') skuQ?: string,
+    @Query('name') nameQ?: string,
+    @Query('brandId') brandId?: string,
+    @Query('vendorModel') vendorModelQ?: string,
+    @Query('collectionId') collectionId?: string,
+    @Query('group') groupQ?: string,
+    @Query('purchaseStatus') purchaseStatusQ?: string,
+    @Query('asIsReasonCodeId') asIsReasonCodeId?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
     const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
@@ -270,6 +287,43 @@ export class CatalogProductsController {
       const match = await vendorMatchFor(this.db, tenant.businessId!, vendorId);
       filters.push(
         sql`EXISTS (SELECT 1 FROM ${schema.productVariants} LEFT JOIN ${schema.brands} ON ${schema.brands.id} = ${schema.products.brandId} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${match})`,
+      );
+    }
+    // A21 D13: each criterion narrows every browse mode below.
+    const contains = (v: string) => `%${v.trim()}%`;
+    if (skuQ?.trim()) {
+      filters.push(
+        sql`(${schema.products.sku} ILIKE ${contains(skuQ)} OR EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.sku} ILIKE ${contains(skuQ)}))`,
+      );
+    }
+    if (nameQ?.trim()) {
+      filters.push(
+        sql`(${schema.products.name} ILIKE ${contains(nameQ)} OR ${schema.products.secondDescription} ILIKE ${contains(nameQ)})`,
+      );
+    }
+    if (brandId) filters.push(eq(schema.products.brandId, brandId));
+    if (collectionId) filters.push(eq(schema.products.collectionId, collectionId));
+    if (vendorModelQ?.trim()) {
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.vendorSku} ILIKE ${contains(vendorModelQ)})`,
+      );
+    }
+    if (groupQ?.trim()) {
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND lower(${schema.productVariants.attributesJson} ->> 'group') = lower(${groupQ.trim()}))`,
+      );
+    }
+    if (purchaseStatusQ) {
+      if (!(PRODUCT_PURCHASE_STATUSES as readonly string[]).includes(purchaseStatusQ)) {
+        throw new BadRequestException(
+          `purchaseStatus must be one of ${PRODUCT_PURCHASE_STATUSES.join(', ')}`,
+        );
+      }
+      filters.push(eq(schema.products.purchaseStatus, purchaseStatusQ));
+    }
+    if (asIsReasonCodeId) {
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.asIsItems} INNER JOIN ${schema.productVariants} ON ${schema.productVariants.id} = ${schema.asIsItems.variantId} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.asIsItems.status} = 'pending_review' AND ${schema.asIsItems.reasonCodeId} = ${asIsReasonCodeId})`,
       );
     }
 
@@ -638,6 +692,13 @@ export class CatalogProductsController {
           .where(eq(schema.categories.id, p.categoryId))
           .limit(1)
       : [];
+    const [collection] = p.collectionId
+      ? await this.db
+          .select({ name: schema.collections.name })
+          .from(schema.collections)
+          .where(eq(schema.collections.id, p.collectionId))
+          .limit(1)
+      : [];
     const primary =
       variants.find((v) => v.sku && v.sku === p.sku) ??
       variants.find((v) => v.isActive) ??
@@ -694,8 +755,11 @@ export class CatalogProductsController {
       logisticalCartonQty: p.logisticalCartonQty,
       purchaseCartonQty: p.purchaseCartonQty,
       logisticalCartonTransfers: p.logisticalCartonTransfers,
+      suggestedRetailCents: p.suggestedRetailCents ?? null,
+      shipping: parseShipping(p.shippingJson),
       brandName: brand?.name ?? null,
       categoryName: category?.name ?? null,
+      collectionName: collection?.name ?? null,
       vendorName: vendor?.name ?? null,
       vendorModel: primary?.vendorSku ?? null,
       group: typeof group === 'string' ? group : null,
@@ -864,6 +928,28 @@ export class CatalogProductsController {
       update.logisticalCartonTransfers = body.logisticalCartonTransfers;
       before.logisticalCartonTransfers = existing.logisticalCartonTransfers;
       after.logisticalCartonTransfers = body.logisticalCartonTransfers;
+    }
+    // A21 General Information (D9).
+    if (body.suggestedRetailCents !== undefined) {
+      const next = body.suggestedRetailCents;
+      if (next !== null && (!Number.isInteger(next) || next < 0)) {
+        throw new BadRequestException('suggestedRetailCents must be a whole number of cents ≥ 0');
+      }
+      if (next !== (existing.suggestedRetailCents ?? null)) {
+        update.suggestedRetailCents = next;
+        before.suggestedRetailCents = existing.suggestedRetailCents ?? null;
+        after.suggestedRetailCents = next;
+      }
+    }
+    if (body.shipping !== undefined) {
+      const current = parseShipping(existing.shippingJson);
+      const { next, bad } = mergeShipping(current, body.shipping);
+      if (bad) throw new BadRequestException(bad);
+      if (JSON.stringify(next) !== JSON.stringify(current)) {
+        update.shippingJson = next;
+        before.shipping = current;
+        after.shipping = next;
+      }
     }
 
     if (Object.keys(after).length > 0) {

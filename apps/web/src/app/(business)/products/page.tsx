@@ -4,7 +4,11 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { GripVertical, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { PRODUCT_PURCHASE_STATUS_LABELS, type ProductPurchaseStatus } from '@jetnine/shared';
+import {
+  PRODUCT_PURCHASE_STATUSES,
+  PRODUCT_PURCHASE_STATUS_LABELS,
+  type ProductPurchaseStatus,
+} from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { CsvImport } from '@/components/csv-import';
 import { LoadMore } from '@/components/load-more';
@@ -12,10 +16,13 @@ import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
 import { useCursorList } from '@/lib/use-cursor-list';
 import {
+  Accordion,
   Alert,
   Button,
   Card,
   EmptyState,
+  Field,
+  FormGrid,
   Input,
   LinkButton,
   LoadingRows,
@@ -58,6 +65,47 @@ interface Location {
   id: string;
   name: string;
   isActive: boolean;
+}
+
+/**
+ * The STORIS "Search for a Product" criteria (A21 D13): each one narrows
+ * the browse; blanks are ignored. Every key is a `GET /v1/products` query.
+ */
+interface Criteria {
+  sku: string;
+  name: string;
+  brandId: string;
+  vendorModel: string;
+  collectionId: string;
+  categoryId: string;
+  group: string;
+  purchaseStatus: string;
+  asIsReasonCodeId: string;
+}
+const EMPTY_CRITERIA: Criteria = {
+  sku: '',
+  name: '',
+  brandId: '',
+  vendorModel: '',
+  collectionId: '',
+  categoryId: '',
+  group: '',
+  purchaseStatus: '',
+  asIsReasonCodeId: '',
+};
+function criteriaParams(c: Criteria): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(c)) if (v.trim()) out[k] = v.trim();
+  return out;
+}
+interface RefOption {
+  id: string;
+  name: string;
+}
+interface ReasonCodeOption {
+  id: string;
+  code: string;
+  description: string;
 }
 
 /**
@@ -196,7 +244,16 @@ export default function ProductsPage() {
   const [dropId, setDropId] = useState<string | null>(null);
   const [sort, setSort] = useState('');
   const [dir, setDir] = useState<'asc' | 'desc'>('asc');
+  // A21 D13: the STORIS Search for a Product criteria, behind a disclosure.
+  const [criteria, setCriteria] = useState<Criteria>(EMPTY_CRITERIA);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [brands, setBrands] = useState<RefOption[]>([]);
+  const [collections, setCollections] = useState<RefOption[]>([]);
+  const [categories, setCategories] = useState<RefOption[]>([]);
+  const [asIsReasons, setAsIsReasons] = useState<ReasonCodeOption[]>([]);
+  const [refsLoaded, setRefsLoaded] = useState(false);
   const { rows, error } = list;
+  const hasCriteria = Object.keys(criteriaParams(criteria)).length > 0;
 
   const params = (
     query: string,
@@ -205,13 +262,43 @@ export default function ProductsPage() {
     inactive = includeInactive,
     s = sort,
     d = dir,
+    c = criteria,
   ) => ({
     ...(query ? { q: query } : {}),
     ...(v ? { vendorId: v.id } : {}),
     ...(loc ? { locationId: loc } : {}),
     ...(inactive ? { includeInactive: '1' } : {}),
     ...(s ? { sort: s, dir: d } : {}),
+    ...criteriaParams(c),
   });
+
+  // Reference lists for the criteria pickers, fetched the first time the
+  // disclosure opens.
+  useEffect(() => {
+    if (!advancedOpen || refsLoaded) return;
+    setRefsLoaded(true);
+    api<RefOption[]>('/v1/brands')
+      .then(setBrands)
+      .catch(() => setBrands([]));
+    api<RefOption[]>('/v1/collections')
+      .then(setCollections)
+      .catch(() => setCollections([]));
+    api<{ flat: RefOption[] }>('/v1/categories')
+      .then((r) => setCategories(r.flat))
+      .catch(() => setCategories([]));
+    api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
+      .then(setAsIsReasons)
+      .catch(() => setAsIsReasons([]));
+  }, [advancedOpen, refsLoaded]);
+
+  function setCriterion<K extends keyof Criteria>(key: K, value: Criteria[K]) {
+    setCriteria((cur) => ({ ...cur, [key]: value }));
+  }
+
+  function clearCriteria() {
+    setCriteria(EMPTY_CRITERIA);
+    void list.load(params(q, vendor, locationId, includeInactive, sort, dir, EMPTY_CRITERIA));
+  }
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -368,6 +455,151 @@ export default function ProductsPage() {
             Clear
           </Button>
         </Toolbar>
+        <div className="mb-4">
+          <Accordion
+            title="Advanced search"
+            summary={
+              hasCriteria
+                ? 'criteria set'
+                : 'product, description, brand, vendor model, collection, category, group, purchase status, as-is reason'
+            }
+            open={advancedOpen}
+            onToggle={() => setAdvancedOpen((o) => !o)}
+          >
+            <div className="p-3" data-testid="products-advanced-search">
+              <FormGrid cols={3}>
+                <Field label="Product">
+                  <Input
+                    value={criteria.sku}
+                    placeholder="SKU contains"
+                    aria-label="Product"
+                    data-testid="criteria-sku"
+                    onChange={(e) => setCriterion('sku', e.target.value)}
+                  />
+                </Field>
+                <Field label="Description">
+                  <Input
+                    value={criteria.name}
+                    placeholder="Description contains"
+                    aria-label="Description"
+                    data-testid="criteria-name"
+                    onChange={(e) => setCriterion('name', e.target.value)}
+                  />
+                </Field>
+                <Field label="Brand">
+                  <Select
+                    value={criteria.brandId}
+                    aria-label="Brand"
+                    data-testid="criteria-brand"
+                    onChange={(e) => setCriterion('brandId', e.target.value)}
+                  >
+                    <option value="">Any brand</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Vendor model">
+                  <Input
+                    value={criteria.vendorModel}
+                    placeholder="Vendor model contains"
+                    aria-label="Vendor model"
+                    data-testid="criteria-vendor-model"
+                    onChange={(e) => setCriterion('vendorModel', e.target.value)}
+                  />
+                </Field>
+                <Field label="Collection">
+                  <Select
+                    value={criteria.collectionId}
+                    aria-label="Collection"
+                    data-testid="criteria-collection"
+                    onChange={(e) => setCriterion('collectionId', e.target.value)}
+                  >
+                    <option value="">Any collection</option>
+                    {collections.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Product category">
+                  <Select
+                    value={criteria.categoryId}
+                    aria-label="Product category"
+                    data-testid="criteria-category"
+                    onChange={(e) => setCriterion('categoryId', e.target.value)}
+                  >
+                    <option value="">Any category</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Product group">
+                  <Input
+                    value={criteria.group}
+                    placeholder="e.g. QUEEN"
+                    aria-label="Product group"
+                    data-testid="criteria-group"
+                    onChange={(e) => setCriterion('group', e.target.value)}
+                  />
+                </Field>
+                <Field label="Purchase status">
+                  <Select
+                    value={criteria.purchaseStatus}
+                    aria-label="Purchase status"
+                    data-testid="criteria-purchase-status"
+                    onChange={(e) => setCriterion('purchaseStatus', e.target.value)}
+                  >
+                    <option value="">Any status</option>
+                    {PRODUCT_PURCHASE_STATUSES.map((st) => (
+                      <option key={st} value={st}>
+                        {PRODUCT_PURCHASE_STATUS_LABELS[st]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="As-Is reason code"
+                  hint="Products with an as-is piece in review under this reason."
+                >
+                  <Select
+                    value={criteria.asIsReasonCodeId}
+                    aria-label="As-Is reason code"
+                    data-testid="criteria-as-is-reason"
+                    onChange={(e) => setCriterion('asIsReasonCodeId', e.target.value)}
+                  >
+                    <option value="">Any reason</option>
+                    {asIsReasons.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.code} — {r.description}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </FormGrid>
+              <div className="mt-3 flex gap-2">
+                <Button type="submit" variant="primary" size="sm" data-testid="criteria-search">
+                  Search
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearCriteria}
+                  disabled={!hasCriteria}
+                >
+                  Clear criteria
+                </Button>
+              </div>
+            </div>
+          </Accordion>
+        </div>
       </form>
 
       <Stack>
@@ -405,19 +637,24 @@ export default function ProductsPage() {
               title={
                 q
                   ? `No products match "${q}"`
-                  : includeInactive
-                    ? 'No products yet'
-                    : 'No active products'
+                  : hasCriteria
+                    ? 'No products match the criteria'
+                    : includeInactive
+                      ? 'No products yet'
+                      : 'No active products'
               }
               action={
-                q ? (
+                q || hasCriteria ? (
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
                     onClick={() => {
                       setQ('');
-                      void list.load(params(''));
+                      setCriteria(EMPTY_CRITERIA);
+                      void list.load(
+                        params('', vendor, locationId, includeInactive, sort, dir, EMPTY_CRITERIA),
+                      );
                     }}
                   >
                     Clear search

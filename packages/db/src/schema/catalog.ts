@@ -115,6 +115,17 @@ export const products = pgTable(
     logisticalCartonQty: integer('logistical_carton_qty').notNull().default(1),
     purchaseCartonQty: integer('purchase_carton_qty').notNull().default(1),
     logisticalCartonTransfers: boolean('logistical_carton_transfers').notNull().default(false),
+    /**
+     * A21 (View Product Activity → General Information): STORIS Suggested
+     * Retail Price, display only — selling price stays on the variant.
+     */
+    suggestedRetailCents: integer('suggested_retail_cents'),
+    /**
+     * A21 Shipping Information block: {weightLb, heightIn, widthIn,
+     * depthIn, shippingVolume, deliveryVolume} — numbers or null. Display
+     * and print only; delivery capacity keeps using variant capacity units.
+     */
+    shippingJson: jsonb('shipping_json'),
     // Generated tsvector (set by the migration via GENERATED ALWAYS AS).
     // Drizzle's pg-core doesn't model generated columns directly, so the
     // column is declared here only so tools that introspect the schema know

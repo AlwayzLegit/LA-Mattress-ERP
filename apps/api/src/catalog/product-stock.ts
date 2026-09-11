@@ -15,6 +15,9 @@
  *   asIsAvailable    = asIsOnHand − asIsNonSellable
  *   layawayReserved  = qty_reserved on open layaway order lines, at the line's
  *                      stock location
+ *   onOrderReserved  = units of those same open PO lines already allocated to
+ *                      order lines (po_line_allocations still 'ordered') — the
+ *                      STORIS "On Order Reserved" column (A21 D3)
  */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -35,6 +38,7 @@ export interface StockTotals {
   asIsAvailable: number;
   asIsNonSellable: number;
   layawayReserved: number;
+  onOrderReserved: number;
 }
 
 export interface LocationStockRow extends StockTotals {
@@ -59,6 +63,7 @@ export const EMPTY_TOTALS: StockTotals = {
   asIsAvailable: 0,
   asIsNonSellable: 0,
   layawayReserved: 0,
+  onOrderReserved: 0,
 };
 
 function add(a: StockTotals, b: Partial<StockTotals>): StockTotals {
@@ -170,7 +175,35 @@ async function loadCells(
     )
     .groupBy(schema.orderLines.variantId, lineLocation);
 
-  const cells: Cell[] = [...levels, ...po, ...asIs];
+  const allocated = await db
+    .select({
+      variantId: schema.purchaseOrderLines.variantId,
+      locationId: schema.purchaseOrders.locationId,
+      onOrderReserved: sql<number>`sum(${schema.poLineAllocations.quantity})::int`,
+    })
+    .from(schema.poLineAllocations)
+    .innerJoin(
+      schema.purchaseOrderLines,
+      eq(schema.purchaseOrderLines.id, schema.poLineAllocations.poLineId),
+    )
+    .innerJoin(
+      schema.purchaseOrders,
+      eq(schema.purchaseOrders.id, schema.purchaseOrderLines.purchaseOrderId),
+    )
+    .where(
+      and(
+        eq(schema.purchaseOrders.businessId, businessId),
+        inArray(schema.purchaseOrderLines.variantId, variantIds),
+        eq(schema.poLineAllocations.status, 'ordered'),
+        inArray(schema.purchaseOrders.status, [...OPEN_PO_STATUSES]),
+        isNull(schema.purchaseOrders.deletedAt),
+        eq(schema.purchaseOrders.directShip, false),
+        locationId ? eq(schema.purchaseOrders.locationId, locationId) : undefined,
+      ),
+    )
+    .groupBy(schema.purchaseOrderLines.variantId, schema.purchaseOrders.locationId);
+
+  const cells: Cell[] = [...levels, ...po, ...asIs, ...allocated];
   for (const r of layaway) {
     if (r.variantId) cells.push({ ...r, variantId: r.variantId });
   }

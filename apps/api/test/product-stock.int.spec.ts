@@ -371,6 +371,7 @@ describe('GET /v1/products/:id — stock block and STORIS fields', () => {
       asIsAvailable: 2,
       asIsNonSellable: 1,
       layawayReserved: 1,
+      onOrderReserved: 0,
     });
     const grid = res.body.stock.byLocation as { locationName: string }[];
     expect(grid.map((r) => r.locationName)).toEqual(['Koreatown', 'Warehouse']);
@@ -397,6 +398,7 @@ describe('GET /v1/products/:id — stock block and STORIS fields', () => {
       asIsAvailable: 2,
       asIsNonSellable: 1,
       layawayReserved: 0,
+      onOrderReserved: 0,
     });
   });
 
