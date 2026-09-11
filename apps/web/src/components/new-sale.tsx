@@ -136,6 +136,17 @@ function findWarehouse<T extends { locationType?: string; name: string }>(
   );
 }
 
+const EMPTY_ADDRESS = { line1: '', line2: '', city: '', region: '', postalCode: '' };
+const EMPTY_NEW_CUSTOMER = {
+  firstName: '',
+  lastName: '',
+  phone: '',
+  phone2: '',
+  email: '',
+  referralSource: '',
+  ...EMPTY_ADDRESS,
+};
+
 export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const router = useRouter();
 
@@ -168,19 +179,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [custOpen, setCustOpen] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingBusy, setCreatingBusy] = useState(false);
-  const [newCust, setNewCust] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    phone2: '',
-    email: '',
-    referralSource: '',
-    line1: '',
-    line2: '',
-    city: '',
-    region: '',
-    postalCode: '',
-  });
+  const [newCust, setNewCust] = useState(EMPTY_NEW_CUSTOMER);
   // Dedupe warn-on-create (handoff G4): a matching phone means the
   // caller probably already exists — offer them, never block.
   const [dupeWarn, setDupeWarn] = useState<{
@@ -189,13 +188,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     phone: string | null;
   } | null>(null);
   const [billDiffers, setBillDiffers] = useState(false);
-  const [newBill, setNewBill] = useState({
-    line1: '',
-    line2: '',
-    city: '',
-    region: '',
-    postalCode: '',
-  });
+  const [newBill, setNewBill] = useState(EMPTY_ADDRESS);
 
   useEffect(() => {
     const digits = newCust.phone.replace(/\D/g, '');
@@ -218,7 +211,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       const existing = await api<CustomerHit>(`/v1/customers/${idToUse}`);
       setCustomer(existing);
       setCreatingCustomer(false);
-      setDupeWarn(null);
+      clearNewCustomer();
       toast.success('Attached the existing customer — no duplicate created.');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -244,6 +237,22 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     bill: null,
     ship: null,
   });
+
+  // The new-customer panel is plain component state and the form stays
+  // mounted for the whole shift, so every way out of the panel — Cancel,
+  // Create, "Use existing", the post-sale reset — must wipe it, or the next
+  // "+ New customer" opens with the previous shopper's name and phone and
+  // the dedupe banner fires before anyone has typed (owner 2026-09-10).
+  // Opening clears too, so a customer picked from search while the panel
+  // was half-filled cannot bring those fields back later.
+  function clearNewCustomer() {
+    setNewCust(EMPTY_NEW_CUSTOMER);
+    setNewBill(EMPTY_ADDRESS);
+    setBillDiffers(false);
+    setDupeWarn(null);
+    zipMemo.current.cust = null;
+    zipMemo.current.bill = null;
+  }
 
   // --- order meta ---
   const [orderType, setOrderType] = useState<'sales_order' | 'layaway' | 'quote'>('sales_order');
@@ -953,6 +962,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   function resetAll() {
     setCustomer(null);
     setCustQuery('');
+    setCreatingCustomer(false);
+    clearNewCustomer();
     setLines([]);
     setPayments([]);
     setOrderDiscount('');
@@ -1304,7 +1315,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     <Button
                       variant="secondary"
                       disabled={creatingBusy}
-                      onClick={() => setCreatingCustomer(false)}
+                      onClick={() => {
+                        setCreatingCustomer(false);
+                        clearNewCustomer();
+                      }}
                     >
                       Cancel
                     </Button>
@@ -1352,6 +1366,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                           .then((c) => {
                             setCustomer(c);
                             setCreatingCustomer(false);
+                            clearNewCustomer();
                           })
                           .catch((err) =>
                             setError(err instanceof Error ? err.message : String(err)),
@@ -1365,7 +1380,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 </Stack>
               ) : (
                 <div>
-                  <Button size="sm" variant="ghost" onClick={() => setCreatingCustomer(true)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      clearNewCustomer();
+                      setCreatingCustomer(true);
+                    }}
+                  >
                     <Plus size={13} aria-hidden /> New customer
                   </Button>
                 </div>
