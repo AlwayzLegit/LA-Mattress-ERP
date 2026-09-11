@@ -7,6 +7,7 @@ import { CatalogCleanupController } from './catalog-cleanup.controller';
 import { CategoriesController } from './categories.controller';
 import { CsvImportController } from './csv-import.controller';
 import { ImagesController } from './images.controller';
+import { ProductActivityController } from './product-activity.controller';
 import { CatalogProductsController } from './products.controller';
 import { VariantsController } from './variants.controller';
 
@@ -18,6 +19,7 @@ import { VariantsController } from './variants.controller';
     CategoriesController,
     CatalogCleanupController,
     CatalogProductsController,
+    ProductActivityController,
     VariantsController,
     ImagesController,
     CsvImportController,

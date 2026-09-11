@@ -5295,3 +5295,43 @@ reload cleared it.
   shapes hoisted to `EMPTY_NEW_CUSTOMER` / `EMPTY_ADDRESS`.
 - e2e: `orders.spec.ts` "new-customer panel opens blank after Cancel, Change
   and a completed sale" (runs in CI; no local stack in this sandbox).
+
+### Checkpoint — 2026-09-11 (View Product Activity — every STORIS tab, A21)
+
+Owner sent the twelve STORIS "View Product Activity" screens and "Search for
+a Product", asked "Do we already have these?", then "start". Amendment A21
+(PLAN-POS-OPERATIONS §12.17) maps every tab; all of it is built.
+
+- Web: the product page grows the STORIS section list on the left (same
+  frame as View Customer Activity; `?tab=` in the URL): Location
+  Availability ATP (Available-to-promise calculator, the A19 tiles and
+  Merchandising card with Suggested retail, the per-location grid with On
+  order reserved / Total PO / As-Is reserved / ATP date / ATP quantity),
+  Purchase Orders, Open Orders (location + fulfillment/selling toggles +
+  order type incl. Quotes = Open Shopping Carts), Sales History (14 monthly
+  periods), Inbound / Outbound Transfers, General Information (Group /
+  Category / Collection, Status, Price, Cost, Shipping cards above the A19
+  cards), Serial/Reference, As-Is, Summary (beginning balances + month to
+  date). The browser gains an Advanced search disclosure with the STORIS
+  criteria (product, description, brand, vendor model, collection, category,
+  group, purchase status, as-is reason code).
+- API: `catalog/product-activity.controller.ts` — nine reads under
+  `GET /v1/products/:id/activity/*` (`products.view`; cost / profit null
+  without `products.cost.view`); `product-stock.ts` adds On order reserved
+  (PO allocations still ordered); `GET /v1/products` accepts the search
+  criteria; products carry `suggestedRetailCents` + `shippingJson`
+  (migration `0093_a21_product_activity`).
+- Decisions worth knowing: ATP stays reservation-basis + inbound PO dates
+  (D2); As-Is reserved reads 0 — no reservation state exists (D4); sales
+  history includes imported STORIS history and costs at catalog cost (D5);
+  Sale / Markdown / Sale end date, Warranty category, WMS tag, Float id,
+  Requested date and Line ID are not modeled (D9, D10, D7); Spiff/Commission,
+  As-Is / Regular Inventory Detail and Special-Order Defaults were not sent
+  and are mapped, not built.
+- Tests: `product-activity.int.spec.ts` (15; CI db
+  `jetnine_product_activity`) — ATP from stock / PO / none, grid columns,
+  POs, open orders + location basis + quotes, sales history by month with
+  returns and cost masking, transfers both ways, cost info with landed
+  lines, the two new product fields (+ 400s), serials, as-is, summary
+  buckets, every search criterion. `product-stock` (10) and `catalog` (25)
+  still green.

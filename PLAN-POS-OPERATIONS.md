@@ -1080,6 +1080,130 @@ Layout: a five-tile strip (written, collected, drawer, balance due, commission)
 then the queues two-up, then commission / offers / scoreboard three-up, then
 returns. Read-only; every row links to its document.
 
+### 12.17 View Product Activity — every STORIS tab (amendment A21, owner 2026-09-11)
+
+Owner sent the twelve STORIS "View Product Activity" screens (Location
+Availability ATP, Purchase Orders, Open Orders, Sales History, Inbound and
+Outbound Transfers, General Information, Serial/Reference, As-Is, Summary, a
+second product's ATP screen, and "Search for a Product") and asked "Do we
+already have these?" — then "start". A19 covered the landing screen's three
+blocks and the per-location grid; the rest existed as data with no per-product
+view. The product page now carries the whole screen.
+
+**Layout.** The product page keeps its header (product code, name, second
+description, vendor, brand, vendor model) and grows the STORIS section list on
+the left — the same pattern as View Customer Activity — with the picked
+section in the URL (`?tab=`). Sections, in STORIS order: Availability,
+Purchase orders, Open orders, Sales history, Inbound transfers, Outbound
+transfers, General information, Serial / Reference, As-Is, Summary. Every
+section that STORIS scopes to a location gets the same Location picker (All
+locations, or one store); the header strip repeats the STORIS quantities (On
+hand, As-Is, Net available, Net PO) for that location. Read endpoints live
+under `GET /v1/products/:id/activity/<section>` (`products.view`; cost and
+profit figures only with `products.cost.view`).
+
+| STORIS tab / block                                                           | Jetnine                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Location Availability ATP · Available to Promise                             | Availability: Desired quantity → ATP date + ATP quantity (D2); per-location grid gains On order reserved, Total PO, As-Is reserved, ATP date, ATP quantity (D3, D4) next to A19's columns.                                                                                                                                                                                                                                                                                 |
+| Location Availability ATP · Inventory Quantities · Merchandising             | A19 tiles and Merchandising card; Merchandising gains Suggested retail price (D9).                                                                                                                                                                                                                                                                                                                                                                                         |
+| Purchase Orders                                                              | Purchase orders: PO number, vendor, receiving location, quantity due, placed (STORIS acknowledged), expected (delivery date), created, line, status, type (D7).                                                                                                                                                                                                                                                                                                            |
+| Open Orders                                                                  | Open orders: Location + "use fulfillment / selling location", Order type; order number, type, selling location, fulfillment date, order quantity, reserved, fulfillment type, fulfillment status, ship from, order date, customer (D6). Open Shopping Carts = order type Quotes.                                                                                                                                                                                           |
+| Sales History                                                                | Sales history: period, sales amount, cost amount, profit %, shipped, returned, net — trailing 14 months, per location or all (D5).                                                                                                                                                                                                                                                                                                                                         |
+| Inbound Transfers · Outbound Transfers                                       | Inbound / Outbound transfers: To/From location, inbound/outbound quantity; transfer number, other location, transfer date, quantity, reserved quantity, order number, scheduled date, customer, type (D8).                                                                                                                                                                                                                                                                 |
+| General Information · Status · Price · Cost · Shipping                       | General information: Group, Category, Collection, Warranty category; Status (purchase, distribution); Price (selling, sale, markdown, sale end, suggested retail); Cost (average, PO replacement, average landed, freight per unit, freight %); Shipping (delivery volume, weight, shipping volume, height, width, depth) — D9. The A19 cards (Descriptive, Purchase status & packing, Tax class, Brand & collection, Variants, Reorder automation, Images) live here too. |
+| Serial/Reference                                                             | Serial / Reference: serial, received, status, storage location, order number, customer, special-order line (D10).                                                                                                                                                                                                                                                                                                                                                          |
+| As-Is                                                                        | As-Is: piece, received, status / condition, reason code, selling price, sellable, storage location, source, comments (D11).                                                                                                                                                                                                                                                                                                                                                |
+| Summary · Inventory Quantities · Month To Date Regular · As-Is               | Summary: beginning-month balances, on hand, as-is, net PO; MTD received / adjustments / transferred in / out / sales; MTD as-is transferred in / out / added / removed (D12).                                                                                                                                                                                                                                                                                              |
+| Search for a Product                                                         | Browser "Advanced search": Product, Description, Brand, Vendor model, Vendor, Collection, Category, Product group, Purchase status, As-Is reason code, Location (D13).                                                                                                                                                                                                                                                                                                     |
+| Spiff/Commission · As-Is / Regular Inventory Detail · Special-Order Defaults | Not built: spiffs are a commission-plan matter (§12); the inventory detail screens are Stock by location (`/products/stock`); special-order defaults are the special-orders module. No screenshots were sent for them.                                                                                                                                                                                                                                                     |
+
+Decisions:
+
+- **D1 One page, one section list.** No new route: `/products/[id]?tab=…`. The
+  header and the STORIS strip render once; sections load on demand.
+- **D2 ATP stays reservation-basis + inbound dates (owner decision kept).**
+  ATP quantity = net available (all locations or the picked one). ATP date =
+  today when that covers the desired quantity; otherwise the expected date of
+  the open purchase order at which cumulative undelivered units (ordered −
+  accepted − rejected, expected date known, earliest first) cover the
+  shortfall; blank when no PO covers it. No projection of open orders'
+  promise dates.
+- **D3 On order reserved** = units of the location's open PO lines allocated
+  to order lines (`po_line_allocations`, live). Net PO stays A19's ordered −
+  accepted − rejected; the free inbound is Net PO − On order reserved. STORIS's
+  negative Net PO (over-allocated) is not reproduced.
+- **D4 As-Is reserved is 0.** As-is pieces have no reservation state — they
+  sell by restocking to a sellable SKU (§10). The column is kept for the
+  STORIS shape and reads 0 until as-is reservations exist.
+- **D5 Sales history** unions register sales (completed / partially refunded
+  / refunded, by completion date) with completed orders (by completion date),
+  imported STORIS history included — it is history, not accrual, so D8's
+  exclusion does not apply. Cost amount = catalog cost × quantity (the Sales
+  by product report's and A20 costed view's basis; FIFO consumption cost is a
+  follow-up). Returned quantity = register refund lines + completed order
+  returns, by their own dates. Net = shipped − returned. Cost and profit are
+  null without `products.cost.view`. Fourteen periods: this month and the
+  thirteen before it, newest first, zero rows kept.
+- **D6 Open orders** = lines of the product on `open` / `partially_fulfilled`
+  orders with units not yet fulfilled; quotes appear when the Order type
+  picker says Quotes (STORIS Open Shopping Carts). Order type: Sales order /
+  Layaway / Exchange / Quote. Fulfillment status: the line's scheduled
+  delivery (scheduled / loaded / out for delivery) else the order's delivery
+  status (will call reads CWC). Ship from = line source, else the order's stock
+  location, else the selling location. Customer code is not modeled
+  (customers have no code) and is omitted.
+- **D7 Purchase orders** = draft and placed POs (not deleted) with units still
+  due, direct ship included (type Direct ship). Acknowledged date reads the
+  placed date; Requested date and Line ID are not tracked (the line's SKU
+  stands in).
+- **D8 Transfers** = open transfers (draft, in transit) touching the location.
+  Transfer date = shipped, else created; quantity = shipped, else ordered.
+  Reserved quantity = the transfer's units when it carries an order (customer
+  transfers). Type: replenishment / customer / as-is / floor sample.
+- **D9 General information adds two product fields:** `suggestedRetailCents`
+  (STORIS Suggested Retail Price — Merchandising and Price information) and
+  `shippingJson` (weight lb, height / width / depth in, shipping volume,
+  delivery volume — the STORIS Shipping Information block; display and print
+  only, no capacity math: delivery capacity stays pieces × capacity units).
+  Both edit on the tab (`products.update`), migration `0093`. Not modeled:
+  Sale / Markdown / Sale end date (A19 D12 — prices are set at the register or
+  on Set prices), Warranty category (A20 phase 2 D8 protection plans),
+  Distribution status (the product's active flag stands in). Cost
+  information: Average = quantity-weighted average of the remaining FIFO cost
+  layers; PO replacement = catalog cost (what a new PO line defaults to);
+  Average landed = average + the preferred vendor's active landed-cost lines
+  (percent of cost, or dollars per unit; "calculate" lines are skipped);
+  Freight per unit / Freight % read the vendor's freight line.
+- **D10 Serial / Reference** lists the product's serial units at the location
+  (all statuses but sold): in stock reads Unassigned, committed reads Assigned
+  with the order and customer; storage location = the variant's bin at that
+  location. Products without serial tracking (D4 of the cutover plan: opt-in)
+  get an empty state saying so. WMS tag and float id are not modeled.
+- **D11 As-Is** lists pieces in review at the location; Sellable = condition
+  not damaged / parts (A19); reason code from the piece's reason code row.
+- **D12 Summary** derives beginning-of-month balances from the movement
+  ledger (on hand − this month's deltas; as-is on hand − added + removed).
+  MTD Regular buckets movement reasons: Received (receive, receive_po,
+  unreceive_po), Adjustments (adjustment, physical_count, physical_variance,
+  physical_commitment, import, as_is_restock), Transferred in / out
+  (transfer_in / transfer_out), Sales (sale, order_fulfill, shown positive).
+  Reservation movements carry delta 0 and count nowhere. MTD As-Is:
+  Transferred in / out = as-is transfers received / shipped this month,
+  Added = pieces entered this month, Removed = pieces reviewed out this month
+  (restocked, vendor return, scrapped, written off). STORIS's as-is Sales line
+  is not tracked separately (D4).
+- **D13 Search for a Product.** `GET /v1/products` accepts `sku` (product or
+  variant SKU contains), `name` (description contains), `brandId`,
+  `vendorModel` (contains), `collectionId`, `group` (equals, case-insensitive),
+  `purchaseStatus`, `asIsReasonCodeId` (products with an as-is piece in review
+  under that reason); each narrows every browse mode (default, sorted,
+  search). The browser shows them under an Advanced search disclosure next to
+  the existing search box, vendor and location.
+
+Build order: migration 0093 → `catalog/product-activity.controller.ts` (nine
+reads) + browser criteria → product page section list + panels + browser
+Advanced search → `product-activity.int.spec.ts`.
+
 ## 14. Build Order
 
 1. Schema: order types/statuses, store prefixes + per-store sequences, fee settings
