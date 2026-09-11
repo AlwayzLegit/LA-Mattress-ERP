@@ -5483,6 +5483,10 @@ Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment
   cards, clean line grid (item + model · brand + comment), payments + totals card
   with the due row filled in the accent, footer note + printed stamp. `@page letter`,
   `print-color-adjust: exact`, repeating grid header, rows don't split. Readable
-  text on any accent (luminance), neutral slate fallback.
+  text on any accent (luminance).
+- Owner review (same day): 1-inch margins all round; default accent is the LA
+  Mattress logo navy `#0f2057` (from the logo SVG on the store site); the header
+  prints the selling store's full address, never its name, and the Store cell is
+  gone.
 - Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
   JSX for web component tests).

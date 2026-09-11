@@ -379,10 +379,11 @@ export function LineInstructions({
  * (the grid header repeats, rows never split). The Exchange Order shares
  * the shell (title, Original Invoice #, Credit Due).
  */
-const DEFAULT_ACCENT = '#1f2937';
+/** LA Mattress logo navy (owner 2026-09-11) — the invoice color until Branding sets one. */
+const DEFAULT_ACCENT = '#0f2057';
 const HEX_RE = /^#[0-9a-f]{6}$/i;
 
-/** Brand accent from Settings → Branding, or a neutral slate. */
+/** Brand accent from Settings → Branding, else the LA Mattress navy. */
 export function invoiceAccent(hex: string | null | undefined): string {
   return hex && HEX_RE.test(hex) ? hex.toLowerCase() : DEFAULT_ACCENT;
 }
@@ -414,7 +415,7 @@ export function onAccent(hex: string): string {
 }
 
 const INVOICE_CSS = `
-@page { size: letter; margin: 0.5in; }
+@page { size: letter; margin: 1in; }
 .inv { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .inv table { border-collapse: collapse; width: 100%; }
 .inv thead { display: table-header-group; }
@@ -535,10 +536,8 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
               {doc.business.name}
             </div>
           )}
+          {/* Owner 2026-09-11: the selling store's full address, no store name. */}
           <div style={{ fontSize: 11, color: '#374151' }}>
-            {doc.location && (
-              <div style={{ fontWeight: 600, color: '#111' }}>{doc.location.name}</div>
-            )}
             <StoreAddress addressJson={doc.location?.addressJson} />
           </div>
         </div>
@@ -642,9 +641,6 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
             {/* BA-0013: full names, not initials. */}
             {doc.salespersonName ?? '—'}
             {doc.secondSalespersonName ? ` / ${doc.secondSalespersonName}` : ''}
-          </DetailRow>
-          <DetailRow label="Store">
-            {[doc.location?.orderPrefix, doc.location?.name ?? '—'].filter(Boolean).join(' ')}
           </DetailRow>
           <DetailRow label="Fulfillment">
             <span style={{ textTransform: 'capitalize' }}>

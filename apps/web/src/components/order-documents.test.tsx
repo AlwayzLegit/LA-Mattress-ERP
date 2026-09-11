@@ -122,7 +122,9 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toContain('WE CALL 6-8PM NIGHT BEFORE DEL');
     expect(html).toContain('All sales final on clearance items.');
     expect(html).toContain('Ronnie Ortiz');
-    expect(html).toContain('02 West LA');
+    // Owner 2026-09-11: the selling store's address prints, never its name.
+    expect(html).toContain('11911 Santa Monica Blvd');
+    expect(html).not.toContain('West LA');
   });
 
   it('keeps Merchandise goods-only with the recycling fee broken out (BA-0015)', () => {
@@ -151,13 +153,13 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toMatch(/Credit due[\s\S]*\$125\.00/);
   });
 
-  it('falls back to a neutral accent and picks readable text on the accent', () => {
-    expect(invoiceAccent(null)).toBe('#1f2937');
-    expect(invoiceAccent('not-a-color')).toBe('#1f2937');
+  it('falls back to the LA Mattress navy and picks readable text on the accent', () => {
+    expect(invoiceAccent(null)).toBe('#0f2057');
+    expect(invoiceAccent('not-a-color')).toBe('#0f2057');
     expect(invoiceAccent('#ABCDEF')).toBe('#abcdef');
-    expect(onAccent('#1f2937')).toBe('#ffffff');
+    expect(onAccent('#0f2057')).toBe('#ffffff');
     expect(onAccent('#facc15')).toBe('#111111');
     const html = render({ ...payload(), business: { ...payload().business, accentColor: null } });
-    expect(html).toContain('#1f2937');
+    expect(html).toContain('#0f2057');
   });
 });

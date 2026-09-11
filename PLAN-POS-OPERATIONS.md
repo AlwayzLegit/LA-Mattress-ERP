@@ -337,14 +337,15 @@ tenant logo slot.
 
 **Amendment (2026-09-11, owner — modern invoice):** the Invoice / Sales Order and
 the Exchange Order drop the STORIS replica for a modern clean layout: tenant logo
-(or name) and the Settings → Branding accent color (neutral slate when unset) on the
-header rule, headings and the due row; a balance callout at the top right (Amount
+(or name) and the Settings → Branding accent color (the LA Mattress logo navy
+`#0f2057` when unset) on the header rule, headings and the due row; the selling
+store's full address under the logo, never the store name (and no Store cell); a balance callout at the top right (Amount
 Due / Credit Due / Paid in full) the customer reads first; Sold To / Ship To / Order
 details cards in place of the info strip; a rule-only line grid (Item carries
 model · brand and the line comment); payments and a totals card side by side;
 footer note plus the printed timestamp. Every §11 field and amendment above still
-prints. Letter paper, browser print, multi-page safe (grid header repeats, rows never
-split). Delivery Ticket, Pick List, Purchase Order and Transfer Ticket are unchanged.
+prints. Letter paper with 1-inch margins on every side, browser print, multi-page
+safe (grid header repeats, rows never split). Delivery Ticket, Pick List, Purchase Order and Transfer Ticket are unchanged.
 
 ## 12. Dashboards, Reporting & Close
 
