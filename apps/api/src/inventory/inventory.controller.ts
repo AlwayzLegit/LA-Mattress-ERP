@@ -11,10 +11,11 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
+import { loadProductStockByLocation, type StockTotals } from '../catalog/product-stock';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -27,6 +28,11 @@ import {
   type PageResponse,
 } from '../common/pagination';
 import { vendorMatchFor } from '../common/vendor-match';
+import { ExceptionsService } from '../controls/exceptions.service';
+import {
+  SecurityOverrideService,
+  type OverrideCredentials,
+} from '../controls/security-override.service';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
@@ -71,6 +77,51 @@ interface AdjustBody {
   delta?: number;
   reason?: string;
   notes?: string;
+  /** A22 slice 3: coded reason (class `inventory_adjustment`) behind the change. */
+  reasonCodeId?: string;
+  /** A22 slice 3: the cost an upward adjustment layers at (defaults to the catalog cost). */
+  unitCostCents?: number;
+}
+
+interface WriteOffBody {
+  variantId?: string;
+  locationId?: string;
+  quantity?: number;
+  reasonCodeId?: string;
+  reason?: string;
+  notes?: string;
+  override?: OverrideCredentials;
+}
+
+/**
+ * A22 slice 3: everything the STORIS Stock Adjustment dialog shows in
+ * its header strip for one variant at one location, plus the pieces the
+ * As-Is tabs and the Change Serial tab act on.
+ */
+export interface StockCard extends StockTotals {
+  variantId: string;
+  productId: string;
+  productName: string;
+  sku: string | null;
+  serialTracked: boolean;
+  costCents: number | null;
+  locationId: string;
+  locationName: string;
+  storageBinId: string | null;
+  storageBinCode: string | null;
+  /** The `-AS` sibling variant, when the catalog carries one, for Move from As-Is. */
+  asIsVariantId: string | null;
+  asIsPieces: {
+    id: string;
+    pieceNumber: string | null;
+    condition: string | null;
+    storageLocation: string | null;
+    asIsPriceCents: number | null;
+    source: string;
+    createdAt: Date;
+  }[];
+  serials: { id: string; serial: string; status: string }[];
+  bins: { id: string; code: string }[];
 }
 
 interface ReceiveBody {
@@ -87,6 +138,8 @@ export class InventoryController {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(WebhookDispatcher) private readonly webhooks: WebhookDispatcher,
     @Inject(CostingService) private readonly costing: CostingService,
+    @Inject(SecurityOverrideService) private readonly overrides: SecurityOverrideService,
+    @Inject(ExceptionsService) private readonly exceptions: ExceptionsService,
   ) {}
 
   /**
@@ -532,20 +585,45 @@ export class InventoryController {
     if (!reason || !ADJUST_REASONS.has(reason)) {
       throw new BadRequestException(`reason must be one of: ${[...ADJUST_REASONS].join(', ')}`);
     }
+    if (body.unitCostCents !== undefined && body.unitCostCents !== null) {
+      if (!Number.isInteger(body.unitCostCents) || body.unitCostCents < 0) {
+        throw new BadRequestException('unitCostCents must be a non-negative integer');
+      }
+      if (delta < 0) {
+        throw new BadRequestException('unitCostCents only applies to an upward adjustment');
+      }
+    }
+    // A22: the coded reason (class `inventory_adjustment`) is validated
+    // when given; the legacy bucket + free text stay the floor so a
+    // business without codes of the class is never blocked.
+    const coded = await this.overrides.resolveReason(
+      'inventory_adjustment',
+      { reasonCodeId: body.reasonCodeId, reason: body.notes },
+      { required: false, codeOptional: true },
+    );
 
     const result = await this.applyDelta(tenant, actor, {
       variantId,
       locationId,
       delta,
       reason,
-      notes: body.notes,
+      notes: body.notes ?? coded.reasonText ?? undefined,
+      reasonCodeId: coded.reasonCodeId,
+      unitCostCents: body.unitCostCents ?? null,
     });
 
     await this.audit.log({
       action: 'inventory.adjust',
       targetType: 'product_variant',
       targetId: variantId,
-      metadata: { delta, reason, locationId, notes: body.notes ?? null },
+      metadata: {
+        delta,
+        reason,
+        locationId,
+        notes: body.notes ?? null,
+        reasonCode: coded.reasonCode,
+        unitCostCents: body.unitCostCents ?? null,
+      },
     });
 
     void this.webhooks.fire({
@@ -562,6 +640,273 @@ export class InventoryController {
     });
 
     return result;
+  }
+
+  /**
+   * A22 slice 3 (STORIS Stock Adjustment → Write-off): scrap units
+   * straight out of sellable stock. Same rules as an As-Is scrap — its
+   * own permission (override-able), a coded `write_off` reason, valued
+   * at cost on the write-off register, an exception for the owner's
+   * feed — plus the ledger movement that actually drops on hand. Only
+   * available units can go: reserved and floor-sample units must be
+   * released first, so a write-off never pulls a committed piece.
+   */
+  @Post('write-off')
+  @RequirePermission('inventory.adjust')
+  async writeOff(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: WriteOffBody,
+  ): Promise<{ writeOffId: string; movementId: string; onHand: number; totalCostCents: number }> {
+    const { variantId, locationId, quantity } = body;
+    if (!variantId) throw new BadRequestException('variantId is required');
+    if (!locationId) throw new BadRequestException('locationId is required');
+    if (!Number.isInteger(quantity) || (quantity ?? 0) <= 0) {
+      throw new BadRequestException('quantity must be a positive integer');
+    }
+    const [variant] = await this.db
+      .select({ id: schema.productVariants.id, costCents: schema.productVariants.costCents })
+      .from(schema.productVariants)
+      .where(eq(schema.productVariants.id, variantId))
+      .limit(1);
+    if (!variant) throw new NotFoundException('Variant not found');
+    const [level] = await this.db
+      .select({
+        onHand: schema.inventoryLevels.onHand,
+        reserved: schema.inventoryLevels.reserved,
+        floorSample: schema.inventoryLevels.floorSample,
+      })
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.variantId, variantId),
+          eq(schema.inventoryLevels.locationId, locationId),
+        ),
+      )
+      .limit(1);
+    const available = level ? level.onHand - level.reserved - level.floorSample : 0;
+    if (available < quantity!) {
+      throw new BadRequestException(
+        `Only ${Math.max(0, available)} available unit(s) here — release reservations or the floor hold before writing off ${quantity}`,
+      );
+    }
+    await this.overrides.require({
+      permission: 'inventory.write_off',
+      action: `Write off ${quantity} unit(s) from stock`,
+      entityType: 'product_variant',
+      entityId: variantId,
+      override: body.override,
+    });
+    const reason = await this.overrides.resolveReason('write_off', {
+      reasonCodeId: body.reasonCodeId ?? body.override?.reasonCodeId,
+      reason: body.reason ?? body.override?.reason ?? body.notes,
+    });
+    const unitCost = variant.costCents ?? 0;
+    const [row] = await this.db
+      .insert(schema.writeOffs)
+      .values({
+        businessId: tenant.businessId!,
+        variantId,
+        locationId,
+        quantity: quantity!,
+        unitCostCents: unitCost,
+        totalCostCents: unitCost * quantity!,
+        reasonCodeId: reason.reasonCodeId,
+        reason: reason.reasonText,
+        actorUserId: actor.id,
+      })
+      .returning({ id: schema.writeOffs.id });
+    if (!row) throw new BadRequestException('failed to record write-off');
+    const result = await this.applyDelta(tenant, actor, {
+      variantId,
+      locationId,
+      delta: -quantity!,
+      reason: 'write_off',
+      notes: body.notes ?? reason.reasonText ?? undefined,
+      referenceType: 'write_off',
+      referenceId: row.id,
+      reasonCodeId: reason.reasonCodeId,
+    });
+    await this.exceptions.record({
+      type: 'write_off',
+      severity: 'warning',
+      entityType: 'product_variant',
+      entityId: variantId,
+      summary: `${quantity} unit(s) written off from stock at cost $${((unitCost * quantity!) / 100).toFixed(2)}`,
+      metadata: {
+        variantId,
+        locationId,
+        quantity,
+        totalCostCents: unitCost * quantity!,
+        reasonCode: reason.reasonCode,
+        reason: reason.reasonText,
+        writeOffId: row.id,
+      },
+    });
+    await this.audit.log({
+      action: 'inventory.write_off',
+      targetType: 'product_variant',
+      targetId: variantId,
+      metadata: {
+        locationId,
+        quantity,
+        reasonCode: reason.reasonCode,
+        reason: reason.reasonText,
+        writeOffId: row.id,
+        movementId: result.movementId,
+      },
+    });
+    void this.webhooks.fire({
+      businessId: tenant.businessId!,
+      eventType: 'inventory.adjusted',
+      payload: {
+        variantId,
+        locationId,
+        delta: -quantity!,
+        reason: 'write_off',
+        onHand: result.onHand,
+        movementId: result.movementId,
+      },
+    });
+    return {
+      writeOffId: row.id,
+      movementId: result.movementId,
+      onHand: result.onHand,
+      totalCostCents: unitCost * quantity!,
+    };
+  }
+
+  /**
+   * A22 slice 3: the Stock Adjustment dialog's header strip and tab
+   * data for one variant at one location — the same totals the product
+   * page shows (on hand / reserved / floor / available / PO / as-is),
+   * the pending as-is pieces here, the serials here, and the bins.
+   */
+  @Get('stock-card')
+  @RequirePermission('inventory.view')
+  async stockCard(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query('variantId') variantId?: string,
+    @Query('locationId') locationId?: string,
+  ): Promise<StockCard> {
+    if (!variantId || !locationId) {
+      throw new BadRequestException('variantId and locationId are required');
+    }
+    const [variant] = await this.db
+      .select({
+        id: schema.productVariants.id,
+        sku: schema.productVariants.sku,
+        costCents: schema.productVariants.costCents,
+        productId: schema.products.id,
+        productName: schema.products.name,
+        serialTracked: schema.products.serialTracked,
+      })
+      .from(schema.productVariants)
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .where(eq(schema.productVariants.id, variantId))
+      .limit(1);
+    if (!variant) throw new NotFoundException('Variant not found');
+    const [location] = await this.db
+      .select({ id: schema.locations.id, name: schema.locations.name })
+      .from(schema.locations)
+      .where(eq(schema.locations.id, locationId))
+      .limit(1);
+    if (!location) throw new NotFoundException('Location not found');
+
+    const stock = await loadProductStockByLocation(this.db, tenant.businessId!, variant.productId);
+    const row = stock.byLocation.find(
+      (r) => r.variantId === variantId && r.locationId === locationId,
+    );
+    const totals: StockTotals = row ?? {
+      onHand: 0,
+      reserved: 0,
+      floorSample: 0,
+      available: 0,
+      netOnPo: 0,
+      totalPo: 0,
+      asIsOnHand: 0,
+      asIsAvailable: 0,
+      asIsNonSellable: 0,
+      layawayReserved: 0,
+      onOrderReserved: 0,
+    };
+    const asIsSibling = variant.sku
+      ? await this.db
+          .select({ id: schema.productVariants.id })
+          .from(schema.productVariants)
+          .where(
+            and(
+              eq(schema.productVariants.businessId, tenant.businessId!),
+              eq(schema.productVariants.sku, `${variant.sku}-AS`),
+            ),
+          )
+          .limit(1)
+      : [];
+    const asIsPieces = await this.db
+      .select({
+        id: schema.asIsItems.id,
+        pieceNumber: schema.asIsItems.pieceNumber,
+        condition: schema.asIsItems.condition,
+        storageLocation: schema.asIsItems.storageLocation,
+        asIsPriceCents: schema.asIsItems.asIsPriceCents,
+        source: schema.asIsItems.source,
+        createdAt: schema.asIsItems.createdAt,
+      })
+      .from(schema.asIsItems)
+      .where(
+        and(
+          eq(schema.asIsItems.variantId, variantId),
+          eq(schema.asIsItems.locationId, locationId),
+          eq(schema.asIsItems.status, 'pending_review'),
+        ),
+      )
+      .orderBy(asc(schema.asIsItems.createdAt));
+    const serials = variant.serialTracked
+      ? await this.db
+          .select({
+            id: schema.serialUnits.id,
+            serial: schema.serialUnits.serial,
+            status: schema.serialUnits.status,
+          })
+          .from(schema.serialUnits)
+          .where(
+            and(
+              eq(schema.serialUnits.variantId, variantId),
+              eq(schema.serialUnits.locationId, locationId),
+              inArray(schema.serialUnits.status, [
+                'in_stock',
+                'committed',
+                'floor_sample',
+                'returned',
+              ]),
+            ),
+          )
+          .orderBy(asc(schema.serialUnits.serial))
+      : [];
+    const bins = await this.db
+      .select({ id: schema.storageBins.id, code: schema.storageBins.code })
+      .from(schema.storageBins)
+      .where(
+        and(eq(schema.storageBins.locationId, locationId), eq(schema.storageBins.isActive, true)),
+      )
+      .orderBy(asc(schema.storageBins.code));
+    return {
+      ...totals,
+      variantId,
+      productId: variant.productId,
+      productName: variant.productName,
+      sku: variant.sku,
+      serialTracked: variant.serialTracked,
+      costCents: variant.costCents,
+      locationId,
+      locationName: location.name,
+      storageBinId: row?.storageBinId ?? null,
+      storageBinCode: row?.storageBinCode ?? null,
+      asIsVariantId: asIsSibling[0]?.id ?? null,
+      asIsPieces,
+      serials,
+      bins,
+    };
   }
 
   /**
@@ -628,6 +973,9 @@ export class InventoryController {
       notes?: string;
       referenceType?: string;
       referenceId?: string;
+      reasonCodeId?: string | null;
+      /** Cost an upward delta layers at; null → the variant's catalog cost. */
+      unitCostCents?: number | null;
     },
   ): Promise<{ onHand: number; movementId: string }> {
     // Verify variant + location belong to the active business (RLS would
@@ -657,6 +1005,7 @@ export class InventoryController {
         reason: args.reason,
         referenceType: args.referenceType ?? null,
         referenceId: args.referenceId ?? null,
+        reasonCodeId: args.reasonCodeId ?? null,
         actorUserId: actor.id,
         notes: args.notes ?? null,
       })
@@ -673,7 +1022,7 @@ export class InventoryController {
         sourceType: args.reason === 'receive' ? 'receive' : 'adjustment',
         referenceId: null,
         quantity: args.delta,
-        unitCostCents: variant.costCents,
+        unitCostCents: args.unitCostCents ?? variant.costCents,
       });
     } else if (args.delta < 0) {
       await this.costing.consume(this.db, {
@@ -681,8 +1030,8 @@ export class InventoryController {
         variantId: args.variantId,
         locationId: args.locationId,
         quantity: -args.delta,
-        referenceType: 'inventory_adjust',
-        referenceId: movement.id,
+        referenceType: args.referenceType ?? 'inventory_adjust',
+        referenceId: args.referenceId ?? movement.id,
       });
     }
 

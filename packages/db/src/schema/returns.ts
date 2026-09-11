@@ -29,9 +29,13 @@ export const asIsItems = pgTable(
       .notNull()
       .references(() => locations.id, { onDelete: 'restrict' }),
     quantity: integer('quantity').notNull(),
-    /** 'return' | 'warranty' | 'defect' | 'exchange_pickup' | 'transfer' (as_is consolidation intake) */
+    /**
+     * 'return' | 'warranty' | 'defect' | 'exchange_pickup' | 'transfer'
+     * (as_is consolidation intake) | 'stock' (A22 slice 3: moved out of
+     * sellable stock by the Stock Adjustment dialog — the level dropped).
+     */
     source: text('source').notNull().default('return'),
-    /** 'pending_review' | 'restocked' | 'vendor_return' | 'scrapped' */
+    /** 'pending_review' | 'restocked' | 'vendor_return' | 'scrapped' | 'voided' (A22: removed by an as-is adjustment) */
     status: text('status').notNull().default('pending_review'),
     /** What produced it: 'refund' | 'order' | 'manual' | 'stock_transfer' + the row's id. */
     referenceType: text('reference_type'),

@@ -5380,3 +5380,22 @@ sends the return salesperson the API already accepts (slice 6).
   `reports/text-layout.ts` (the AR.317 renderer now imports it). Page under
   Reports. A22 D22.
 - Tests: `transfers-sweep.int.spec.ts` (7; CI db `jetnine_transfers_sweep`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 3 — stock adjustment)
+
+- Enter a Stock Adjustment: one dialog on Stock by location and the product
+  page — header strip from `GET /v1/inventory/stock-card`, tabs Quantity
+  (reason code class Inventory adjustments + unit cost; migration
+  `0095_a22_stock_adjustment` adds `inventory_movements.reason_code_id`),
+  Bin to bin, Move to As-Is (`POST /v1/as-is` with `fromStock` now
+  decrements stock — the double count is closed), Move from As-Is, As-Is
+  status, As-Is adjustment (`POST /v1/as-is/:id/void`, optional return to
+  stock, or walk-in pieces), Write-off (`POST /v1/inventory/write-off`:
+  permission + override, coded reason, register at cost, exception,
+  ledger), Change serial (`PATCH /v1/serials/:id`), SO info. A22 D23–D26.
+- Reassign a Sales Reservation: `GET /v1/inventory/reservation-board` +
+  `POST /v1/inventory/reservations/move` (back order / reserve, moving
+  between orders in one request); the Reserved count on both pages opens
+  the dialog. Shared `orders/order-guards.ts` (extracted from the A20
+  actions). A22 D27.
+- Tests: `stock-adjustment.int.spec.ts` (13; CI db `jetnine_stock_adjustment`).

@@ -1282,6 +1282,54 @@ Decisions (slice 2 — transfers):
   has one; instructions and notes under the transfer when asked. The spool
   reuses the AR.317 text writer through the shared `text-layout` helpers.
 
+Decisions (slice 3 — stock adjustment + reassign reservation):
+
+- **D23 One Stock Adjustment dialog.** Stock by location and the product
+  page open the same dialog (`components/stock-adjustment-dialog.tsx`) on a
+  variant + location: a header strip from `GET /v1/inventory/stock-card`
+  (on hand / reserved / floor / available / net on PO / as-is here / bin /
+  cost, plus the pending as-is pieces, the serials in the building, the
+  active bins and the `-AS` sibling variant) and the STORIS tabs: Quantity,
+  Bin to bin, Move to As-Is, Move from As-Is, As-Is status, As-Is
+  adjustment, Write-off, Change serial (serial-tracked products only), SO
+  info. Vendor chargeback stays on the As-Is queue's vendor-return path.
+  The `prompt()` adjust is gone.
+- **D24 Quantity adjustment.** `POST /v1/inventory/adjust` takes a coded
+  reason (`reasonCodeId`, class `inventory_adjustment`, validated when
+  given — the legacy bucket + notes stay the floor so a business without
+  codes is never blocked) and `unitCostCents` for an upward adjustment (the
+  FIFO layer lands at that cost instead of the catalog cost). Migration
+  `0095` adds `inventory_movements.reason_code_id` so the ledger and the
+  shrink report can group by reason.
+- **D25 Write-off from stock.** `POST /v1/inventory/write-off` mirrors the
+  As-Is scrap: `inventory.write_off` (override-able through the Security
+  Override dialog), a coded `write_off` reason, a write-off register row at
+  catalog cost, an exception, and the ledger movement (`write_off`) that
+  drops on hand. Only available units can go — reserved and floor-sample
+  units must be released first.
+- **D26 Move to / from As-Is.** `POST /v1/as-is` with `fromStock: true`
+  (source `stock`) now decrements on hand (available units only), consumes
+  FIFO layers and writes an `as_is_intake` movement — the double count the
+  screen sweep found is closed. Move from As-Is is the existing restock
+  review (this product or its `-AS` variant). As-Is adjustment is
+  `POST /v1/as-is/:id/void` (status `voided`, reason required, optional
+  return to sellable stock) for a piece taken in by mistake, plus the
+  walk-in intake for pieces found on the floor. Change serial is
+  `PATCH /v1/serials/:id` (`serials.manage`; sold / in-service units keep
+  their serial; duplicates 409).
+- **D27 Reassign a Sales Reservation.** `GET /v1/inventory/reservation-board`
+  lists every live order line wanting the item at the location (order,
+  customer, kind, order date, fill-by = line delivery date else requested
+  date, qty / reserved / short); `POST /v1/inventory/reservations/move`
+  (`orders.update`) back-orders N units off a line or reserves N onto a
+  line — taking them from another order's line in the same request when
+  nothing is free. Both orders pass the shared order-edit guards
+  (`orders/order-guards.ts`: live, unlocked, off the truck) and the moves
+  go through the order service's reserve / release primitives, so the
+  `order_reserve` / `order_release` ledger rows are the same ones the order
+  page writes. The Reserved count on Stock by location and the product page
+  opens it; the release-only popup is gone.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.

@@ -12,6 +12,7 @@ import { OrdersController } from './orders.controller';
 import { PublicOrderController } from './public-order.controller';
 import { OrderNotesController } from './order-notes.controller';
 import { OrderActionsController } from './order-actions.controller';
+import { ReservationsController } from './reservations.controller';
 import { TasksController } from './tasks.controller';
 import { OrdersService } from './orders.service';
 
@@ -31,6 +32,7 @@ import { OrdersService } from './orders.service';
     PublicOrderController,
     OrderNotesController,
     OrderActionsController,
+    ReservationsController,
     TasksController,
   ],
   providers: [OrdersService, TicketFlagsService],

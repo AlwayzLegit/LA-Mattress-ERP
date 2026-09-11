@@ -666,6 +666,13 @@
       "when": 1789107448310,
       "tag": "0094_a22_transfer_entry_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789108333138,
+      "tag": "0095_a22_stock_adjustment",
+      "breakpoints": true
     }
   ]
 }

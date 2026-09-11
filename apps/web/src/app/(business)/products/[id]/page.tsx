@@ -13,6 +13,8 @@ import {
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
+import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
+import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog';
 import { AsIsPanel } from './activity/as-is-panel';
 import { AtpCard } from './activity/atp-card';
 import { GeneralPanel } from './activity/general-panel';
@@ -124,7 +126,6 @@ interface Product {
   stock: { totals: StockTotals; byLocation: LocationStockRow[] };
 }
 
-const ADJUST_REASONS = ['count_correction', 'damage', 'theft', 'other'] as const;
 interface RefEntity {
   id: string;
   name: string;
@@ -326,38 +327,10 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Location availability actions (A19): the same endpoints the Stock by
-  // location screen uses, scoped to this product's row.
-  async function adjustAt(row: LocationStockRow) {
-    const deltaStr = prompt(
-      `Adjust ${row.variantSku ?? p?.name ?? 'stock'} at ${row.locationName} (current ${row.onHand}). Delta:`,
-      '0',
-    );
-    if (!deltaStr) return;
-    const delta = Number(deltaStr);
-    if (!Number.isInteger(delta) || delta === 0) {
-      toast.error('delta must be a non-zero integer');
-      return;
-    }
-    const reason = prompt(`Reason (${ADJUST_REASONS.join(', ')}):`, 'count_correction');
-    if (!reason) return;
-    const notes = prompt('Optional notes:', '') ?? undefined;
-    try {
-      await api('/v1/inventory/adjust', {
-        method: 'POST',
-        body: JSON.stringify({
-          variantId: row.variantId,
-          locationId: row.locationId,
-          delta,
-          reason,
-          notes: notes || undefined,
-        }),
-      });
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
+  // Location availability actions (A19 → A22 slice 3): the STORIS Stock
+  // Adjustment dialog and Reassign Reservation open on this product's row.
+  const [adjustFor, setAdjustFor] = useState<LocationStockRow | null>(null);
+  const [reassignFor, setReassignFor] = useState<LocationStockRow | null>(null);
 
   async function setFloorAt(row: LocationStockRow) {
     const qtyStr = prompt(
@@ -624,11 +597,15 @@ export default function ProductDetailPage() {
                           <td className="num">{row.available}</td>
                           <td className="num">
                             {row.reserved > 0 ? (
-                              <Link
-                                href={`/products/stock?locationId=${row.locationId}&q=${encodeURIComponent(row.variantSku ?? '')}`}
+                              <button
+                                type="button"
+                                className="btn-link"
+                                title="Who holds these units — back order or reserve from here"
+                                data-testid="product-reserved-count"
+                                onClick={() => setReassignFor(row)}
                               >
                                 {row.reserved}
-                              </Link>
+                              </button>
                             ) : (
                               row.reserved
                             )}
@@ -647,7 +624,8 @@ export default function ProductDetailPage() {
                             <Button
                               size="sm"
                               variant="secondary"
-                              onClick={() => void adjustAt(row)}
+                              onClick={() => setAdjustFor(row)}
+                              data-testid="product-stock-adjust"
                             >
                               Adjust
                             </Button>
@@ -1023,6 +1001,29 @@ export default function ProductDetailPage() {
           )}
         </div>
       </div>
+      {adjustFor && (
+        <StockAdjustmentDialog
+          open
+          variantId={adjustFor.variantId}
+          locationId={adjustFor.locationId}
+          onClose={() => setAdjustFor(null)}
+          onChanged={() => void load()}
+          onReassign={() => {
+            setReassignFor(adjustFor);
+            setAdjustFor(null);
+          }}
+        />
+      )}
+      {reassignFor && (
+        <ReassignReservationDialog
+          open
+          variantId={reassignFor.variantId}
+          locationId={reassignFor.locationId}
+          itemLabel={`${reassignFor.variantSku ?? p?.name ?? 'item'} @ ${reassignFor.locationName}`}
+          onClose={() => setReassignFor(null)}
+          onChanged={() => void load()}
+        />
+      )}
     </div>
   );
 }

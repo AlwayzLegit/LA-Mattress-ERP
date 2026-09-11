@@ -11,6 +11,7 @@ import {
 import { businesses, users } from './platform';
 import { locations } from './tenancy';
 import { productVariants } from './catalog';
+import { reasonCodes } from './controls';
 
 /**
  * Warehouse storage bins (STORIS Tracked Storage Location parity, lean —
@@ -101,10 +102,20 @@ export const inventoryMovements = pgTable(
       .notNull()
       .references(() => locations.id, { onDelete: 'cascade' }),
     delta: integer('delta').notNull(),
-    // 'sale' | 'return' | 'adjustment' | 'receive' | 'transfer'
+    // 'sale' | 'return' | 'adjustment' | 'receive' | 'transfer' | 'write_off'
+    // | 'as_is_intake' | 'as_is_restock' | 'order_reserve' | 'order_release' …
     reason: text('reason').notNull(),
     referenceType: text('reference_type'),
     referenceId: uuid('reference_id'),
+    /**
+     * A22 slice 3 (STORIS Stock Adjustment "Reason Code"): the coded
+     * reason behind a manual adjustment or write-off, so the ledger and
+     * the shrink report can group by it. Free-text `notes` stays the
+     * fallback while a business has no codes of the class.
+     */
+    reasonCodeId: uuid('reason_code_id').references(() => reasonCodes.id, {
+      onDelete: 'set null',
+    }),
     actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
