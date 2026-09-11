@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { InvoiceDoc, invoiceAccent, onAccent, type OrderDocumentPayload } from './order-documents';
+import {
+  InvoiceDoc,
+  invoiceAccent,
+  onAccent,
+  paymentRef,
+  type OrderDocumentPayload,
+} from './order-documents';
 
 function payload(over: Partial<OrderDocumentPayload['order']> = {}): OrderDocumentPayload {
   return {
@@ -68,6 +74,7 @@ function payload(over: Partial<OrderDocumentPayload['order']> = {}): OrderDocume
           amountCents: 50000,
           status: 'succeeded',
           createdAt: '2026-09-10T20:05:00.000Z',
+          processorRef: '4242',
         },
       ],
       ...over,
@@ -134,6 +141,15 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toContain('TP-ADAPT-M-Q · Tempur-Pedic');
     expect(html).toContain('Leave at side door');
     expect(html).toContain('Credit card');
+    // The register's last-4 / reference prints with the tender.
+    expect(html).toContain('•••• 4242');
+  });
+
+  it('prints the payment reference as entered unless it is a bare last 4', () => {
+    expect(paymentRef('4242')).toBe('•••• 4242');
+    expect(paymentRef(' 4242 ')).toBe('•••• 4242');
+    expect(paymentRef('APR-88213')).toBe('APR-88213');
+    expect(paymentRef('chk 1042')).toBe('chk 1042');
   });
 
   it('says Paid in full when nothing is owed', () => {

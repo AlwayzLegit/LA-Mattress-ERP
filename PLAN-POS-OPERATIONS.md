@@ -342,7 +342,8 @@ the Exchange Order drop the STORIS replica for a modern clean layout: tenant log
 store's full address under the logo, never the store name (and no Store cell); a balance callout at the top right (Amount
 Due / Credit Due / Paid in full) the customer reads first; Sold To / Ship To / Order
 details cards in place of the info strip; a rule-only line grid (Item carries
-model · brand and the line comment); payments and a totals card side by side;
+model · brand and the line comment); payments (method, date, amount, and the register's reference / card last 4) and a
+totals card side by side;
 footer note plus the printed timestamp. Every §11 field and amendment above still
 prints. Letter paper with 1-inch margins on every side, browser print, multi-page
 safe (grid header repeats, rows never split). Delivery Ticket, Pick List, Purchase Order and Transfer Ticket are unchanged.

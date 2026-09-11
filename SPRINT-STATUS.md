@@ -5488,5 +5488,8 @@ Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment
   Mattress logo navy `#0f2057` (from the logo SVG on the store site); the header
   prints the selling store's full address, never its name, and the Store cell is
   gone.
+- Owner (same day): each payment prints the register's reference — a bare last 4
+  as "•••• 4242", approval / check numbers as entered. `processorRef` was already
+  in the document payload; `orders.int.spec.ts` +1 proves the round trip.
 - Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
   JSX for web component tests).

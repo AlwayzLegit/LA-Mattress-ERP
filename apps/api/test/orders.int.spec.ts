@@ -622,6 +622,24 @@ describe('Documents + A1 print lock (PLAN-POS-OPERATIONS P4)', () => {
     expect(res.body.order.totalCents).toBe(res.body.order.subtotalCents + res.body.order.taxCents);
   });
 
+  it("Document payload carries each payment's reference (the card last 4) for the invoice", async () => {
+    const order = await makeOrder();
+    const pay = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.id}/payments`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ method: 'card', amountCents: 1000, kind: 'deposit', processorRef: '4242' });
+    expect(pay.status).toBe(201);
+    const res = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.id}/document`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(res.status).toBe(200);
+    const printed = res.body.order.payments.find((p: { id: string }) => p.id === pay.body.id);
+    expect(printed).toBeTruthy();
+    expect(printed.processorRef).toBe('4242');
+  });
+
   it('Document payload carries the branding accent for the invoice (null until set)', async () => {
     const order = await makeOrder();
     const before = await request(app.getHttpServer())

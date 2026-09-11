@@ -74,6 +74,8 @@ export interface OrderDocumentPayload {
       amountCents: number;
       status: string;
       createdAt: string;
+      /** The register's "Reference / last 4 / approval #" entry (owner 2026-09-11: prints). */
+      processorRef?: string | null;
     }[];
   };
   lines: {
@@ -757,7 +759,18 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
                 <tbody>
                   {payments.map((p) => (
                     <tr key={p.id}>
-                      <td style={{ padding: '3px 0', fontSize: 11 }}>{tenderLabel(p.method)}</td>
+                      <td style={{ padding: '3px 0', fontSize: 11 }}>
+                        {tenderLabel(p.method)}
+                        {p.processorRef && (
+                          <span
+                            style={{ color: MUTED, marginLeft: 6 }}
+                            className="inv-num"
+                            data-testid="invoice-payment-ref"
+                          >
+                            {paymentRef(p.processorRef)}
+                          </span>
+                        )}
+                      </td>
                       <td
                         style={{ padding: '3px 8px', fontSize: 11, color: MUTED }}
                         className="inv-num"
@@ -838,6 +851,16 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
       </footer>
     </div>
   );
+}
+
+/**
+ * The register's reference field as it should read on paper: a bare
+ * last-4 becomes "•••• 4242"; anything else (approval #, check #) prints
+ * as entered.
+ */
+export function paymentRef(ref: string): string {
+  const t = ref.trim();
+  return /^\d{4}$/.test(t) ? `•••• ${t}` : t;
 }
 
 function DetailRow({ label: l, children }: { label: string; children: React.ReactNode }) {
