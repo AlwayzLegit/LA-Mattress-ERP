@@ -83,6 +83,9 @@ export const NAV: NavGroup[] = [
       { href: '/pos', label: 'New sale', icon: Monitor },
       { href: '/my-day', label: 'My Day', icon: Sunrise },
       { href: '/tasks', label: 'Team Tasks', icon: ClipboardList },
+      ...(process.env.NEXT_PUBLIC_LIVE_CHAT_ENABLED === 'true'
+        ? [{ href: '/chat', label: 'Live chat', icon: Megaphone }]
+        : []),
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
       { href: '/deliveries', label: 'Deliveries', icon: Truck },
       { href: '/jeopardy', label: 'At risk', icon: AlertTriangle },

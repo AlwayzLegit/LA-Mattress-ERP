@@ -2,6 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
+import { ChatWorker, AblyChatPublisher } from '../src/chat/chat-worker';
+import request from 'supertest';
+import { Test } from '@nestjs/testing';
+import { hashPassword } from 'better-auth/crypto';
+import { AppModule } from '../src/app.module';
+import { REDIS } from '../src/redis/redis.module';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -115,6 +121,218 @@ afterAll(async () => {
 });
 
 describe('chat persistence foundation on Postgres', () => {
+  it('reclaims abandoned leases and rejects completion from stale workers', async () => {
+    await db
+      .update(schema.chatOutbox)
+      .set({ completedAt: new Date() })
+      .where(eq(schema.chatOutbox.businessId, businessId));
+    await service.startConversation(auth, randomUUID(), input());
+    let now = new Date(Date.now() + 1000);
+    const worker = new ChatWorker(db, { publish: async () => {} }, 'staging', () => now);
+    const a = await worker.claim(businessId);
+    const b = await worker.claim(businessId);
+    expect(a!.id).not.toBe(b!.id);
+    expect(await worker.claim(businessId)).toBeNull();
+    now = new Date(now.getTime() + 31000);
+    const recovered = await worker.claim(businessId);
+    expect([a!.id, b!.id]).toContain(recovered!.id);
+    expect(recovered!.attempts).toBe(2);
+    expect(await worker.settle(recovered!.id === a!.id ? a! : b!, true)).toBe(false);
+    expect(await worker.settle(recovered!, true)).toBe(true);
+  });
+
+  it('retries provider failures with backoff and preserves failed work for inspection', async () => {
+    await db
+      .update(schema.chatOutbox)
+      .set({ completedAt: new Date() })
+      .where(eq(schema.chatOutbox.businessId, businessId));
+    await service.startConversation(auth, randomUUID(), input());
+    let now = new Date(Date.now() + 1000);
+    const worker = new ChatWorker(
+      db,
+      {
+        publish: async () => {
+          throw new Error('Do not store provider credentials');
+        },
+      },
+      'staging',
+      () => now,
+    );
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await worker.runOnce(businessId);
+      await worker.runOnce(businessId);
+      expect(await worker.runOnce(businessId)).toBe(false);
+      now = new Date(now.getTime() + 61000);
+    }
+    const rows = await db
+      .select()
+      .from(schema.chatOutbox)
+      .where(eq(schema.chatOutbox.businessId, businessId));
+    const failed = rows.filter((row) => row.failedAt);
+    expect(failed).toHaveLength(2);
+    expect(failed.every((row) => row.attempts === 8)).toBe(true);
+    expect(JSON.stringify(failed)).not.toContain('credentials');
+  });
+
+  it('publishes only change metadata to environment-specific private channels with stable IDs', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const publisher = new AblyChatPublisher(
+      'test.key:test-secret',
+      'staging',
+      async (url, init) => {
+        calls.push({ url: String(url), init });
+        return new Response('', { status: 201 });
+      },
+    );
+    const event = {
+      id: randomUUID(),
+      businessId,
+      conversationId: randomUUID(),
+      sequence: 3,
+      audience: 'staff' as const,
+    };
+    await publisher.publish(event);
+    await publisher.publish(event);
+    expect(decodeURIComponent(calls[0]!.url)).toContain(
+      `chat:staging:${businessId}:${event.conversationId}:staff`,
+    );
+    expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({
+      id: event.id,
+      name: 'conversation.changed',
+      data: { conversationId: event.conversationId, sequence: 3 },
+    });
+    expect(calls[0]!.init!.body).toBe(calls[1]!.init!.body);
+    const wrongEnvironment = new ChatWorker(db, publisher, 'production');
+    expect(await wrongEnvironment.claim(businessId)).toBeNull();
+  });
+
+  it('serves authenticated visitor/staff HTTP flows and enforces origin, kill switch and limiter failures', async () => {
+    const previousEnv = { ...process.env };
+    Object.assign(process.env, {
+      DATABASE_URL: url,
+      BETTER_AUTH_URL: 'http://localhost',
+      BETTER_AUTH_SECRET: 'chat-test-secret-only-2026-123456',
+      AUTH_TRUSTED_ORIGINS: 'http://localhost',
+      AUTH_RATE_LIMIT_DISABLED: '1',
+      NODE_ENV: 'test',
+      CHAT_ENABLED: 'true',
+      CHAT_ENVIRONMENT: 'staging',
+      CHAT_STAFF_ORIGINS: 'http://localhost',
+    });
+    const password = 'LocalChatTest!2026';
+    await db
+      .update(schema.users)
+      .set({ emailVerified: true })
+      .where(eq(schema.users.id, staff.userId!));
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, staff.userId!));
+    await db.insert(schema.accounts).values({
+      accountId: staff.userId!,
+      providerId: 'credential',
+      userId: staff.userId!,
+      password: await hashPassword(password),
+    });
+    let limitMode = 'ok';
+    const redis = {
+      eval: async () => {
+        if (limitMode === 'down') throw new Error('Unavailable');
+        return limitMode === 'limited' ? 1000 : 1;
+      },
+      get: async () => null,
+      set: async () => 'OK',
+      del: async () => 1,
+    };
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(REDIS)
+      .useValue(redis)
+      .compile();
+    const app = module.createNestApplication({ bufferLogs: true });
+    try {
+      await app.init();
+      const contract = await request(app.getHttpServer()).get('/v1/chat/openapi.json').expect(200);
+      expect(contract.body.info.version).toBe('1.0.0');
+      expect(contract.body.paths['/v1/chat/visitor/conversations']).toBeDefined();
+      const login = await request(app.getHttpServer())
+        .post('/api/auth/sign-in/email')
+        .send({ email: user!.email, password })
+        .expect(200);
+      const cookie = (login.get('Set-Cookie') ?? [])
+        .map((c: string) => c.split(';')[0]!)
+        .find((c: string) => c.startsWith('jetnine.session_token='))!;
+      const visitorHeaders = {
+        authorization: `Bearer ${auth.credential}`,
+        'x-chat-integration-id': auth.integrationId,
+        'x-chat-session': auth.sessionCredential,
+      };
+      const staffHeaders = {
+        Cookie: cookie,
+        'x-business-id': businessId,
+        Origin: 'http://localhost',
+        'x-chat-request': '1',
+      };
+      await request(app.getHttpServer()).get('/v1/chat/conversations').expect(401);
+      await request(app.getHttpServer()).post('/v1/chat/visitor/session').send({}).expect(401);
+      const start = await request(app.getHttpServer())
+        .post('/v1/chat/visitor/conversations')
+        .set(visitorHeaders)
+        .send({ clientConversationId: randomUUID(), ...input('HTTP question') })
+        .expect(201);
+      expect(start.get('Cache-Control')).toBe('no-store');
+      const id = start.body.conversationId as string;
+      await request(app.getHttpServer())
+        .post(`/v1/chat/conversations/${id}/messages`)
+        .set(staffHeaders)
+        .send(input('HTTP reply'))
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/v1/chat/conversations/${id}/notes`)
+        .set(staffHeaders)
+        .send(input('Private HTTP note'))
+        .expect(201);
+      const history = await request(app.getHttpServer())
+        .get(`/v1/chat/visitor/conversations/${id}/history`)
+        .set(visitorHeaders)
+        .expect(200);
+      expect(history.body.data.map((row: { body: string }) => row.body)).toEqual([
+        'HTTP question',
+        'HTTP reply',
+      ]);
+      const staffHistory = await request(app.getHttpServer())
+        .get(`/v1/chat/conversations/${id}/history`)
+        .set(staffHeaders)
+        .expect(200);
+      expect(staffHistory.body.data).toHaveLength(3);
+      await request(app.getHttpServer())
+        .post(`/v1/chat/conversations/${id}/messages`)
+        .set({ ...staffHeaders, Origin: 'https://untrusted.test' })
+        .send(input())
+        .expect(403);
+      await request(app.getHttpServer())
+        .get(`/v1/chat/visitor/conversations/${id}/history`)
+        .set({ ...visitorHeaders, 'x-chat-session': otherVisitor.sessionCredential })
+        .expect(404);
+      limitMode = 'down';
+      await request(app.getHttpServer())
+        .get(`/v1/chat/visitor/conversations/${id}/history`)
+        .set(visitorHeaders)
+        .expect(503);
+      limitMode = 'limited';
+      await request(app.getHttpServer())
+        .get(`/v1/chat/visitor/conversations/${id}/history`)
+        .set(visitorHeaders)
+        .expect(429);
+      limitMode = 'ok';
+      process.env.CHAT_ENABLED = 'false';
+      await request(app.getHttpServer())
+        .get(`/v1/chat/visitor/conversations/${id}/history`)
+        .set(visitorHeaders)
+        .expect(503);
+    } finally {
+      await app.close();
+      for (const key of Object.keys(process.env))
+        if (!(key in previousEnv)) delete process.env[key];
+      Object.assign(process.env, previousEnv);
+    }
+  });
   it('stores only credential hashes and validates integration environment and credential', async () => {
     const [session] = await db
       .select()

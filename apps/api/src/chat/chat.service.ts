@@ -38,9 +38,8 @@ type MessageRow = typeof messages.$inferSelect;
 type ConversationRow = typeof conversations.$inferSelect;
 type Actor = { type: 'visitor' | 'staff'; id: string; audience: 'public' | 'internal' };
 
-/** Persistence foundation only. No HTTP routes are registered until adapter,
- * shared rate limiting and staging isolation are implemented. Pass the root DB;
- * each operation owns its RLS transaction and resolves only after commit. */
+/** Pass the root DB. Each operation owns its RLS transaction and resolves only
+ * after commit. HTTP routes are disabled by default through ChatHttpGuard. */
 export class ChatService {
   constructor(
     private readonly db: PostgresJsDatabase,
@@ -273,40 +272,7 @@ export class ChatService {
       this.db,
       { businessId: tenant.businessId, userId: tenant.userId },
       async (tx) => {
-        const [member] = await tx
-          .select()
-          .from(schema.memberships)
-          .where(
-            and(
-              eq(schema.memberships.businessId, tenant.businessId!),
-              eq(schema.memberships.id, tenant.membershipId!),
-              eq(schema.memberships.userId, tenant.userId!),
-              eq(schema.memberships.status, 'active'),
-              eq(schema.memberships.dataScope, 'all'),
-            ),
-          )
-          .for('share');
-        if (!member) throw new ForbiddenException('Active chat membership required');
-        const rolePermissions = await tx
-          .select()
-          .from(schema.rolePermissions)
-          .where(eq(schema.rolePermissions.roleId, member.roleId));
-        const overrides = await tx
-          .select()
-          .from(schema.membershipPermissionOverrides)
-          .where(
-            and(
-              eq(schema.membershipPermissionOverrides.businessId, tenant.businessId!),
-              eq(schema.membershipPermissionOverrides.membershipId, member.id),
-            ),
-          );
-        const effective = new Set(rolePermissions.map((row) => row.permission));
-        for (const override of overrides) {
-          if (override.allowed) effective.add(override.permission);
-          else effective.delete(override.permission);
-        }
-        if (!effective.has('chat.view_team') || !effective.has('chat.reply'))
-          throw new ForbiddenException('Chat team reply permission required');
+        const member = await this.requireStaff(tx, tenant, true);
         const conversation = await this.conversation(tx, tenant.businessId!, conversationId);
         const saved = await this.append(
           tx,
@@ -332,6 +298,143 @@ export class ChatService {
           audience: saved.audience,
           createdAt: saved.createdAt.toISOString(),
           persisted: true as const,
+        };
+      },
+    );
+  }
+
+  async startFromHttp(auth: ChatVisitorAuth, body: unknown) {
+    const parsed = chatMessageInputSchema
+      .extend({ clientConversationId: z.string().uuid() })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid conversation request');
+    const { clientConversationId, ...message } = parsed.data;
+    return this.startConversation(auth, clientConversationId, message);
+  }
+
+  private async requireStaff(tx: DrizzleTransaction, tenant: RequestTenantContext, reply = false) {
+    if (
+      !tenant.businessId ||
+      !tenant.userId ||
+      !tenant.membershipId ||
+      tenant.apiKeyId ||
+      tenant.dataScope !== 'all' ||
+      !tenant.permissions.has('chat.view_team')
+    )
+      throw new ForbiddenException('Chat team permission required');
+    const [member] = await tx
+      .select()
+      .from(schema.memberships)
+      .where(
+        and(
+          eq(schema.memberships.businessId, tenant.businessId!),
+          eq(schema.memberships.id, tenant.membershipId!),
+          eq(schema.memberships.userId, tenant.userId!),
+          eq(schema.memberships.status, 'active'),
+          eq(schema.memberships.dataScope, 'all'),
+        ),
+      )
+      .for('share');
+    if (!member) throw new ForbiddenException('Active chat membership required');
+    const rolePermissions = await tx
+      .select()
+      .from(schema.rolePermissions)
+      .where(eq(schema.rolePermissions.roleId, member.roleId));
+    const overrides = await tx
+      .select()
+      .from(schema.membershipPermissionOverrides)
+      .where(
+        and(
+          eq(schema.membershipPermissionOverrides.businessId, tenant.businessId!),
+          eq(schema.membershipPermissionOverrides.membershipId, member.id),
+        ),
+      );
+    const effective = new Set(rolePermissions.map((row) => row.permission));
+    for (const override of overrides) {
+      if (override.allowed) effective.add(override.permission);
+      else effective.delete(override.permission);
+    }
+    if (!effective.has('chat.view_team') || (reply && !effective.has('chat.reply')))
+      throw new ForbiddenException('Chat team reply permission required');
+
+    return member;
+  }
+
+  async staffConversations(tenant: RequestTenantContext, query: unknown = {}) {
+    const parsed = z
+      .object({
+        afterId: z.string().uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(100).default(50),
+      })
+      .strict()
+      .safeParse(query);
+    if (!parsed.success) throw new BadRequestException('Invalid inbox cursor');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant);
+        const rows = await tx
+          .select({
+            id: conversations.id,
+            status: conversations.status,
+            updatedAt: conversations.updatedAt,
+            lastSequence: conversations.lastSequence,
+          })
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.businessId, tenant.businessId!),
+              parsed.data.afterId ? gt(conversations.id, parsed.data.afterId) : undefined,
+            ),
+          )
+          .orderBy(asc(conversations.id))
+          .limit(parsed.data.limit + 1);
+        const data = rows.slice(0, parsed.data.limit);
+        return {
+          data,
+          hasMore: rows.length > parsed.data.limit,
+          nextCursor: data.at(-1)?.id ?? null,
+        };
+      },
+    );
+  }
+
+  async staffHistory(tenant: RequestTenantContext, conversationId: string, query: unknown = {}) {
+    this.uuid(conversationId);
+    const parsed = chatHistoryQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException('Invalid history cursor');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant);
+        await this.conversation(tx, tenant.businessId!, conversationId);
+        const rows = await tx
+          .select({
+            id: messages.id,
+            conversationId: messages.conversationId,
+            body: messages.body,
+            sender: messages.senderType,
+            audience: messages.audience,
+            sequence: messages.sequence,
+            createdAt: messages.createdAt,
+          })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.businessId, tenant.businessId!),
+              eq(messages.conversationId, conversationId),
+              gt(messages.sequence, parsed.data.afterSequence),
+            ),
+          )
+          .orderBy(asc(messages.sequence))
+          .limit(parsed.data.limit + 1);
+        const data = rows.slice(0, parsed.data.limit);
+        return {
+          data,
+          hasMore: rows.length > parsed.data.limit,
+          nextSequence: data.at(-1)?.sequence ?? parsed.data.afterSequence,
         };
       },
     );

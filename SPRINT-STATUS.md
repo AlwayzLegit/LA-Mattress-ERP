@@ -5476,3 +5476,11 @@ sends the return salesperson the API already accepts (slice 6).
 - [x] Validation: 11 Postgres chat integration tests and package typechecks; see docs/live-chat-development.md for exact checks and limits.
 - [ ] Build: worker/Ably transport, HTTP boundaries and OpenAPI, inbox, assignments and persistent storefront widget. The service is not registered in AppModule.
 - [ ] Ops: isolated staging services/provider credentials and named testers. Owner confirmed no staging environments or testing accounts yet; local synthetic fixtures unblock development.
+
+### Checkpoint — 2026-09-11 (live chat: HTTP, worker and initial inbox)
+
+- [x] Build: disabled-by-default ChatModule, visitor/staff HTTP routes, strict staff origin checks, fail-closed Redis counters, private error handling and metadata-only audit, initial OpenAPI document.
+- [x] Build: dedicated lease/retry worker with Ably transport and stale-worker protection; initial ERP /chat inbox with replies, notes and bounded polling.
+- [x] Validation: 15 Postgres/API tests including real staff HTTP authentication, worker recovery and privacy; API build/typechecks and focused lint. Browser reply independently verified through visitor history.
+- [ ] Build: assignment/scoping, provider tokens/recovery, generated storefront response types and widget integration.
+- [ ] Ops: separate staging, Redis/Ably verification, staffing/retention. Local preview uses synthetic data and a test-only limiter; no production deployment.

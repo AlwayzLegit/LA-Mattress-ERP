@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
@@ -71,6 +72,10 @@ import { WebhooksModule } from './webhooks/webhooks.module';
           paths: [
             'req.headers.authorization',
             'req.headers.cookie',
+            'res.headers["set-cookie"]',
+            'req.headers["x-chat-session"]',
+            'req.body.body',
+            'req.body.message',
             'req.headers["x-api-key"]',
             'req.body.password',
             'req.body.token',
@@ -88,6 +93,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     }),
     TerminusModule,
     DatabaseModule,
+    ChatModule,
     RedisModule,
     EmailModule,
     AuditModule,
