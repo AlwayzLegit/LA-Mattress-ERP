@@ -161,6 +161,57 @@ test.describe('Day 2 — order writer', () => {
     await expect(page.getByTestId('order-line-row').first()).toContainText('Reserved');
   });
 
+  test('new-customer panel opens blank after Cancel, Change and a completed sale', async ({
+    page,
+  }) => {
+    // Owner 2026-09-10: the panel kept the previous shopper's fields until a
+    // reload, so "+ New customer" opened prefilled and the dedupe banner
+    // fired before anyone typed. Every exit from the panel must wipe it.
+    test.slow();
+    await loginAndPickBusiness(page);
+    await page.goto('/orders/new');
+    const firstName = page.getByPlaceholder('First name');
+    const openPanel = () => page.getByRole('button', { name: 'New customer' }).click();
+
+    // Cancel.
+    await openPanel();
+    await firstName.fill('Stale');
+    await page.getByPlaceholder('Last name').fill('Entry');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await openPanel();
+    await expect(firstName).toHaveValue('');
+    await expect(page.getByPlaceholder('Last name')).toHaveValue('');
+
+    // Create, then Change (customer detached; the panel must not remember them).
+    await firstName.fill('Fresh');
+    await page.getByPlaceholder('Last name').fill('Shopper');
+    await page.getByTestId('create-customer').click();
+    await expect(page.getByTestId('order-customer')).toContainText('Fresh Shopper');
+    await page.getByRole('button', { name: 'Change', exact: true }).click();
+    await openPanel();
+    await expect(firstName).toHaveValue('');
+
+    // Complete a sale, start the next one from the "New Sale" button.
+    await firstName.fill('Second');
+    await page.getByPlaceholder('Last name').fill('Shopper');
+    await page.getByTestId('create-customer').click();
+    await expect(page.getByTestId('order-customer')).toContainText('Second Shopper');
+    await page.getByTestId('add-product').click();
+    await page.getByTestId('product-query').fill(variantSku);
+    const result = page.getByTestId('product-result').first();
+    await expect(result).toBeVisible();
+    await result.click();
+    await page.getByTestId('complete-sale').click();
+    await page.getByTestId('new-sale-again').click();
+    await openPanel();
+    await expect(firstName).toHaveValue('');
+    // Scoped to the panel's own grid: the ship-to block and the second
+    // phone field also carry "phone" in their placeholders.
+    await expect(firstName.locator('..').getByPlaceholder('Phone', { exact: true })).toHaveValue(
+      '',
+    );
+  });
+
   test('delivery lifecycle: schedule → deliver → collect balance → complete', async ({ page }) => {
     test.slow();
     await loginAndPickBusiness(page);
