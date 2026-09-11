@@ -13,6 +13,7 @@ export const REASON_USAGE_CLASSES = [
   'manifest_removal',
   'inventory_adjustment',
   'transfer_variance',
+  'transfer',
   'write_off',
   'physical_variance',
 ] as const;
@@ -28,6 +29,7 @@ export const REASON_USAGE_CLASS_LABELS: Record<ReasonUsageClass, string> = {
   manifest_removal: 'Removed from a delivery run',
   inventory_adjustment: 'Inventory adjustments',
   transfer_variance: 'Transfer variances',
+  transfer: 'Transfers (reason for the move)',
   write_off: 'Write-offs / scrap',
   physical_variance: 'Physical count variances',
 };

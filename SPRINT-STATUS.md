@@ -5364,3 +5364,19 @@ customers, 7 time clock kiosk, active sessions, batch PO print. Two findings
 worth flagging now: manual as-is intake (`POST /v1/as-is`) never decrements
 on hand (double count until slice 3 fixes it), and the exchange wizard never
 sends the return salesperson the API already accepts (slice 6).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 2 — transfers)
+
+- Enter a Transfer: reason code (new reason class Transfers), delivery date,
+  route, ship direct, instructions for this fulfillment only, Complete
+  transfer (ship + receive on create, no ticket needed), Print transfer
+  ticket after saving, several To locations with Distribute quantities (one
+  transfer per store), total pieces — `POST /v1/stock-transfers` body,
+  migration `0094_a22_transfer_entry_fields`; the detail page shows the
+  fields. A22 D19–D21.
+- Report Transfers by Location: `GET /v1/reports/transfers-by-location`
+  (from / to / dates / reserve level / include instructions; json, csv, txt,
+  Basic PDF) grouped by receiving store — TE.324 layout via the new shared
+  `reports/text-layout.ts` (the AR.317 renderer now imports it). Page under
+  Reports. A22 D22.
+- Tests: `transfers-sweep.int.spec.ts` (7; CI db `jetnine_transfers_sweep`).

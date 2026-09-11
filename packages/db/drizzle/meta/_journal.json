@@ -659,6 +659,13 @@
       "when": 1789100932979,
       "tag": "0093_a21_product_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1789107448310,
+      "tag": "0094_a22_transfer_entry_fields",
+      "breakpoints": true
     }
   ]
 }

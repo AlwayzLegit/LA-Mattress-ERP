@@ -1,4 +1,5 @@
 import {
+  boolean,
   check,
   date,
   index,
@@ -61,6 +62,16 @@ export const stockTransfers = pgTable(
     varianceReasonCodeId: uuid('variance_reason_code_id').references(() => reasonCodes.id, {
       onDelete: 'set null',
     }),
+    /** A22 slice 2 (STORIS Enter a Transfer): coded reason for the move (class `transfer`). */
+    reasonCodeId: uuid('reason_code_id').references(() => reasonCodes.id, { onDelete: 'set null' }),
+    /**
+     * A22 slice 2 — STORIS Delivery Information: the route it rides, whether
+     * it ships straight to the customer, and instructions for this
+     * fulfillment only (the ticket prints them).
+     */
+    route: text('route'),
+    shipDirect: boolean('ship_direct').notNull().default(false),
+    fulfillmentInstructions: text('fulfillment_instructions'),
     notes: text('notes'),
     createdByUserId: uuid('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',

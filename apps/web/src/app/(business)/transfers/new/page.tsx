@@ -47,6 +47,11 @@ interface SerialRow {
   serial: string;
   status: string;
 }
+interface ReasonCodeRow {
+  id: string;
+  code: string;
+  description: string;
+}
 
 export default function NewTransferPage() {
   const router = useRouter();
@@ -56,6 +61,19 @@ export default function NewTransferPage() {
   const [notes, setNotes] = useState('');
   const [transferType, setTransferType] = useState('replenishment');
   const [shipNow, setShipNow] = useState(false);
+  // A22 slice 2 — STORIS Enter a Transfer: reason, delivery information,
+  // complete-on-create, ticket print and several destinations.
+  const [reasonCodes, setReasonCodes] = useState<ReasonCodeRow[]>([]);
+  const [reasonCodeId, setReasonCodeId] = useState('');
+  const [scheduledFor, setScheduledFor] = useState('');
+  const [route, setRoute] = useState('');
+  const [shipDirect, setShipDirect] = useState(false);
+  const [instructions, setInstructions] = useState('');
+  const [complete, setComplete] = useState(false);
+  const [printTicket, setPrintTicket] = useState(false);
+  const [multi, setMulti] = useState(false);
+  const [toLocationIds, setToLocationIds] = useState<string[]>([]);
+  const [distribute, setDistribute] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<VariantRow[]>([]);
@@ -73,8 +91,16 @@ export default function NewTransferPage() {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      try {
+        setReasonCodes(await api<ReasonCodeRow[]>('/v1/reason-codes?usageClass=transfer'));
+      } catch {
+        setReasonCodes([]);
+      }
     })();
   }, []);
+
+  const destinations = multi ? toLocationIds : toLocationId ? [toLocationId] : [];
+  const totalPieces = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
 
   async function searchVariants() {
     if (!search.trim()) {
@@ -155,7 +181,11 @@ export default function NewTransferPage() {
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    if (fromLocationId === toLocationId) {
+    if (destinations.length === 0) {
+      setError('Pick at least one To location.');
+      return;
+    }
+    if (destinations.includes(fromLocationId)) {
       setError('From and To must be different locations.');
       return;
     }
@@ -165,14 +195,26 @@ export default function NewTransferPage() {
     }
     setSaving(true);
     try {
-      const created = await api<{ id: string }>('/v1/stock-transfers', {
+      const created = await api<{
+        id: string;
+        number: string;
+        createdTransfers?: { id: string; number: string; toLocationId: string }[];
+      }>('/v1/stock-transfers', {
         method: 'POST',
         body: JSON.stringify({
           fromLocationId,
           transferType,
-          toLocationId,
+          ...(multi
+            ? { toLocationIds: destinations, distributeQuantities: distribute }
+            : { toLocationId }),
           notes: notes || null,
-          ship: shipNow,
+          ship: shipNow && !complete,
+          complete,
+          reasonCodeId: reasonCodeId || null,
+          scheduledFor: scheduledFor || null,
+          route: route || null,
+          shipDirect,
+          fulfillmentInstructions: instructions || null,
           lines: lines.map((l) => ({
             variantId: l.variantId,
             quantity: Number(l.quantity),
@@ -183,6 +225,15 @@ export default function NewTransferPage() {
           })),
         }),
       });
+      if (printTicket) window.open(`/print/transfers/${created.id}`, '_blank');
+      if (created.createdTransfers && created.createdTransfers.length > 1) {
+        const names = created.createdTransfers
+          .map(
+            (t) => `${t.number} → ${locations.find((l) => l.id === t.toLocationId)?.name ?? '?'}`,
+          )
+          .join(', ');
+        window.alert(`Created ${created.createdTransfers.length} transfers: ${names}`);
+      }
       router.push(`/transfers/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -198,7 +249,7 @@ export default function NewTransferPage() {
       />
       <form onSubmit={submit}>
         <Stack>
-          <Card title="Details">
+          <Card title="Details" description={`Total pieces: ${totalPieces}`}>
             <FormGrid cols={2}>
               <Field label="From location" required>
                 <Select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)}>
@@ -209,15 +260,71 @@ export default function NewTransferPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="To location" required>
-                <Select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)}>
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              {multi ? (
+                <Field
+                  label="To locations"
+                  required
+                  hint="One transfer per store. Distribute splits each line's quantity across them; otherwise every store gets the full lines."
+                >
+                  <div className="flex flex-wrap gap-3" data-testid="transfer-to-locations">
+                    {locations
+                      .filter((l) => l.id !== fromLocationId)
+                      .map((l) => (
+                        <label key={l.id} className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={toLocationIds.includes(l.id)}
+                            onChange={(e) =>
+                              setToLocationIds((prev) =>
+                                e.target.checked
+                                  ? [...prev, l.id]
+                                  : prev.filter((id) => id !== l.id),
+                              )
+                            }
+                          />
+                          {l.name}
+                        </label>
+                      ))}
+                  </div>
+                  <label className="mt-2 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={distribute}
+                      onChange={(e) => setDistribute(e.target.checked)}
+                      data-testid="transfer-distribute"
+                    />
+                    Distribute quantities
+                  </label>
+                  <button
+                    type="button"
+                    className="link mt-1 text-sm"
+                    onClick={() => setMulti(false)}
+                  >
+                    One location
+                  </button>
+                </Field>
+              ) : (
+                <Field label="To location" required>
+                  <Select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)}>
+                    {locations.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <button
+                    type="button"
+                    className="link mt-1 text-sm"
+                    onClick={() => {
+                      setMulti(true);
+                      setToLocationIds(toLocationId ? [toLocationId] : []);
+                    }}
+                    data-testid="transfer-several-locations"
+                  >
+                    Several locations…
+                  </button>
+                </Field>
+              )}
               <Field label="Transfer type">
                 <Select
                   value={transferType}
@@ -228,6 +335,23 @@ export default function NewTransferPage() {
                   <option value="floor_sample">Floor sample</option>
                   <option value="customer">Customer-driven</option>
                   <option value="as_is">As-Is consolidation</option>
+                </Select>
+              </Field>
+              <Field
+                label="Reason code"
+                hint="Why the stock moves (Settings → Reason codes, class Transfers)."
+              >
+                <Select
+                  value={reasonCodeId}
+                  onChange={(e) => setReasonCodeId(e.target.value)}
+                  data-testid="transfer-reason"
+                >
+                  <option value="">(none)</option>
+                  {reasonCodes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.code} — {r.description}
+                    </option>
+                  ))}
                 </Select>
               </Field>
               <Field label="Notes" className="form-span">
@@ -243,17 +367,78 @@ export default function NewTransferPage() {
                   <input
                     type="checkbox"
                     checked={shipNow}
+                    disabled={complete}
                     onChange={(e) => setShipNow(e.target.checked)}
                   />
                   Ship immediately (skip the draft step)
                 </label>
-                {shipNow && (
+                {shipNow && !complete && (
                   <p className="field-hint">
                     Blocked when a printed transfer ticket is required before shipping (the default)
                     — create the draft, print the ticket, then ship.
                   </p>
                 )}
+                <label className="mt-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={complete}
+                    onChange={(e) => setComplete(e.target.checked)}
+                    data-testid="transfer-complete"
+                  />
+                  Complete transfer — the stock already moved; ship and receive it now
+                </label>
+                <label className="mt-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={printTicket}
+                    onChange={(e) => setPrintTicket(e.target.checked)}
+                  />
+                  Print transfer ticket after saving
+                </label>
               </div>
+            </FormGrid>
+          </Card>
+
+          <Card
+            title="Delivery information"
+            description="How it travels: the route, the delivery date, whether it ships straight to the customer, and instructions for this fulfillment only (the ticket prints them)."
+          >
+            <FormGrid cols={2}>
+              <Field label="Route">
+                <Input
+                  value={route}
+                  onChange={(e) => setRoute(e.target.value)}
+                  placeholder="e.g. Westside AM"
+                  data-testid="transfer-route"
+                />
+              </Field>
+              <Field label="Delivery date">
+                <Input
+                  type="date"
+                  value={scheduledFor}
+                  onChange={(e) => setScheduledFor(e.target.value)}
+                  data-testid="transfer-scheduled-for"
+                />
+              </Field>
+              <Field label="Ship direct" as="div">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={shipDirect}
+                    onChange={(e) => setShipDirect(e.target.checked)}
+                  />
+                  Ships straight to the customer
+                </label>
+              </Field>
+              <Field label="Instructions for this fulfillment only" className="form-span">
+                <textarea
+                  className="textarea"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  rows={2}
+                  data-testid="transfer-instructions"
+                />
+              </Field>
             </FormGrid>
           </Card>
 
@@ -429,7 +614,13 @@ export default function NewTransferPage() {
             </LinkButton>
             <Button type="submit" variant="primary" disabled={saving}>
               <Plus size={14} aria-hidden />
-              {saving ? 'Saving…' : shipNow ? 'Create + ship' : 'Create draft'}
+              {saving
+                ? 'Saving…'
+                : complete
+                  ? 'Create + complete'
+                  : shipNow
+                    ? 'Create + ship'
+                    : 'Create draft'}
             </Button>
           </FormActions>
         </Stack>

@@ -68,6 +68,28 @@ interface CreateBody {
    * stock. Pass true to skip the draft step.
    */
   ship?: boolean;
+  // A22 slice 2 — STORIS Enter a Transfer.
+  /** Coded reason for the move (usage class `transfer`). */
+  reasonCodeId?: string | null;
+  /** Delivery date (YYYY-MM-DD) — the STORIS Delivery Information date. */
+  scheduledFor?: string | null;
+  route?: string | null;
+  shipDirect?: boolean;
+  /** Instructions for this fulfillment only; the ticket prints them. */
+  fulfillmentInstructions?: string | null;
+  /**
+   * STORIS "Complete Transfer": the stock already moved — ship and receive
+   * in one step. Needs no printed ticket (there is nothing left to pick).
+   */
+  complete?: boolean;
+  /**
+   * STORIS several To locations: one transfer per destination. With
+   * `distributeQuantities` each line's quantity is split across them
+   * (remainder to the first); without it every destination gets the
+   * full lines. Serial-picked lines cannot fan out.
+   */
+  toLocationIds?: string[];
+  distributeQuantities?: boolean;
 }
 
 interface ReceiveBody {
@@ -125,7 +147,15 @@ interface Detail extends ListRow {
   fromLocationAddressJson: unknown;
   toLocationAddressJson: unknown;
   businessName: string | null;
+  // A22 slice 2 — STORIS Enter a Transfer fields.
+  reasonCodeId: string | null;
+  reasonCode: { code: string; description: string } | null;
+  route: string | null;
+  shipDirect: boolean;
+  fulfillmentInstructions: string | null;
   lines: LineRow[];
+  /** Set on a create that fanned out to several destinations. */
+  createdTransfers?: { id: string; number: string; toLocationId: string }[];
 }
 
 @TenantScoped()
@@ -322,8 +352,17 @@ export class TransfersController {
     @Body() body: CreateBody,
   ): Promise<Detail> {
     if (!body.fromLocationId) throw new BadRequestException('fromLocationId is required');
-    if (!body.toLocationId) throw new BadRequestException('toLocationId is required');
-    if (body.fromLocationId === body.toLocationId) {
+    const destinations = [
+      ...new Set(
+        body.toLocationIds && body.toLocationIds.length > 0
+          ? body.toLocationIds
+          : body.toLocationId
+            ? [body.toLocationId]
+            : [],
+      ),
+    ];
+    if (destinations.length === 0) throw new BadRequestException('toLocationId is required');
+    if (destinations.includes(body.fromLocationId)) {
       throw new BadRequestException('fromLocationId and toLocationId must differ');
     }
     if (!body.lines || body.lines.length === 0) {
@@ -333,22 +372,59 @@ export class TransfersController {
     if (!TRANSFER_TYPES.includes(transferType)) {
       throw new BadRequestException(`transferType must be one of ${TRANSFER_TYPES.join(', ')}`);
     }
+    const complete = body.complete === true;
+    const ship = complete || body.ship === true;
+    if (body.scheduledFor != null && body.scheduledFor !== '') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.scheduledFor)) {
+        throw new BadRequestException('scheduledFor must be YYYY-MM-DD');
+      }
+    }
+    const scheduledFor = body.scheduledFor?.trim() || null;
+    const route = body.route?.trim() || null;
+    const fulfillmentInstructions = body.fulfillmentInstructions?.trim() || null;
+    const shipDirect = body.shipDirect === true;
+    let reasonCodeId: string | null = null;
+    if (body.reasonCodeId) {
+      const [rc] = await this.db
+        .select({ id: schema.reasonCodes.id })
+        .from(schema.reasonCodes)
+        .where(
+          and(
+            eq(schema.reasonCodes.id, body.reasonCodeId),
+            eq(schema.reasonCodes.businessId, tenant.businessId!),
+            eq(schema.reasonCodes.usageClass, 'transfer'),
+            eq(schema.reasonCodes.active, true),
+          ),
+        )
+        .limit(1);
+      if (!rc) throw new BadRequestException('reasonCodeId must be an active transfer reason code');
+      reasonCodeId = rc.id;
+    }
 
+    const locIds = [body.fromLocationId, ...destinations];
     const locs = await this.db
       .select({ id: schema.locations.id, locationType: schema.locations.locationType })
       .from(schema.locations)
-      .where(inArray(schema.locations.id, [body.fromLocationId, body.toLocationId]));
-    if (locs.length !== 2) throw new NotFoundException('One or both locations not found');
+      .where(inArray(schema.locations.id, locIds));
+    if (locs.length !== locIds.length)
+      throw new NotFoundException('One or more locations not found');
+    const typeOf = new Map(locs.map((l) => [l.id, l.locationType]));
 
     const ops = await this.shipSvc.transferOps(tenant.businessId!);
     // E20: store→store is rejected when the gate is switched off.
-    if (ops.storeToStore === false && locs.every((l) => l.locationType === 'store')) {
+    if (
+      ops.storeToStore === false &&
+      typeOf.get(body.fromLocationId) === 'store' &&
+      destinations.some((d) => typeOf.get(d) === 'store')
+    ) {
       throw new BadRequestException(
         'Store-to-store transfers are disabled (ops.transfers.storeToStore). Route the stock through a warehouse.',
       );
     }
-    // Q3: create+ship in one step can never have a printed ticket.
-    if (body.ship === true && ops.requireTicketBeforeShip !== false) {
+    // Q3: create+ship in one step can never have a printed ticket. A
+    // completed transfer (A22) records a move that already happened, so
+    // there is nothing left to pick and no ticket to print first.
+    if (body.ship === true && !complete && ops.requireTicketBeforeShip !== false) {
       throw new BadRequestException(
         'A printed transfer ticket is required before shipping (ops.transfers.requireTicketBeforeShip). Create the draft, print the ticket, then ship.',
       );
@@ -379,6 +455,10 @@ export class TransfersController {
 
     // J3: named pieces must be real, in stock at the origin, unclaimed,
     // and of the line's variant — validated before anything is written.
+    const anySerials = body.lines.some((l) => (l.serialIds ?? []).length > 0);
+    if (anySerials && destinations.length > 1) {
+      throw new BadRequestException('Serial-picked lines cannot fan out to several destinations');
+    }
     for (const l of body.lines) {
       const serialIds = l.serialIds ?? [];
       if (serialIds.length === 0) continue;
@@ -413,62 +493,122 @@ export class TransfersController {
       }
     }
 
-    const number = await this.generateNumber(tenant.businessId!);
-    const ship = body.ship === true;
-
-    const [transfer] = await this.db
-      .insert(schema.stockTransfers)
-      .values({
-        businessId: tenant.businessId!,
-        fromLocationId: body.fromLocationId,
-        toLocationId: body.toLocationId,
-        number,
-        status: ship ? 'in_transit' : 'draft',
-        transferType,
-        notes: body.notes ?? null,
-        createdByUserId: actor.id,
-        shippedAt: ship ? new Date() : null,
-      })
-      .returning();
-    if (!transfer) throw new BadRequestException('failed to create transfer');
-
-    await this.db.insert(schema.stockTransferLines).values(
-      body.lines.map((l) => ({
-        businessId: tenant.businessId!,
-        transferId: transfer.id,
-        variantId: l.variantId!,
-        quantityShipped: l.quantity!,
-        quantityOrdered:
-          l.quantityOrdered != null && l.quantityOrdered > l.quantity! ? l.quantityOrdered : null,
-        serialIdsJson: l.serialIds && l.serialIds.length > 0 ? l.serialIds : null,
-      })),
-    );
-
-    if (ship) {
-      await this.shipSvc.deductOrigin(
-        tenant.businessId!,
-        actor.id,
-        transfer.id,
-        transfer.fromLocationId,
-        body.lines.map((l) => ({ variantId: l.variantId!, quantity: l.quantity! })),
-        body.notes ?? null,
+    // A22: the lines each destination gets — split evenly (remainder to
+    // the first destinations) or duplicated.
+    const distribute = body.distributeQuantities === true && destinations.length > 1;
+    const perDestination = destinations.map((toLocationId, index) => {
+      const lines = body
+        .lines!.map((l) => {
+          const share = (total: number) => {
+            const base = Math.floor(total / destinations.length);
+            return base + (index < total % destinations.length ? 1 : 0);
+          };
+          const quantity = distribute ? share(l.quantity!) : l.quantity!;
+          const ordered =
+            l.quantityOrdered != null && l.quantityOrdered > l.quantity!
+              ? distribute
+                ? share(l.quantityOrdered)
+                : l.quantityOrdered
+              : null;
+          return {
+            variantId: l.variantId!,
+            quantity,
+            quantityOrdered: ordered != null && ordered > quantity ? ordered : null,
+            serialIds: l.serialIds ?? [],
+          };
+        })
+        .filter((l) => l.quantity > 0);
+      return { toLocationId, lines };
+    });
+    const empty = perDestination.find((d) => d.lines.length === 0);
+    if (empty) {
+      throw new BadRequestException(
+        'distributeQuantities leaves a destination with nothing to ship — raise the quantities or drop a location',
       );
-      await this.shipSvc.markSerialsInTransit(transfer.id);
     }
 
-    await this.audit.log({
-      action: 'stock_transfer.create',
-      targetType: 'stock_transfer',
-      targetId: transfer.id,
-      after: {
-        number: transfer.number,
-        fromLocationId: transfer.fromLocationId,
-        toLocationId: transfer.toLocationId,
-        status: transfer.status,
-        lineCount: body.lines.length,
-      },
-    });
-    return this.hydrate(transfer.id);
+    const created: { id: string; number: string; toLocationId: string }[] = [];
+    for (const dest of perDestination) {
+      const number = await this.generateNumber(tenant.businessId!);
+      const [transfer] = await this.db
+        .insert(schema.stockTransfers)
+        .values({
+          businessId: tenant.businessId!,
+          fromLocationId: body.fromLocationId,
+          toLocationId: dest.toLocationId,
+          number,
+          status: ship ? 'in_transit' : 'draft',
+          transferType,
+          notes: body.notes ?? null,
+          createdByUserId: actor.id,
+          shippedAt: ship ? new Date() : null,
+          reasonCodeId,
+          scheduledFor,
+          route,
+          shipDirect,
+          fulfillmentInstructions,
+        })
+        .returning();
+      if (!transfer) throw new BadRequestException('failed to create transfer');
+
+      const insertedLines = await this.db
+        .insert(schema.stockTransferLines)
+        .values(
+          dest.lines.map((l) => ({
+            businessId: tenant.businessId!,
+            transferId: transfer.id,
+            variantId: l.variantId,
+            quantityShipped: l.quantity,
+            quantityOrdered: l.quantityOrdered,
+            serialIdsJson: l.serialIds.length > 0 ? l.serialIds : null,
+          })),
+        )
+        .returning({
+          id: schema.stockTransferLines.id,
+          quantityShipped: schema.stockTransferLines.quantityShipped,
+        });
+
+      if (ship) {
+        await this.shipSvc.deductOrigin(
+          tenant.businessId!,
+          actor.id,
+          transfer.id,
+          transfer.fromLocationId,
+          dest.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+          body.notes ?? null,
+        );
+        await this.shipSvc.markSerialsInTransit(transfer.id);
+      }
+
+      await this.audit.log({
+        action: 'stock_transfer.create',
+        targetType: 'stock_transfer',
+        targetId: transfer.id,
+        after: {
+          number: transfer.number,
+          fromLocationId: transfer.fromLocationId,
+          toLocationId: transfer.toLocationId,
+          status: transfer.status,
+          lineCount: dest.lines.length,
+          reasonCodeId,
+          scheduledFor,
+          route,
+          shipDirect,
+          complete,
+          fannedOut: destinations.length > 1 ? destinations.length : undefined,
+        },
+      });
+      created.push({ id: transfer.id, number: transfer.number, toLocationId: dest.toLocationId });
+
+      if (complete) {
+        await this.receive(tenant, actor, transfer.id, {
+          notes: body.notes ?? null,
+          lines: insertedLines.map((l) => ({ lineId: l.id, quantity: l.quantityShipped })),
+        });
+      }
+    }
+    const detail = await this.hydrate(created[0]!.id);
+    return created.length > 1 ? { ...detail, createdTransfers: created } : detail;
   }
 
   /**
@@ -999,6 +1139,12 @@ export class TransfersController {
         notes: schema.stockTransfers.notes,
         createdByUserId: schema.stockTransfers.createdByUserId,
         createdAt: schema.stockTransfers.createdAt,
+        reasonCodeId: schema.stockTransfers.reasonCodeId,
+        reasonCodeCode: schema.reasonCodes.code,
+        reasonCodeDescription: schema.reasonCodes.description,
+        route: schema.stockTransfers.route,
+        shipDirect: schema.stockTransfers.shipDirect,
+        fulfillmentInstructions: schema.stockTransfers.fulfillmentInstructions,
       })
       .from(schema.stockTransfers)
       .leftJoin(fromLoc, eq(fromLoc.id, schema.stockTransfers.fromLocationId))
@@ -1008,6 +1154,7 @@ export class TransfersController {
         schema.stockManifests,
         eq(schema.stockManifests.id, schema.stockTransfers.manifestId),
       )
+      .leftJoin(schema.reasonCodes, eq(schema.reasonCodes.id, schema.stockTransfers.reasonCodeId))
       .where(eq(schema.stockTransfers.id, id))
       .limit(1);
     if (!row) throw new NotFoundException('Transfer not found');
@@ -1031,8 +1178,13 @@ export class TransfersController {
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .where(eq(schema.stockTransferLines.transferId, id));
 
+    const { reasonCodeCode, reasonCodeDescription, ...rest } = row;
     return {
-      ...row,
+      ...rest,
+      reasonCode:
+        reasonCodeCode != null
+          ? { code: reasonCodeCode, description: reasonCodeDescription ?? '' }
+          : null,
       lines: lines.map((l) => ({
         ...l,
         productName: l.productName ?? '(deleted)',

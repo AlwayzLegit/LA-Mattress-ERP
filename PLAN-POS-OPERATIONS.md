@@ -1257,6 +1257,31 @@ Decisions (slice 1):
   arithmetic on the as-is count. Both default to month to date.
 - **D18 Open Shopping Carts** = the Open Orders view opened on Quotes.
 
+Decisions (slice 2 — transfers):
+
+- **D19 Enter a Transfer fields.** A transfer carries a coded reason
+  (usage class `transfer`, Settings → Reason codes), a delivery date
+  (`scheduledFor`, until now auto-transfers only), a route name, a Ship
+  direct flag and "instructions for this fulfillment only" (the ticket
+  prints them). Migration `0094`. The document date stays the creation date.
+- **D20 Complete transfer.** `complete: true` ships and receives on create
+  — the stock already moved, so nothing is left to pick and the printed-
+  ticket gate does not apply. Plain create + ship keeps the gate.
+- **D21 Several To locations.** `toLocationIds` creates one transfer per
+  destination; `distributeQuantities` splits each line evenly (remainder to
+  the first stores) and refuses to leave a store with nothing, otherwise
+  every store gets the full lines. Serial-picked lines never fan out. The
+  response is the first transfer plus `createdTransfers`.
+- **D22 Report Transfers by Location** (`GET /v1/reports/transfers-by-location`,
+  `reports.inventory.view`; csv / txt / pdf need `reports.export`): every
+  non-cancelled transfer line grouped by receiving store, filtered by sending
+  and receiving location, transfer date (shipped, else created) and reserve
+  level — partial = units still held (ordered − shipped), full = none.
+  Columns follow TE.324: Order Qty = ordered else shipped, Res Qty = shipped,
+  BOy Qty = held, Manifest Number; a Vendor Model sub-line when the variant
+  has one; instructions and notes under the transfer when asked. The spool
+  reuses the AR.317 text writer through the shared `text-layout` helpers.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.

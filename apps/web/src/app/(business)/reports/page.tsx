@@ -418,6 +418,13 @@ export default function ReportsPage() {
             >
               Written sales dollars
             </LinkButton>
+            <LinkButton
+              size="sm"
+              href="/reports/transfers-by-location"
+              data-testid="reports-transfers-by-location-link"
+            >
+              Transfers by location
+            </LinkButton>
             <DateRangePicker value={range} onChange={setRange} testid="reports-range" />
           </>
         }

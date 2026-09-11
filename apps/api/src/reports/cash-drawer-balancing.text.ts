@@ -3,6 +3,7 @@ import type {
   CashDrawerBalancingReport,
   PaymentLine,
 } from './cash-drawer-balancing.controller';
+import { clockStamp, fit, mmddyy, put, putRight, trimTo } from './text-layout';
 
 /**
  * The STORIS AR.317 page layout for Report Cash Drawer Balancing Totals
@@ -53,46 +54,7 @@ function money(cents: number): string {
   return `${sign}${(Math.abs(cents) / 100).toFixed(2)}`;
 }
 
-function fit(s: string | null | undefined, width: number): string {
-  const v = (s ?? '').replace(/\s+/g, ' ');
-  return v.length > width ? v.slice(0, width) : v.padEnd(width);
-}
-
-/** Place `text` so that it starts at column `at` on a 132-wide line. */
-function put(line: string, at: number, text: string): string {
-  const padded = line.length < at ? line.padEnd(at) : line;
-  return padded.slice(0, at) + text + padded.slice(at + text.length);
-}
-
-/** Place `text` so that it ends at column `end` (exclusive, like a right edge). */
-function putRight(line: string, end: number, text: string): string {
-  return put(line, Math.max(0, end - text.length), text);
-}
-
-function trim(line: string): string {
-  return line.length > REPORT_WIDTH ? line.slice(0, REPORT_WIDTH) : line.replace(/\s+$/, '');
-}
-
-function mmddyy(day: string): string {
-  const [y, m, d] = day.split('-');
-  return `${m}/${d}/${y!.slice(2)}`;
-}
-
-function clockStamp(at: Date, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour12: false,
-    year: '2-digit',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(at);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  const hour = get('hour') === '24' ? '00' : get('hour');
-  return `${hour}:${get('minute')}:${get('second')} ${get('month')}/${get('day')}/${get('year')}`;
-}
+const trim = (line: string) => trimTo(line, REPORT_WIDTH);
 
 /**
  * The STORIS page header: reference at 0, the account banner centered on
