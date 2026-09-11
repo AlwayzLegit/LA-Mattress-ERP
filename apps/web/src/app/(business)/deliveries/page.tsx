@@ -36,6 +36,9 @@ interface DeliveryRow {
   addressCity: string | null;
   balanceDueCents: number;
   fulfillmentType: string;
+  /** A22 slice 6: 'delivery' | 'return_pickup' (the truck collects a return). */
+  kind?: string;
+  rmaNumber?: string | null;
   lines: { id: string; description: string; quantity: number }[];
 }
 
@@ -224,7 +227,18 @@ export default function DeliveriesPage() {
                             borderLeft: `4px solid ${STATUS_COLOR[r.status] ?? 'var(--text-muted)'}`,
                           }}
                         >
-                          <div className="font-semibold">{r.orderNumber}</div>
+                          <div className="font-semibold">
+                            {r.kind === 'return_pickup' ? (
+                              <>
+                                <span className="badge badge-warning" data-testid="pickup-badge">
+                                  Pickup
+                                </span>{' '}
+                                {r.rmaNumber ?? r.orderNumber}
+                              </>
+                            ) : (
+                              r.orderNumber
+                            )}
+                          </div>
                           <div className="text-[var(--text-secondary)]">
                             {r.customerName ?? '—'}
                             {r.addressCity ? ` · ${r.addressCity}` : ''}

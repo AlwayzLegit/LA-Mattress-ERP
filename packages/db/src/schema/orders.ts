@@ -372,6 +372,13 @@ export const deliveries = pgTable(
     orderId: uuid('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
+    /**
+     * A22 slice 6: 'delivery' (goods out) | 'return_pickup' (the truck
+     * collects a return — completing it receives the goods back instead
+     * of fulfilling the order). `returnId` names the return document.
+     */
+    kind: text('kind').notNull().default('delivery'),
+    returnId: uuid('return_id'),
     scheduledDate: date('scheduled_date').notNull(),
     // Local wall-clock window ("09:00"–"12:00"); the location's timezone
     // supplies the offset. Stored without a zone on purpose — a route is

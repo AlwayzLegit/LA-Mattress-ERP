@@ -42,6 +42,16 @@ interface CustomerRow {
   notes: string | null;
   addressesJson: unknown;
   referralSource: string | null;
+  /** A22 slice 6 (STORIS Update a Customer Address): number, trade names, name parts, alternate contact, standing instructions. */
+  customerNumber: string | null;
+  businessName: string | null;
+  contactName: string | null;
+  prefix: string | null;
+  middleName: string | null;
+  suffix: string | null;
+  alternateName: string | null;
+  alternateRelationship: string | null;
+  deliveryInstructions: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,7 +67,36 @@ interface CreateBody {
   notes?: string | null;
   addressesJson?: unknown;
   referralSource?: string | null;
+  businessName?: string | null;
+  contactName?: string | null;
+  prefix?: string | null;
+  middleName?: string | null;
+  suffix?: string | null;
+  alternateName?: string | null;
+  alternateRelationship?: string | null;
+  deliveryInstructions?: string | null;
 }
+
+/** The free-text fields create and update share (the number is assigned, never typed). */
+const TEXT_FIELDS = [
+  'email',
+  'phone',
+  'phone2',
+  'workPhone',
+  'workPhoneExt',
+  'firstName',
+  'lastName',
+  'notes',
+  'referralSource',
+  'businessName',
+  'contactName',
+  'prefix',
+  'middleName',
+  'suffix',
+  'alternateName',
+  'alternateRelationship',
+  'deliveryInstructions',
+] as const;
 
 type UpdateBody = CreateBody;
 
@@ -284,6 +323,15 @@ export class CustomersController {
         notes: normalize(body.notes),
         addressesJson: (body.addressesJson ?? null) as never,
         referralSource: normalize(body.referralSource),
+        customerNumber: await this.nextCustomerNumber(tenant.businessId!),
+        businessName: normalize(body.businessName),
+        contactName: normalize(body.contactName),
+        prefix: normalize(body.prefix),
+        middleName: normalize(body.middleName),
+        suffix: normalize(body.suffix),
+        alternateName: normalize(body.alternateName),
+        alternateRelationship: normalize(body.alternateRelationship),
+        deliveryInstructions: normalize(body.deliveryInstructions),
       })
       .returning(SELECT_COLS);
     if (!row) throw new BadRequestException('failed to create customer');
@@ -330,17 +378,7 @@ export class CustomersController {
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
 
-    for (const key of [
-      'email',
-      'phone',
-      'phone2',
-      'workPhone',
-      'workPhoneExt',
-      'firstName',
-      'lastName',
-      'notes',
-      'referralSource',
-    ] as const) {
+    for (const key of TEXT_FIELDS) {
       const v = body[key as keyof UpdateBody];
       if (v !== undefined) {
         const next = normalize(v as string | null | undefined);
@@ -382,6 +420,33 @@ export class CustomersController {
       after,
     });
     return updated;
+  }
+
+  /**
+   * A22 slice 6: `C-000001`-style numbers per business, assigned at
+   * creation (the migration numbered existing customers in creation
+   * order). Count + retry past a collision, like every document number.
+   */
+  private async nextCustomerNumber(businessId: string): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const [row] = await this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.customers)
+        .where(eq(schema.customers.businessId, businessId));
+      const candidate = `C-${String((row?.count ?? 0) + 1 + attempt).padStart(6, '0')}`;
+      const [dup] = await this.db
+        .select({ id: schema.customers.id })
+        .from(schema.customers)
+        .where(
+          and(
+            eq(schema.customers.businessId, businessId),
+            eq(schema.customers.customerNumber, candidate),
+          ),
+        )
+        .limit(1);
+      if (!dup) return candidate;
+    }
+    return `C-${Date.now().toString().slice(-6)}`;
   }
 
   /**
@@ -654,6 +719,15 @@ const SELECT_COLS = {
   notes: schema.customers.notes,
   addressesJson: schema.customers.addressesJson,
   referralSource: schema.customers.referralSource,
+  customerNumber: schema.customers.customerNumber,
+  businessName: schema.customers.businessName,
+  contactName: schema.customers.contactName,
+  prefix: schema.customers.prefix,
+  middleName: schema.customers.middleName,
+  suffix: schema.customers.suffix,
+  alternateName: schema.customers.alternateName,
+  alternateRelationship: schema.customers.alternateRelationship,
+  deliveryInstructions: schema.customers.deliveryInstructions,
   createdAt: schema.customers.createdAt,
   updatedAt: schema.customers.updatedAt,
 } as const;

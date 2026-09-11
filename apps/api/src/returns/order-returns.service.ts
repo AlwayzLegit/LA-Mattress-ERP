@@ -223,6 +223,54 @@ export class OrderReturnsService {
           reason: `Applied to exchange ${liveExchange.number} (${saleOrder.number})`,
         });
       }
+      // A22 slice 6 (STORIS "refund tender"): when the return is worth
+      // more than the replacement, the leftover credit goes back the way
+      // the exchange asked — original tenders (newest first), cash or
+      // check — instead of sitting on the ledger. Store credit (the
+      // default) leaves it spendable.
+      let refundedCents = 0;
+      const residual = credit - applied;
+      if (residual > 0 && liveExchange.refundTender !== 'store_credit') {
+        await this.storeCredit.redeem(this.db, {
+          businessId: ret.businessId,
+          customerId: order.customerId,
+          amountCents: residual,
+          referenceType: 'exchange',
+          referenceId: liveExchange.id,
+          actorUserId,
+          reason: `Refunded from exchange ${liveExchange.number} by ${liveExchange.refundTender}`,
+        });
+        if (liveExchange.refundTender === 'original') {
+          let remaining = residual;
+          for (const p of payments) {
+            if (remaining <= 0) break;
+            if (p.status !== 'succeeded' || p.amountCents <= 0) continue;
+            const slice = Math.min(remaining, p.amountCents);
+            await this.db.insert(schema.payments).values({
+              businessId: ret.businessId,
+              saleId: null,
+              orderId: ret.orderId,
+              kind: 'refund',
+              method: p.method,
+              amountCents: -slice,
+              status: 'succeeded',
+            });
+            remaining -= slice;
+          }
+          refundedCents = residual - remaining;
+        } else {
+          await this.db.insert(schema.payments).values({
+            businessId: ret.businessId,
+            saleId: null,
+            orderId: ret.orderId,
+            kind: 'refund',
+            method: liveExchange.refundTender,
+            amountCents: -residual,
+            status: 'succeeded',
+          });
+          refundedCents = residual;
+        }
+      }
       await this.db
         .update(schema.exchanges)
         .set({ updatedAt: new Date() })
@@ -239,7 +287,9 @@ export class OrderReturnsService {
           creditIssuedCents: credit,
           appliedToSaleCents: applied,
           saleOrderNumber: saleOrder.number,
-          residualCreditCents: credit - applied,
+          residualCreditCents: credit - applied - refundedCents,
+          refundTender: liveExchange.refundTender,
+          refundedCents,
         },
       });
       void this.webhooks.fire({

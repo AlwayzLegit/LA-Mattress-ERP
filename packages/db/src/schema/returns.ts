@@ -1,7 +1,7 @@
-import { check, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { check, date, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { businesses, users } from './platform';
-import { locations } from './tenancy';
+import { locations, memberships } from './tenancy';
 import { customers } from './customers';
 import { productVariants } from './catalog';
 import { orders, orderLines } from './orders';
@@ -151,9 +151,24 @@ export const orderReturns = pgTable(
     fulfillment: text('fulfillment').notNull().default('drop_off'),
     /** 'original' | 'store_credit' — captured at authorization. */
     refundMethod: text('refund_method').notNull().default('original'),
-    /** Total to refund, computed from the lines at authorization. */
+    /** Total to refund, computed from the lines at authorization (fees already deducted). */
     amountCents: integer('amount_cents').notNull(),
     reason: text('reason'),
+    /**
+     * A22 slice 6 (STORIS Enter a Return): who took the return, which
+     * store took it, the fees withheld from the refund, the requested
+     * pickup date and the calendar stop that carries the pickup, and
+     * how many return tickets were printed.
+     */
+    salespersonMembershipId: uuid('salesperson_membership_id').references(() => memberships.id, {
+      onDelete: 'set null',
+    }),
+    locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+    restockingFeeCents: integer('restocking_fee_cents').notNull().default(0),
+    pickupFeeCents: integer('pickup_fee_cents').notNull().default(0),
+    pickupDate: date('pickup_date'),
+    pickupDeliveryId: uuid('pickup_delivery_id'),
+    ticketPrintCount: integer('ticket_print_count').notNull().default(0),
     createdByUserId: uuid('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),

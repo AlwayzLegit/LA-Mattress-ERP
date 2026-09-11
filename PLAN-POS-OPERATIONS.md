@@ -1408,6 +1408,47 @@ Decisions (slice 5 — Logistical Scheduling):
   `PATCH /v1/deliveries/:id/contact` (`deliveries.schedule`, audited with
   the call note) — inline on the Confirm schedule grid.
 
+Decisions (slice 6 — returns, exchanges, customers):
+
+- **D36 Enter a Return fields.** `POST /v1/orders/:id/return` takes the
+  return salesperson (`salespersonMembershipId`), the store taking the
+  return (`locationId`), a restocking fee and — for a truck pickup — a
+  pickup fee; both fees come off the refund (never more than the lines
+  are worth) and print on the ticket. Migration `0097`. The order page's
+  Returns card carries the fields.
+- **D37 Pickup on the delivery calendar.** A pickup return with a
+  `pickupDate` (and window) writes a `return_pickup` delivery
+  (`deliveries.kind`, `deliveries.return_id`) carrying the returned lines
+  at the store taking the return, so it shows on the calendar, the day
+  sheet, Search for schedules and Confirm schedule — with the delivery's
+  contact status as the return's contact status. Completing that stop
+  receives the return (qtyReturned, As-Is staging, the refund) instead of
+  fulfilling the order; stock never drops. The return keeps
+  `pickupDeliveryId`.
+- **D38 Return and exchange tickets.** `GET /v1/order-returns/:id` is the
+  return's print view (order, customer, store, salesperson, lines with
+  reasons, fees, refund, pickup stop); `/print/returns/:id` prints it and
+  `POST /v1/order-returns/:id/ticket-print` counts the print
+  (`ticketPrintCount`). Exchanges get the same pair
+  (`/print/exchanges/:id`, `POST /v1/exchanges/:id/ticket-print`) — both
+  legs, the settlement and the refund tender on one page.
+- **D39 Enter an Exchange fields.** The exchange records `fulfillment`
+  (`drop_off` | `pickup`, from the wizard's goods-in-hand switch), the
+  return salesperson (by name on the detail) and a `refundTender`
+  (`store_credit` default | `original` | `cash` | `check`). When the
+  return credit exceeds what the replacement absorbs, settlement pays the
+  excess out by that tender — original tenders newest-first, or a cash /
+  check refund on the original order — after redeeming it from the
+  ledger; store credit leaves it spendable. Audited on `exchange.settle`.
+- **D40 Update a Customer Address fields.** Customers gain a per-business
+  customer number (`C-000001`, assigned at creation, existing customers
+  numbered in creation order by the migration), business + contact name,
+  prefix / middle name / suffix, an alternate contact + relationship, and
+  standing delivery instructions. Search covers the number, the trade
+  names, the middle name and the alternate contact. The order's customer
+  panel and the invoice / ticket document payload carry the number, trade
+  names, alternate contact and delivery instructions.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.

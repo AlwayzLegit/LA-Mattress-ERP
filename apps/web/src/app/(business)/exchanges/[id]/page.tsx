@@ -12,6 +12,7 @@ import {
   Button,
   Card,
   KeyValue,
+  LinkButton,
   LoadingRows,
   PageHeader,
   StatusBadge,
@@ -48,6 +49,10 @@ interface ExchangeDetail {
     salePaidCents: number;
     saleBalanceDueCents: number;
   };
+  returnSalespersonName?: string | null;
+  fulfillment?: string;
+  refundTender?: string;
+  ticketPrintCount?: number;
 }
 
 export default function ExchangeDetailPage() {
@@ -118,6 +123,15 @@ export default function ExchangeDetailPage() {
         sub={`${exchange.customerName ?? '—'} · ${new Date(exchange.createdAt).toLocaleString()}`}
         actions={
           <>
+            <LinkButton
+              size="sm"
+              variant="secondary"
+              href={`/print/exchanges/${id}`}
+              target="_blank"
+              data-testid="print-exchange-ticket"
+            >
+              Print exchange ticket
+            </LinkButton>
             {canEdit && (
               <>
                 <Button
@@ -203,6 +217,24 @@ export default function ExchangeDetailPage() {
                     {exchange.saleOrderStatus && <StatusBadge status={exchange.saleOrderStatus} />}
                   </>
                 ),
+              },
+              ...(exchange.returnSalespersonName
+                ? [{ label: 'Return salesperson', value: exchange.returnSalespersonName }]
+                : []),
+              {
+                label: 'Goods come back by',
+                value: exchange.fulfillment === 'pickup' ? 'Truck pickup' : 'Customer drop-off',
+              },
+              {
+                label: 'Refund tender (excess credit)',
+                value:
+                  exchange.refundTender === 'original'
+                    ? 'Original tenders'
+                    : exchange.refundTender === 'cash'
+                      ? 'Cash'
+                      : exchange.refundTender === 'check'
+                        ? 'Check'
+                        : 'Store credit',
               },
               ...(exchange.notes ? [{ label: 'Notes', value: exchange.notes }] : []),
             ]}

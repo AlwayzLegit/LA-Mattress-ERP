@@ -5429,3 +5429,21 @@ sends the return salesperson the API already accepts (slice 6).
   date (`scheduledFor` on the service order patch) — migration
   `0096_a22_scheduling`. A22 D32–D35.
 - Tests: `scheduling.int.spec.ts` (6; CI db `jetnine_scheduling`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 6 — returns / exchanges / customers)
+
+- Enter a Return: return salesperson, store, restocking + pickup fees
+  (deducted from the refund), pickup date + window → a `return_pickup`
+  stop on the delivery calendar whose completion receives the return
+  (stock never drops), return ticket (`/print/returns/:id`,
+  `GET /v1/order-returns/:id`, ticket-print counter). A22 D36–D38.
+- Enter an Exchange: return salesperson + fulfillment + refund tender on
+  the wizard and the exchange (`fulfillment`, `refundTender`); settlement
+  pays excess credit out by the chosen tender; exchange ticket
+  (`/print/exchanges/:id`). A22 D39.
+- Update a Customer Address: customer number (auto, backfilled), business
+  - contact name, prefix / middle / suffix, alternate contact +
+    relationship, delivery instructions — on the customer forms, in search,
+    on the order's customer panel and in the document payload. Migration
+    `0097_a22_returns_exchanges_customers`. A22 D40.
+- Tests: `returns-sweep.int.spec.ts` (8; CI db `jetnine_returns_sweep`).
