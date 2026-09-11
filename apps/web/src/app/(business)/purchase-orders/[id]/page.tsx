@@ -50,6 +50,8 @@ interface Po {
   number: string;
   status: string;
   vendorId: string;
+  printCount?: number;
+  lastPrintedAt?: string | null;
   vendorName: string | null;
   vendorContactName: string | null;
   vendorEmail: string | null;
@@ -362,9 +364,21 @@ export default function PurchaseOrderDetailPage() {
                 Place order
               </Button>
             )}
-            <Button variant="secondary" size="sm" onClick={() => window.print()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                // A22 slice 7: record the print (reprint tracking) before the dialog.
+                api(`/v1/purchase-orders/${po.id}/print`, { method: 'POST' })
+                  .catch(() => undefined)
+                  .finally(() => window.print());
+              }}
+              data-testid="print-po"
+            >
               <Printer size={14} aria-hidden />
-              Print for vendor
+              {po.printCount && po.printCount > 0
+                ? `Reprint for vendor (${po.printCount})`
+                : 'Print for vendor'}
             </Button>
             <Button
               variant="secondary"

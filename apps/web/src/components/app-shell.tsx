@@ -5,7 +5,9 @@ import { DynamicFavicon } from '@/components/dynamic-favicon';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  Clock,
   Landmark,
+  MonitorSmartphone,
   BadgeDollarSign,
   AlertTriangle,
   ArrowLeftRight,
@@ -114,6 +116,8 @@ export const NAV: NavGroup[] = [
       { href: '/marketing', label: 'Marketing', icon: Megaphone },
       { href: '/members', label: 'Members', icon: UserCog },
       { href: '/roles', label: 'Roles', icon: ShieldCheck },
+      { href: '/timeclock', label: 'Time clock', icon: Clock },
+      { href: '/settings/sessions', label: 'Active sessions', icon: MonitorSmartphone },
     ],
   },
   {

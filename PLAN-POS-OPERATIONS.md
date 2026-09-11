@@ -1449,6 +1449,36 @@ Decisions (slice 6 — returns, exchanges, customers):
   panel and the invoice / ticket document payload carry the number, trade
   names, alternate contact and delivery instructions.
 
+Decisions (slice 7 — kiosk, sessions, batch PO print):
+
+- **D41 Time clock kiosk.** `/timeclock` is the shared-terminal screen:
+  the terminal stays signed in as any member who may punch, and every
+  punch carries the punching member's own email + password.
+  `POST /v1/timeclock/kiosk-punch` (`timeclock.punch`) verifies the
+  credentials against the credential account (never a session), finds
+  that user's active membership in this business, checks their role may
+  punch, and records the punch on THEIR membership (audit metadata
+  `source: kiosk`). The terminal's session never changes; the form clears
+  after every punch.
+- **D42 Active sessions.** New permission `sessions.manage` (Owner,
+  Manager, Operations). `GET /v1/business/sessions` lists every unexpired
+  sign-in held by a member of this business (name, role, IP, device,
+  signed in, last seen, expires, "this session"); `DELETE
+/v1/business/sessions/:id` signs one out (audited `session.revoke`) —
+  only sessions of this business's members. Page: Settings → Active
+  sessions (`/settings/sessions`, also in the People nav). Sessions are
+  now also persisted in the database (`storeSessionInDatabase`) so the
+  listing sees them when Redis is the session store; revoking goes through
+  better-auth's adapter so the Redis copy dies with the row.
+- **D43 Batch PO print.** `/print/purchase-orders` prints every purchase
+  order matching `ids`, or PO number / receiving location / vendor /
+  status / direct ships in or out / not-yet-printed (new list filters on
+  `GET /v1/purchase-orders`), one vendor document per page.
+  `purchase_orders.print_count` + `last_printed_at` (migration `0098`)
+  track prints: `POST /v1/purchase-orders/:id/print` bumps them (the
+  single-PO Print button and the batch page both call it) and a second
+  print is flagged REPRINT on paper and in the toolbar.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.

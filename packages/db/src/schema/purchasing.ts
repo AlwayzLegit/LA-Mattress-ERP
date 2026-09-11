@@ -109,6 +109,13 @@ export const purchaseOrders = pgTable(
     /** Direct-ship only: customer ship-to snapshot {name, phone, email, address}. */
     shipToJson: jsonb('ship_to_json'),
     notes: text('notes'),
+    /**
+     * A22 slice 7 (STORIS Print a Purchase Order): how many times the
+     * vendor document was printed and when last — a second print is a
+     * reprint, and the batch screen can pick "not yet printed".
+     */
+    printCount: integer('print_count').notNull().default(0),
+    lastPrintedAt: timestamp('last_printed_at', { withTimezone: true }),
     createdByUserId: uuid('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),

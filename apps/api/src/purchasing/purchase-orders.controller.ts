@@ -13,7 +13,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -139,6 +139,9 @@ interface PoListRow {
   /** Q1 landed cost lean: whole-PO freight loaded into layer cost. */
   freightCents: number | null;
   createdAt: Date;
+  /** A22 slice 7: batch print picks direct ships in or out and not-yet-printed POs. */
+  directShip: boolean;
+  printCount: number;
   /** Set on a soft-deleted draft; null on every live PO. */
   deletedAt: Date | null;
   deletedByEmail: string | null;
@@ -180,6 +183,9 @@ interface PoDetail extends PoListRow {
   /** PO-060: vendor ships straight to the customer (shipToJson block). */
   directShip: boolean;
   shipToJson: unknown;
+  /** A22 slice 7: print tracking — a second print is a reprint. */
+  printCount: number;
+  lastPrintedAt: Date | null;
   lines: PoLineRow[];
 }
 
@@ -211,12 +217,26 @@ export class PurchaseOrdersController {
     @Query('includeDeleted') includeDeleted?: string,
     @Query('limit') limitStr?: string,
     @Query('cursor') cursorStr?: string,
+    @Query('locationId') locationId?: string,
+    @Query('directShip') directShip?: string,
+    @Query('printed') printed?: string,
+    @Query('number') number?: string,
   ): Promise<PageResponse<PoListRow>> {
     const limit = clampLimit(limitStr);
     const deleter = alias(schema.users, 'po_deleter');
     const conditions: SQL[] = [];
     if (status) conditions.push(eq(schema.purchaseOrders.status, status));
     if (vendorId) conditions.push(eq(schema.purchaseOrders.vendorId, vendorId));
+    // A22 slice 7 (batch print): receiving location, direct ships in or
+    // out, printed / not yet printed, and a PO number to pick one.
+    if (locationId) conditions.push(eq(schema.purchaseOrders.locationId, locationId));
+    if (directShip === '0') conditions.push(eq(schema.purchaseOrders.directShip, false));
+    if (directShip === '1') conditions.push(eq(schema.purchaseOrders.directShip, true));
+    if (printed === '0') conditions.push(eq(schema.purchaseOrders.printCount, 0));
+    if (printed === '1') conditions.push(gt(schema.purchaseOrders.printCount, 0));
+    if (number?.trim()) {
+      conditions.push(sql`${schema.purchaseOrders.number} ILIKE ${`%${number.trim()}%`}`);
+    }
     if (includeDeleted !== '1') conditions.push(isNull(schema.purchaseOrders.deletedAt));
     const cursor = decodeCursor(cursorStr);
     if (cursor) {
@@ -238,6 +258,8 @@ export class PurchaseOrdersController {
         subtotalCents: schema.purchaseOrders.subtotalCents,
         freightCents: schema.purchaseOrders.freightCents,
         createdAt: schema.purchaseOrders.createdAt,
+        directShip: schema.purchaseOrders.directShip,
+        printCount: schema.purchaseOrders.printCount,
         deletedAt: schema.purchaseOrders.deletedAt,
         deletedByEmail: deleter.email,
       })
@@ -281,6 +303,38 @@ export class PurchaseOrdersController {
       ReturnType<PurchaseOrdersController['reorderSuggestions']>
     >['vendors'];
     return { vendors };
+  }
+
+  /**
+   * A22 slice 7 (STORIS Print a Purchase Order): record a print of the
+   * vendor document — the count says whether this is a reprint, and
+   * the batch screen filters on it.
+   */
+  @Post(':id/print')
+  @RequirePermission('purchase_orders.view')
+  async recordPrint(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Param('id') id: string,
+  ): Promise<{ printCount: number; lastPrintedAt: Date; reprint: boolean }> {
+    const [po] = await this.db
+      .select({ id: schema.purchaseOrders.id, printCount: schema.purchaseOrders.printCount })
+      .from(schema.purchaseOrders)
+      .where(eq(schema.purchaseOrders.id, id))
+      .limit(1);
+    if (!po) throw new NotFoundException('Purchase order not found');
+    const now = new Date();
+    const next = po.printCount + 1;
+    await this.db
+      .update(schema.purchaseOrders)
+      .set({ printCount: next, lastPrintedAt: now, updatedAt: now })
+      .where(eq(schema.purchaseOrders.id, id));
+    await this.audit.log({
+      action: 'purchase_order.print',
+      targetType: 'purchase_order',
+      targetId: id,
+      after: { printCount: next, reprint: po.printCount > 0 },
+    });
+    return { printCount: next, lastPrintedAt: now, reprint: po.printCount > 0 };
   }
 
   @Get(':id')
@@ -1590,6 +1644,8 @@ export class PurchaseOrdersController {
         freightCents: schema.purchaseOrders.freightCents,
         directShip: schema.purchaseOrders.directShip,
         shipToJson: schema.purchaseOrders.shipToJson,
+        printCount: schema.purchaseOrders.printCount,
+        lastPrintedAt: schema.purchaseOrders.lastPrintedAt,
         notes: schema.purchaseOrders.notes,
         createdByUserId: schema.purchaseOrders.createdByUserId,
         createdAt: schema.purchaseOrders.createdAt,

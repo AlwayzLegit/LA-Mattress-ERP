@@ -55,6 +55,8 @@ const operationsPermissions: Permission[] = [
   // The dashboard and its sign-off verbs.
   'ops.dashboard.view',
   'ops.review.clear',
+  // A22 slice 7: recover a stuck terminal by signing its session out.
+  'sessions.manage',
   // Owner 2026-09-10: the tick that says the cash was physically handed
   // over, stamped with the member who confirmed it.
   'pos.cash.pickup_confirm',

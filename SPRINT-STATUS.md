@@ -5447,3 +5447,19 @@ sends the return salesperson the API already accepts (slice 6).
     on the order's customer panel and in the document payload. Migration
     `0097_a22_returns_exchanges_customers`. A22 D40.
 - Tests: `returns-sweep.int.spec.ts` (8; CI db `jetnine_returns_sweep`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 7 — kiosk, sessions, batch PO print)
+
+- Access Time Clock: `/timeclock` kiosk — email + password per punch on a
+  shared terminal (`POST /v1/timeclock/kiosk-punch` verifies the
+  credentials and punches for that member). A22 D41.
+- Recover STORIS Licenses: Settings → Active sessions
+  (`/settings/sessions`; `GET` / `DELETE /v1/business/sessions`,
+  permission `sessions.manage` — Owner, Manager, Operations). A22 D42.
+- Print a Purchase Order: `/print/purchase-orders` batch print by ids / PO
+  number / receiving location / vendor / status / direct ships / not yet
+  printed; `POST /v1/purchase-orders/:id/print` counts prints (migration
+  `0098_a22_po_print_tracking`), reprints flagged. A22 D43.
+- Tests: `kiosk-sessions-print.int.spec.ts` (5; CI db
+  `jetnine_kiosk_sessions_print`).
+- **A22 is complete** — all seven slices are on the branch.

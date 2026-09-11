@@ -107,9 +107,21 @@ export default function PurchaseOrdersPage() {
       <PageHeader
         title="Purchase orders"
         actions={
-          <LinkButton href="/purchase-orders/new" variant="primary">
-            + New PO
-          </LinkButton>
+          <>
+            <LinkButton
+              href="/print/purchase-orders?status=ordered&directShip=0&printed=0"
+              variant="secondary"
+              size="sm"
+              target="_blank"
+              title="Print every placed PO that has not been printed yet (change the filters on the print page URL)"
+              data-testid="batch-print-pos"
+            >
+              Batch print
+            </LinkButton>
+            <LinkButton href="/purchase-orders/new" variant="primary">
+              + New PO
+            </LinkButton>
+          </>
         }
       />
       <Stack>
