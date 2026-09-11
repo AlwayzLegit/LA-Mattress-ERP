@@ -205,7 +205,11 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('new-sale-again').click();
     await openPanel();
     await expect(firstName).toHaveValue('');
-    await expect(page.getByPlaceholder('Phone')).toHaveValue('');
+    // Scoped to the panel's own grid: the ship-to block and the second
+    // phone field also carry "phone" in their placeholders.
+    await expect(firstName.locator('..').getByPlaceholder('Phone', { exact: true })).toHaveValue(
+      '',
+    );
   });
 
   test('delivery lifecycle: schedule → deliver → collect balance → complete', async ({ page }) => {
