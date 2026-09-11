@@ -102,6 +102,7 @@ jobs:
       PRODUCT_ACTIVITY_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_product_activity
       TRANSFERS_SWEEP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_transfers_sweep
       STOCK_ADJUSTMENT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_stock_adjustment
+      REPLENISH_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_replenish
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -134,6 +135,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_product_activity
           createdb -h localhost -U postgres jetnine_transfers_sweep
           createdb -h localhost -U postgres jetnine_stock_adjustment
+          createdb -h localhost -U postgres jetnine_replenish
           createdb -h localhost -U postgres jetnine_deliveries
           createdb -h localhost -U postgres jetnine_specials
           createdb -h localhost -U postgres jetnine_exchanges

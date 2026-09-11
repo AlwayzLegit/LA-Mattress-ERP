@@ -5399,3 +5399,19 @@ sends the return salesperson the API already accepts (slice 6).
   the dialog. Shared `orders/order-guards.ts` (extracted from the A20
   actions). A22 D27.
 - Tests: `stock-adjustment.int.spec.ts` (13; CI db `jetnine_stock_adjustment`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 4 — replenish)
+
+- Replenish Inventory: `/replenishment` now switches between Allocated
+  order, Stock level and Sales rate. The two new types run across every
+  vendor (`POST /v1/purchasing/replenish/run`): allocated = uncovered open
+  order units at the location the order draws from, fulfillment-status
+  checkboxes; stock level = per-store Min Stock or the product safety point
+  (at least the reorder pack); location / vendor / category / collection /
+  text filters; include floor samples / returns as stock; carton rounding
+  with Carton, Cartons and Total quantity columns; the orders behind each
+  row. Create purchase orders writes one PO per vendor and receiving
+  location with special-order allocations (`POST
+/v1/purchasing/replenish/purchase-orders`, placed or held). A22 D28–D31.
+- Tests: `replenish.int.spec.ts` (7; CI db `jetnine_replenish`) and the
+  pure `replenish-engine.spec.ts` (8).

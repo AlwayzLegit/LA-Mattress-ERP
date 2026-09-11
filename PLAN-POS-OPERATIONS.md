@@ -1330,6 +1330,48 @@ Decisions (slice 3 — stock adjustment + reassign reservation):
   page writes. The Reserved count on Stock by location and the product page
   opens it; the release-only popup is gone.
 
+Decisions (slice 4 — Replenish Inventory):
+
+- **D28 One Replenish screen, three types.** `/replenishment` gains a
+  Replenishment type switch: Allocated order and Stock level (new,
+  `POST /v1/purchasing/replenish/run`, `purchase_orders.view`) run across
+  every vendor at once; Sales rate is the per-vendor engine the nightly
+  build uses, unchanged. Filters: location, vendor, category, collection
+  (Jetnine's "group"), product / SKU text; options: include floor samples
+  as stock, include returns (pending As-Is pieces) as stock, round up to
+  purchase cartons, show positions with nothing to order.
+- **D29 Allocated order.** Demand is every open (`open`,
+  `partially_fulfilled`) sales-order line's uncovered units — quantity −
+  fulfilled − reserved − units already allocated on an open PO — at the
+  location the line draws from (line source, else the order's stock
+  location, else its selling location). The STORIS fulfillment-status
+  checkboxes filter on the order's delivery status (scheduled / estimated
+  / ASAP / will call / not set; none ticked = all). Need = demand − free
+  stock − unallocated open-PO units (negative stock counts as zero). The
+  grid shows the orders behind each row, earliest fill-by first.
+- **D30 Stock level.** Basis `minimum` = the store's Min Stock
+  (`inventory_levels.reorder_point`), one row per store position; basis
+  `safety` = the variant's reorder point, business-wide (one row per
+  product, stock summed across locations; the run's location receives the
+  POs). Need tops the position (free stock + open PO) back up to the
+  threshold and is at least the variant's reorder quantity when one is
+  set. Carton = the product's Purchase Carton Qty; Cartons and Total
+  quantity columns follow STORIS (Total = cartons × carton when rounding
+  is on).
+- **D31 Create purchase orders by vendor.** A row's vendor is the
+  variant's preferred vendor, else its collection's vendor, else the
+  active vendor named like the product's brand; rows without one show
+  under "No vendor" and never become a PO. `POST
+/v1/purchasing/replenish/purchase-orders` (`purchase_orders.create`)
+  recomputes the run, applies the buyer's Total quantity edits and the
+  vendor tick-boxes, and writes one PO per vendor and receiving location
+  (placed, or held as drafts): expected date from the vendor's lead days
+  when it has replenishment settings, freight from its landed-cost lines,
+  lines past a PO cutting date dropped and noted, and — for allocated
+  orders — the special-order allocations (earliest fill-by first) so
+  receiving commits the units to the customers waiting. PO numbers come
+  from the shared `purchasing/po-number.ts`.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.
