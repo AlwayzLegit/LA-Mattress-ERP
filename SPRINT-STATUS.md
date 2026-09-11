@@ -5335,3 +5335,137 @@ a Product", asked "Do we already have these?", then "start". Amendment A21
   lines, the two new product fields (+ 400s), serials, as-is, summary
   buckets, every search criterion. `product-stock` (10) and `catalog` (25)
   still green.
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 1 — A22)
+
+Owner sent 28 STORIS screens ("take a look and see what we are missing and
+incorporate accordingly"). Amendment A22 (PLAN-POS-OPERATIONS §12.18) maps
+every screen to what stands and what is missing, in seven slices. Slice 1
+(the View Product Activity and Search for a Product views) is built:
+
+- Browser: Product category leads and Primary collection ends the column
+  strip, both sortable (`categoryName`, `collectionName` on the list rows).
+- Open Orders: Linked transfer / Linked transfer quantity / Linked PO columns
+  (the customer transfer carrying the product and the PO line allocated to
+  the order line). Purchase Orders: PO type (Standard / Special order /
+  Direct ship) and At dock (received, not yet accepted).
+- New tabs: Regular Inventory Detail and As-Is Inventory Detail —
+  `GET /v1/products/:id/activity/ledger?kind=regular|as_is` with location and
+  date range, opening / running / ending balances, references resolved to
+  order, PO, transfer, sale and RMA numbers; Open Shopping Carts (Open Orders
+  on quotes). The ATP grid follows the STORIS column order.
+- Tests: `product-activity.int.spec.ts` grows to 18 (linked columns, PO
+  type / at dock, both ledgers, category / collection sort).
+
+Remaining slices (each its own PR): 2 transfers (entry fields + Report
+Transfers by Location), 3 stock adjustment dialog + reassign reservation,
+4 replenish screen, 5 logistical scheduling, 6 returns / exchanges /
+customers, 7 time clock kiosk, active sessions, batch PO print. Two findings
+worth flagging now: manual as-is intake (`POST /v1/as-is`) never decrements
+on hand (double count until slice 3 fixes it), and the exchange wizard never
+sends the return salesperson the API already accepts (slice 6).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 2 — transfers)
+
+- Enter a Transfer: reason code (new reason class Transfers), delivery date,
+  route, ship direct, instructions for this fulfillment only, Complete
+  transfer (ship + receive on create, no ticket needed), Print transfer
+  ticket after saving, several To locations with Distribute quantities (one
+  transfer per store), total pieces — `POST /v1/stock-transfers` body,
+  migration `0094_a22_transfer_entry_fields`; the detail page shows the
+  fields. A22 D19–D21.
+- Report Transfers by Location: `GET /v1/reports/transfers-by-location`
+  (from / to / dates / reserve level / include instructions; json, csv, txt,
+  Basic PDF) grouped by receiving store — TE.324 layout via the new shared
+  `reports/text-layout.ts` (the AR.317 renderer now imports it). Page under
+  Reports. A22 D22.
+- Tests: `transfers-sweep.int.spec.ts` (7; CI db `jetnine_transfers_sweep`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 3 — stock adjustment)
+
+- Enter a Stock Adjustment: one dialog on Stock by location and the product
+  page — header strip from `GET /v1/inventory/stock-card`, tabs Quantity
+  (reason code class Inventory adjustments + unit cost; migration
+  `0095_a22_stock_adjustment` adds `inventory_movements.reason_code_id`),
+  Bin to bin, Move to As-Is (`POST /v1/as-is` with `fromStock` now
+  decrements stock — the double count is closed), Move from As-Is, As-Is
+  status, As-Is adjustment (`POST /v1/as-is/:id/void`, optional return to
+  stock, or walk-in pieces), Write-off (`POST /v1/inventory/write-off`:
+  permission + override, coded reason, register at cost, exception,
+  ledger), Change serial (`PATCH /v1/serials/:id`), SO info. A22 D23–D26.
+- Reassign a Sales Reservation: `GET /v1/inventory/reservation-board` +
+  `POST /v1/inventory/reservations/move` (back order / reserve, moving
+  between orders in one request); the Reserved count on both pages opens
+  the dialog. Shared `orders/order-guards.ts` (extracted from the A20
+  actions). A22 D27.
+- Tests: `stock-adjustment.int.spec.ts` (13; CI db `jetnine_stock_adjustment`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 4 — replenish)
+
+- Replenish Inventory: `/replenishment` now switches between Allocated
+  order, Stock level and Sales rate. The two new types run across every
+  vendor (`POST /v1/purchasing/replenish/run`): allocated = uncovered open
+  order units at the location the order draws from, fulfillment-status
+  checkboxes; stock level = per-store Min Stock or the product safety point
+  (at least the reorder pack); location / vendor / category / collection /
+  text filters; include floor samples / returns as stock; carton rounding
+  with Carton, Cartons and Total quantity columns; the orders behind each
+  row. Create purchase orders writes one PO per vendor and receiving
+  location with special-order allocations (`POST
+/v1/purchasing/replenish/purchase-orders`, placed or held). A22 D28–D31.
+- Tests: `replenish.int.spec.ts` (7; CI db `jetnine_replenish`) and the
+  pure `replenish-engine.spec.ts` (8).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 5 — scheduling)
+
+- Logistical Scheduling: Search for schedules (`/deliveries/search`,
+  `GET /v1/scheduling/search`: sales orders / transfers / service orders;
+  deliver from, route, truck, transfer to, date range, past dates; Stops /
+  Units / Dollars / Volume) and Confirm schedule (`/deliveries/confirm`,
+  `GET /v1/scheduling/confirm`: delivery + contact status filters, totals
+  with a Confirmed count, zip / city / phone, T D F P OO flags, inline
+  contact status). Contact status is a delivery field
+  (`PATCH /v1/deliveries/:id/contact`) and service orders gain a booked
+  date (`scheduledFor` on the service order patch) — migration
+  `0096_a22_scheduling`. A22 D32–D35.
+- Tests: `scheduling.int.spec.ts` (6; CI db `jetnine_scheduling`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 6 — returns / exchanges / customers)
+
+- Enter a Return: return salesperson, store, restocking + pickup fees
+  (deducted from the refund), pickup date + window → a `return_pickup`
+  stop on the delivery calendar whose completion receives the return
+  (stock never drops), return ticket (`/print/returns/:id`,
+  `GET /v1/order-returns/:id`, ticket-print counter). A22 D36–D38.
+- Enter an Exchange: return salesperson + fulfillment + refund tender on
+  the wizard and the exchange (`fulfillment`, `refundTender`); settlement
+  pays excess credit out by the chosen tender; exchange ticket
+  (`/print/exchanges/:id`). A22 D39.
+- Update a Customer Address: customer number (auto, backfilled), business
+  - contact name, prefix / middle / suffix, alternate contact +
+    relationship, delivery instructions — on the customer forms, in search,
+    on the order's customer panel and in the document payload. Migration
+    `0097_a22_returns_exchanges_customers`. A22 D40.
+- Tests: `returns-sweep.int.spec.ts` (8; CI db `jetnine_returns_sweep`).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 7 — kiosk, sessions, batch PO print)
+
+- Access Time Clock: `/timeclock` kiosk — email + password per punch on a
+  shared terminal (`POST /v1/timeclock/kiosk-punch` verifies the
+  credentials and punches for that member). A22 D41.
+- Recover STORIS Licenses: Settings → Active sessions
+  (`/settings/sessions`; `GET` / `DELETE /v1/business/sessions`,
+  permission `sessions.manage` — Owner, Manager, Operations). A22 D42.
+- Print a Purchase Order: `/print/purchase-orders` batch print by ids / PO
+  number / receiving location / vendor / status / direct ships / not yet
+  printed; `POST /v1/purchase-orders/:id/print` counts prints (migration
+  `0098_a22_po_print_tracking`), reprints flagged. A22 D43.
+- Tests: `kiosk-sessions-print.int.spec.ts` (5; CI db
+  `jetnine_kiosk_sessions_print`).
+- **A22 is complete** — all seven slices are on the branch.
+- 2026-09-11 (PR #158 CI): the API suite runs every spec file in one vitest
+  process (`singleFork`), and `DatabaseModule` never closed its postgres-js
+  pool on `app.close()`, so each spec left ~1.5 idle connections behind until
+  Postgres refused new clients (`sorry, too many clients already`) at 64
+  integration specs. `DatabaseModule` now ends the pool in
+  `onApplicationShutdown`; the full suite peaks at 10 connections.

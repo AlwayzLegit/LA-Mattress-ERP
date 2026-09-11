@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Delete,
   Get,
@@ -21,7 +20,7 @@ import { PriceVarianceService, type PriceControlBody } from '../controls/price-v
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
-import { isLiveOrderStatus } from './order-math';
+import { assertOrderEditable } from './order-guards';
 import { OrdersService } from './orders.service';
 
 /**
@@ -1127,35 +1126,7 @@ export class OrderActionsController {
 
   /** Same three guards the order page's money edits pass: live, unlocked, off the truck. */
   private async assertEditable(order: typeof schema.orders.$inferSelect): Promise<void> {
-    if (!isLiveOrderStatus(order.status)) {
-      throw new BadRequestException(`Order is ${order.status} and cannot be changed`);
-    }
-    if (order.lockedAt) {
-      throw new ConflictException(
-        'Order is locked — its delivery ticket has been printed. Unlock it with a reason before editing.',
-      );
-    }
-    if (order.ticketPrintCount > 0 && order.relockAt && order.relockAt.getTime() < Date.now()) {
-      throw new ConflictException(
-        'The unlock window expired and the lock re-engaged. Unlock again with a reason.',
-      );
-    }
-    const [onRun] = await this.db
-      .select({ runId: schema.deliveries.runId })
-      .from(schema.deliveries)
-      .innerJoin(schema.deliveryRuns, eq(schema.deliveryRuns.id, schema.deliveries.runId))
-      .where(
-        and(
-          eq(schema.deliveries.orderId, order.id),
-          inArray(schema.deliveryRuns.status, ['open', 'out']),
-        ),
-      )
-      .limit(1);
-    if (onRun) {
-      throw new ConflictException(
-        'This order is on a delivery run. Remove it from the run (with a reason) before editing.',
-      );
-    }
+    await assertOrderEditable(this.db, order);
   }
 }
 

@@ -3,6 +3,8 @@ export const PERMISSIONS = {
   'business.settings.update': 'Update business settings',
   'business.billing.view': 'View billing',
   'business.billing.update': 'Update billing',
+  /** A22 slice 7 (STORIS Recover Licenses): see every member's sign-ins and sign one out. */
+  'sessions.manage': "See every member's active sessions and sign them out",
 
   'users.view': 'View users in business',
   'users.invite': 'Invite new users',

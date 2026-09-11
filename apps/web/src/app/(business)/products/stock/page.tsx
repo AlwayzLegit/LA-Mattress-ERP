@@ -6,12 +6,13 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { CsvImport } from '@/components/csv-import';
 import { ProductsNav } from '@/components/products-nav';
+import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
+import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog';
 import {
   Alert,
   Button,
   Card,
   EmptyState,
-  FormActions,
   Input,
   LinkButton,
   LoadingRows,
@@ -50,19 +51,6 @@ interface Bin {
   isActive: boolean;
 }
 
-interface ReservationRow {
-  orderId: string;
-  orderNumber: string;
-  orderStatus: string;
-  requestedDate: string | null;
-  customerName: string | null;
-  lineId: string;
-  description: string;
-  qtyReserved: number;
-}
-
-const ADJUST_REASONS = ['count_correction', 'damage', 'theft', 'other'] as const;
-
 export default function InventoryPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [vendor, setVendor] = useState<{ id: string; name: string } | null>(null);
@@ -73,41 +61,11 @@ export default function InventoryPage() {
   const [newBin, setNewBin] = useState('');
   const [addingBin, setAddingBin] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Reserved drill-down: which orders hold this variant's committed units.
+  // A22 slice 3: the STORIS Stock Adjustment dialog and the Reassign
+  // Reservation dialog replace the old prompt() adjust and the
+  // release-only reservations popup.
+  const [adjustFor, setAdjustFor] = useState<Level | null>(null);
   const [resFor, setResFor] = useState<Level | null>(null);
-  const [reservations, setReservations] = useState<ReservationRow[] | null>(null);
-
-  async function openReservations(level: Level) {
-    setResFor(level);
-    setReservations(null);
-    try {
-      setReservations(
-        await api<ReservationRow[]>(
-          `/v1/inventory/reservations?variantId=${level.variantId}&locationId=${level.locationId}`,
-        ),
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-      setResFor(null);
-    }
-  }
-
-  async function releaseReservation(r: ReservationRow) {
-    if (
-      !confirm(
-        `Release ${r.qtyReserved} reserved unit(s) from ${r.orderNumber}? The stock becomes sellable immediately; re-reserve on ${r.orderNumber} from its page when replacement stock lands.`,
-      )
-    )
-      return;
-    try {
-      await api(`/v1/orders/${r.orderId}/lines/${r.lineId}/release`, { method: 'POST' });
-      toast.success(`Released — ${r.orderNumber} now holds no reservation on this item.`);
-      if (resFor) await openReservations(resFor);
-      await loadLevels(locationId);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
 
   async function loadLocations() {
     try {
@@ -204,37 +162,6 @@ export default function InventoryPage() {
           variantId: level.variantId,
           locationId: level.locationId,
           quantity,
-        }),
-      });
-      await loadLevels(locationId);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function adjust(level: Level) {
-    const deltaStr = prompt(
-      `Adjust ${level.variantSku ?? level.productName} (current ${level.onHand}). Delta:`,
-      '0',
-    );
-    if (!deltaStr) return;
-    const delta = Number(deltaStr);
-    if (!Number.isInteger(delta) || delta === 0) {
-      toast.error('delta must be a non-zero integer');
-      return;
-    }
-    const reason = prompt(`Reason (${ADJUST_REASONS.join(', ')}):`, 'count_correction');
-    if (!reason) return;
-    const notes = prompt('Optional notes:', '') ?? undefined;
-    try {
-      await api('/v1/inventory/adjust', {
-        method: 'POST',
-        body: JSON.stringify({
-          variantId: level.variantId,
-          locationId: level.locationId,
-          delta,
-          reason,
-          notes: notes || undefined,
         }),
       });
       await loadLevels(locationId);
@@ -390,9 +317,9 @@ export default function InventoryPage() {
                           <button
                             type="button"
                             className="btn-link"
-                            title="See which orders hold these units — release from there to sell the piece today"
+                            title="See which orders hold these units — back order one to sell the piece today, or reserve it elsewhere"
                             data-testid="reserved-count"
-                            onClick={() => void openReservations(l)}
+                            onClick={() => setResFor(l)}
                           >
                             {l.reserved}
                           </button>
@@ -428,7 +355,12 @@ export default function InventoryPage() {
                         </Select>
                       </td>
                       <td className="actions">
-                        <Button size="sm" variant="ghost" onClick={() => adjust(l)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setAdjustFor(l)}
+                          data-testid="stock-adjust"
+                        >
                           Adjust
                         </Button>
                       </td>
@@ -508,64 +440,28 @@ export default function InventoryPage() {
         </Card>
       </Stack>
 
+      {adjustFor && (
+        <StockAdjustmentDialog
+          open
+          variantId={adjustFor.variantId}
+          locationId={adjustFor.locationId}
+          onClose={() => setAdjustFor(null)}
+          onChanged={() => void loadLevels(locationId)}
+          onReassign={() => {
+            setResFor(adjustFor);
+            setAdjustFor(null);
+          }}
+        />
+      )}
       {resFor && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          data-testid="reservations-dialog"
-        >
-          <Card
-            className="w-full max-w-[640px]"
-            title={`Reserved — ${resFor.productName}${resFor.variantSku ? ` (${resFor.variantSku})` : ''}`}
-            description="These orders hold the committed units. Release one to sell the piece today, then re-reserve it on that order from its page when replacement stock lands."
-          >
-            {!reservations ? (
-              <LoadingRows rows={2} />
-            ) : reservations.length === 0 ? (
-              <EmptyState>No live orders hold this item here.</EmptyState>
-            ) : (
-              <TableWrap>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Order</th>
-                      <th>Customer</th>
-                      <th>Promised</th>
-                      <th className="num">Reserved</th>
-                      <th className="actions" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reservations.map((r) => (
-                      <tr key={r.lineId}>
-                        <td>
-                          <a href={`/orders/${r.orderId}`}>{r.orderNumber}</a>
-                        </td>
-                        <td>{r.customerName ?? '—'}</td>
-                        <td>{r.requestedDate ?? '—'}</td>
-                        <td className="num">{r.qtyReserved}</td>
-                        <td className="actions">
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => void releaseReservation(r)}
-                            data-testid="release-reservation"
-                          >
-                            Release
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
-            )}
-            <FormActions>
-              <Button variant="secondary" onClick={() => setResFor(null)}>
-                Close
-              </Button>
-            </FormActions>
-          </Card>
-        </div>
+        <ReassignReservationDialog
+          open
+          variantId={resFor.variantId}
+          locationId={resFor.locationId}
+          itemLabel={`${resFor.variantSku ?? resFor.productName}`}
+          onClose={() => setResFor(null)}
+          onChanged={() => void loadLevels(locationId)}
+        />
       )}
     </div>
   );

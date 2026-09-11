@@ -10,7 +10,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -20,6 +20,7 @@ import {
   type CurrentUserPayload,
 } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
+import { generatePoNumber } from './po-number';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import {
   cuttingDateMessage,
@@ -266,7 +267,7 @@ export class ReplenishmentRunService {
     }
 
     const hold = vendor.automaticallyHoldPos;
-    const number = await this.generatePoNumber(db, businessId);
+    const number = await generatePoNumber(db, businessId);
     const subtotalCents = lines.reduce((s, l) => s + l.orderQty * (l.costCents ?? 0), 0);
     // Advanced Vendor Settings → Shipping: active landed-cost lines default
     // the PO's freight (landed cost lean, Q1).
@@ -320,35 +321,6 @@ export class ReplenishmentRunService {
       businessId,
     });
     return { poId: po.id, number, status: po.status, lineCount: lines.length };
-  }
-
-  private async generatePoNumber(db: PostgresJsDatabase, businessId: string): Promise<string> {
-    const year = new Date().getUTCFullYear();
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const rows = await db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(schema.purchaseOrders)
-        .where(
-          and(
-            eq(schema.purchaseOrders.businessId, businessId),
-            sql`${schema.purchaseOrders.number} LIKE ${`PO-${year}-%`}`,
-          ),
-        );
-      const seq = (rows[0]?.count ?? 0) + 1 + attempt;
-      const candidate = `PO-${year}-${String(seq).padStart(6, '0')}`;
-      const [existing] = await db
-        .select({ id: schema.purchaseOrders.id })
-        .from(schema.purchaseOrders)
-        .where(
-          and(
-            eq(schema.purchaseOrders.businessId, businessId),
-            eq(schema.purchaseOrders.number, candidate),
-          ),
-        )
-        .limit(1);
-      if (!existing) return candidate;
-    }
-    return `PO-${year}-${Date.now().toString().slice(-6)}`;
   }
 }
 

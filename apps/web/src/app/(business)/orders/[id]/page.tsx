@@ -190,6 +190,13 @@ interface CustomerRow {
   lastName: string | null;
   email: string | null;
   phone: string | null;
+  /** A22 slice 6 (STORIS customer panel). */
+  customerNumber?: string | null;
+  businessName?: string | null;
+  contactName?: string | null;
+  alternateName?: string | null;
+  alternateRelationship?: string | null;
+  deliveryInstructions?: string | null;
   phone2?: string | null;
   workPhone?: string | null;
   workPhoneExt?: string | null;
@@ -1891,6 +1898,30 @@ export default function OrderDetailPage() {
                     ),
                   },
                   { label: 'Contact', value: customer.email ?? customer.phone ?? '—' },
+                  ...(customer.customerNumber
+                    ? [{ label: 'Customer #', value: <code>{customer.customerNumber}</code> }]
+                    : []),
+                  ...(customer.businessName || customer.contactName
+                    ? [
+                        {
+                          label: 'Business',
+                          value: [customer.businessName, customer.contactName]
+                            .filter(Boolean)
+                            .join(' · '),
+                        },
+                      ]
+                    : []),
+                  ...(customer.alternateName
+                    ? [
+                        {
+                          label: 'Alternate',
+                          value: `${customer.alternateName}${customer.alternateRelationship ? ` (${customer.alternateRelationship})` : ''}`,
+                        },
+                      ]
+                    : []),
+                  ...(customer.deliveryInstructions
+                    ? [{ label: 'Delivery instructions', value: customer.deliveryInstructions }]
+                    : []),
                   ...(order.fulfillmentType === 'delivery' && order.addressLine1
                     ? [
                         {
@@ -2417,6 +2448,25 @@ function ReturnsCard({
   const [method, setMethod] = useState<'original' | 'store_credit'>('original');
   const [fulfillment, setFulfillment] = useState<'drop_off' | 'pickup'>('drop_off');
   const [reason, setReason] = useState('');
+  // A22 slice 6 (STORIS Enter a Return): who took it, which store, the
+  // fees withheld, and the pickup stop for the delivery calendar.
+  const [members, setMembers] = useState<{ membershipId: string; name: string | null }[]>([]);
+  const [stores, setStores] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
+  const [salespersonId, setSalespersonId] = useState('');
+  const [storeId, setStoreId] = useState('');
+  const [restockingFee, setRestockingFee] = useState('');
+  const [pickupFee, setPickupFee] = useState('');
+  const [pickupDate, setPickupDate] = useState('');
+  const [pickupStart, setPickupStart] = useState('');
+  const [pickupEnd, setPickupEnd] = useState('');
+  useEffect(() => {
+    api<{ membershipId: string; name: string | null }[]>('/v1/business/members')
+      .then(setMembers)
+      .catch(() => setMembers([]));
+    api<{ id: string; name: string; isActive: boolean }[]>('/v1/business/locations')
+      .then((rows) => setStores(rows.filter((l) => l.isActive)))
+      .catch(() => setStores([]));
+  }, []);
   const [adjustAmount, setAdjustAmount] = useState('');
   const [working, setWorking] = useState(false);
   // A7 lifecycle: authorized returns wait here for the goods; receiving
@@ -2430,6 +2480,8 @@ function ReturnsCard({
       refundMethod: string;
       amountCents: number;
       authorizedAt: string;
+      pickupDate?: string | null;
+      pickupDeliveryId?: string | null;
     }[]
   >([]);
   // Cancelling a return authorization is override-gated server-side, so
@@ -2498,6 +2550,21 @@ function ReturnsCard({
       refundMethod: method,
       fulfillment,
       reason: reason || null,
+      ...(salespersonId ? { salespersonMembershipId: salespersonId } : {}),
+      ...(storeId ? { locationId: storeId } : {}),
+      ...(restockingFee.trim()
+        ? { restockingFeeCents: Math.round(Number(restockingFee) * 100) }
+        : {}),
+      ...(fulfillment === 'pickup' && pickupFee.trim()
+        ? { pickupFeeCents: Math.round(Number(pickupFee) * 100) }
+        : {}),
+      ...(fulfillment === 'pickup' && pickupDate
+        ? {
+            pickupDate,
+            pickupWindowStart: pickupStart || null,
+            pickupWindowEnd: pickupEnd || null,
+          }
+        : {}),
     };
   }
 
@@ -2591,6 +2658,7 @@ function ReturnsCard({
                   <th>RMA</th>
                   <th>Status</th>
                   <th>Refund</th>
+                  <th>Pickup</th>
                   <th className="num">Amount</th>
                   <th className="actions" />
                 </tr>
@@ -2607,10 +2675,28 @@ function ReturnsCard({
                     <td>
                       {r.refundMethod === 'store_credit' ? 'store credit' : 'original tenders'}
                     </td>
+                    <td>
+                      {r.pickupDeliveryId ? (
+                        <Link href={`/deliveries/${r.pickupDeliveryId}`}>
+                          {r.pickupDate ?? 'stop'}
+                        </Link>
+                      ) : (
+                        (r.pickupDate ?? '—')
+                      )}
+                    </td>
                     <td className="num">
                       <Money cents={r.amountCents} />
                     </td>
                     <td className="actions">
+                      <Link
+                        href={`/print/returns/${r.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-ghost btn-sm"
+                        data-testid="print-return-ticket"
+                      >
+                        Ticket
+                      </Link>
                       {r.status === 'authorized' && (
                         <>
                           <Button
@@ -2742,6 +2828,80 @@ function ReturnsCard({
             <Field label="Reason">
               <Input value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
+            <Field label="Return salesperson">
+              <Select
+                value={salespersonId}
+                onChange={(e) => setSalespersonId(e.target.value)}
+                data-testid="return-salesperson"
+              >
+                <option value="">—</option>
+                {members.map((m) => (
+                  <option key={m.membershipId} value={m.membershipId}>
+                    {m.name ?? m.membershipId}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Store taking the return">
+              <Select
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                data-testid="return-store"
+              >
+                <option value="">Order&apos;s store</option>
+                {stores.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Restocking fee ($)" hint="Withheld from the refund">
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={restockingFee}
+                onChange={(e) => setRestockingFee(e.target.value)}
+                data-testid="return-restocking-fee"
+              />
+            </Field>
+            {fulfillment === 'pickup' && (
+              <>
+                <Field label="Pickup fee ($)" hint="Withheld from the refund">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={pickupFee}
+                    onChange={(e) => setPickupFee(e.target.value)}
+                  />
+                </Field>
+                <Field label="Pickup date" hint="Puts the stop on the delivery calendar">
+                  <Input
+                    type="date"
+                    value={pickupDate}
+                    onChange={(e) => setPickupDate(e.target.value)}
+                    data-testid="return-pickup-date"
+                  />
+                </Field>
+                <Field label="Pickup window">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="time"
+                      value={pickupStart}
+                      onChange={(e) => setPickupStart(e.target.value)}
+                    />
+                    <span className="muted">to</span>
+                    <Input
+                      type="time"
+                      value={pickupEnd}
+                      onChange={(e) => setPickupEnd(e.target.value)}
+                    />
+                  </div>
+                </Field>
+              </>
+            )}
             <SectionHeading as="h3" title="Price adjustment" />
             <Field label="Adjustment ($)">
               <Input

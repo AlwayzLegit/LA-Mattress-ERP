@@ -155,6 +155,11 @@ export async function createAuth(deps: AuthDeps) {
     },
 
     secondaryStorage: redis ? makeRedisStorage(redis) : undefined,
+    // A22 slice 7 (Settings → Active sessions): with Redis as the session
+    // store the `sessions` table would stay empty, so the tenant-wide
+    // listing would see nothing. Keep a row per session in the database
+    // as well; better-auth still serves reads from Redis.
+    session: { storeSessionInDatabase: true },
   } satisfies BetterAuthOptions;
 
   return betterAuth(options);

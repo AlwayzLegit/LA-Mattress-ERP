@@ -38,12 +38,18 @@ import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 
+const FULFILLMENTS = ['drop_off', 'pickup'] as const;
+const REFUND_TENDERS = ['store_credit', 'original', 'cash', 'check'] as const;
+
 interface BindBody {
   saleOrderId?: string;
   returnId?: string;
   evenExchange?: boolean;
   restockingFeeCents?: number;
   returnSalespersonMembershipId?: string | null;
+  /** A22 slice 6: how the returned goods come back, and how leftover credit is paid out. */
+  fulfillment?: (typeof FULFILLMENTS)[number];
+  refundTender?: (typeof REFUND_TENDERS)[number];
   notes?: string | null;
   override?: OverrideCredentials;
 }
@@ -75,6 +81,10 @@ interface ExchangeRow {
 interface ExchangeDetail extends ExchangeRow {
   notes: string | null;
   returnSalespersonMembershipId: string | null;
+  returnSalespersonName: string | null;
+  fulfillment: string;
+  refundTender: string;
+  ticketPrintCount: number;
   settlement: {
     returnCents: number;
     restockingFeeCents: number;
@@ -157,6 +167,27 @@ export class ExchangesController {
   ): Promise<ExchangeDetail> {
     if (!body.saleOrderId) throw new BadRequestException('saleOrderId is required');
     if (!body.returnId) throw new BadRequestException('returnId is required');
+    const fulfillment = body.fulfillment ?? 'drop_off';
+    if (!FULFILLMENTS.includes(fulfillment)) {
+      throw new BadRequestException(`fulfillment must be one of ${FULFILLMENTS.join(', ')}`);
+    }
+    const refundTender = body.refundTender ?? 'store_credit';
+    if (!REFUND_TENDERS.includes(refundTender)) {
+      throw new BadRequestException(`refundTender must be one of ${REFUND_TENDERS.join(', ')}`);
+    }
+    if (body.returnSalespersonMembershipId) {
+      const [sp] = await this.db
+        .select({ id: schema.memberships.id })
+        .from(schema.memberships)
+        .where(
+          and(
+            eq(schema.memberships.id, body.returnSalespersonMembershipId),
+            eq(schema.memberships.businessId, tenant.businessId!),
+          ),
+        )
+        .limit(1);
+      if (!sp) throw new NotFoundException('Return salesperson not found');
+    }
 
     const [saleOrder] = await this.db
       .select()
@@ -316,6 +347,8 @@ export class ExchangesController {
             restockingFeeCents,
             restockingFeeOverridden,
             returnSalespersonMembershipId: body.returnSalespersonMembershipId ?? null,
+            fulfillment,
+            refundTender,
             notes: body.notes ?? null,
             createdByUserId: actor?.id ?? null,
           })
@@ -435,6 +468,33 @@ export class ExchangesController {
       await this.settleFromLedger(id, actor?.id ?? null);
     }
     return this.hydrate(id);
+  }
+
+  /** A22 slice 6: record an exchange ticket print. */
+  @Post(':id/ticket-print')
+  @RequirePermission('orders.view')
+  async ticketPrint(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Param('id') id: string,
+  ): Promise<{ ticketPrintCount: number }> {
+    const [exchange] = await this.db
+      .select({ id: schema.exchanges.id, count: schema.exchanges.ticketPrintCount })
+      .from(schema.exchanges)
+      .where(eq(schema.exchanges.id, id))
+      .limit(1);
+    if (!exchange) throw new NotFoundException('Exchange not found');
+    const next = exchange.count + 1;
+    await this.db
+      .update(schema.exchanges)
+      .set({ ticketPrintCount: next, updatedAt: new Date() })
+      .where(eq(schema.exchanges.id, id));
+    await this.audit.log({
+      action: 'exchange.ticket_print',
+      targetType: 'exchange',
+      targetId: id,
+      after: { ticketPrintCount: next },
+    });
+    return { ticketPrintCount: next };
   }
 
   /**
@@ -687,12 +747,21 @@ export class ExchangesController {
         splitAt: schema.exchanges.splitAt,
         notes: schema.exchanges.notes,
         returnSalespersonMembershipId: schema.exchanges.returnSalespersonMembershipId,
+        returnSalespersonName: schema.users.name,
+        fulfillment: schema.exchanges.fulfillment,
+        refundTender: schema.exchanges.refundTender,
+        ticketPrintCount: schema.exchanges.ticketPrintCount,
       })
       .from(schema.exchanges)
       .leftJoin(schema.orderReturns, eq(schema.orderReturns.id, schema.exchanges.returnId))
       .leftJoin(schema.orders, eq(schema.orders.id, schema.exchanges.saleOrderId))
       .leftJoin(orig, eq(orig.id, schema.exchanges.originalOrderId))
       .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
+      .leftJoin(
+        schema.memberships,
+        eq(schema.memberships.id, schema.exchanges.returnSalespersonMembershipId),
+      )
+      .leftJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
       .$dynamic();
   }
 

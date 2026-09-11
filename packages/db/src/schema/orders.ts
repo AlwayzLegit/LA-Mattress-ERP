@@ -372,6 +372,13 @@ export const deliveries = pgTable(
     orderId: uuid('order_id')
       .notNull()
       .references(() => orders.id, { onDelete: 'cascade' }),
+    /**
+     * A22 slice 6: 'delivery' (goods out) | 'return_pickup' (the truck
+     * collects a return — completing it receives the goods back instead
+     * of fulfilling the order). `returnId` names the return document.
+     */
+    kind: text('kind').notNull().default('delivery'),
+    returnId: uuid('return_id'),
     scheduledDate: date('scheduled_date').notNull(),
     // Local wall-clock window ("09:00"–"12:00"); the location's timezone
     // supplies the offset. Stored without a zone on purpose — a route is
@@ -408,6 +415,14 @@ export const deliveries = pgTable(
     failureReasonCodeId: uuid('failure_reason_code_id').references(() => reasonCodes.id, {
       onDelete: 'set null',
     }),
+    /**
+     * A22 slice 5 (STORIS Confirm Schedule "Contact Status"): where the
+     * confirmation call stands — 'not_contacted' | 'left_message' |
+     * 'no_answer' | 'confirmed' | 'reschedule_requested'. Null = never
+     * touched; `contactedAt` stamps the last change.
+     */
+    contactStatus: text('contact_status'),
+    contactedAt: timestamp('contacted_at', { withTimezone: true }),
     notes: text('notes'),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

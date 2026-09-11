@@ -46,6 +46,9 @@ export interface PurchaseOrderRow {
   createdAt: string;
   status: string;
   transactionType: 'merchandise' | 'direct_ship';
+  purchaseOrderType: 'standard' | 'special_order' | 'direct_ship';
+  atDock: boolean;
+  quantityAtDock: number;
 }
 
 export interface OpenOrderRow {
@@ -67,6 +70,40 @@ export interface OpenOrderRow {
   lineId: string;
   lineDescription: string;
   lineType: string;
+  linkedTransferId: string | null;
+  linkedTransferNumber: string | null;
+  linkedTransferQuantity: number;
+  linkedPurchaseOrderId: string | null;
+  linkedPurchaseOrderNumber: string | null;
+  linkedPurchaseOrderQuantity: number;
+}
+
+export interface LedgerRow {
+  id: string;
+  date: string;
+  quantity: number;
+  balance: number;
+  memo: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  referenceNumber: string | null;
+  comments: string | null;
+  user: string | null;
+  orderId: string | null;
+  orderNumber: string | null;
+  sku: string | null;
+  locationName: string | null;
+}
+
+export interface Ledger {
+  kind: 'regular' | 'as_is';
+  locationId: string | null;
+  start: string;
+  end: string;
+  openingBalance: number;
+  endingBalance: number;
+  onHandNow: number;
+  rows: LedgerRow[];
 }
 
 export interface SalesHistoryPeriod {
@@ -182,5 +219,8 @@ export const PRODUCT_TABS = [
   { key: 'serials', label: 'Serial/Reference' },
   { key: 'as-is', label: 'As-Is' },
   { key: 'summary', label: 'Summary' },
+  { key: 'as-is-detail', label: 'As-Is Inventory Detail' },
+  { key: 'regular-detail', label: 'Regular Inventory Detail' },
+  { key: 'carts', label: 'Open Shopping Carts' },
 ] as const;
 export type ProductTab = (typeof PRODUCT_TABS)[number]['key'];

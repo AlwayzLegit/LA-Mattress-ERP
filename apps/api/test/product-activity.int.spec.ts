@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import request from 'supertest';
@@ -216,7 +217,7 @@ async function seed(): Promise<void> {
         locationId: warehouseId,
         delta: -1,
         reason: 'order_fulfill',
-        createdAt: thisMonth,
+        createdAt: new Date(thisMonth.getTime() + 1000),
       },
       {
         businessId,
@@ -224,7 +225,7 @@ async function seed(): Promise<void> {
         locationId: warehouseId,
         delta: -1,
         reason: 'transfer_out',
-        createdAt: thisMonth,
+        createdAt: new Date(thisMonth.getTime() + 2000),
       },
       {
         businessId,
@@ -384,7 +385,7 @@ async function seed(): Promise<void> {
         purchaseOrderId: poId,
         variantId,
         quantityOrdered: 6,
-        quantityReceived: 1,
+        quantityReceived: 2,
         quantityInspected: 1,
         quantityAccepted: 1,
         unitCostCents: 46800,
@@ -398,6 +399,17 @@ async function seed(): Promise<void> {
       quantity: 1,
       status: 'ordered',
     });
+    // The +3 receipt this month came off this PO (ledger reference).
+    await db
+      .update(schema.inventoryMovements)
+      .set({ referenceType: 'purchase_order', referenceId: poId })
+      .where(
+        and(
+          eq(schema.inventoryMovements.variantId, variantId),
+          eq(schema.inventoryMovements.reason, 'receive_po'),
+          eq(schema.inventoryMovements.delta, 3),
+        ),
+      );
     const [ds] = await db
       .insert(schema.purchaseOrders)
       .values({
@@ -607,11 +619,17 @@ describe('Purchase Orders tab (A21 D7)', () => {
       expectedAt: inTwentyDays.toISOString(),
       status: 'ordered',
       transactionType: 'merchandise',
+      // A22: allocated to the open order's line; 2 received − 1 accepted at the dock.
+      purchaseOrderType: 'special_order',
+      atDock: true,
+      quantityAtDock: 1,
     });
     expect(rows[1]).toMatchObject({
       quantityDue: 2,
       status: 'draft',
       transactionType: 'direct_ship',
+      purchaseOrderType: 'direct_ship',
+      atDock: false,
     });
   });
 });
@@ -631,6 +649,13 @@ describe('Open Orders tab (A21 D6)', () => {
       fulfillmentStatus: 'scheduled',
       shipFromLocationName: 'Warehouse',
       customerName: 'Anna Rose Baltazar',
+      // A22: the customer transfer carrying it and the PO line allocated to it.
+      linkedTransferId: transferId,
+      linkedTransferNumber: 'XFR-1',
+      linkedTransferQuantity: 1,
+      linkedPurchaseOrderId: poId,
+      linkedPurchaseOrderNumber: 'PO-21048',
+      linkedPurchaseOrderQuantity: 1,
     });
     const quotes = await as(ownerCookie)
       .get(activity('open-orders', 'orderType=quote'))
@@ -837,6 +862,59 @@ describe('Summary tab (A21 D12)', () => {
   });
 });
 
+describe('Regular / As-Is Inventory Detail (A22 D17)', () => {
+  it('walks the movement ledger with a running balance and resolves references', async () => {
+    const res = await as(ownerCookie)
+      .get(activity('ledger', `kind=regular&locationId=${warehouseId}`))
+      .expect(200);
+    expect(res.body).toMatchObject({
+      kind: 'regular',
+      start: monthStart.toISOString().slice(0, 10),
+      // 4 on hand now − (+3 −1 −1) this month
+      openingBalance: 3,
+      endingBalance: 4,
+      onHandNow: 4,
+    });
+    const rows = res.body.rows as { quantity: number; balance: number; memo: string }[];
+    expect(rows.map((r) => [r.quantity, r.balance])).toEqual([
+      [3, 6],
+      [-1, 5],
+      [-1, 4],
+    ]);
+    expect(rows[0]).toMatchObject({ memo: 'PO receipt', referenceNumber: 'PO# PO-21048' });
+    expect(rows[1]).toMatchObject({ memo: 'Order / invoice' });
+    expect(rows[2]).toMatchObject({ memo: 'Transfer out', locationName: 'Warehouse' });
+    // Last month only: the +9 receipt, ending where this month started.
+    const lm = lastMonth.toISOString().slice(0, 10);
+    const prior = await as(ownerCookie)
+      .get(activity('ledger', `kind=regular&locationId=${warehouseId}&start=${lm}&end=${lm}`))
+      .expect(200);
+    expect(prior.body).toMatchObject({ openingBalance: -6, endingBalance: 3 });
+    expect(prior.body.rows).toHaveLength(1);
+    await as(ownerCookie).get(activity('ledger', 'kind=bogus')).expect(400);
+    await as(ownerCookie).get(activity('ledger', 'start=2026-13-01')).expect(400);
+    await as(ownerCookie).get(activity('ledger', 'start=2026-09-10&end=2026-09-01')).expect(400);
+  });
+
+  it('lists as-is pieces entered and reviewed out with the as-is balance', async () => {
+    const res = await as(ownerCookie)
+      .get(activity('ledger', `kind=as_is&locationId=${warehouseId}`))
+      .expect(200);
+    // 1 in review now; 2 entered and 1 scrapped this month.
+    expect(res.body).toMatchObject({
+      kind: 'as_is',
+      openingBalance: 0,
+      endingBalance: 1,
+      onHandNow: 1,
+    });
+    const rows = res.body.rows as { quantity: number; balance: number; memo: string }[];
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.quantity > 0)).toHaveLength(2);
+    expect(rows.find((r) => r.quantity < 0)).toMatchObject({ memo: 'Scrapped' });
+    expect(rows[rows.length - 1]!.balance).toBe(1);
+  });
+});
+
 describe('Search for a Product criteria (A21 D13)', () => {
   const ids = (body: { data: { id: string }[] }) => body.data.map((r) => r.id);
 
@@ -865,6 +943,13 @@ describe('Search for a Product criteria (A21 D13)', () => {
     const nothing = await as(ownerCookie).get('/v1/products?q=queen&group=frame').expect(200);
     expect(ids(nothing.body)).toEqual([]);
     await as(ownerCookie).get('/v1/products?purchaseStatus=bogus').expect(400);
+  });
+
+  it('carries the category and primary collection columns and sorts by them (A22 D14)', async () => {
+    const res = await as(ownerCookie).get('/v1/products?sort=collectionName&dir=asc').expect(200);
+    const row = res.body.data.find((r: { id: string }) => r.id === productId);
+    expect(row).toMatchObject({ categoryName: null, collectionName: null, brandName: 'EASTMAN' });
+    await as(ownerCookie).get('/v1/products?sort=categoryName').expect(200);
   });
 });
 

@@ -7,6 +7,7 @@ import { InvitationService } from './invitation.service';
 import { LocationsController } from './locations.controller';
 import { MembersController } from './members.controller';
 import { PermissionsCatalogController, RolesController } from './roles.controller';
+import { SessionsAdminController } from './sessions-admin.controller';
 import { SettingsController } from './settings.controller';
 import { TaxClassesController } from './tax-classes.controller';
 
@@ -23,6 +24,7 @@ import { TaxClassesController } from './tax-classes.controller';
     RolesController,
     PermissionsCatalogController,
     TaxClassesController,
+    SessionsAdminController,
   ],
   exports: [InvitationService],
 })

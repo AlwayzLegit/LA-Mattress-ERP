@@ -13,9 +13,10 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { tzDayStart } from '../common/date-range';
-import { DRIZZLE } from '../database/database.module';
+import { DRIZZLE, ROOT_DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
+import { importESM } from '../utils/import-esm';
 import {
   allowedPunches,
   hoursFromMs,
@@ -59,16 +60,19 @@ export interface TimeClockMe {
 export class TimeClockController {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase,
+    @Inject(ROOT_DRIZZLE) private readonly rootDb: PostgresJsDatabase,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   private async me(tenant: RequestTenantContext): Promise<TimeClockMe> {
-    const businessId = tenant.businessId!;
     if (!tenant.membershipId) {
       throw new ForbiddenException('The time clock needs a signed-in member');
     }
-    const membershipId = tenant.membershipId;
+    return this.meFor(tenant.businessId!, tenant.membershipId);
+  }
 
+  /** The strip for one member — the signed-in one, or the one a kiosk just verified. */
+  private async meFor(businessId: string, membershipId: string): Promise<TimeClockMe> {
     const [member] = await this.db
       .select({
         name: schema.users.name,
@@ -212,9 +216,88 @@ export class TimeClockController {
       throw new BadRequestException('type must be clock_in, break_start, break_end or clock_out');
     }
     const before = await this.me(tenant);
-    if (!before.allowed.includes(body.type)) {
+    return this.record(tenant.businessId!, before, body.type);
+  }
+
+  /**
+   * A22 slice 7 (STORIS Access Time Clock): the shared-terminal kiosk.
+   * The terminal itself is signed in as any member who may punch; each
+   * punch carries the punching member's own email + password, verified
+   * here against their credential account (never a session), and lands
+   * on THEIR membership. Nothing about the terminal's session changes.
+   */
+  @Post('kiosk-punch')
+  @RequirePermission('timeclock.punch')
+  async kioskPunch(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Body() body: { email?: unknown; password?: unknown; type?: unknown },
+  ): Promise<TimeClockMe & { punched: { type: PunchType; at: Date } }> {
+    if (!isPunchType(body?.type)) {
+      throw new BadRequestException('type must be clock_in, break_start, break_end or clock_out');
+    }
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (!email || !password) throw new BadRequestException('email and password are required');
+    const denied = () =>
+      new ForbiddenException({ statusCode: 403, code: 'KIOSK_DENIED', message: 'Invalid sign-in' });
+    const [user] = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.email, email))
+      .limit(1);
+    if (!user) throw denied();
+    const [account] = await this.rootDb
+      .select({ password: schema.accounts.password })
+      .from(schema.accounts)
+      .where(and(eq(schema.accounts.userId, user.id), eq(schema.accounts.providerId, 'credential')))
+      .limit(1);
+    if (!account?.password) throw denied();
+    const { verifyPassword } = await importESM<{
+      verifyPassword: (args: { hash: string; password: string }) => Promise<boolean>;
+    }>('better-auth/crypto');
+    if (!(await verifyPassword({ hash: account.password, password }))) throw denied();
+    const [membership] = await this.db
+      .select({ id: schema.memberships.id, roleId: schema.memberships.roleId })
+      .from(schema.memberships)
+      .where(
+        and(
+          eq(schema.memberships.businessId, tenant.businessId!),
+          eq(schema.memberships.userId, user.id),
+          eq(schema.memberships.status, 'active'),
+        ),
+      )
+      .limit(1);
+    if (!membership) throw denied();
+    const [canPunch] = await this.db
+      .select({ permission: schema.rolePermissions.permission })
+      .from(schema.rolePermissions)
+      .where(
+        and(
+          eq(schema.rolePermissions.roleId, membership.roleId),
+          eq(schema.rolePermissions.permission, 'timeclock.punch'),
+        ),
+      )
+      .limit(1);
+    if (!canPunch) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'KIOSK_DENIED',
+        message: 'This member cannot use the time clock',
+      });
+    }
+    const before = await this.meFor(tenant.businessId!, membership.id);
+    return this.record(tenant.businessId!, before, body.type, 'kiosk');
+  }
+
+  private async record(
+    businessId: string,
+    before: TimeClockMe,
+    type: PunchType,
+    source: 'self' | 'kiosk' = 'self',
+  ): Promise<TimeClockMe & { punched: { type: PunchType; at: Date } }> {
+    if (!before.allowed.includes(type)) {
       throw new BadRequestException(
-        `Cannot ${body.type.replace('_', ' ')} while ${
+        `Cannot ${type.replace('_', ' ')} while ${
           before.status === 'in'
             ? 'on the clock'
             : before.status === 'break'
@@ -225,19 +308,19 @@ export class TimeClockController {
     }
     const at = new Date();
     await this.db.insert(schema.timePunches).values({
-      businessId: tenant.businessId!,
+      businessId,
       membershipId: before.member.membershipId,
       locationId: before.member.locationId,
-      type: body.type,
+      type,
       at,
     });
     await this.audit.log({
       action: 'timeclock.punch',
       targetType: 'membership',
       targetId: before.member.membershipId,
-      metadata: { type: body.type, at, locationId: before.member.locationId },
+      metadata: { type, at, locationId: before.member.locationId, source },
     });
-    const after = await this.me(tenant);
-    return { ...after, punched: { type: body.type, at } };
+    const after = await this.meFor(businessId, before.member.membershipId);
+    return { ...after, punched: { type, at } };
   }
 }

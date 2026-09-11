@@ -33,6 +33,11 @@ export default function NewCustomerPage() {
         email: blankToNull(data.get('email')),
         phone: blankToNull(data.get('phone')),
         notes: blankToNull(data.get('notes')),
+        businessName: blankToNull(data.get('businessName')),
+        contactName: blankToNull(data.get('contactName')),
+        alternateName: blankToNull(data.get('alternateName')),
+        alternateRelationship: blankToNull(data.get('alternateRelationship')),
+        deliveryInstructions: blankToNull(data.get('deliveryInstructions')),
       };
       const created = await api<{ id: string }>('/v1/customers', {
         method: 'POST',
@@ -69,6 +74,21 @@ export default function NewCustomerPage() {
             </Field>
             <Field label="Phone">
               <Input name="phone" type="tel" autoComplete="off" />
+            </Field>
+            <Field label="Business name" hint="Trade accounts">
+              <Input name="businessName" autoComplete="off" />
+            </Field>
+            <Field label="Contact name">
+              <Input name="contactName" autoComplete="off" />
+            </Field>
+            <Field label="Alternate contact">
+              <Input name="alternateName" autoComplete="off" />
+            </Field>
+            <Field label="Relationship">
+              <Input name="alternateRelationship" autoComplete="off" />
+            </Field>
+            <Field label="Delivery instructions" className="form-span">
+              <textarea name="deliveryInstructions" rows={2} className="textarea" />
             </Field>
             <Field label="Notes" className="form-span">
               <textarea name="notes" rows={3} className="textarea" />

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { ReplenishPanel, type ReplenishMode } from './replenish-panel';
 import {
   Alert,
   Button,
@@ -63,7 +64,50 @@ interface GridRow {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+type ReplenishmentType = ReplenishMode | 'sales_rate';
+const TYPES: { key: ReplenishmentType; label: string }[] = [
+  { key: 'allocated_order', label: 'Allocated order' },
+  { key: 'stock_level', label: 'Stock level' },
+  { key: 'sales_rate', label: 'Sales rate' },
+];
+
+/**
+ * STORIS "Replenish Inventory" (A22 slice 4): one screen, three
+ * replenishment types — Allocated order and Stock level run across every
+ * vendor at once; Sales rate is the per-vendor engine the nightly build
+ * uses.
+ */
 export default function ReplenishmentPage() {
+  const [type, setType] = useState<ReplenishmentType>('allocated_order');
+  return (
+    <div>
+      <PageHeader
+        title="Replenish inventory"
+        sub="Allocated orders, stock levels, or the sales-rate engine — pick the type, run, and create the purchase orders by vendor"
+        actions={
+          <div className="seg seg-lg" role="tablist" aria-label="Replenishment type">
+            {TYPES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={type === t.key}
+                className={`seg-btn${type === t.key ? ' is-active' : ''}`}
+                onClick={() => setType(t.key)}
+                data-testid={`replenishment-type-${t.key}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        }
+      />
+      {type === 'sales_rate' ? <SalesRatePanel /> : <ReplenishPanel mode={type} />}
+    </div>
+  );
+}
+
+function SalesRatePanel() {
   const [vendors, setVendors] = useState<Vendor[] | null>(null);
   const [locations, setLocations] = useState<Location[] | null>(null);
   const [vendorId, setVendorId] = useState('');
@@ -207,15 +251,13 @@ export default function ReplenishmentPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Sales-rate replenishment"
-        sub="One engine, three run modes — what this screen shows is exactly what the nightly build orders"
-      />
-
       <Stack>
         {error ? <Alert tone="error">{error}</Alert> : null}
 
-        <Card title="Criteria">
+        <Card
+          title="Sales-rate criteria"
+          description="One engine, three run modes — what this screen shows is exactly what the nightly build orders"
+        >
           <form
             onSubmit={(e) => {
               e.preventDefault();

@@ -8,6 +8,7 @@ import { SpecialOrdersModule } from '../special-orders/special-orders.module';
 import { AuthModule } from '../auth/auth.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { PurchaseOrdersController } from './purchase-orders.controller';
+import { ReplenishController } from './replenish.controller';
 import { ReplenishmentController, ReplenishmentRunService } from './replenishment.controller';
 import { VendorInvoicesController } from './vendor-invoices.controller';
 import { VendorsController } from './vendors.controller';
@@ -28,6 +29,7 @@ import { VendorsController } from './vendors.controller';
     PurchaseOrdersController,
     VendorInvoicesController,
     ReplenishmentController,
+    ReplenishController,
   ],
   providers: [ReplenishmentRunService],
   exports: [ReplenishmentRunService],

@@ -1,0 +1,2 @@
+ALTER TABLE "inventory_movements" ADD COLUMN "reason_code_id" uuid;--> statement-breakpoint
+ALTER TABLE "inventory_movements" ADD CONSTRAINT "inventory_movements_reason_code_id_reason_codes_id_fk" FOREIGN KEY ("reason_code_id") REFERENCES "public"."reason_codes"("id") ON DELETE set null ON UPDATE no action;

@@ -67,6 +67,15 @@ interface Customer {
   phone2: string | null;
   firstName: string | null;
   lastName: string | null;
+  customerNumber: string | null;
+  prefix: string | null;
+  middleName: string | null;
+  suffix: string | null;
+  businessName: string | null;
+  contactName: string | null;
+  alternateName: string | null;
+  alternateRelationship: string | null;
+  deliveryInstructions: string | null;
   notes: string | null;
   addressesJson: CustomerAddress[] | null;
   referralSource: string | null;
@@ -260,6 +269,14 @@ export default function CustomerDetailPage() {
           notes: blankToNull(data.get('notes')),
           referralSource: blankToNull(data.get('referralSource')),
           addressesJson: addresses.length > 0 ? addresses : null,
+          prefix: blankToNull(data.get('prefix')),
+          middleName: blankToNull(data.get('middleName')),
+          suffix: blankToNull(data.get('suffix')),
+          businessName: blankToNull(data.get('businessName')),
+          contactName: blankToNull(data.get('contactName')),
+          alternateName: blankToNull(data.get('alternateName')),
+          alternateRelationship: blankToNull(data.get('alternateRelationship')),
+          deliveryInstructions: blankToNull(data.get('deliveryInstructions')),
         }),
       });
       setSaved(true);
@@ -316,14 +333,17 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || '(no name)';
+  const name =
+    [c.prefix, c.firstName, c.middleName, c.lastName, c.suffix].filter(Boolean).join(' ') ||
+    c.businessName ||
+    '(no name)';
 
   return (
     <div>
       <PageHeader
         eyebrow={backLink}
         title={name}
-        sub={`Customer since ${new Date(c.createdAt).toLocaleDateString()}`}
+        sub={`${c.customerNumber ? `${c.customerNumber} · ` : ''}${c.businessName ? `${c.businessName} · ` : ''}Customer since ${new Date(c.createdAt).toLocaleDateString()}`}
         actions={
           <LinkButton size="sm" href={`/customers/${id}/activity`} data-testid="view-activity">
             View customer activity
@@ -335,11 +355,35 @@ export default function CustomerDetailPage() {
         <Card title="Details">
           <form onSubmit={save}>
             <FormGrid cols={2}>
+              <Field label="Customer #" hint="Assigned automatically">
+                <Input value={c.customerNumber ?? '—'} readOnly data-testid="customer-number" />
+              </Field>
+              <Field label="Prefix" hint="Mr., Ms., Dr.">
+                <Input name="prefix" defaultValue={c.prefix ?? ''} />
+              </Field>
               <Field label="First name">
                 <Input name="firstName" defaultValue={c.firstName ?? ''} />
               </Field>
+              <Field label="Middle name">
+                <Input name="middleName" defaultValue={c.middleName ?? ''} />
+              </Field>
               <Field label="Last name">
                 <Input name="lastName" defaultValue={c.lastName ?? ''} />
+              </Field>
+              <Field label="Suffix" hint="Jr., Sr., III">
+                <Input name="suffix" defaultValue={c.suffix ?? ''} />
+              </Field>
+              <Field label="Business name" hint="Trade accounts">
+                <Input name="businessName" defaultValue={c.businessName ?? ''} />
+              </Field>
+              <Field label="Contact name" hint="Who to ask for at the business">
+                <Input name="contactName" defaultValue={c.contactName ?? ''} />
+              </Field>
+              <Field label="Alternate contact">
+                <Input name="alternateName" defaultValue={c.alternateName ?? ''} />
+              </Field>
+              <Field label="Relationship" hint="Spouse, partner, assistant…">
+                <Input name="alternateRelationship" defaultValue={c.alternateRelationship ?? ''} />
               </Field>
               <Field label="Email">
                 <Input name="email" type="email" defaultValue={c.email ?? ''} />
@@ -408,6 +452,18 @@ export default function CustomerDetailPage() {
                   </Fragment>
                 );
               })}
+              <Field
+                label="Delivery instructions"
+                hint="Standing instructions — pre-filled on every order"
+                className="form-span"
+              >
+                <textarea
+                  name="deliveryInstructions"
+                  defaultValue={c.deliveryInstructions ?? ''}
+                  rows={2}
+                  className="textarea"
+                />
+              </Field>
               <Field label="Notes" className="form-span">
                 <textarea name="notes" defaultValue={c.notes ?? ''} rows={3} className="textarea" />
               </Field>

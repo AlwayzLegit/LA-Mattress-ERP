@@ -1204,6 +1204,285 @@ Build order: migration 0093 → `catalog/product-activity.controller.ts` (nine
 reads) + browser criteria → product page section list + panels + browser
 Advanced search → `product-activity.int.spec.ts`.
 
+### 12.18 STORIS screen sweep #2 — 28 screens, gap map and build order (amendment A22, owner 2026-09-11)
+
+Owner sent a folder of 28 STORIS screens ("take a look and see what we are
+missing and incorporate accordingly"). Nine are View Product Activity views
+(A21) with a few columns and two tabs we did not have; the rest span
+transfers, logistical scheduling, replenishment, stock adjustments, returns
+and exchanges, customers, purchasing and administration. Each screen was
+checked against the code; the map below records what stands, what is
+missing and where it lands. Build order is by slice; every slice is its own
+PR.
+
+| STORIS screen                                      | Today                                                                                                                                                                                                                                                   | Plan                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| View Product Activity (9 views)                    | A21 tabs                                                                                                                                                                                                                                                | **Slice 1 (built):** Open Orders gains Linked transfer / Linked transfer quantity / Linked PO (D15); Purchase Orders gains PO type + At dock (D16); Regular and As-Is Inventory Detail tabs (D17); Open Shopping Carts tab (D18); the ATP grid follows the STORIS column order.                                                                                                                                                      |
+| Search for a Product (3 views)                     | Browser + Advanced search (A21 D13)                                                                                                                                                                                                                     | **Slice 1 (built):** Product category leads and Primary collection ends the column strip, both sortable (D14).                                                                                                                                                                                                                                                                                                                       |
+| Enter a Transfer                                   | From / To / type / notes / ship-now / lines                                                                                                                                                                                                             | **Slice 2:** date (scheduled for), reason code, Complete transfer (receive on create), Print transfer ticket, several To locations with Distribute quantities (one transfer per store), Delivery information (route, ship direct, instructions for this fulfillment only), total volume.                                                                                                                                             |
+| Report Transfers by Location (2 views)             | No transfer report                                                                                                                                                                                                                                      | **Slice 2:** `GET /v1/reports/transfers-by-location` (from / to / dates / reserve level / include instructions; csv, txt, Basic PDF via the AR.317 text writer) grouped by receiving store: transfer, date, sending location, transfer for, product, brand, order / reserved / held qty, manifest.                                                                                                                                   |
+| Enter a Stock Adjustment                           | Adjust + floor sample via prompt(); bins; as-is intake, restock, scrap, vendor credit on the As-Is queue; no cost per unit, reason code, as-is quantity fix, serial rename or write-off from stock. `POST /v1/as-is` intake does not decrement on hand. | **Slice 3:** one Stock adjustment dialog on Stock by location and the product page with the STORIS tabs: Quantity (qty, cost per unit, reason code, notes), Bin to bin, Move to As-Is (fix: decrements stock), Move from As-Is, As-Is status, As-Is adjustment (quantity fix / void), Write-off (from stock, coded reason, register + `inventory.write_off`), Vendor chargeback, Change serial, SO info.                             |
+| Reassign a Sales Reservation                       | Release a whole line on Stock by location; reserve the whole order on its page                                                                                                                                                                          | **Slice 3:** Reassign reservation dialog: location + product, On hand / Net available / Net PO, holders with Fill by / Type / Status / Order qty / Reserved; move N units from one line to another in one transaction, or back-order (release) N units.                                                                                                                                                                              |
+| Replenish Inventory (Allocated order, Stock level) | Sales-rate replenishment (vendor + location required, one PO); legacy reorder suggestions; special-orders queue                                                                                                                                         | **Slice 4:** one Replenish screen with Replenishment type (Allocated order = open-order shortfall by variant; Stock level = below minimum (per-store min stock) or safety (variant reorder point)); Create PO by vendor across every vendor; product / group / category / vendor / location filters; fulfillment-status checkboxes; include floor samples / returns toggles; carton rounding with Carton and Total quantity columns. |
+| Logistical Scheduling (2 views)                    | 35-day calendar + dispatch for sales orders; transfers on manifests; service orders unscheduled                                                                                                                                                         | **Slice 5:** Search for schedules (kind: sales orders / transfers / service orders; deliver from, route, truck, transfer to, date range, past dates) and Confirm schedule (delivery status + contact status filters; Stops / Units / Dollars / Volume; grid with zip, city, contact, T D F P OO flags). Contact status becomes a delivery field.                                                                                     |
+| Enter a Return                                     | Returns with / without original; drop-off or pickup; refund method; RMA                                                                                                                                                                                 | **Slice 6:** pickup scheduled on the delivery calendar (deliveries carry a return), return salesperson, store, restocking / pickup fees, return ticket print, contact status.                                                                                                                                                                                                                                                        |
+| Enter an Exchange                                  | Exchange binder (return + sale legs, settlement, restocking fee, return salesperson in the API)                                                                                                                                                         | **Slice 6:** return salesperson and fulfillment on the wizard, refund tender when the return exceeds the sale, exchange ticket print.                                                                                                                                                                                                                                                                                                |
+| Update a Customer Address                          | First / last, phones, email, delivery + billing address, notes                                                                                                                                                                                          | **Slice 6:** customer number, Business + contact name, prefix / middle / suffix, alternate name + relationship, delivery instructions; the same fields on the order's customer panel.                                                                                                                                                                                                                                                |
+| Access Time Clock                                  | Time clock strip on the dashboards, signed-in member only                                                                                                                                                                                               | **Slice 7:** `/timeclock` kiosk page: email + password re-auth per punch on a shared terminal (punch-on-behalf endpoint that verifies the credentials).                                                                                                                                                                                                                                                                              |
+| Recover STORIS Licenses                            | Own sessions only (user menu)                                                                                                                                                                                                                           | **Slice 7:** Settings → Active sessions: every member's sessions (signed in, IP, device, last seen) with Sign out; `sessions.manage`.                                                                                                                                                                                                                                                                                                |
+| Print a Purchase Order                             | Print from the PO page, one at a time                                                                                                                                                                                                                   | **Slice 7:** `/print/purchase-orders` batch print by PO / receiving location / vendor, include direct ships, reprint tracking.                                                                                                                                                                                                                                                                                                       |
+| Receive a Purchase Order                           | Receiving + reverse (unreceive) on the PO page and Products → Receive                                                                                                                                                                                   | Covered.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Enter a Purchase Order (Merchandise tab)           | PO builder                                                                                                                                                                                                                                              | Covered; Volume / Weight / Pieces header from the shipping fields and per-line discounted cost are noted, not scheduled.                                                                                                                                                                                                                                                                                                             |
+| Main Menu (Favorites, History, Program search)     | Global search (⌘K) is the program search                                                                                                                                                                                                                | Not built: favorites / history are a shell nicety, not a STORIS workflow.                                                                                                                                                                                                                                                                                                                                                            |
+
+Decisions (slice 1):
+
+- **D14 Browser columns.** Product category is the first column and Primary
+  collection the last, both sortable (`categoryName`, `collectionName`).
+  Saved column orders pick the new columns up at the end.
+- **D15 Linked documents on Open Orders.** Linked transfer = the earliest
+  live transfer carrying this product for the order (quantity = shipped,
+  else ordered); Linked PO = the PO line allocated to the order line, with
+  its allocated quantity.
+- **D16 PO type and dock.** PO type reads Direct ship, Special order (a line
+  allocated to a sales-order line) or Standard. STORIS "Dock scheduled" has
+  no counterpart (no dock appointments); the column reads **At dock** — units
+  received and not yet accepted or rejected.
+- **D17 Inventory detail.** Regular = the movement ledger at the location
+  between two dates (reservation rows carry delta 0 and are skipped); opening
+  balance = on hand now − every movement since the start, ending balance = on
+  hand now − every movement after the end, running balance per row.
+  References resolve to the order, PO, transfer, register sale or RMA number.
+  As-Is = pieces entered (+) and reviewed out (−) by their own dates, same
+  arithmetic on the as-is count. Both default to month to date.
+- **D18 Open Shopping Carts** = the Open Orders view opened on Quotes.
+
+Decisions (slice 2 — transfers):
+
+- **D19 Enter a Transfer fields.** A transfer carries a coded reason
+  (usage class `transfer`, Settings → Reason codes), a delivery date
+  (`scheduledFor`, until now auto-transfers only), a route name, a Ship
+  direct flag and "instructions for this fulfillment only" (the ticket
+  prints them). Migration `0094`. The document date stays the creation date.
+- **D20 Complete transfer.** `complete: true` ships and receives on create
+  — the stock already moved, so nothing is left to pick and the printed-
+  ticket gate does not apply. Plain create + ship keeps the gate.
+- **D21 Several To locations.** `toLocationIds` creates one transfer per
+  destination; `distributeQuantities` splits each line evenly (remainder to
+  the first stores) and refuses to leave a store with nothing, otherwise
+  every store gets the full lines. Serial-picked lines never fan out. The
+  response is the first transfer plus `createdTransfers`.
+- **D22 Report Transfers by Location** (`GET /v1/reports/transfers-by-location`,
+  `reports.inventory.view`; csv / txt / pdf need `reports.export`): every
+  non-cancelled transfer line grouped by receiving store, filtered by sending
+  and receiving location, transfer date (shipped, else created) and reserve
+  level — partial = units still held (ordered − shipped), full = none.
+  Columns follow TE.324: Order Qty = ordered else shipped, Res Qty = shipped,
+  BOy Qty = held, Manifest Number; a Vendor Model sub-line when the variant
+  has one; instructions and notes under the transfer when asked. The spool
+  reuses the AR.317 text writer through the shared `text-layout` helpers.
+
+Decisions (slice 3 — stock adjustment + reassign reservation):
+
+- **D23 One Stock Adjustment dialog.** Stock by location and the product
+  page open the same dialog (`components/stock-adjustment-dialog.tsx`) on a
+  variant + location: a header strip from `GET /v1/inventory/stock-card`
+  (on hand / reserved / floor / available / net on PO / as-is here / bin /
+  cost, plus the pending as-is pieces, the serials in the building, the
+  active bins and the `-AS` sibling variant) and the STORIS tabs: Quantity,
+  Bin to bin, Move to As-Is, Move from As-Is, As-Is status, As-Is
+  adjustment, Write-off, Change serial (serial-tracked products only), SO
+  info. Vendor chargeback stays on the As-Is queue's vendor-return path.
+  The `prompt()` adjust is gone.
+- **D24 Quantity adjustment.** `POST /v1/inventory/adjust` takes a coded
+  reason (`reasonCodeId`, class `inventory_adjustment`, validated when
+  given — the legacy bucket + notes stay the floor so a business without
+  codes is never blocked) and `unitCostCents` for an upward adjustment (the
+  FIFO layer lands at that cost instead of the catalog cost). Migration
+  `0095` adds `inventory_movements.reason_code_id` so the ledger and the
+  shrink report can group by reason.
+- **D25 Write-off from stock.** `POST /v1/inventory/write-off` mirrors the
+  As-Is scrap: `inventory.write_off` (override-able through the Security
+  Override dialog), a coded `write_off` reason, a write-off register row at
+  catalog cost, an exception, and the ledger movement (`write_off`) that
+  drops on hand. Only available units can go — reserved and floor-sample
+  units must be released first.
+- **D26 Move to / from As-Is.** `POST /v1/as-is` with `fromStock: true`
+  (source `stock`) now decrements on hand (available units only), consumes
+  FIFO layers and writes an `as_is_intake` movement — the double count the
+  screen sweep found is closed. Move from As-Is is the existing restock
+  review (this product or its `-AS` variant). As-Is adjustment is
+  `POST /v1/as-is/:id/void` (status `voided`, reason required, optional
+  return to sellable stock) for a piece taken in by mistake, plus the
+  walk-in intake for pieces found on the floor. Change serial is
+  `PATCH /v1/serials/:id` (`serials.manage`; sold / in-service units keep
+  their serial; duplicates 409).
+- **D27 Reassign a Sales Reservation.** `GET /v1/inventory/reservation-board`
+  lists every live order line wanting the item at the location (order,
+  customer, kind, order date, fill-by = line delivery date else requested
+  date, qty / reserved / short); `POST /v1/inventory/reservations/move`
+  (`orders.update`) back-orders N units off a line or reserves N onto a
+  line — taking them from another order's line in the same request when
+  nothing is free. Both orders pass the shared order-edit guards
+  (`orders/order-guards.ts`: live, unlocked, off the truck) and the moves
+  go through the order service's reserve / release primitives, so the
+  `order_reserve` / `order_release` ledger rows are the same ones the order
+  page writes. The Reserved count on Stock by location and the product page
+  opens it; the release-only popup is gone.
+
+Decisions (slice 4 — Replenish Inventory):
+
+- **D28 One Replenish screen, three types.** `/replenishment` gains a
+  Replenishment type switch: Allocated order and Stock level (new,
+  `POST /v1/purchasing/replenish/run`, `purchase_orders.view`) run across
+  every vendor at once; Sales rate is the per-vendor engine the nightly
+  build uses, unchanged. Filters: location, vendor, category, collection
+  (Jetnine's "group"), product / SKU text; options: include floor samples
+  as stock, include returns (pending As-Is pieces) as stock, round up to
+  purchase cartons, show positions with nothing to order.
+- **D29 Allocated order.** Demand is every open (`open`,
+  `partially_fulfilled`) sales-order line's uncovered units — quantity −
+  fulfilled − reserved − units already allocated on an open PO — at the
+  location the line draws from (line source, else the order's stock
+  location, else its selling location). The STORIS fulfillment-status
+  checkboxes filter on the order's delivery status (scheduled / estimated
+  / ASAP / will call / not set; none ticked = all). Need = demand − free
+  stock − unallocated open-PO units (negative stock counts as zero). The
+  grid shows the orders behind each row, earliest fill-by first.
+- **D30 Stock level.** Basis `minimum` = the store's Min Stock
+  (`inventory_levels.reorder_point`), one row per store position; basis
+  `safety` = the variant's reorder point, business-wide (one row per
+  product, stock summed across locations; the run's location receives the
+  POs). Need tops the position (free stock + open PO) back up to the
+  threshold and is at least the variant's reorder quantity when one is
+  set. Carton = the product's Purchase Carton Qty; Cartons and Total
+  quantity columns follow STORIS (Total = cartons × carton when rounding
+  is on).
+- **D31 Create purchase orders by vendor.** A row's vendor is the
+  variant's preferred vendor, else its collection's vendor, else the
+  active vendor named like the product's brand; rows without one show
+  under "No vendor" and never become a PO. `POST
+/v1/purchasing/replenish/purchase-orders` (`purchase_orders.create`)
+  recomputes the run, applies the buyer's Total quantity edits and the
+  vendor tick-boxes, and writes one PO per vendor and receiving location
+  (placed, or held as drafts): expected date from the vendor's lead days
+  when it has replenishment settings, freight from its landed-cost lines,
+  lines past a PO cutting date dropped and noted, and — for allocated
+  orders — the special-order allocations (earliest fill-by first) so
+  receiving commits the units to the customers waiting. PO numbers come
+  from the shared `purchasing/po-number.ts`.
+
+Decisions (slice 5 — Logistical Scheduling):
+
+- **D32 Search for schedules** (`GET /v1/scheduling/search`,
+  `deliveries.view`; page `/deliveries/search`): one list per kind —
+  sales orders (deliveries), transfers, service orders — filtered by
+  deliver-from location, route, truck, transfer-to location (transfers),
+  status and a date range that defaults to today → +35 days;
+  `includePast=1` drops the lower bound. Open schedules only unless a
+  status is asked for. Every row carries the same columns (date, window,
+  number, customer / manifest, from → to, route, truck, driver or
+  technician, city, zip, phone, units, dollars, balance due, volume,
+  status, contact status) so the grid is one table, and the strip totals
+  Stops / Units / Dollars / Volume (volume = capacity units, G12).
+- **D33 Where each kind's date, route and truck come from.** Deliveries:
+  the scheduled date, the delivery's route else its run's, the run's
+  truck and driver. Transfers: `scheduledFor` else the manifest date, the
+  transfer's route else the manifest's route name, the manifest's route
+  name as the truck; units = ordered else shipped. Service orders: the new
+  `service_orders.scheduled_for` (migration 0096; set through
+  `PATCH /v1/service-orders/:id`), the technician as crew; unbooked calls
+  never list.
+- **D34 Confirm schedule** (`GET /v1/scheduling/confirm`; page
+  `/deliveries/confirm`): a day's (or range's) deliveries — open stops
+  unless delivery statuses are ticked — with location, route and contact
+  status filters, the totals strip plus a Confirmed count, zip / city /
+  phone (the order's delivery phone else the customer's), and the flags:
+  **T** delivery ticket printed, **D** dollars due at the door (balance
+  owed), **F** fully reserved (every stock line reserved or fulfilled),
+  **P** pick list printed, **OO** on an open purchase order (a
+  special-order allocation still outstanding).
+- **D35 Contact status is a delivery field.** `deliveries.contact_status`
+  (`not_contacted` | `left_message` | `no_answer` | `confirmed` |
+  `reschedule_requested`, null = never called) with `contacted_at`, set by
+  `PATCH /v1/deliveries/:id/contact` (`deliveries.schedule`, audited with
+  the call note) — inline on the Confirm schedule grid.
+
+Decisions (slice 6 — returns, exchanges, customers):
+
+- **D36 Enter a Return fields.** `POST /v1/orders/:id/return` takes the
+  return salesperson (`salespersonMembershipId`), the store taking the
+  return (`locationId`), a restocking fee and — for a truck pickup — a
+  pickup fee; both fees come off the refund (never more than the lines
+  are worth) and print on the ticket. Migration `0097`. The order page's
+  Returns card carries the fields.
+- **D37 Pickup on the delivery calendar.** A pickup return with a
+  `pickupDate` (and window) writes a `return_pickup` delivery
+  (`deliveries.kind`, `deliveries.return_id`) carrying the returned lines
+  at the store taking the return, so it shows on the calendar, the day
+  sheet, Search for schedules and Confirm schedule — with the delivery's
+  contact status as the return's contact status. Completing that stop
+  receives the return (qtyReturned, As-Is staging, the refund) instead of
+  fulfilling the order; stock never drops. The return keeps
+  `pickupDeliveryId`.
+- **D38 Return and exchange tickets.** `GET /v1/order-returns/:id` is the
+  return's print view (order, customer, store, salesperson, lines with
+  reasons, fees, refund, pickup stop); `/print/returns/:id` prints it and
+  `POST /v1/order-returns/:id/ticket-print` counts the print
+  (`ticketPrintCount`). Exchanges get the same pair
+  (`/print/exchanges/:id`, `POST /v1/exchanges/:id/ticket-print`) — both
+  legs, the settlement and the refund tender on one page.
+- **D39 Enter an Exchange fields.** The exchange records `fulfillment`
+  (`drop_off` | `pickup`, from the wizard's goods-in-hand switch), the
+  return salesperson (by name on the detail) and a `refundTender`
+  (`store_credit` default | `original` | `cash` | `check`). When the
+  return credit exceeds what the replacement absorbs, settlement pays the
+  excess out by that tender — original tenders newest-first, or a cash /
+  check refund on the original order — after redeeming it from the
+  ledger; store credit leaves it spendable. Audited on `exchange.settle`.
+- **D40 Update a Customer Address fields.** Customers gain a per-business
+  customer number (`C-000001`, assigned at creation, existing customers
+  numbered in creation order by the migration), business + contact name,
+  prefix / middle name / suffix, an alternate contact + relationship, and
+  standing delivery instructions. Search covers the number, the trade
+  names, the middle name and the alternate contact. The order's customer
+  panel and the invoice / ticket document payload carry the number, trade
+  names, alternate contact and delivery instructions.
+
+Decisions (slice 7 — kiosk, sessions, batch PO print):
+
+- **D41 Time clock kiosk.** `/timeclock` is the shared-terminal screen:
+  the terminal stays signed in as any member who may punch, and every
+  punch carries the punching member's own email + password.
+  `POST /v1/timeclock/kiosk-punch` (`timeclock.punch`) verifies the
+  credentials against the credential account (never a session), finds
+  that user's active membership in this business, checks their role may
+  punch, and records the punch on THEIR membership (audit metadata
+  `source: kiosk`). The terminal's session never changes; the form clears
+  after every punch.
+- **D42 Active sessions.** New permission `sessions.manage` (Owner,
+  Manager, Operations). `GET /v1/business/sessions` lists every unexpired
+  sign-in held by a member of this business (name, role, IP, device,
+  signed in, last seen, expires, "this session"); `DELETE
+/v1/business/sessions/:id` signs one out (audited `session.revoke`) —
+  only sessions of this business's members. Page: Settings → Active
+  sessions (`/settings/sessions`, also in the People nav). Sessions are
+  now also persisted in the database (`storeSessionInDatabase`) so the
+  listing sees them when Redis is the session store; revoking goes through
+  better-auth's adapter so the Redis copy dies with the row.
+- **D43 Batch PO print.** `/print/purchase-orders` prints every purchase
+  order matching `ids`, or PO number / receiving location / vendor /
+  status / direct ships in or out / not-yet-printed (new list filters on
+  `GET /v1/purchase-orders`), one vendor document per page.
+  `purchase_orders.print_count` + `last_printed_at` (migration `0098`)
+  track prints: `POST /v1/purchase-orders/:id/print` bumps them (the
+  single-PO Print button and the batch page both call it) and a second
+  print is flagged REPRINT on paper and in the toolbar.
+
+Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
+reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
+exchanges / customers → 7 kiosk, sessions, batch PO print.
+
 ## 14. Build Order
 
 1. Schema: order types/statuses, store prefixes + per-store sequences, fee settings

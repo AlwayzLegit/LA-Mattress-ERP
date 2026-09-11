@@ -13,9 +13,12 @@ import {
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
+import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
+import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog';
 import { AsIsPanel } from './activity/as-is-panel';
 import { AtpCard } from './activity/atp-card';
 import { GeneralPanel } from './activity/general-panel';
+import { InventoryDetailPanel } from './activity/inventory-detail-panel';
 import { fmtDate, ProductSectionNav } from './activity/kit';
 import { OpenOrdersPanel } from './activity/open-orders-panel';
 import { PurchaseOrdersPanel } from './activity/purchase-orders-panel';
@@ -123,7 +126,6 @@ interface Product {
   stock: { totals: StockTotals; byLocation: LocationStockRow[] };
 }
 
-const ADJUST_REASONS = ['count_correction', 'damage', 'theft', 'other'] as const;
 interface RefEntity {
   id: string;
   name: string;
@@ -325,38 +327,10 @@ export default function ProductDetailPage() {
     }
   }
 
-  // Location availability actions (A19): the same endpoints the Stock by
-  // location screen uses, scoped to this product's row.
-  async function adjustAt(row: LocationStockRow) {
-    const deltaStr = prompt(
-      `Adjust ${row.variantSku ?? p?.name ?? 'stock'} at ${row.locationName} (current ${row.onHand}). Delta:`,
-      '0',
-    );
-    if (!deltaStr) return;
-    const delta = Number(deltaStr);
-    if (!Number.isInteger(delta) || delta === 0) {
-      toast.error('delta must be a non-zero integer');
-      return;
-    }
-    const reason = prompt(`Reason (${ADJUST_REASONS.join(', ')}):`, 'count_correction');
-    if (!reason) return;
-    const notes = prompt('Optional notes:', '') ?? undefined;
-    try {
-      await api('/v1/inventory/adjust', {
-        method: 'POST',
-        body: JSON.stringify({
-          variantId: row.variantId,
-          locationId: row.locationId,
-          delta,
-          reason,
-          notes: notes || undefined,
-        }),
-      });
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
+  // Location availability actions (A19 → A22 slice 3): the STORIS Stock
+  // Adjustment dialog and Reassign Reservation open on this product's row.
+  const [adjustFor, setAdjustFor] = useState<LocationStockRow | null>(null);
+  const [reassignFor, setReassignFor] = useState<LocationStockRow | null>(null);
 
   async function setFloorAt(row: LocationStockRow) {
     const qtyStr = prompt(
@@ -568,22 +542,22 @@ export default function ProductDetailPage() {
                       <tr>
                         <th>Location</th>
                         <th>SKU</th>
+                        <th>ATP date</th>
+                        <th className="num">ATP quantity</th>
                         <th className="num">On hand</th>
                         <th className="num">Net available</th>
                         <th className="num">Reserved</th>
                         <th className="num">Floor</th>
                         <th className="num">Net PO</th>
-                        <th className="num">On order reserved</th>
-                        <th className="num">Total PO</th>
                         <th className="num">As-Is</th>
                         <th className="num">As-Is available</th>
-                        <th className="num">As-Is non-sellable</th>
-                        <th className="num">Layaway reserved</th>
                         <th className="num" title="As-is pieces have no reservation state (A21 D4)">
                           As-Is reserved
                         </th>
-                        <th>ATP date</th>
-                        <th className="num">ATP quantity</th>
+                        <th className="num">As-Is non-sellable</th>
+                        <th className="num">On order reserved</th>
+                        <th className="num">Layaway reserved</th>
+                        <th className="num">Total PO</th>
                         <th>Bin</th>
                         <th className="actions" />
                       </tr>
@@ -615,38 +589,43 @@ export default function ProductDetailPage() {
                               </>
                             )}
                           </td>
+                          <td data-testid="location-atp-date">
+                            {atp ? fmtDate(atpFor(row.locationId)?.atpDate ?? null) : '…'}
+                          </td>
+                          <td className="num">{atpFor(row.locationId)?.atpQuantity ?? '—'}</td>
                           <td className="num">{row.onHand}</td>
                           <td className="num">{row.available}</td>
                           <td className="num">
                             {row.reserved > 0 ? (
-                              <Link
-                                href={`/products/stock?locationId=${row.locationId}&q=${encodeURIComponent(row.variantSku ?? '')}`}
+                              <button
+                                type="button"
+                                className="btn-link"
+                                title="Who holds these units — back order or reserve from here"
+                                data-testid="product-reserved-count"
+                                onClick={() => setReassignFor(row)}
                               >
                                 {row.reserved}
-                              </Link>
+                              </button>
                             ) : (
                               row.reserved
                             )}
                           </td>
                           <td className="num">{row.floorSample}</td>
                           <td className="num">{row.netOnPo}</td>
-                          <td className="num">{row.onOrderReserved}</td>
-                          <td className="num">{row.totalPo}</td>
                           <td className="num">{row.asIsOnHand}</td>
                           <td className="num">{row.asIsAvailable}</td>
-                          <td className="num">{row.asIsNonSellable}</td>
-                          <td className="num">{row.layawayReserved}</td>
                           <td className="num">0</td>
-                          <td data-testid="location-atp-date">
-                            {atp ? fmtDate(atpFor(row.locationId)?.atpDate ?? null) : '…'}
-                          </td>
-                          <td className="num">{atpFor(row.locationId)?.atpQuantity ?? '—'}</td>
+                          <td className="num">{row.asIsNonSellable}</td>
+                          <td className="num">{row.onOrderReserved}</td>
+                          <td className="num">{row.layawayReserved}</td>
+                          <td className="num">{row.totalPo}</td>
                           <td>{row.storageBinCode ?? '—'}</td>
                           <td className="actions">
                             <Button
                               size="sm"
                               variant="secondary"
-                              onClick={() => void adjustAt(row)}
+                              onClick={() => setAdjustFor(row)}
+                              data-testid="product-stock-adjust"
                             >
                               Adjust
                             </Button>
@@ -678,6 +657,9 @@ export default function ProductDetailPage() {
           )}
           {tab === 'as-is' && <AsIsPanel productId={id} />}
           {tab === 'summary' && <SummaryPanel productId={id} />}
+          {tab === 'as-is-detail' && <InventoryDetailPanel productId={id} kind="as_is" />}
+          {tab === 'regular-detail' && <InventoryDetailPanel productId={id} kind="regular" />}
+          {tab === 'carts' && <OpenOrdersPanel productId={id} initialOrderType="quote" />}
 
           {tab === 'general' && (
             <Stack>
@@ -1019,6 +1001,29 @@ export default function ProductDetailPage() {
           )}
         </div>
       </div>
+      {adjustFor && (
+        <StockAdjustmentDialog
+          open
+          variantId={adjustFor.variantId}
+          locationId={adjustFor.locationId}
+          onClose={() => setAdjustFor(null)}
+          onChanged={() => void load()}
+          onReassign={() => {
+            setReassignFor(adjustFor);
+            setAdjustFor(null);
+          }}
+        />
+      )}
+      {reassignFor && (
+        <ReassignReservationDialog
+          open
+          variantId={reassignFor.variantId}
+          locationId={reassignFor.locationId}
+          itemLabel={`${reassignFor.variantSku ?? p?.name ?? 'item'} @ ${reassignFor.locationName}`}
+          onClose={() => setReassignFor(null)}
+          onChanged={() => void load()}
+        />
+      )}
     </div>
   );
 }

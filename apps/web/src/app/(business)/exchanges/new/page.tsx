@@ -111,10 +111,20 @@ function NewExchangeInner() {
   // the settlement applies the return credit.
   const [collectNow, setCollectNow] = useState(true);
   const [payMethod, setPayMethod] = useState<(typeof TENDERS)[number]['value']>('card');
+  // A22 slice 6 (STORIS Enter an Exchange): the return salesperson and
+  // how any credit left after the replacement goes back to the customer.
+  const [members, setMembers] = useState<{ membershipId: string; name: string | null }[]>([]);
+  const [returnSalespersonId, setReturnSalespersonId] = useState('');
+  const [refundTender, setRefundTender] = useState<'store_credit' | 'original' | 'cash' | 'check'>(
+    'store_credit',
+  );
   useEffect(() => {
     api<LocationRow[]>('/v1/business/locations')
       .then(setLocations)
       .catch(() => setLocations([]));
+    api<{ membershipId: string; name: string | null }[]>('/v1/business/members')
+      .then(setMembers)
+      .catch(() => setMembers([]));
   }, []);
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'this store';
 
@@ -272,6 +282,9 @@ function NewExchangeInner() {
           saleOrderId,
           returnId,
           evenExchange,
+          fulfillment: goodsInHand ? 'drop_off' : 'pickup',
+          refundTender,
+          ...(returnSalespersonId ? { returnSalespersonMembershipId: returnSalespersonId } : {}),
           ...(fee !== '' ? { restockingFeeCents: Math.round(Number(fee) * 100) } : {}),
         }),
       });
@@ -667,6 +680,39 @@ function NewExchangeInner() {
                 ]}
               />
               <FormGrid cols={2}>
+                <Field label="Return salesperson" hint="Who is credited with the return leg">
+                  <Select
+                    value={returnSalespersonId}
+                    onChange={(e) => setReturnSalespersonId(e.target.value)}
+                    data-testid="exchange-return-salesperson"
+                  >
+                    <option value="">—</option>
+                    {members.map((m) => (
+                      <option key={m.membershipId} value={m.membershipId}>
+                        {m.name ?? m.membershipId}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Refund tender"
+                  hint={
+                    estNetCents < 0
+                      ? 'The return is worth more than the replacement — how the difference goes back'
+                      : 'Only used when the return exceeds the replacement'
+                  }
+                >
+                  <Select
+                    value={refundTender}
+                    onChange={(e) => setRefundTender(e.target.value as typeof refundTender)}
+                    data-testid="exchange-refund-tender"
+                  >
+                    <option value="store_credit">Store credit (stays on account)</option>
+                    <option value="original">Original tenders</option>
+                    <option value="cash">Cash</option>
+                    <option value="check">Check</option>
+                  </Select>
+                </Field>
                 <Field label="Restocking fee override ($)" hint="Blank = calculated from settings">
                   <Input
                     type="number"
@@ -684,8 +730,8 @@ function NewExchangeInner() {
                       checked={goodsInHand}
                       onChange={(e) => setGoodsInHand(e.target.checked)}
                     />
-                    Goods are in hand — settle immediately (uncheck if the truck picks the return
-                    up)
+                    Goods are in hand — settle immediately (uncheck for a truck pickup; the exchange
+                    records the fulfillment either way)
                   </label>
                 </div>
                 {goodsInHand && (

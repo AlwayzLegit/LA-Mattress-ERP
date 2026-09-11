@@ -8,6 +8,7 @@ import { OrderChangesController } from './order-changes.controller';
 import { OwnerDashboardController } from './owner-dashboard.controller';
 import { ReportsController } from './reports.controller';
 import { StoreDashboardController } from './store-dashboard.controller';
+import { TransfersByLocationController } from './transfers-by-location.controller';
 import { WrittenSalesController } from './written-sales.controller';
 
 @Module({
@@ -20,6 +21,7 @@ import { WrittenSalesController } from './written-sales.controller';
     WrittenSalesController,
     StoreDashboardController,
     OrderChangesController,
+    TransfersByLocationController,
   ],
 })
 export class ReportsModule {}

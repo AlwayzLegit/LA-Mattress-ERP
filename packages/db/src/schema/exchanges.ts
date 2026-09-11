@@ -66,6 +66,15 @@ export const exchanges = pgTable(
     createdByUserId: uuid('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /**
+     * A22 slice 6 (STORIS Enter an Exchange): how the returned goods come
+     * back ('drop_off' | 'pickup'), how any credit left after the
+     * replacement is paid out ('store_credit' | 'original' | 'cash' |
+     * 'check'), and how many exchange tickets were printed.
+     */
+    fulfillment: text('fulfillment').notNull().default('drop_off'),
+    refundTender: text('refund_tender').notNull().default('store_credit'),
+    ticketPrintCount: integer('ticket_print_count').notNull().default(0),
     approvedByUserId: uuid('approved_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),

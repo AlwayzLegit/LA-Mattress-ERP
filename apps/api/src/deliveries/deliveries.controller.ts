@@ -22,6 +22,7 @@ import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
 import { OrdersService } from '../orders/orders.service';
+import { OrderReturnsService } from '../returns/order-returns.service';
 import {
   deriveFulfillmentStatus,
   planFulfillment,
@@ -114,6 +115,9 @@ interface DeliveryRow {
   id: string;
   orderId: string;
   locationId: string;
+  /** A22 slice 6: 'delivery' | 'return_pickup' (the truck collects a return). */
+  kind: string;
+  returnId: string | null;
   scheduledDate: string;
   windowStart: string | null;
   windowEnd: string | null;
@@ -129,6 +133,8 @@ interface DeliveryRow {
 
 interface DeliveryDetail extends DeliveryRow {
   orderNumber: string;
+  /** The RMA a return pickup collects. */
+  rmaNumber: string | null;
   customerId: string;
   customerName: string | null;
   addressLine1: string | null;
@@ -166,6 +172,7 @@ export class DeliveriesController {
     @Inject(ExceptionsService) private readonly exceptions: ExceptionsService,
     @Inject(SecurityOverrideService) private readonly overrides: SecurityOverrideService,
     @Inject(TicketFlagsService) private readonly ticketFlags: TicketFlagsService,
+    @Inject(OrderReturnsService) private readonly returns: OrderReturnsService,
   ) {}
 
   /**
@@ -642,6 +649,32 @@ export class DeliveriesController {
         targetType: 'delivery',
         targetId: id,
         after: { notes: body.notes ?? null },
+      });
+      return this.hydrate(await this.load(id));
+    }
+
+    // A22 slice 6: a return pickup brings goods BACK — receiving the
+    // return (qtyReturned, As-Is staging, the refund) is the completion;
+    // nothing is fulfilled. The goods land at the order's stock location.
+    if (row.kind === 'return_pickup') {
+      if (!row.returnId) throw new BadRequestException('This pickup has no return attached');
+      const [stockOwner] = await this.db
+        .select({ stockLocationId: schema.orders.stockLocationId })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, row.orderId))
+        .limit(1);
+      await this.returns.receiveGoods(row.returnId, actor?.id ?? null, {
+        receiveLocationId: stockOwner?.stockLocationId ?? row.locationId,
+      });
+      await this.db
+        .update(schema.deliveries)
+        .set({ status: 'delivered', completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.deliveries.id, id));
+      await this.audit.log({
+        action: 'delivery.picked_up',
+        targetType: 'delivery',
+        targetId: id,
+        after: { orderId: row.orderId, returnId: row.returnId },
       });
       return this.hydrate(await this.load(id));
     }
@@ -1286,9 +1319,17 @@ export class DeliveriesController {
       .from(schema.deliveryLines)
       .innerJoin(schema.orderLines, eq(schema.orderLines.id, schema.deliveryLines.orderLineId))
       .where(eq(schema.deliveryLines.deliveryId, row.id));
+    const [ret] = row.returnId
+      ? await this.db
+          .select({ rmaNumber: schema.orderReturns.rmaNumber })
+          .from(schema.orderReturns)
+          .where(eq(schema.orderReturns.id, row.returnId))
+          .limit(1)
+      : [];
     return {
       ...row,
       orderNumber: order?.number ?? '?',
+      rmaNumber: ret?.rmaNumber ?? null,
       customerId: order?.customerId ?? '',
       customerName: customer
         ? [customer.firstName, customer.lastName].filter(Boolean).join(' ') || null

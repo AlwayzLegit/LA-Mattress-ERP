@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   Inject,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -105,6 +107,59 @@ export class SerialsController {
       after: { count: rows.length, serials },
     });
     return rows as SerialRow[];
+  }
+
+  /**
+   * A22 slice 3 (STORIS Stock Adjustment → Change Serial): correct a
+   * mistyped serial on a unit that is still in the building. Sold and
+   * in-service units keep the serial the customer's paperwork carries.
+   */
+  @Patch(':id')
+  @RequirePermission('serials.manage')
+  async rename(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: { serial?: string },
+  ): Promise<SerialRow> {
+    const serial = body.serial?.trim();
+    if (!serial) throw new BadRequestException('serial is required');
+    if (serial.length > 80) throw new BadRequestException('serial must be 80 characters or fewer');
+    const [unit] = await this.db
+      .select()
+      .from(schema.serialUnits)
+      .where(eq(schema.serialUnits.id, id))
+      .limit(1);
+    if (!unit) throw new NotFoundException('Serial unit not found');
+    if (
+      !['in_stock', 'committed', 'floor_sample', 'returned', 'in_transit'].includes(unit.status)
+    ) {
+      throw new BadRequestException(`A ${unit.status} unit keeps its serial`);
+    }
+    if (serial === unit.serial) return unit as SerialRow;
+    const [dup] = await this.db
+      .select({ id: schema.serialUnits.id })
+      .from(schema.serialUnits)
+      .where(
+        and(
+          eq(schema.serialUnits.variantId, unit.variantId),
+          eq(schema.serialUnits.serial, serial),
+        ),
+      )
+      .limit(1);
+    if (dup) throw new ConflictException(`Serial ${serial} already exists on this product`);
+    const [row] = await this.db
+      .update(schema.serialUnits)
+      .set({ serial, updatedAt: new Date() })
+      .where(eq(schema.serialUnits.id, id))
+      .returning();
+    await this.audit.log({
+      action: 'serials.rename',
+      targetType: 'serial_unit',
+      targetId: id,
+      before: { serial: unit.serial },
+      after: { serial },
+    });
+    return row as SerialRow;
   }
 
   /**

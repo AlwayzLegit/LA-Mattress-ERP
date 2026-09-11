@@ -35,7 +35,7 @@ import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
-const SOURCES = ['return', 'warranty', 'defect', 'exchange_pickup'] as const;
+const SOURCES = ['return', 'warranty', 'defect', 'exchange_pickup', 'stock'] as const;
 const REVIEW_ACTIONS = ['restock', 'vendor_return', 'scrap'] as const;
 
 interface IntakeBody {
@@ -49,6 +49,19 @@ interface IntakeBody {
   reason?: string;
   override?: OverrideCredentials;
   notes?: string | null;
+  /**
+   * A22 slice 3 (STORIS Stock Adjustment → Move to As-Is): the pieces
+   * come out of sellable stock here — the level drops by `quantity`
+   * (available units only) and the ledger records an `as_is_intake`.
+   * Without it the intake is the walk-in path: nothing was in stock.
+   */
+  fromStock?: boolean;
+}
+
+interface VoidBody {
+  reason?: string | null;
+  /** Put the unit back into sellable stock (an as-is adjustment made in error). */
+  returnToStock?: boolean;
 }
 
 interface ReviewBody {
@@ -404,6 +417,7 @@ export class AsIsController {
   @RequirePermission('inventory.adjust')
   async intake(
     @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
     @Body() body: IntakeBody,
   ): Promise<AsIsRow> {
     if (!body.variantId) throw new BadRequestException('variantId is required');
@@ -416,11 +430,34 @@ export class AsIsController {
       throw new BadRequestException(`source must be one of ${SOURCES.join(', ')}`);
     }
     const [variant] = await this.db
-      .select({ id: schema.productVariants.id })
+      .select({ id: schema.productVariants.id, costCents: schema.productVariants.costCents })
       .from(schema.productVariants)
       .where(eq(schema.productVariants.id, body.variantId))
       .limit(1);
     if (!variant) throw new NotFoundException('Variant not found');
+    const fromStock = body.fromStock === true || source === 'stock';
+    if (fromStock) {
+      const [level] = await this.db
+        .select({
+          onHand: schema.inventoryLevels.onHand,
+          reserved: schema.inventoryLevels.reserved,
+          floorSample: schema.inventoryLevels.floorSample,
+        })
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.variantId, body.variantId),
+            eq(schema.inventoryLevels.locationId, body.locationId),
+          ),
+        )
+        .limit(1);
+      const available = level ? level.onHand - level.reserved - level.floorSample : 0;
+      if (available < body.quantity!) {
+        throw new BadRequestException(
+          `Only ${Math.max(0, available)} available unit(s) here — release reservations or the floor hold before moving ${body.quantity} to As-Is`,
+        );
+      }
+    }
 
     // G10: coded intake reason (class `as_is`); a RESTRICTED code needs
     // write-off authority or a manager override (STORIS "As-Is
@@ -472,6 +509,43 @@ export class AsIsController {
         .set({ pieceNumber: `AS-${row.id.slice(0, 8).toUpperCase()}` })
         .where(eq(schema.asIsItems.id, row.id));
     }
+    if (fromStock) {
+      // The pieces leave sellable stock: one ledger row for the move,
+      // FIFO layers consumed, the level dropped. Restock (Move from
+      // As-Is) is the mirror image and lands them back at catalog cost.
+      await this.db.insert(schema.inventoryMovements).values({
+        businessId: tenant.businessId!,
+        variantId: body.variantId,
+        locationId: body.locationId,
+        delta: -body.quantity!,
+        reason: 'as_is_intake',
+        referenceType: 'as_is_item',
+        referenceId: inserted[0]!.id,
+        reasonCodeId: reason.reasonCodeId,
+        actorUserId: actor.id,
+        notes: body.notes ?? reason.reasonText ?? null,
+      });
+      await this.costing.consume(this.db, {
+        businessId: tenant.businessId!,
+        variantId: body.variantId,
+        locationId: body.locationId,
+        quantity: body.quantity!,
+        referenceType: 'as_is_intake',
+        referenceId: inserted[0]!.id,
+      });
+      await this.db
+        .update(schema.inventoryLevels)
+        .set({
+          onHand: sql`GREATEST(0, ${schema.inventoryLevels.onHand} - ${body.quantity!})`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.inventoryLevels.variantId, body.variantId),
+            eq(schema.inventoryLevels.locationId, body.locationId),
+          ),
+        );
+    }
     await this.audit.log({
       action: 'as_is.intake',
       targetType: 'as_is_item',
@@ -480,10 +554,100 @@ export class AsIsController {
         variantId: body.variantId,
         pieces: inserted.length,
         source,
+        fromStock,
         reasonCode: reason.reasonCode,
       },
     });
     return this.load(inserted[0]!.id);
+  }
+
+  /**
+   * A22 slice 3 (STORIS "As-Is Adjustment"): take a piece out of the
+   * as-is queue without a disposition — the intake was a mistake, or
+   * the piece was counted twice. `returnToStock` puts the unit back
+   * into sellable stock (only meaningful for a piece that came out of
+   * stock); otherwise the row simply closes as `voided`. Pending pieces
+   * only — a reviewed piece already has its ledger.
+   */
+  @Post(':id/void')
+  @RequirePermission('inventory.adjust')
+  async voidPiece(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() body: VoidBody,
+  ): Promise<AsIsRow> {
+    const [item] = await this.db
+      .select()
+      .from(schema.asIsItems)
+      .where(eq(schema.asIsItems.id, id))
+      .limit(1);
+    if (!item) throw new NotFoundException('As-Is item not found');
+    if (item.status !== 'pending_review') {
+      throw new BadRequestException(`Item is already ${item.status}`);
+    }
+    const reason = body.reason?.trim();
+    if (!reason) throw new BadRequestException('reason is required');
+    const returnToStock = body.returnToStock === true;
+    if (returnToStock) {
+      await this.db.insert(schema.inventoryMovements).values({
+        businessId: tenant.businessId!,
+        variantId: item.variantId,
+        locationId: item.locationId,
+        delta: item.quantity,
+        reason: 'as_is_void',
+        referenceType: 'as_is_item',
+        referenceId: item.id,
+        actorUserId: actor.id,
+        notes: reason,
+      });
+      const [pv] = await this.db
+        .select({ costCents: schema.productVariants.costCents })
+        .from(schema.productVariants)
+        .where(eq(schema.productVariants.id, item.variantId))
+        .limit(1);
+      await this.costing.addLayer(this.db, {
+        businessId: tenant.businessId!,
+        variantId: item.variantId,
+        locationId: item.locationId,
+        sourceType: 'as_is_void',
+        referenceId: item.id,
+        quantity: item.quantity,
+        unitCostCents: pv?.costCents ?? null,
+      });
+      await this.db
+        .insert(schema.inventoryLevels)
+        .values({
+          businessId: tenant.businessId!,
+          variantId: item.variantId,
+          locationId: item.locationId,
+          onHand: item.quantity,
+        })
+        .onConflictDoUpdate({
+          target: [schema.inventoryLevels.variantId, schema.inventoryLevels.locationId],
+          set: {
+            onHand: sql`${schema.inventoryLevels.onHand} + ${item.quantity}`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+    await this.db
+      .update(schema.asIsItems)
+      .set({
+        status: 'voided',
+        reviewedByUserId: actor.id,
+        reviewedAt: new Date(),
+        notes: [item.notes, `Voided: ${reason}`].filter(Boolean).join(' · '),
+      })
+      .where(eq(schema.asIsItems.id, id));
+    await this.audit.log({
+      action: 'as_is.void',
+      targetType: 'as_is_item',
+      targetId: id,
+      before: { status: item.status, quantity: item.quantity },
+      after: { status: 'voided', returnToStock, reason },
+    });
+    return this.load(id);
   }
 
   /**

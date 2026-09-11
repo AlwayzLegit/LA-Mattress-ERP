@@ -45,6 +45,14 @@ export interface OrderReturnRow {
   refundMethod: string;
   amountCents: number;
   reason: string | null;
+  /** A22 slice 6: who took it, where, the fees withheld, the pickup stop and the ticket count. */
+  salespersonMembershipId: string | null;
+  locationId: string | null;
+  restockingFeeCents: number;
+  pickupFeeCents: number;
+  pickupDate: string | null;
+  pickupDeliveryId: string | null;
+  ticketPrintCount: number;
   authorizedAt: Date;
   goodsReceivedAt: Date | null;
   completedAt: Date | null;
@@ -67,6 +75,32 @@ export interface OrderReturnRow {
  * the lifecycle: the warehouse receiving the goods back (which fires
  * the refund), cancelling an authorized return, and listing.
  */
+
+export interface OrderReturnDetail extends OrderReturnRow {
+  orderNumber: string | null;
+  orderDate: Date | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressRegion: string | null;
+  addressPostalCode: string | null;
+  locationName: string | null;
+  salespersonName: string | null;
+  businessName: string | null;
+  linesTotalCents: number;
+  pickup: {
+    deliveryId: string;
+    scheduledDate: string;
+    windowStart: string | null;
+    windowEnd: string | null;
+    status: string;
+    contactStatus: string | null;
+  } | null;
+}
+
 @TenantScoped()
 @Controller('v1/order-returns')
 export class OrderReturnsController {
@@ -155,6 +189,13 @@ export class OrderReturnsController {
       refundMethod: r.refundMethod,
       amountCents: r.amountCents,
       reason: r.reason,
+      salespersonMembershipId: r.salespersonMembershipId,
+      locationId: r.locationId,
+      restockingFeeCents: r.restockingFeeCents,
+      pickupFeeCents: r.pickupFeeCents,
+      pickupDate: r.pickupDate,
+      pickupDeliveryId: r.pickupDeliveryId,
+      ticketPrintCount: r.ticketPrintCount,
       authorizedAt: r.authorizedAt,
       goodsReceivedAt: r.goodsReceivedAt,
       completedAt: r.completedAt,
@@ -401,6 +442,13 @@ export class OrderReturnsController {
       refundMethod: ret.refundMethod,
       amountCents,
       reason: ret.reason,
+      salespersonMembershipId: ret.salespersonMembershipId,
+      locationId: ret.locationId,
+      restockingFeeCents: ret.restockingFeeCents,
+      pickupFeeCents: ret.pickupFeeCents,
+      pickupDate: ret.pickupDate,
+      pickupDeliveryId: ret.pickupDeliveryId,
+      ticketPrintCount: ret.ticketPrintCount,
       authorizedAt: ret.authorizedAt,
       goodsReceivedAt: ret.goodsReceivedAt,
       completedAt: ret.completedAt,
@@ -423,6 +471,47 @@ export class OrderReturnsController {
    * permission — the money was already authorized by the return writer,
    * this step executes it (A7: refund fires at goods receipt).
    */
+  /**
+   * A22 slice 6: one return with everything the return ticket prints —
+   * the order and customer, the store and salesperson by name, the
+   * fees, the pickup stop (date, window, contact status) and the lines.
+   */
+  @Get(':id')
+  @RequirePermission('orders.view')
+  async detail(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+  ): Promise<OrderReturnDetail> {
+    return this.loadDetail(tenant.businessId!, id);
+  }
+
+  /** Record a return ticket print (the count rides on the document). */
+  @Post(':id/ticket-print')
+  @RequirePermission('orders.view')
+  async ticketPrint(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Param('id') id: string,
+  ): Promise<{ ticketPrintCount: number }> {
+    const [ret] = await this.db
+      .select({ id: schema.orderReturns.id, count: schema.orderReturns.ticketPrintCount })
+      .from(schema.orderReturns)
+      .where(eq(schema.orderReturns.id, id))
+      .limit(1);
+    if (!ret) throw new NotFoundException('Return not found');
+    const next = ret.count + 1;
+    await this.db
+      .update(schema.orderReturns)
+      .set({ ticketPrintCount: next })
+      .where(eq(schema.orderReturns.id, id));
+    await this.audit.log({
+      action: 'order_return.ticket_print',
+      targetType: 'order_return',
+      targetId: id,
+      after: { ticketPrintCount: next },
+    });
+    return { ticketPrintCount: next };
+  }
+
   @Post(':id/receive')
   @RequirePermission('inventory.receive')
   async receive(
@@ -493,5 +582,123 @@ export class OrderReturnsController {
       },
     });
     return { status: 'cancelled' };
+  }
+
+  private async loadDetail(businessId: string, id: string): Promise<OrderReturnDetail> {
+    const [ret] = await this.db
+      .select()
+      .from(schema.orderReturns)
+      .where(and(eq(schema.orderReturns.id, id), eq(schema.orderReturns.businessId, businessId)))
+      .limit(1);
+    if (!ret) throw new NotFoundException('Return not found');
+    const [order] = ret.orderId
+      ? await this.db.select().from(schema.orders).where(eq(schema.orders.id, ret.orderId)).limit(1)
+      : [];
+    const customerId = order?.customerId ?? ret.customerId;
+    const [customer] = customerId
+      ? await this.db
+          .select({
+            firstName: schema.customers.firstName,
+            lastName: schema.customers.lastName,
+            phone: schema.customers.phone,
+            email: schema.customers.email,
+          })
+          .from(schema.customers)
+          .where(eq(schema.customers.id, customerId))
+          .limit(1)
+      : [];
+    const locationId = ret.locationId ?? order?.locationId ?? null;
+    const [location] = locationId
+      ? await this.db
+          .select({ name: schema.locations.name })
+          .from(schema.locations)
+          .where(eq(schema.locations.id, locationId))
+          .limit(1)
+      : [];
+    const [salesperson] = ret.salespersonMembershipId
+      ? await this.db
+          .select({ name: schema.users.name })
+          .from(schema.memberships)
+          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+          .where(eq(schema.memberships.id, ret.salespersonMembershipId))
+          .limit(1)
+      : [];
+    const [biz] = await this.db
+      .select({ name: schema.businesses.name })
+      .from(schema.businesses)
+      .where(eq(schema.businesses.id, businessId))
+      .limit(1);
+    const [pickup] = ret.pickupDeliveryId
+      ? await this.db
+          .select({
+            deliveryId: schema.deliveries.id,
+            scheduledDate: schema.deliveries.scheduledDate,
+            windowStart: schema.deliveries.windowStart,
+            windowEnd: schema.deliveries.windowEnd,
+            status: schema.deliveries.status,
+            contactStatus: schema.deliveries.contactStatus,
+          })
+          .from(schema.deliveries)
+          .where(eq(schema.deliveries.id, ret.pickupDeliveryId))
+          .limit(1)
+      : [];
+    const lines = await this.db
+      .select({
+        id: schema.orderReturnLines.id,
+        orderLineId: schema.orderReturnLines.orderLineId,
+        description: sql<
+          string | null
+        >`coalesce(${schema.orderLines.description}, ${schema.orderReturnLines.description})`,
+        quantity: schema.orderReturnLines.quantity,
+        perUnitCents: schema.orderReturnLines.perUnitCents,
+        reasonCode: schema.reasonCodes.code,
+        reason: schema.orderReturnLines.reason,
+      })
+      .from(schema.orderReturnLines)
+      .leftJoin(schema.orderLines, eq(schema.orderLines.id, schema.orderReturnLines.orderLineId))
+      .leftJoin(schema.reasonCodes, eq(schema.reasonCodes.id, schema.orderReturnLines.reasonCodeId))
+      .where(eq(schema.orderReturnLines.returnId, id));
+    return {
+      id: ret.id,
+      orderId: ret.orderId,
+      customerId: ret.customerId,
+      referencedOrderNumber: ret.referencedOrderNumber,
+      rmaNumber: ret.rmaNumber,
+      status: ret.status,
+      fulfillment: ret.fulfillment,
+      refundMethod: ret.refundMethod,
+      amountCents: ret.amountCents,
+      reason: ret.reason,
+      salespersonMembershipId: ret.salespersonMembershipId,
+      locationId: ret.locationId,
+      restockingFeeCents: ret.restockingFeeCents,
+      pickupFeeCents: ret.pickupFeeCents,
+      pickupDate: ret.pickupDate,
+      pickupDeliveryId: ret.pickupDeliveryId,
+      ticketPrintCount: ret.ticketPrintCount,
+      authorizedAt: ret.authorizedAt,
+      goodsReceivedAt: ret.goodsReceivedAt,
+      completedAt: ret.completedAt,
+      cancelledAt: ret.cancelledAt,
+      cancelReason: ret.cancelReason,
+      lines,
+      orderNumber: order?.number ?? null,
+      orderDate: order?.createdAt ?? null,
+      customerName: customer
+        ? [customer.firstName, customer.lastName].filter(Boolean).join(' ') || null
+        : null,
+      customerPhone: order?.addressPhone ?? customer?.phone ?? null,
+      customerEmail: customer?.email ?? null,
+      addressLine1: order?.addressLine1 ?? null,
+      addressLine2: order?.addressLine2 ?? null,
+      addressCity: order?.addressCity ?? null,
+      addressRegion: order?.addressRegion ?? null,
+      addressPostalCode: order?.addressPostalCode ?? null,
+      locationName: location?.name ?? null,
+      salespersonName: salesperson?.name ?? null,
+      businessName: biz?.name ?? null,
+      linesTotalCents: lines.reduce((t, l) => t + l.quantity * l.perUnitCents, 0),
+      pickup: pickup ?? null,
+    };
   }
 }

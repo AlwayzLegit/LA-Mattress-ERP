@@ -525,6 +525,13 @@ interface OrderDocument {
     name: string;
     email: string | null;
     phone: string | null;
+    /** A22 slice 6 (STORIS customer panel): number, trade names, alternate contact, standing instructions. */
+    customerNumber: string | null;
+    businessName: string | null;
+    contactName: string | null;
+    alternateName: string | null;
+    alternateRelationship: string | null;
+    deliveryInstructions: string | null;
     /** Billing address for the SOLD TO block (BA-0014/BA-0030 audit fix). */
     address: {
       line1: string | null;
@@ -4081,6 +4088,15 @@ export class OrdersController {
       returnToLocationId?: string | null;
       reason?: string | null;
       override?: OverrideCredentials;
+      /** A22 slice 6 (STORIS Enter a Return): who took it, which store, fees withheld, the pickup stop. */
+      salespersonMembershipId?: string | null;
+      locationId?: string | null;
+      restockingFeeCents?: number;
+      pickupFeeCents?: number;
+      pickupDate?: string | null;
+      pickupWindowStart?: string | null;
+      pickupWindowEnd?: string | null;
+      pickupNotes?: string | null;
     },
   ): Promise<OrderDetail> {
     if (!body.lines || body.lines.length === 0) {
@@ -4089,6 +4105,41 @@ export class OrdersController {
     const fulfillment = body.fulfillment ?? 'drop_off';
     if (!['drop_off', 'pickup'].includes(fulfillment)) {
       throw new BadRequestException('fulfillment must be drop_off or pickup');
+    }
+    for (const [k, v] of [
+      ['restockingFeeCents', body.restockingFeeCents],
+      ['pickupFeeCents', body.pickupFeeCents],
+    ] as const) {
+      if (v !== undefined && (!Number.isInteger(v) || v < 0)) {
+        throw new BadRequestException(`${k} must be a non-negative integer`);
+      }
+    }
+    if (body.pickupDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(body.pickupDate)) {
+      throw new BadRequestException('pickupDate must be YYYY-MM-DD');
+    }
+    if (body.pickupDate && fulfillment !== 'pickup') {
+      throw new BadRequestException('pickupDate only applies to a truck pickup');
+    }
+    if (body.salespersonMembershipId) {
+      const [sp] = await this.db
+        .select({ id: schema.memberships.id })
+        .from(schema.memberships)
+        .where(
+          and(
+            eq(schema.memberships.id, body.salespersonMembershipId),
+            eq(schema.memberships.businessId, tenant.businessId!),
+          ),
+        )
+        .limit(1);
+      if (!sp) throw new NotFoundException('Return salesperson not found');
+    }
+    if (body.locationId) {
+      const [loc] = await this.db
+        .select({ id: schema.locations.id })
+        .from(schema.locations)
+        .where(eq(schema.locations.id, body.locationId))
+        .limit(1);
+      if (!loc) throw new NotFoundException('Return location not found');
     }
     const [order] = await this.db
       .select()
@@ -4192,6 +4243,15 @@ export class OrdersController {
       amountCents += perUnit * r.quantity!;
     }
 
+    // A22 slice 6: restocking and pickup fees come off the refund; a fee
+    // can never exceed what the lines are worth.
+    const restockingFeeCents = body.restockingFeeCents ?? 0;
+    const pickupFeeCents = fulfillment === 'pickup' ? (body.pickupFeeCents ?? 0) : 0;
+    if (restockingFeeCents + pickupFeeCents > amountCents) {
+      throw new BadRequestException('Fees cannot exceed the value of the returned lines');
+    }
+    amountCents -= restockingFeeCents + pickupFeeCents;
+
     // Authorization-time sanity check on an original-tender refund; the
     // binding check re-runs at goods receipt.
     const toStoreCredit = body.refundMethod === 'store_credit';
@@ -4225,6 +4285,11 @@ export class OrdersController {
         refundMethod: toStoreCredit ? 'store_credit' : 'original',
         amountCents,
         reason: body.reason ?? null,
+        salespersonMembershipId: body.salespersonMembershipId ?? null,
+        locationId: body.locationId ?? null,
+        restockingFeeCents,
+        pickupFeeCents,
+        pickupDate: fulfillment === 'pickup' ? (body.pickupDate ?? null) : null,
         createdByUserId: actor?.id ?? null,
       })
       .returning();
@@ -4257,6 +4322,42 @@ export class OrdersController {
     if (fulfillment === 'drop_off') {
       await this.orderReturns.receiveGoods(ret!.id, actor?.id ?? null, {
         receiveLocationId: body.returnToLocationId ?? null,
+      });
+    } else if (body.pickupDate) {
+      // A22 slice 6: the pickup is a stop on the delivery calendar — a
+      // `return_pickup` delivery carrying the returned lines; completing
+      // it receives the return instead of fulfilling the order.
+      const [stop] = await this.db
+        .insert(schema.deliveries)
+        .values({
+          businessId: tenant.businessId!,
+          locationId: body.locationId ?? order.locationId,
+          orderId: id,
+          kind: 'return_pickup',
+          returnId: ret!.id,
+          scheduledDate: body.pickupDate,
+          windowStart: body.pickupWindowStart ?? null,
+          windowEnd: body.pickupWindowEnd ?? null,
+          notes: body.pickupNotes ?? `Pickup for ${rmaNumber}`,
+        })
+        .returning({ id: schema.deliveries.id });
+      await this.db.insert(schema.deliveryLines).values(
+        validated.map((v) => ({
+          businessId: tenant.businessId!,
+          deliveryId: stop!.id,
+          orderLineId: v.line.id,
+          quantity: v.quantity,
+        })),
+      );
+      await this.db
+        .update(schema.orderReturns)
+        .set({ pickupDeliveryId: stop!.id })
+        .where(eq(schema.orderReturns.id, ret!.id));
+      await this.audit.log({
+        action: 'delivery.scheduled',
+        targetType: 'delivery',
+        targetId: stop!.id,
+        after: { kind: 'return_pickup', rmaNumber, scheduledDate: body.pickupDate },
       });
     }
     return this.loadDetail(id);
@@ -4456,6 +4557,12 @@ export class OrdersController {
         email: schema.customers.email,
         phone: schema.customers.phone,
         addressesJson: schema.customers.addressesJson,
+        customerNumber: schema.customers.customerNumber,
+        businessName: schema.customers.businessName,
+        contactName: schema.customers.contactName,
+        alternateName: schema.customers.alternateName,
+        alternateRelationship: schema.customers.alternateRelationship,
+        deliveryInstructions: schema.customers.deliveryInstructions,
       })
       .from(schema.customers)
       .where(eq(schema.customers.id, detail.customerId))
@@ -4629,6 +4736,12 @@ export class OrdersController {
             name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || '(no name)',
             email: customer.email,
             phone: customer.phone,
+            customerNumber: customer.customerNumber,
+            businessName: customer.businessName,
+            contactName: customer.contactName,
+            alternateName: customer.alternateName,
+            alternateRelationship: customer.alternateRelationship,
+            deliveryInstructions: customer.deliveryInstructions,
             address: customerAddress,
           }
         : null,

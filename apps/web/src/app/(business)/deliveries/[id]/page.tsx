@@ -29,6 +29,10 @@ interface DeliveryDetail {
   id: string;
   orderId: string;
   orderNumber: string;
+  /** A22 slice 6: 'delivery' | 'return_pickup'. */
+  kind?: string;
+  rmaNumber?: string | null;
+  returnId?: string | null;
   customerName: string | null;
   scheduledDate: string;
   windowStart: string | null;
@@ -200,7 +204,9 @@ export default function DeliveryDetailPage() {
                 data-testid="mark-delivered"
               >
                 <PackageCheck size={16} aria-hidden />
-                Delivered — hand over the goods
+                {d.kind === 'return_pickup'
+                  ? `Picked up — goods received back (${d.rmaNumber ?? 'return'})`
+                  : 'Delivered — hand over the goods'}
               </Button>
               <Button
                 variant="danger"

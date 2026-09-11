@@ -94,6 +94,9 @@ interface ProductListRow {
   isActive: boolean;
   purchaseStatus: string;
   brandName: string | null;
+  /** A21 addendum: STORIS Search for a Product leads with the category and ends with the collection. */
+  categoryName: string | null;
+  collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -175,6 +178,8 @@ export const PRODUCT_SORT_KEYS = [
   'asIsNonSellable',
   'group',
   'brandName',
+  'categoryName',
+  'collectionName',
 ] as const;
 export type ProductSortKey = (typeof PRODUCT_SORT_KEYS)[number];
 
@@ -425,9 +430,13 @@ export class CatalogProductsController {
         id: schema.products.id,
         purchaseStatus: schema.products.purchaseStatus,
         brandName: schema.brands.name,
+        categoryName: schema.categories.name,
+        collectionName: schema.collections.name,
       })
       .from(schema.products)
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+      .leftJoin(schema.collections, eq(schema.collections.id, schema.products.collectionId))
       .where(inArray(schema.products.id, ids));
     const variants = await this.db
       .select({
@@ -468,6 +477,8 @@ export class CatalogProductsController {
         isActive: r.isActive,
         purchaseStatus: p?.purchaseStatus ?? 'active',
         brandName: p?.brandName ?? null,
+        categoryName: p?.categoryName ?? null,
+        collectionName: p?.collectionName ?? null,
         vendorName: v?.vendorName ?? null,
         vendorModel: v?.vendorSku ?? null,
         group: v?.group ?? null,

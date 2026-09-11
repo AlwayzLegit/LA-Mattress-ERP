@@ -50,6 +50,12 @@ interface Transfer {
   canceledAt: string | null;
   notes: string | null;
   createdAt: string;
+  // A22 slice 2
+  scheduledFor: string | null;
+  reasonCode: { code: string; description: string } | null;
+  route: string | null;
+  shipDirect: boolean;
+  fulfillmentInstructions: string | null;
   lines: TransferLine[];
 }
 
@@ -300,6 +306,17 @@ export default function TransferDetailPage() {
               rows={[
                 { label: 'From', value: t.fromLocationName ?? '—' },
                 { label: 'To', value: t.toLocationName ?? '—' },
+                {
+                  label: 'Reason',
+                  value: t.reasonCode ? `${t.reasonCode.code} — ${t.reasonCode.description}` : '—',
+                },
+                { label: 'Route', value: t.route ?? '—' },
+                { label: 'Delivery date', value: t.scheduledFor ?? '—' },
+                { label: 'Ship direct', value: t.shipDirect ? 'Yes' : 'No' },
+                {
+                  label: 'Fulfillment instructions',
+                  value: t.fulfillmentInstructions ?? '—',
+                },
                 {
                   label: 'Manifest',
                   value: t.manifestId ? (
