@@ -5463,3 +5463,9 @@ sends the return salesperson the API already accepts (slice 6).
 - Tests: `kiosk-sessions-print.int.spec.ts` (5; CI db
   `jetnine_kiosk_sessions_print`).
 - **A22 is complete** — all seven slices are on the branch.
+- 2026-09-11 (PR #158 CI): the API suite runs every spec file in one vitest
+  process (`singleFork`), and `DatabaseModule` never closed its postgres-js
+  pool on `app.close()`, so each spec left ~1.5 idle connections behind until
+  Postgres refused new clients (`sorry, too many clients already`) at 64
+  integration specs. `DatabaseModule` now ends the pool in
+  `onApplicationShutdown`; the full suite peaks at 10 connections.

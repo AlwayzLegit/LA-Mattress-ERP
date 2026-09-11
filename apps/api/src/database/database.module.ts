@@ -1,4 +1,4 @@
-import { Global, Module, type OnModuleDestroy } from '@nestjs/common';
+import { Global, Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres, { type Sql } from 'postgres';
@@ -72,14 +72,19 @@ function tenantAwareDrizzle(sql: Sql): PostgresJsDatabase {
   ],
   exports: [DRIZZLE, ROOT_DRIZZLE, PG_SQL],
 })
-export class DatabaseModule implements OnModuleDestroy {
-  // The Sql instance handles its own pool lifecycle on module destroy via the
-  // Nest lifecycle hook below — we wire it through the provider's onModuleDestroy
-  // by inspecting the registered factory.
-  async onModuleDestroy(): Promise<void> {
-    // Nest doesn't auto-call onModuleDestroy on factory providers; the actual
-    // teardown happens when the postgres-js process exits or when an explicit
-    // shutdown hook fires. For the API process this is fine — the connection
-    // pool is owned for the lifetime of the process.
+export class DatabaseModule implements OnApplicationShutdown {
+  constructor(@Inject(PG_SQL) private readonly sql: Sql) {}
+
+  /**
+   * Close the pool when the application shuts down (`app.close()`, or a
+   * signal once shutdown hooks are enabled). This runs after every
+   * module's onModuleDestroy, so nothing is still mid-query. Factory
+   * providers get no lifecycle hooks of their own, and without this the
+   * idle pool connections outlive the Nest app: the integration suite
+   * runs every spec file in one process, and each spec's app left its
+   * connections open until Postgres refused new clients.
+   */
+  async onApplicationShutdown(): Promise<void> {
+    await this.sql.end({ timeout: 5 });
   }
 }
