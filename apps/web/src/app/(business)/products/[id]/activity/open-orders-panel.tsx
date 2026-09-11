@@ -37,11 +37,18 @@ function fulfillmentStatus(s: string | null): string {
 }
 
 /** STORIS Open Orders tab (A21 D6). */
-export function OpenOrdersPanel({ productId }: { productId: string }) {
+export function OpenOrdersPanel({
+  productId,
+  initialOrderType = 'all',
+}: {
+  productId: string;
+  /** STORIS Open Shopping Carts opens this panel on quotes (A22). */
+  initialOrderType?: string;
+}) {
   const [locationId, setLocationId] = useState('');
   const [useFulfillment, setUseFulfillment] = useState(true);
   const [useSelling, setUseSelling] = useState(true);
-  const [orderType, setOrderType] = useState('all');
+  const [orderType, setOrderType] = useState(initialOrderType);
   const qs = new URLSearchParams();
   if (locationId) qs.set('locationId', locationId);
   qs.set('useFulfillment', useFulfillment ? '1' : '0');
@@ -116,11 +123,14 @@ export function OpenOrdersPanel({ productId }: { productId: string }) {
                   <th>Order date</th>
                   <th>Customer</th>
                   <th>Line</th>
+                  <th>Linked transfer</th>
+                  <th className="num">Linked transfer qty</th>
+                  <th>Linked PO</th>
                 </tr>
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={12}>No open orders for this product.</TableEmpty>
+                  <TableEmpty colSpan={15}>No open orders for this product.</TableEmpty>
                 )}
                 {data?.rows.map((r) => (
                   <tr key={r.lineId} data-testid="activity-open-order-row">
@@ -152,6 +162,26 @@ export function OpenOrdersPanel({ productId }: { productId: string }) {
                     <td className="muted">
                       {r.lineDescription}
                       {r.lineType !== 'stock' && <> · {titleCase(r.lineType)}</>}
+                    </td>
+                    <td>
+                      {r.linkedTransferId ? (
+                        <Link href={`/transfers/${r.linkedTransferId}`}>
+                          {r.linkedTransferNumber}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="num">{r.linkedTransferId ? r.linkedTransferQuantity : '—'}</td>
+                    <td>
+                      {r.linkedPurchaseOrderId ? (
+                        <Link href={`/purchase-orders/${r.linkedPurchaseOrderId}`}>
+                          {r.linkedPurchaseOrderNumber}
+                          <span className="muted"> · {r.linkedPurchaseOrderQuantity}</span>
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                   </tr>
                 ))}

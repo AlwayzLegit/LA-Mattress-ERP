@@ -87,6 +87,11 @@ export interface ActivityPurchaseOrderRow {
   createdAt: string;
   status: string;
   transactionType: 'merchandise' | 'direct_ship';
+  /** A22: STORIS "Purchase Order Type" — special order when a line is allocated to a sales-order line. */
+  purchaseOrderType: 'standard' | 'special_order' | 'direct_ship';
+  /** A22: STORIS "Dock Scheduled" stands in for units received at the dock and not yet accepted. */
+  atDock: boolean;
+  quantityAtDock: number;
 }
 
 export interface ActivityOpenOrderRow {
@@ -108,6 +113,42 @@ export interface ActivityOpenOrderRow {
   lineId: string;
   lineDescription: string;
   lineType: string;
+  /** A22: STORIS Linked Transfer / Linked Transfer Quantity Reserved / Linked Purchase Order. */
+  linkedTransferId: string | null;
+  linkedTransferNumber: string | null;
+  linkedTransferQuantity: number;
+  linkedPurchaseOrderId: string | null;
+  linkedPurchaseOrderNumber: string | null;
+  linkedPurchaseOrderQuantity: number;
+}
+
+export interface LedgerRow {
+  id: string;
+  date: string;
+  quantity: number;
+  /** Running balance after this row. */
+  balance: number;
+  memo: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  referenceNumber: string | null;
+  comments: string | null;
+  user: string | null;
+  orderId: string | null;
+  orderNumber: string | null;
+  sku: string | null;
+  locationName: string | null;
+}
+
+export interface LedgerResult {
+  kind: 'regular' | 'as_is';
+  locationId: string | null;
+  start: string;
+  end: string;
+  openingBalance: number;
+  endingBalance: number;
+  onHandNow: number;
+  rows: LedgerRow[];
 }
 
 export interface SalesHistoryPeriod {
@@ -243,6 +284,34 @@ function customerName(first: string | null, last: string | null): string | null 
 function monthStartUtc(now = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+function parseYmd(raw: string | undefined, name: string, fallback: Date): Date {
+  if (raw === undefined || raw === '') return fallback;
+  if (!YMD.test(raw)) throw new BadRequestException(`${name} must be YYYY-MM-DD`);
+  const d = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) throw new BadRequestException(`${name} must be a real date`);
+  return d;
+}
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+const MOVEMENT_MEMO: Record<string, string> = {
+  receive: 'Receipt',
+  receive_po: 'PO receipt',
+  unreceive_po: 'PO receipt reversed',
+  adjustment: 'Adjustment',
+  physical_count: 'Physical count',
+  physical_variance: 'Count variance',
+  physical_commitment: 'Count commitment',
+  import: 'Import',
+  as_is_restock: 'Restocked from As-Is',
+  transfer_in: 'Transfer in',
+  transfer_out: 'Transfer out',
+  sale: 'Sale',
+  order_fulfill: 'Order / invoice',
+  order_reserve: 'Reserved',
+  order_release: 'Released',
+};
 
 function clampQuantity(raw: string | undefined): number {
   if (raw === undefined || raw === '') return 1;
@@ -437,8 +506,10 @@ export class ProductActivityController {
         receivingLocationId: schema.purchaseOrders.locationId,
         receivingLocationName: schema.locations.name,
         sku: schema.productVariants.sku,
+        poLineId: schema.purchaseOrderLines.id,
         quantityOrdered: schema.purchaseOrderLines.quantityOrdered,
         quantityDue: sql<number>`greatest(0, ${schema.purchaseOrderLines.quantityOrdered} - ${schema.purchaseOrderLines.quantityAccepted} - ${schema.purchaseOrderLines.quantityRejected})::int`,
+        quantityAtDock: sql<number>`greatest(0, ${schema.purchaseOrderLines.quantityReceived} - ${schema.purchaseOrderLines.quantityAccepted} - ${schema.purchaseOrderLines.quantityRejected})::int`,
         placedAt: schema.purchaseOrders.placedAt,
         expectedAt: schema.purchaseOrders.expectedAt,
         createdAt: schema.purchaseOrders.createdAt,
@@ -469,6 +540,23 @@ export class ProductActivityController {
         sql`${schema.purchaseOrders.expectedAt} ASC NULLS LAST`,
         asc(schema.purchaseOrders.createdAt),
       );
+    // A22: a line allocated to a sales-order line makes the PO a special order.
+    const allocated = new Set<string>();
+    if (rows.length > 0) {
+      const hits = await this.db
+        .select({ poLineId: schema.poLineAllocations.poLineId })
+        .from(schema.poLineAllocations)
+        .where(
+          and(
+            inArray(
+              schema.poLineAllocations.poLineId,
+              rows.map((r) => r.poLineId),
+            ),
+            ne(schema.poLineAllocations.status, 'cancelled'),
+          ),
+        );
+      for (const h of hits) allocated.add(h.poLineId);
+    }
     return {
       strip,
       rows: rows.map((r) => ({
@@ -486,6 +574,13 @@ export class ProductActivityController {
         createdAt: r.createdAt.toISOString(),
         status: r.status,
         transactionType: r.directShip ? 'direct_ship' : 'merchandise',
+        purchaseOrderType: r.directShip
+          ? 'direct_ship'
+          : allocated.has(r.poLineId)
+            ? 'special_order'
+            : 'standard',
+        atDock: r.quantityAtDock > 0,
+        quantityAtDock: r.quantityAtDock,
       })),
     };
   }
@@ -614,10 +709,72 @@ export class ProductActivityController {
         deliveryFor.set(d.orderLineId, { status: d.status, scheduledDate: d.scheduledDate });
       }
     }
+    // A22: the transfer carrying this product for the order, and the PO
+    // line allocated to the order line (STORIS Linked Transfer / Linked PO).
+    const orderIds = [...new Set(rows.map((r) => r.orderId))];
+    const linkedTransfers = await this.db
+      .select({
+        orderId: schema.stockTransfers.orderId,
+        transferId: schema.stockTransfers.id,
+        number: schema.stockTransfers.number,
+        quantity: sql<number>`greatest(${schema.stockTransferLines.quantityShipped}, coalesce(${schema.stockTransferLines.quantityOrdered}, 0))::int`,
+      })
+      .from(schema.stockTransferLines)
+      .innerJoin(
+        schema.stockTransfers,
+        eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+      )
+      .where(
+        and(
+          eq(schema.stockTransfers.businessId, tenant.businessId!),
+          inArray(schema.stockTransfers.orderId, orderIds),
+          inArray(schema.stockTransferLines.variantId, product.variantIds),
+          ne(schema.stockTransfers.status, 'canceled'),
+        ),
+      )
+      .orderBy(asc(schema.stockTransfers.createdAt));
+    const transferFor = new Map<string, { id: string; number: string; quantity: number }>();
+    for (const t of linkedTransfers) {
+      if (t.orderId && !transferFor.has(t.orderId)) {
+        transferFor.set(t.orderId, { id: t.transferId, number: t.number, quantity: t.quantity });
+      }
+    }
+    const linkedPos = await this.db
+      .select({
+        orderLineId: schema.poLineAllocations.orderLineId,
+        purchaseOrderId: schema.purchaseOrders.id,
+        number: schema.purchaseOrders.number,
+        quantity: schema.poLineAllocations.quantity,
+      })
+      .from(schema.poLineAllocations)
+      .innerJoin(
+        schema.purchaseOrderLines,
+        eq(schema.purchaseOrderLines.id, schema.poLineAllocations.poLineId),
+      )
+      .innerJoin(
+        schema.purchaseOrders,
+        eq(schema.purchaseOrders.id, schema.purchaseOrderLines.purchaseOrderId),
+      )
+      .where(
+        and(
+          inArray(schema.poLineAllocations.orderLineId, lineIds),
+          ne(schema.poLineAllocations.status, 'cancelled'),
+          isNull(schema.purchaseOrders.deletedAt),
+        ),
+      )
+      .orderBy(asc(schema.purchaseOrders.createdAt));
+    const poFor = new Map<string, { id: string; number: string; quantity: number }>();
+    for (const p of linkedPos) {
+      if (!poFor.has(p.orderLineId)) {
+        poFor.set(p.orderLineId, { id: p.purchaseOrderId, number: p.number, quantity: p.quantity });
+      }
+    }
     return {
       strip,
       rows: rows.map((r) => {
         const delivery = deliveryFor.get(r.lineId);
+        const transfer = transferFor.get(r.orderId);
+        const po = poFor.get(r.lineId);
         const orderType: ActivityOpenOrderRow['orderType'] =
           r.orderStatus === 'quote'
             ? 'quote'
@@ -647,6 +804,12 @@ export class ProductActivityController {
           lineId: r.lineId,
           lineDescription: r.lineDescription,
           lineType: r.lineType,
+          linkedTransferId: transfer?.id ?? null,
+          linkedTransferNumber: transfer?.number ?? null,
+          linkedTransferQuantity: transfer?.quantity ?? 0,
+          linkedPurchaseOrderId: po?.id ?? null,
+          linkedPurchaseOrderNumber: po?.number ?? null,
+          linkedPurchaseOrderQuantity: po?.quantity ?? 0,
         };
       }),
     };
@@ -1128,6 +1291,292 @@ export class ProductActivityController {
         notes: r.notes ?? null,
       })),
     };
+  }
+
+  // ----------------------------------------------------------------- ledger
+
+  /**
+   * A22: STORIS Regular Inventory Detail / As-Is Inventory Detail — the
+   * movement ledger of this product at a location over a date range, with
+   * a running balance, an opening balance and the ending balance
+   * (on hand now, walked back through later movements). `kind=regular`
+   * reads inventory_movements (delta-0 reservation rows are skipped);
+   * `kind=as_is` reads as-is pieces entered and reviewed out.
+   */
+  @Get('ledger')
+  @RequirePermission('products.view')
+  async ledger(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Query('kind') kindRaw?: string,
+    @Query('locationId') locationId?: string,
+    @Query('start') startRaw?: string,
+    @Query('end') endRaw?: string,
+  ): Promise<LedgerResult> {
+    const kind =
+      kindRaw === 'as_is' ? 'as_is' : kindRaw === 'regular' || !kindRaw ? 'regular' : null;
+    if (!kind) throw new BadRequestException('kind must be regular or as_is');
+    const product = await this.loadProduct(tenant, id);
+    await this.assertLocation(tenant.businessId!, locationId);
+    const now = new Date();
+    const start = parseYmd(startRaw, 'start', monthStartUtc(now));
+    const end = parseYmd(
+      endRaw,
+      'end',
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
+    );
+    if (end < start) throw new BadRequestException('end must be on or after start');
+    const endExclusive = new Date(end.getTime() + 86_400_000);
+    const strip = await this.strip(tenant.businessId!, product.id, locationId);
+    const names = await this.locations(tenant.businessId!);
+    const biz = tenant.businessId!;
+    const ids = product.variantIds;
+    const skuOf = new Map(product.variants.map((v) => [v.id, v.sku ?? null]));
+    const base: LedgerResult = {
+      kind,
+      locationId: locationId ?? null,
+      start: ymd(start),
+      end: ymd(end),
+      openingBalance: 0,
+      endingBalance: 0,
+      onHandNow: kind === 'regular' ? strip.onHand : strip.asIsOnHand,
+      rows: [],
+    };
+    if (ids.length === 0) return base;
+
+    if (kind === 'regular') {
+      const rows = await this.db
+        .select({
+          id: schema.inventoryMovements.id,
+          variantId: schema.inventoryMovements.variantId,
+          locationId: schema.inventoryMovements.locationId,
+          delta: schema.inventoryMovements.delta,
+          reason: schema.inventoryMovements.reason,
+          referenceType: schema.inventoryMovements.referenceType,
+          referenceId: schema.inventoryMovements.referenceId,
+          notes: schema.inventoryMovements.notes,
+          createdAt: schema.inventoryMovements.createdAt,
+          userName: schema.users.name,
+          userEmail: schema.users.email,
+        })
+        .from(schema.inventoryMovements)
+        .leftJoin(schema.users, eq(schema.users.id, schema.inventoryMovements.actorUserId))
+        .where(
+          and(
+            eq(schema.inventoryMovements.businessId, biz),
+            inArray(schema.inventoryMovements.variantId, ids),
+            ne(schema.inventoryMovements.delta, 0),
+            gte(schema.inventoryMovements.createdAt, start),
+            sql`${schema.inventoryMovements.createdAt} < ${endExclusive.toISOString()}::timestamptz`,
+            locationId ? eq(schema.inventoryMovements.locationId, locationId) : undefined,
+          ),
+        )
+        .orderBy(asc(schema.inventoryMovements.createdAt), asc(schema.inventoryMovements.id));
+      // Opening = on hand now − everything since the start; ending = on
+      // hand now − everything after the end.
+      const [after] = await this.db
+        .select({
+          sinceStart: sql<number>`coalesce(sum(${schema.inventoryMovements.delta}) filter (where ${schema.inventoryMovements.createdAt} >= ${start.toISOString()}::timestamptz), 0)::int`,
+          afterEnd: sql<number>`coalesce(sum(${schema.inventoryMovements.delta}) filter (where ${schema.inventoryMovements.createdAt} >= ${endExclusive.toISOString()}::timestamptz), 0)::int`,
+        })
+        .from(schema.inventoryMovements)
+        .where(
+          and(
+            eq(schema.inventoryMovements.businessId, biz),
+            inArray(schema.inventoryMovements.variantId, ids),
+            locationId ? eq(schema.inventoryMovements.locationId, locationId) : undefined,
+          ),
+        );
+      base.openingBalance = strip.onHand - (after?.sinceStart ?? 0);
+      base.endingBalance = strip.onHand - (after?.afterEnd ?? 0);
+      const refs = await this.resolveReferences(
+        biz,
+        rows.map((r) => ({ type: r.referenceType, id: r.referenceId })),
+      );
+      let balance = base.openingBalance;
+      base.rows = rows.map((r) => {
+        balance += r.delta;
+        const ref = r.referenceId ? refs.get(`${r.referenceType}:${r.referenceId}`) : undefined;
+        return {
+          id: r.id,
+          date: r.createdAt.toISOString(),
+          quantity: r.delta,
+          balance,
+          memo: MOVEMENT_MEMO[r.reason] ?? r.reason.replace(/_/g, ' '),
+          referenceType: r.referenceType ?? null,
+          referenceId: r.referenceId ?? null,
+          referenceNumber: ref?.number ?? null,
+          comments: r.notes ?? null,
+          user: r.userName ?? r.userEmail ?? null,
+          orderId: ref?.orderId ?? null,
+          orderNumber: ref?.orderId ? (ref.number ?? null) : null,
+          sku: skuOf.get(r.variantId) ?? null,
+          locationName: names.get(r.locationId)?.name ?? null,
+        };
+      });
+      return base;
+    }
+
+    // As-is: a piece entered is +quantity on its entry date; a piece
+    // reviewed out (restocked, vendor return, scrapped, written off) is
+    // −quantity on its review date.
+    const items = await this.db
+      .select({
+        id: schema.asIsItems.id,
+        variantId: schema.asIsItems.variantId,
+        locationId: schema.asIsItems.locationId,
+        quantity: schema.asIsItems.quantity,
+        status: schema.asIsItems.status,
+        source: schema.asIsItems.source,
+        pieceNumber: schema.asIsItems.pieceNumber,
+        referenceType: schema.asIsItems.referenceType,
+        referenceId: schema.asIsItems.referenceId,
+        notes: schema.asIsItems.notes,
+        createdAt: schema.asIsItems.createdAt,
+        reviewedAt: schema.asIsItems.reviewedAt,
+        reviewerName: schema.users.name,
+        reviewerEmail: schema.users.email,
+      })
+      .from(schema.asIsItems)
+      .leftJoin(schema.users, eq(schema.users.id, schema.asIsItems.reviewedByUserId))
+      .where(
+        and(
+          eq(schema.asIsItems.businessId, biz),
+          inArray(schema.asIsItems.variantId, ids),
+          locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
+        ),
+      );
+    type Ev = { at: Date; delta: number; item: (typeof items)[number]; kind: 'added' | 'removed' };
+    const events: Ev[] = [];
+    let sinceStart = 0;
+    let afterEnd = 0;
+    for (const it of items) {
+      const add: Ev = { at: it.createdAt, delta: it.quantity, item: it, kind: 'added' };
+      const removed: Ev | null =
+        it.status !== 'pending_review' && it.reviewedAt
+          ? { at: it.reviewedAt, delta: -it.quantity, item: it, kind: 'removed' }
+          : null;
+      for (const ev of removed ? [add, removed] : [add]) {
+        if (ev.at >= start) sinceStart += ev.delta;
+        if (ev.at >= endExclusive) afterEnd += ev.delta;
+        if (ev.at >= start && ev.at < endExclusive) events.push(ev);
+      }
+    }
+    events.sort((a, b) => a.at.getTime() - b.at.getTime() || a.item.id.localeCompare(b.item.id));
+    base.openingBalance = strip.asIsOnHand - sinceStart;
+    base.endingBalance = strip.asIsOnHand - afterEnd;
+    const refs = await this.resolveReferences(
+      biz,
+      events.map((e) => ({ type: e.item.referenceType, id: e.item.referenceId })),
+    );
+    let balance = base.openingBalance;
+    base.rows = events.map((e) => {
+      balance += e.delta;
+      const ref = e.item.referenceId
+        ? refs.get(`${e.item.referenceType}:${e.item.referenceId}`)
+        : undefined;
+      const memo =
+        e.kind === 'added'
+          ? `Entered · ${e.item.source.replace(/_/g, ' ')}`
+          : e.item.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return {
+        id: `${e.item.id}:${e.kind}`,
+        date: e.at.toISOString(),
+        quantity: e.delta,
+        balance,
+        memo,
+        referenceType: e.item.referenceType ?? null,
+        referenceId: e.item.referenceId ?? null,
+        referenceNumber: ref?.number ?? e.item.pieceNumber ?? null,
+        comments: e.item.notes ?? null,
+        user: e.kind === 'removed' ? (e.item.reviewerName ?? e.item.reviewerEmail ?? null) : null,
+        orderId: ref?.orderId ?? null,
+        orderNumber: ref?.orderId ? (ref.number ?? null) : null,
+        sku: skuOf.get(e.item.variantId) ?? null,
+        locationName: names.get(e.item.locationId)?.name ?? null,
+      };
+    });
+    return base;
+  }
+
+  /**
+   * Document numbers for ledger references: orders, purchase orders,
+   * transfers, register sales and returns; anything else keeps its type.
+   */
+  private async resolveReferences(
+    businessId: string,
+    refs: { type: string | null; id: string | null }[],
+  ): Promise<Map<string, { number: string; orderId: string | null }>> {
+    const out = new Map<string, { number: string; orderId: string | null }>();
+    const idsOf = (types: string[]) => [
+      ...new Set(refs.filter((r) => r.id && r.type && types.includes(r.type)).map((r) => r.id!)),
+    ];
+    const put = (types: string[], id: string, number: string, orderId: string | null) => {
+      for (const t of types) out.set(`${t}:${id}`, { number, orderId });
+    };
+    const orderTypes = ['order', 'order_fulfill', 'exchange', 'delivery'];
+    const orderIds = idsOf(orderTypes);
+    if (orderIds.length) {
+      const hits = await this.db
+        .select({ id: schema.orders.id, number: schema.orders.number })
+        .from(schema.orders)
+        .where(and(eq(schema.orders.businessId, businessId), inArray(schema.orders.id, orderIds)));
+      for (const h of hits) put(orderTypes, h.id, h.number, h.id);
+    }
+    const poTypes = ['purchase_order', 'po_unreceive', 'direct_ship'];
+    const poIds = idsOf(poTypes);
+    if (poIds.length) {
+      const hits = await this.db
+        .select({ id: schema.purchaseOrders.id, number: schema.purchaseOrders.number })
+        .from(schema.purchaseOrders)
+        .where(
+          and(
+            eq(schema.purchaseOrders.businessId, businessId),
+            inArray(schema.purchaseOrders.id, poIds),
+          ),
+        );
+      for (const h of hits) put(poTypes, h.id, `PO# ${h.number}`, null);
+    }
+    const xferTypes = ['stock_transfer', 'transfer_out'];
+    const xferIds = idsOf(xferTypes);
+    if (xferIds.length) {
+      const hits = await this.db
+        .select({ id: schema.stockTransfers.id, number: schema.stockTransfers.number })
+        .from(schema.stockTransfers)
+        .where(
+          and(
+            eq(schema.stockTransfers.businessId, businessId),
+            inArray(schema.stockTransfers.id, xferIds),
+          ),
+        );
+      for (const h of hits) put(xferTypes, h.id, h.number, null);
+    }
+    const saleIds = idsOf(['sale']);
+    if (saleIds.length) {
+      const hits = await this.db
+        .select({ id: schema.sales.id, number: schema.sales.number })
+        .from(schema.sales)
+        .where(and(eq(schema.sales.businessId, businessId), inArray(schema.sales.id, saleIds)));
+      for (const h of hits) put(['sale'], h.id, h.number, null);
+    }
+    const returnIds = idsOf(['order_return']);
+    if (returnIds.length) {
+      const hits = await this.db
+        .select({
+          id: schema.orderReturns.id,
+          number: schema.orderReturns.rmaNumber,
+          orderId: schema.orderReturns.orderId,
+        })
+        .from(schema.orderReturns)
+        .where(
+          and(
+            eq(schema.orderReturns.businessId, businessId),
+            inArray(schema.orderReturns.id, returnIds),
+          ),
+        );
+      for (const h of hits) put(['order_return'], h.id, h.number, h.orderId ?? null);
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- summary

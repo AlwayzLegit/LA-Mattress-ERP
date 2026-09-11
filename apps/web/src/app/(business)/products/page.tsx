@@ -51,6 +51,8 @@ interface ProductRow {
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
+  categoryName: string | null;
+  collectionName: string | null;
   priceCents: number | null;
   costCents: number | null;
   onHand: number;
@@ -123,6 +125,14 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
+  // A22: STORIS Search for a Product leads with the category and ends
+  // with the primary collection.
+  {
+    id: 'category',
+    label: 'Product category',
+    sort: 'categoryName',
+    render: (p) => p.categoryName ?? '—',
+  },
   {
     id: 'product',
     label: 'Product',
@@ -199,6 +209,12 @@ const COLUMNS: Column[] = [
   },
   { id: 'group', label: 'Product group', sort: 'group', render: (p) => p.group ?? '—' },
   { id: 'brand', label: 'Brand', sort: 'brandName', render: (p) => p.brandName ?? '—' },
+  {
+    id: 'collection',
+    label: 'Primary collection',
+    sort: 'collectionName',
+    render: (p) => p.collectionName ?? '—',
+  },
 ];
 const DEFAULT_ORDER = COLUMNS.map((c) => c.id);
 const COLUMN_ORDER_KEY = 'jetnine.products.columns';

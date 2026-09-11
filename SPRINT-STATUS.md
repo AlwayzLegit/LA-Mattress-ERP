@@ -5335,3 +5335,32 @@ a Product", asked "Do we already have these?", then "start". Amendment A21
   lines, the two new product fields (+ 400s), serials, as-is, summary
   buckets, every search criterion. `product-stock` (10) and `catalog` (25)
   still green.
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 1 — A22)
+
+Owner sent 28 STORIS screens ("take a look and see what we are missing and
+incorporate accordingly"). Amendment A22 (PLAN-POS-OPERATIONS §12.18) maps
+every screen to what stands and what is missing, in seven slices. Slice 1
+(the View Product Activity and Search for a Product views) is built:
+
+- Browser: Product category leads and Primary collection ends the column
+  strip, both sortable (`categoryName`, `collectionName` on the list rows).
+- Open Orders: Linked transfer / Linked transfer quantity / Linked PO columns
+  (the customer transfer carrying the product and the PO line allocated to
+  the order line). Purchase Orders: PO type (Standard / Special order /
+  Direct ship) and At dock (received, not yet accepted).
+- New tabs: Regular Inventory Detail and As-Is Inventory Detail —
+  `GET /v1/products/:id/activity/ledger?kind=regular|as_is` with location and
+  date range, opening / running / ending balances, references resolved to
+  order, PO, transfer, sale and RMA numbers; Open Shopping Carts (Open Orders
+  on quotes). The ATP grid follows the STORIS column order.
+- Tests: `product-activity.int.spec.ts` grows to 18 (linked columns, PO
+  type / at dock, both ledgers, category / collection sort).
+
+Remaining slices (each its own PR): 2 transfers (entry fields + Report
+Transfers by Location), 3 stock adjustment dialog + reassign reservation,
+4 replenish screen, 5 logistical scheduling, 6 returns / exchanges /
+customers, 7 time clock kiosk, active sessions, batch PO print. Two findings
+worth flagging now: manual as-is intake (`POST /v1/as-is`) never decrements
+on hand (double count until slice 3 fixes it), and the exchange wizard never
+sends the return salesperson the API already accepts (slice 6).

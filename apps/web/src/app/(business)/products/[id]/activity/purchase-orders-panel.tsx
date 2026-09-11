@@ -36,12 +36,14 @@ export function PurchaseOrdersPanel({ productId }: { productId: string }) {
                   <th>Delivery date</th>
                   <th>Created</th>
                   <th>Status</th>
-                  <th>Type</th>
+                  <th>Transaction type</th>
+                  <th>PO type</th>
+                  <th title="Units received at the dock and not yet accepted">At dock</th>
                 </tr>
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={10}>No open purchase orders for this product.</TableEmpty>
+                  <TableEmpty colSpan={12}>No open purchase orders for this product.</TableEmpty>
                 )}
                 {data?.rows.map((r, i) => (
                   <tr key={`${r.purchaseOrderId}:${i}`} data-testid="activity-po-row">
@@ -64,6 +66,14 @@ export function PurchaseOrdersPanel({ productId }: { productId: string }) {
                       <StatusBadge status={r.status} />
                     </td>
                     <td>{r.transactionType === 'direct_ship' ? 'Direct ship' : 'Merchandise'}</td>
+                    <td>
+                      {r.purchaseOrderType === 'special_order'
+                        ? 'Special order'
+                        : r.purchaseOrderType === 'direct_ship'
+                          ? 'Direct ship'
+                          : 'Standard'}
+                    </td>
+                    <td>{r.atDock ? `Yes · ${r.quantityAtDock}` : 'No'}</td>
                   </tr>
                 ))}
               </tbody>
