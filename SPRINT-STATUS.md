@@ -5484,3 +5484,16 @@ sends the return salesperson the API already accepts (slice 6).
 - [x] Validation: 15 Postgres/API tests including real staff HTTP authentication, worker recovery and privacy; API build/typechecks and focused lint. Browser reply independently verified through visitor history.
 - [ ] Build: assignment/scoping, provider tokens/recovery, generated storefront response types and widget integration.
 - [ ] Ops: separate staging, Redis/Ably verification, staffing/retention. Local preview uses synthetic data and a test-only limiter; no production deployment.
+
+### 2026-09-11 — Local live-chat stream and notification cues
+
+- [x] Pilot ERP SSE metadata stream with tenant permission rechecks, bounded
+      connections, generic errors, reconnect/catch-up and visitor-only watermarks.
+- [x] Live connection cues, unread queue/tab badges, incoming sound toggle,
+      permission-gated desktop alerts, arrival cues, saved replies and visible composer.
+- [x] 16 database/API integration tests plus 3 alert-state tests; API build, web
+      typecheck and changed-file lint. Browser arrival and restart-recovery verified.
+- [ ] Ops: staging services/Ably remain unprovisioned. This pilot's open-tab alerts
+      do not provide closed-browser Web Push. In-app browser denied OS notifications.
+
+See `docs/live-chat-development.md` slice 3 for transport limits and remaining work.

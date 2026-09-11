@@ -52,6 +52,20 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/conversations/live': {
+      get: {
+        security: staffSecurity,
+        description:
+          'Pilot SSE stream. snapshot events contain conversations with id, status, updatedAt, lastSequence and visitorSequence. No message content. Connections renew every 30 seconds; rebaseline only on first load and fetch history after changed sequences. access-revoked ends access; unavailable requests reconnect.',
+        responses: {
+          '200': {
+            description: 'Tenant-scoped metadata snapshots, checked once per second.',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          ...errorResponses,
+        },
+      },
+    },
     '/v1/chat/visitor/session': {
       post: {
         security: [{ IntegrationBearer: [], IntegrationId: [] }],

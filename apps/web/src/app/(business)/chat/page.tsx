@@ -1,13 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { api, ApiError } from '@/lib/api';
 import { Form, FormRootError, useZodForm } from '@/components/form/form';
 import { Button, PageHeader } from '@/components/ui';
 import styles from './chat.module.css';
+import { useLiveChat } from './use-live-chat';
 
-type Conversation = { id: string; status: string; updatedAt: string; lastSequence: number };
 type Message = {
   id: string;
   body: string;
@@ -19,108 +19,100 @@ type Message = {
 const formSchema = z.object({
   body: z.string().trim().min(1, 'Write a message.').max(4000, 'Use 4,000 characters or fewer.'),
 });
-const errorMessage = (error: unknown) =>
-  error instanceof ApiError && error.status === 412
-    ? 'Choose your business from the selector above to open its inbox.'
-    : error instanceof Error
-      ? error.message
-      : 'Unable to load conversations';
-
 export default function ChatPage() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const [more, setMore] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const started = useRef(Date.now());
-  const paginated = useRef(false);
-  const load = useCallback(async (cursor?: string) => {
-    try {
-      const result = await api<{
-        data: Conversation[];
-        hasMore: boolean;
-        nextCursor: string | null;
-      }>(`/v1/chat/conversations?limit=50${cursor ? `&afterId=${cursor}` : ''}`, {
-        cache: 'no-store',
-      });
-      if (cursor) paginated.current = true;
-      setConversations((old) => {
-        if (!paginated.current) return result.data;
-        const merged = new Map(old.map((row) => [row.id, row]));
-        for (const row of result.data) merged.set(row.id, row);
-        return [...merged.values()];
-      });
-      if (cursor || !paginated.current) setMore(result.hasMore ? result.nextCursor : null);
-      setError('');
-      setLoaded(true);
-    } catch (e) {
-      setError(errorMessage(e));
-      if (e instanceof ApiError && [401, 403].includes(e.status)) {
-        setConversations([]);
-        setSelected(null);
-      }
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => {
-      if (Date.now() - started.current > 10 * 60 * 1000) {
-        setPaused(true);
-        return;
-      }
-      if (!document.hidden) void load();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [load]);
+  const {
+    conversations,
+    connection,
+    unread,
+    selected,
+    select,
+    sound,
+    toggleSound,
+    notifications,
+    toggleNotifications,
+    notice,
+    latest,
+  } = useLiveChat();
   return (
     <div className={styles.root} data-sentry-mask>
       <PageHeader
         title="Live chat"
         sub="Talk with website visitors and keep the conversation together."
       />
-      <div className={styles.toolbar}>
-        <span role="status">
-          {paused
-            ? 'Automatic updates paused.'
-            : 'Checking for new conversations every few seconds.'}
-        </span>
-        <Button
-          onClick={() => {
-            started.current = Date.now();
-            setPaused(false);
-            void load();
-          }}
-        >
-          Refresh inbox
-        </Button>
+      <div className={styles.livebar}>
+        <div className={styles.connection} data-state={connection} role="status">
+          <span className={styles.dot} />
+          <strong>
+            {connection === 'live'
+              ? 'Live'
+              : connection === 'connecting'
+                ? 'Connecting...'
+                : connection === 'denied'
+                  ? 'Access required'
+                  : 'Reconnecting...'}
+          </strong>
+          <span>
+            {connection === 'live'
+              ? 'Messages update automatically'
+              : 'Waiting for a secure connection'}
+          </span>
+        </div>
+        <div className={styles.modes}>
+          <Button aria-pressed={sound} onClick={() => void toggleSound()}>
+            {sound ? 'Sound on' : 'Enable sound'}
+          </Button>
+          <Button aria-pressed={notifications} onClick={() => void toggleNotifications()}>
+            {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
+          </Button>
+        </div>
       </div>
-      {error && (
+      <div className={styles.toolbar}>
+        <span role="status">{notice}</span>
+        <strong>
+          {unread.length
+            ? `${unread.length} unread conversation${unread.length === 1 ? '' : 's'}`
+            : connection === 'live'
+              ? 'Inbox up to date'
+              : 'Connecting to inbox'}
+        </strong>
+      </div>
+      {connection === 'reconnecting' && (
         <p role="alert" className={styles.error}>
-          {error}
+          Connection interrupted. Reconnecting automatically; messages will catch up when the
+          connection returns.
         </p>
       )}
+      <p className={styles.arrival} role="status">
+        {latest || 'Ready to help your next visitor.'}
+      </p>
       <div className={styles.layout}>
         <aside className={styles.queue} aria-label="Conversation queue">
           <h2>Team conversations</h2>
-          {!loaded && !error && <p>Loading conversations…</p>}
-          {loaded && !conversations.length && !error && <p>No conversations yet.</p>}
+          {connection === 'connecting' && <p>Loading conversations...</p>}
+          {connection === 'live' && !conversations.length && <p>No conversations yet.</p>}
           {conversations.map((conversation) => (
             <button
               className={styles.item}
               key={conversation.id}
               aria-pressed={selected === conversation.id}
-              onClick={() => setSelected(conversation.id)}
+              onClick={() => select(conversation.id)}
+              data-unread={unread.includes(conversation.id)}
             >
               <strong>Visitor · {conversation.id.slice(0, 8)}</strong>
+              {unread.includes(conversation.id) && (
+                <span className={styles.badge}>New message</span>
+              )}
               <span>{conversation.status.replaceAll('_', ' ')}</span>
               <small>{new Date(conversation.updatedAt).toLocaleString()}</small>
             </button>
           ))}
-          {more && <Button onClick={() => void load(more)}>Load more</Button>}
         </aside>
         {selected ? (
-          <ConversationPanel key={selected} id={selected} />
+          <ConversationPanel
+            key={selected}
+            id={selected}
+            revision={conversations.find((row) => row.id === selected)?.lastSequence ?? 0}
+          />
         ) : (
           <section className={styles.empty}>
             <h2>Your next conversation starts here</h2>
@@ -132,11 +124,14 @@ export default function ChatPage() {
   );
 }
 
-function ConversationPanel({ id }: { id: string }) {
+function ConversationPanel({ id, revision }: { id: string; revision: number }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [note, setNote] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const history = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const [below, setBelow] = useState(false);
   const sequence = useRef(0);
   const retry = useRef<{ body: string; note: boolean; id: string } | null>(null);
   const form = useZodForm(formSchema, { body: '' });
@@ -144,9 +139,14 @@ function ConversationPanel({ id }: { id: string }) {
   useEffect(() => {
     const abort = new AbortController();
     let fetching = false;
-    const deadline = Date.now() + 10 * 60 * 1000;
+    let queued = false;
     async function load() {
-      if (fetching || abort.signal.aborted) return;
+      if (abort.signal.aborted) return;
+      if (fetching) {
+        queued = true;
+        return;
+      }
+      queued = false;
       fetching = true;
       try {
         let hasMore = true;
@@ -156,10 +156,10 @@ function ConversationPanel({ id }: { id: string }) {
             { signal: abort.signal, cache: 'no-store' },
           );
           if (abort.signal.aborted) return;
-          setMessages((old) => [
-            ...old,
-            ...result.data.filter((row) => !old.some((item) => item.id === row.id)),
-          ]);
+          setMessages((old) => {
+            const added = result.data.filter((row) => !old.some((item) => item.id === row.id));
+            return added.length ? [...old, ...added] : old;
+          });
           sequence.current = result.nextSequence;
           hasMore = result.hasMore;
         }
@@ -174,18 +174,24 @@ function ConversationPanel({ id }: { id: string }) {
         }
       } finally {
         fetching = false;
+        if (queued && !abort.signal.aborted) void load();
       }
     }
     refresh.current = load;
     void load();
-    const timer = setInterval(() => {
-      if (!document.hidden && Date.now() < deadline) void load();
-    }, 3000);
+    const retryTimer = setInterval(() => void load(), 15000);
     return () => {
       abort.abort();
-      clearInterval(timer);
+      clearInterval(retryTimer);
     };
   }, [id]);
+  useEffect(() => {
+    void refresh.current();
+  }, [revision]);
+  useEffect(() => {
+    if (followLatest.current) history.current?.scrollTo({ top: history.current.scrollHeight });
+    else setBelow(true);
+  }, [messages]);
   return (
     <section className={styles.conversation} aria-label="Selected conversation">
       <header className={styles.heading}>
@@ -201,6 +207,14 @@ function ConversationPanel({ id }: { id: string }) {
         </p>
       )}
       <div
+        ref={history}
+        onScroll={() => {
+          const node = history.current;
+          if (node) {
+            followLatest.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+            if (followLatest.current) setBelow(false);
+          }
+        }}
         className={styles.history}
         role="log"
         aria-label="Messages"
@@ -228,9 +242,23 @@ function ConversationPanel({ id }: { id: string }) {
               </time>
             </div>
             <p>{message.body}</p>
+            {message.sender === 'staff' && message.audience === 'public' && (
+              <small className={styles.saved}>Saved</small>
+            )}
           </article>
         ))}
       </div>
+      {below && (
+        <Button
+          onClick={() => {
+            followLatest.current = true;
+            setBelow(false);
+            history.current?.scrollTo({ top: history.current.scrollHeight, behavior: 'smooth' });
+          }}
+        >
+          Jump to new messages
+        </Button>
+      )}
       <div className={styles.composer}>
         <div className={styles.modes}>
           <Button
@@ -276,7 +304,7 @@ function ConversationPanel({ id }: { id: string }) {
           <textarea
             id="chat-message"
             className="input"
-            rows={4}
+            rows={3}
             maxLength={4000}
             {...form.register('body')}
             disabled={form.formState.isSubmitting}

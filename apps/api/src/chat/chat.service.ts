@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { and, asc, eq, gt, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext, type DrizzleTransaction } from '@jetnine/db';
 import {
@@ -358,6 +358,30 @@ export class ChatService {
       throw new ForbiddenException('Chat team reply permission required');
 
     return member;
+  }
+
+  /** Metadata only; each snapshot rechecks membership and runs under tenant RLS. */
+  async staffLiveSnapshot(tenant: RequestTenantContext) {
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant);
+        return tx
+          .select({
+            id: conversations.id,
+            status: conversations.status,
+            updatedAt: conversations.updatedAt,
+            lastSequence: conversations.lastSequence,
+            visitorSequence:
+              sql<number>`coalesce((select max(m.sequence) from chat_messages m where m.business_id = "chat_conversations"."business_id" and m.conversation_id = "chat_conversations"."id" and m.sender_type = 'visitor' and m.audience = 'public'), 0)`.mapWith(
+                Number,
+              ),
+          })
+          .from(conversations)
+          .where(eq(conversations.businessId, tenant.businessId!));
+      },
+    );
   }
 
   async staffConversations(tenant: RequestTenantContext, query: unknown = {}) {

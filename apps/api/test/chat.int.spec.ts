@@ -278,6 +278,41 @@ describe('chat persistence foundation on Postgres', () => {
         .expect(201);
       expect(start.get('Cache-Control')).toBe('no-store');
       const id = start.body.conversationId as string;
+      await app.listen(0, '127.0.0.1');
+      const streamAbort = new AbortController();
+      const streamTimeout = setTimeout(() => streamAbort.abort(), 8000);
+      try {
+        const stream = await fetch(`${await app.getUrl()}/v1/chat/conversations/live`, {
+          headers: staffHeaders,
+          signal: streamAbort.signal,
+        });
+        expect(stream.status).toBe(200);
+        expect(stream.headers.get('content-type')).toContain('text/event-stream');
+        const reader = stream.body!.getReader();
+        let received = '';
+        while (!received.includes(id))
+          received += new TextDecoder().decode((await reader.read()).value);
+        expect(received).toContain('event: snapshot');
+        expect(received).not.toContain('HTTP question');
+        await service.sendVisitorMessage(auth, id, input('Streaming follow-up'));
+        received = '';
+        while (!received.includes('"visitorSequence":2'))
+          received += new TextDecoder().decode((await reader.read()).value);
+        expect(received).toContain(id);
+        process.env.CHAT_ENABLED = 'false';
+        received = '';
+        while (!received.includes('event: unavailable')) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          received += new TextDecoder().decode(chunk.value);
+        }
+        expect(received).toContain('event: unavailable');
+        process.env.CHAT_ENABLED = 'true';
+      } finally {
+        clearTimeout(streamTimeout);
+        streamAbort.abort();
+      }
+
       await request(app.getHttpServer())
         .post(`/v1/chat/conversations/${id}/messages`)
         .set(staffHeaders)
@@ -294,13 +329,14 @@ describe('chat persistence foundation on Postgres', () => {
         .expect(200);
       expect(history.body.data.map((row: { body: string }) => row.body)).toEqual([
         'HTTP question',
+        'Streaming follow-up',
         'HTTP reply',
       ]);
       const staffHistory = await request(app.getHttpServer())
         .get(`/v1/chat/conversations/${id}/history`)
         .set(staffHeaders)
         .expect(200);
-      expect(staffHistory.body.data).toHaveLength(3);
+      expect(staffHistory.body.data).toHaveLength(4);
       await request(app.getHttpServer())
         .post(`/v1/chat/conversations/${id}/messages`)
         .set({ ...staffHeaders, Origin: 'https://untrusted.test' })
@@ -590,5 +626,37 @@ describe('chat persistence foundation on Postgres', () => {
         businessId,
       }),
     ).rejects.toThrow('Write a message');
+  });
+});
+
+describe('live inbox snapshots', () => {
+  it('only advances visitor watermark for public visitor messages and contains no transcript', async () => {
+    const start = await service.startConversation(auth, randomUUID(), input('Live visitor'));
+    const before = (await service.staffLiveSnapshot(staff)).find(
+      (row) => row.id === start.conversationId,
+    )!;
+    await service.sendStaffMessage(staff, start.conversationId, input('Staff reply'));
+    await service.sendStaffMessage(staff, start.conversationId, input('Private note'), 'note');
+    const staffOnly = (await service.staffLiveSnapshot(staff)).find(
+      (row) => row.id === start.conversationId,
+    )!;
+    expect(staffOnly.visitorSequence).toBe(before.visitorSequence);
+    expect(staffOnly.lastSequence).toBeGreaterThan(before.lastSequence);
+    await service.sendVisitorMessage(auth, start.conversationId, input('Another visitor message'));
+    const updated = (await service.staffLiveSnapshot(staff)).find(
+      (row) => row.id === start.conversationId,
+    )!;
+    expect(updated.visitorSequence).toBeGreaterThan(staffOnly.visitorSequence);
+    expect(Object.keys(updated).sort()).toEqual([
+      'id',
+      'lastSequence',
+      'status',
+      'updatedAt',
+      'visitorSequence',
+    ]);
+    await expect(
+      service.staffLiveSnapshot({ ...staff, businessId: otherBusinessId }),
+    ).rejects.toThrow();
+    await expect(service.staffLiveSnapshot({ ...staff, permissions: new Set() })).rejects.toThrow();
   });
 });

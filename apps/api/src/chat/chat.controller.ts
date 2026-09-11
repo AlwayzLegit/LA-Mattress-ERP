@@ -1,4 +1,9 @@
+import { timer, exhaustMap, map, takeUntil, catchError, of } from 'rxjs';
+import { ConfigService } from '@nestjs/config';
 import {
+  Sse,
+  ServiceUnavailableException,
+  ForbiddenException,
   Body,
   Controller,
   Get,
@@ -71,7 +76,35 @@ export class ChatVisitorController {
 @UseFilters(ChatExceptionFilter)
 @Controller('v1/chat/conversations')
 export class ChatStaffController {
-  constructor(@Inject(ChatService) private readonly chat: ChatService) {}
+  constructor(
+    @Inject(ChatService) private readonly chat: ChatService,
+    @Inject(ConfigService) private readonly config: ConfigService,
+  ) {}
+  @Sse('live')
+  @RequirePermission('chat.view_team')
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Accel-Buffering', 'no')
+  live(@CurrentTenant() tenant: RequestTenantContext) {
+    // Bound connections so cookie/session/subscription guards are rerun on reconnect.
+    return timer(0, 1000).pipe(
+      exhaustMap(async () => {
+        if (this.config.get('CHAT_ENABLED') !== 'true')
+          throw new ServiceUnavailableException('Chat unavailable');
+        return this.chat.staffLiveSnapshot(tenant);
+      }),
+      map((conversations) => ({ type: 'snapshot', data: { conversations } })),
+      takeUntil(timer(30000)),
+      catchError((error: unknown) =>
+        of({
+          type:
+            error instanceof ForbiddenException || error instanceof UnauthorizedException
+              ? 'access-revoked'
+              : 'unavailable',
+          data: {},
+        }),
+      ),
+    );
+  }
   @Get()
   @RequirePermission('chat.view_team')
   @Header('Cache-Control', 'no-store')

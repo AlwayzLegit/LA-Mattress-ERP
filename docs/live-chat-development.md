@@ -130,3 +130,46 @@ transcript-retention schedule. Credential rotation, visitor identities independe
 of sessions, location/team scope, assignments, exports/deletion, attachments,
 provider tokens and operational monitoring remain unfinished. Stored outbox events
 are delivered only when a configured worker runs; no Ably credentials exist yet.
+
+## Slice 3: live inbox and browser alerts (September 11, 2026)
+
+The local ERP inbox now uses `/v1/chat/conversations/live`, a same-origin SSE
+stream. The pilot server queries committed Postgres metadata once per second,
+including the latest public visitor sequence. It rechecks tenant membership and
+permissions on each snapshot, emits no transcript text, and renews connections
+at 30 seconds to rerun session/subscription guards. Errors emit generic events;
+access revocation clears the visible inbox. The client reconnects with bounded
+backoff, keeps its watermark across reconnects, and reconciles persisted history.
+History also retries every 15 seconds to recover a failed fetch.
+
+This replaces slice 2's bounded inbox polling and pagination in the pilot UI.
+It covers all team conversations, including new ones outside a previously loaded
+page. It is a pilot transport: full metadata snapshots and per-client database
+queries must be replaced/scaled with the planned Ably subscriptions before a
+large deployment. No Ably account or keys have been provisioned.
+
+Visible features: live/connecting/reconnecting/access-required state, unread
+conversation badges and tab count, arrival announcement, visitor/team bubbles,
+private-note styling, saved-reply acknowledgement, and a scrollable transcript
+with a visible composer. New messages follow the scroll only when the reader is
+near the bottom; otherwise a jump control appears. No typing, presence, delivery,
+or read receipt is fabricated. Saved means database acknowledgement only.
+
+Sound is opt-in through a browser gesture and can be muted. Desktop alerts request
+notification permission explicitly and omit visitor/message content. They fire
+when the inbox is in the background. Initial history, duplicate snapshots, team
+replies and internal notes remain silent. A versioned localStorage sequence gives
+best-effort deduplication across alert-enabled tabs; in-tab deduplication survives
+reconnects. Unread state and alert preferences are local to the mounted inbox,
+not durable team read receipts. These are open-tab browser notifications, not
+closed-browser Web Push. Closed-tab delivery needs push subscriptions, a service
+worker notification handler and server-side Web Push delivery; not implemented.
+
+Validation: 16 Postgres/API tests and 3 alert-state tests pass, including actual
+HTTP SSE snapshots, incoming changes and kill-switch termination. API build,
+web typecheck and changed-file lint pass. Browser-verified queue unread badges,
+open-conversation arrivals without refresh, sound enable/mute controls, and API
+restart recovery without losing the selected conversation. The in-app browser
+returned notification permission denied; its blocked-permission feedback was
+verified. An actual OS notification and audible hardware output were not verified.
+Preview remains local at http://localhost:3000/chat with synthetic data only.
