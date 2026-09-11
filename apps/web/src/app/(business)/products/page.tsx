@@ -52,6 +52,7 @@ interface ProductRow {
   vendorModel: string | null;
   group: string | null;
   categoryName: string | null;
+  categoryPath: string | null;
   collectionName: string | null;
   priceCents: number | null;
   costCents: number | null;
@@ -104,6 +105,38 @@ interface RefOption {
   id: string;
   name: string;
 }
+interface CategoryFlat {
+  id: string;
+  parentId: string | null;
+  name: string;
+  position: number;
+}
+
+/**
+ * A22.1: categories nest, so the picker reads "Mattresses › Hybrid" —
+ * roots in their set order, each one's children right under it. Picking a
+ * root filters to everything beneath it.
+ */
+function categoryOptions(flat: CategoryFlat[]): RefOption[] {
+  const byParent = new Map<string | null, CategoryFlat[]>();
+  for (const c of flat) {
+    const key = c.parentId ?? null;
+    byParent.set(key, [...(byParent.get(key) ?? []), c]);
+  }
+  const out: RefOption[] = [];
+  const walk = (parentId: string | null, prefix: string) => {
+    const kids = [...(byParent.get(parentId) ?? [])].sort(
+      (a, b) => a.position - b.position || a.name.localeCompare(b.name),
+    );
+    for (const c of kids) {
+      const label = prefix ? `${prefix} › ${c.name}` : c.name;
+      out.push({ id: c.id, name: label });
+      walk(c.id, label);
+    }
+  };
+  walk(null, '');
+  return out;
+}
 interface ReasonCodeOption {
   id: string;
   code: string;
@@ -131,7 +164,7 @@ const COLUMNS: Column[] = [
     id: 'category',
     label: 'Product category',
     sort: 'categoryName',
-    render: (p) => p.categoryName ?? '—',
+    render: (p) => p.categoryPath ?? p.categoryName ?? '—',
   },
   {
     id: 'product',
@@ -299,8 +332,8 @@ export default function ProductsPage() {
     api<RefOption[]>('/v1/collections')
       .then(setCollections)
       .catch(() => setCollections([]));
-    api<{ flat: RefOption[] }>('/v1/categories')
-      .then((r) => setCategories(r.flat))
+    api<{ flat: CategoryFlat[] }>('/v1/categories')
+      .then((r) => setCategories(categoryOptions(r.flat)))
       .catch(() => setCategories([]));
     api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
       .then(setAsIsReasons)

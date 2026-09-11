@@ -5469,3 +5469,16 @@ sends the return salesperson the API already accepts (slice 6).
   Postgres refused new clients (`sorry, too many clients already`) at 64
   integration specs. `DatabaseModule` now ends the pool in
   `onApplicationShutdown`; the full suite peaks at 10 connections.
+- 2026-09-11 (A22.1, owner ask "categorize all of the products for advanced
+  search"): `docs/imports/2026-09-11/product-categories.csv` files all 1,948
+  STORIS SKUs into a 10 × 35 retail tree (PLAN §12.19 D44–D46; sources and
+  inferred rows in `product-categories.md`). `ops/categorize-products.ts` +
+  workflow _Ops — categorize products_ apply it (validate → commit; renames
+  MATT/ADJUST/… in place, RF folds into Services & Fees). Browser: category
+  filter includes subcategories, rows show `categoryPath`, picker reads
+  "Mattresses › Hybrid"; re-imports never coarsen. Tests:
+  `categorize-products.int.spec.ts` (7; CI db `jetnine_categorize`) +
+  nested-category case in `catalog.int.spec.ts`.
+  **Ops:** after deploy run the workflow with mode `validate`, read the plan,
+  then `commit` (file `docs/imports/2026-09-11/product-categories.csv`,
+  expect_rows 1948).

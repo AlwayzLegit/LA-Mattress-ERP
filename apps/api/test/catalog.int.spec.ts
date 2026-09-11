@@ -738,3 +738,60 @@ describe('Product delete (owner ask 2026-08-30)', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('Nested categories in the browser (A22.1)', () => {
+  it('filtering by a parent category returns the subcategory products, each with its path', async () => {
+    const parent = await request(app.getHttpServer())
+      .post('/v1/categories')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ name: 'Mattresses (tree test)' })
+      .expect(201);
+    const parentId = parent.body.id as string;
+    const child = await request(app.getHttpServer())
+      .post('/v1/categories')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ name: 'Hybrid', parentId })
+      .expect(201);
+    const childId = child.body.id as string;
+    const mk = async (sku: string, categoryId: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/v1/products')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ sku, name: sku, categoryId, variants: [{ sku, name: 'Queen', priceCents: 1 }] })
+        .expect(201);
+      return res.body.id as string;
+    };
+    const onParent = await mk('TREE-PARENT', parentId);
+    const onChild = await mk('TREE-CHILD', childId);
+
+    const byParent = await request(app.getHttpServer())
+      .get(`/v1/products?categoryId=${parentId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const rows = byParent.body.data as { id: string; categoryPath: string | null }[];
+    expect(rows.map((r) => r.id).sort()).toEqual([onChild, onParent].sort());
+    expect(rows.find((r) => r.id === onChild)?.categoryPath).toBe(
+      'Mattresses (tree test) › Hybrid',
+    );
+    expect(rows.find((r) => r.id === onParent)?.categoryPath).toBe('Mattresses (tree test)');
+
+    const byChild = await request(app.getHttpServer())
+      .get(`/v1/products?categoryId=${childId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect((byChild.body.data as { id: string }[]).map((r) => r.id)).toEqual([onChild]);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/v1/products/${onChild}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(detail.body.categoryName).toBe('Hybrid');
+    expect(detail.body.categoryPath).toBe('Mattresses (tree test) › Hybrid');
+  });
+});
