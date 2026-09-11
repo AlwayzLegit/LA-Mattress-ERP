@@ -1372,6 +1372,42 @@ Decisions (slice 4 — Replenish Inventory):
   receiving commits the units to the customers waiting. PO numbers come
   from the shared `purchasing/po-number.ts`.
 
+Decisions (slice 5 — Logistical Scheduling):
+
+- **D32 Search for schedules** (`GET /v1/scheduling/search`,
+  `deliveries.view`; page `/deliveries/search`): one list per kind —
+  sales orders (deliveries), transfers, service orders — filtered by
+  deliver-from location, route, truck, transfer-to location (transfers),
+  status and a date range that defaults to today → +35 days;
+  `includePast=1` drops the lower bound. Open schedules only unless a
+  status is asked for. Every row carries the same columns (date, window,
+  number, customer / manifest, from → to, route, truck, driver or
+  technician, city, zip, phone, units, dollars, balance due, volume,
+  status, contact status) so the grid is one table, and the strip totals
+  Stops / Units / Dollars / Volume (volume = capacity units, G12).
+- **D33 Where each kind's date, route and truck come from.** Deliveries:
+  the scheduled date, the delivery's route else its run's, the run's
+  truck and driver. Transfers: `scheduledFor` else the manifest date, the
+  transfer's route else the manifest's route name, the manifest's route
+  name as the truck; units = ordered else shipped. Service orders: the new
+  `service_orders.scheduled_for` (migration 0096; set through
+  `PATCH /v1/service-orders/:id`), the technician as crew; unbooked calls
+  never list.
+- **D34 Confirm schedule** (`GET /v1/scheduling/confirm`; page
+  `/deliveries/confirm`): a day's (or range's) deliveries — open stops
+  unless delivery statuses are ticked — with location, route and contact
+  status filters, the totals strip plus a Confirmed count, zip / city /
+  phone (the order's delivery phone else the customer's), and the flags:
+  **T** delivery ticket printed, **D** dollars due at the door (balance
+  owed), **F** fully reserved (every stock line reserved or fulfilled),
+  **P** pick list printed, **OO** on an open purchase order (a
+  special-order allocation still outstanding).
+- **D35 Contact status is a delivery field.** `deliveries.contact_status`
+  (`not_contacted` | `left_message` | `no_answer` | `confirmed` |
+  `reschedule_requested`, null = never called) with `contacted_at`, set by
+  `PATCH /v1/deliveries/:id/contact` (`deliveries.schedule`, audited with
+  the call note) — inline on the Confirm schedule grid.
+
 Build order: slice 1 (this amendment) → 2 transfers → 3 stock adjustment +
 reassign reservation → 4 replenishment → 5 scheduling → 6 returns /
 exchanges / customers → 7 kiosk, sessions, batch PO print.

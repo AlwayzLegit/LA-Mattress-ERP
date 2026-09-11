@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   index,
   integer,
   pgTable,
@@ -45,6 +46,12 @@ export const serviceOrders = pgTable(
       onDelete: 'set null',
     }),
     warranty: boolean('warranty').notNull().default(false),
+    /**
+     * A22 slice 5 (STORIS Logistical Scheduling → service orders): the
+     * day the technician visit is booked for, so the schedule search can
+     * list service calls beside deliveries and transfers.
+     */
+    scheduledFor: date('scheduled_for'),
     subtotalCents: integer('subtotal_cents').notNull().default(0),
     taxCents: integer('tax_cents').notNull().default(0),
     totalCents: integer('total_cents').notNull().default(0),

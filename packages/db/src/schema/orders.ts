@@ -408,6 +408,14 @@ export const deliveries = pgTable(
     failureReasonCodeId: uuid('failure_reason_code_id').references(() => reasonCodes.id, {
       onDelete: 'set null',
     }),
+    /**
+     * A22 slice 5 (STORIS Confirm Schedule "Contact Status"): where the
+     * confirmation call stands — 'not_contacted' | 'left_message' |
+     * 'no_answer' | 'confirmed' | 'reschedule_requested'. Null = never
+     * touched; `contactedAt` stamps the last change.
+     */
+    contactStatus: text('contact_status'),
+    contactedAt: timestamp('contacted_at', { withTimezone: true }),
     notes: text('notes'),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

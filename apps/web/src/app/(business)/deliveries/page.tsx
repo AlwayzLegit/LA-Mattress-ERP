@@ -139,6 +139,12 @@ export default function DeliveriesPage() {
         }
         actions={
           <>
+            <LinkButton href="/deliveries/search" variant="secondary" size="sm">
+              Search schedules
+            </LinkButton>
+            <LinkButton href="/deliveries/confirm" variant="secondary" size="sm">
+              Confirm schedule
+            </LinkButton>
             <LinkButton href="/deliveries/dispatch" variant="secondary" size="sm">
               Dispatch
             </LinkButton>

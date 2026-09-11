@@ -256,9 +256,19 @@ export class ServiceOrdersController {
   async update(
     @CurrentTenant() _tenant: RequestTenantContext,
     @Param('id') id: string,
-    @Body() body: { technicianMembershipId?: string | null; issue?: string; warranty?: boolean },
+    @Body()
+    body: {
+      technicianMembershipId?: string | null;
+      issue?: string;
+      warranty?: boolean;
+      /** A22 slice 5: the technician visit date (YYYY-MM-DD, null clears). */
+      scheduledFor?: string | null;
+    },
   ): Promise<Detail> {
-    await this.load(id);
+    const before = await this.load(id);
+    if (body.scheduledFor != null && !/^\d{4}-\d{2}-\d{2}$/.test(body.scheduledFor)) {
+      throw new BadRequestException('scheduledFor must be YYYY-MM-DD');
+    }
     await this.db
       .update(schema.serviceOrders)
       .set({
@@ -267,9 +277,19 @@ export class ServiceOrdersController {
           : {}),
         ...(body.issue !== undefined ? { issue: body.issue } : {}),
         ...(body.warranty !== undefined ? { warranty: body.warranty } : {}),
+        ...(body.scheduledFor !== undefined ? { scheduledFor: body.scheduledFor } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.serviceOrders.id, id));
+    if (body.scheduledFor !== undefined && body.scheduledFor !== before.scheduledFor) {
+      await this.audit.log({
+        action: 'service_order.schedule',
+        targetType: 'service_order',
+        targetId: id,
+        before: { scheduledFor: before.scheduledFor },
+        after: { scheduledFor: body.scheduledFor },
+      });
+    }
     return this.detail(id);
   }
 

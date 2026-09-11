@@ -5415,3 +5415,17 @@ sends the return salesperson the API already accepts (slice 6).
 /v1/purchasing/replenish/purchase-orders`, placed or held). A22 D28–D31.
 - Tests: `replenish.int.spec.ts` (7; CI db `jetnine_replenish`) and the
   pure `replenish-engine.spec.ts` (8).
+
+### Checkpoint — 2026-09-11 (STORIS screen sweep #2, slice 5 — scheduling)
+
+- Logistical Scheduling: Search for schedules (`/deliveries/search`,
+  `GET /v1/scheduling/search`: sales orders / transfers / service orders;
+  deliver from, route, truck, transfer to, date range, past dates; Stops /
+  Units / Dollars / Volume) and Confirm schedule (`/deliveries/confirm`,
+  `GET /v1/scheduling/confirm`: delivery + contact status filters, totals
+  with a Confirmed count, zip / city / phone, T D F P OO flags, inline
+  contact status). Contact status is a delivery field
+  (`PATCH /v1/deliveries/:id/contact`) and service orders gain a booked
+  date (`scheduledFor` on the service order patch) — migration
+  `0096_a22_scheduling`. A22 D32–D35.
+- Tests: `scheduling.int.spec.ts` (6; CI db `jetnine_scheduling`).

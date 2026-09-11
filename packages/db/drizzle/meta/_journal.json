@@ -673,6 +673,13 @@
       "when": 1789108333138,
       "tag": "0095_a22_stock_adjustment",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1789110019731,
+      "tag": "0096_a22_scheduling",
+      "breakpoints": true
     }
   ]
 }
