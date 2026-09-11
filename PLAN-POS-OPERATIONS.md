@@ -918,6 +918,18 @@ and View Product Activity (Inventory Quantities, Merchandising, Location Availab
 - Tests: `product-stock.int.spec.ts` (8, CI db `jetnine_product_stock`); the
   Playwright orders flow reaches the stock table through the `/inventory` redirect.
 
+**Amendment (owner 2026-09-11) — browser columns the user arranges:** the
+Products browser's header row is the control surface. Drag a column header
+to put the columns in any order (kept per browser in localStorage under
+`jetnine.products.columns`; "Reset columns" restores the STORIS order).
+Click a header to sort the list by that column, click again to flip; the
+sort lives in the URL (`?sort=&dir=`) like the orders list. Sorting is
+server-side so every page follows it: `GET /v1/products?sort=<column>&dir=`
+materialises the matching products (first 5,000 by name), sorts the
+finished rows (text case-insensitively with blanks last, numbers
+numerically, a hidden cost as blank) and pages by offset; unsorted browsing
+keeps its keyset cursor.
+
 ### 12.16 Enter a Sales Order — every STORIS section and action (amendment A20, owner 2026-09-10)
 
 Owner ask (four STORIS screenshots — the empty and filled "Enter a Sales

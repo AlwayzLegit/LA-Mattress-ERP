@@ -247,6 +247,68 @@ describe('Epic 1.7 — Product catalog', () => {
     expect(ids).toContain(productId);
   });
 
+  it('Browser sorts by any column and pages by offset (owner 2026-09-11)', async () => {
+    // Two more products around the widget: a cheap one first by name, a
+    // dear one last by name.
+    for (const [sku, name, priceCents] of [
+      ['AARD-1', 'Aardvark Base', 999],
+      ['ZEPH-1', 'Zephyr Pillow', 5999],
+    ] as const) {
+      await request(app.getHttpServer())
+        .post('/v1/products')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ sku, name, variants: [{ sku: `${sku}-A`, name: 'Std', priceCents }] })
+        .expect(201);
+    }
+    const byPrice = await request(app.getHttpServer())
+      .get('/v1/products?sort=priceCents&dir=desc')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const prices = (byPrice.body.data as { priceCents: number | null }[]).map((p) => p.priceCents);
+    expect(prices[0]).toBe(5999);
+    for (let i = 1; i < prices.length; i++) {
+      // Descending, blanks (null) last.
+      if (prices[i] != null) expect(prices[i]!).toBeLessThanOrEqual(prices[i - 1] ?? Infinity);
+    }
+
+    // Offset paging follows the sort: one row per page, names ascending.
+    const first = await request(app.getHttpServer())
+      .get('/v1/products?sort=name&dir=asc&limit=1')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(first.body.data).toHaveLength(1);
+    expect(first.body.data[0].name).toBe('Aardvark Base');
+    expect(first.body.nextCursor).toBeTruthy();
+    const second = await request(app.getHttpServer())
+      .get(`/v1/products?sort=name&dir=asc&limit=1&cursor=${first.body.nextCursor}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(second.body.data).toHaveLength(1);
+    expect(second.body.data[0].id).not.toBe(first.body.data[0].id);
+    expect(
+      String(second.body.data[0].name).localeCompare('Aardvark Base', undefined, {
+        sensitivity: 'base',
+      }),
+    ).toBeGreaterThan(0);
+
+    // Search results sort too; a made-up column is refused.
+    const searched = await request(app.getHttpServer())
+      .get('/v1/products?q=Widget&sort=priceCents&dir=asc')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(searched.body.nextCursor).toBeNull();
+    await request(app.getHttpServer())
+      .get('/v1/products?sort=bogus')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(400);
+  });
+
   it('Cashier (products.view but not products.cost.view) sees prices but not costs', async () => {
     const res = await request(app.getHttpServer())
       .get(`/v1/products/${productId}`)

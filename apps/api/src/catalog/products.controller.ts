@@ -21,6 +21,7 @@ import { CurrentTenant } from '../auth/current-user.decorator';
 import {
   buildPage,
   clampLimit as clampPageLimit,
+  encodeCursor,
   decodeCursor,
   type PageResponse,
 } from '../common/pagination';
@@ -149,6 +150,67 @@ interface ProductOut {
   stock: { totals: StockTotals; byLocation: LocationStockRow[] };
 }
 
+/** The STORIS browser columns a click can sort by (owner 2026-09-11). */
+export const PRODUCT_SORT_KEYS = [
+  'sku',
+  'vendorModel',
+  'vendorName',
+  'name',
+  'onHand',
+  'available',
+  'netOnPo',
+  'costCents',
+  'asIsOnHand',
+  'asIsAvailable',
+  'priceCents',
+  'purchaseStatus',
+  'asIsNonSellable',
+  'group',
+  'brandName',
+] as const;
+export type ProductSortKey = (typeof PRODUCT_SORT_KEYS)[number];
+
+/** A sorted browse materialises at most this many products (by name). */
+const SORTED_BROWSE_CAP = 5000;
+const OFFSET_CURSOR_ID = 'offset';
+
+function offsetFromCursor(raw: string | undefined): number {
+  const c = decodeCursor(raw);
+  if (!c) return 0;
+  if (c.id !== OFFSET_CURSOR_ID || typeof c.v !== 'number' || c.v < 0) {
+    throw new BadRequestException('Invalid cursor');
+  }
+  return Math.floor(c.v);
+}
+
+/**
+ * Stable sort of finished rows: text columns case-insensitively with
+ * blanks last in either direction, numbers numerically (a hidden cost
+ * counts as blank), name + id as the tiebreaker so pages never repeat.
+ */
+export function sortProductRows(
+  rows: ProductListRow[],
+  key: ProductSortKey,
+  dir: 'asc' | 'desc',
+): ProductListRow[] {
+  const sign = dir === 'desc' ? -1 : 1;
+  const cmp = (a: ProductListRow, b: ProductListRow): number => {
+    const av = a[key];
+    const bv = b[key];
+    const aBlank = av == null || av === '';
+    const bBlank = bv == null || bv === '';
+    if (aBlank && bBlank) return 0;
+    if (aBlank) return 1;
+    if (bBlank) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return sign * (av - bv);
+    if (typeof av === 'boolean' && typeof bv === 'boolean') return sign * (Number(av) - Number(bv));
+    return sign * String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' });
+  };
+  return [...rows].sort(
+    (a, b) => cmp(a, b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+  );
+}
+
 @TenantScoped()
 @Controller('v1/products')
 export class CatalogProductsController {
@@ -167,6 +229,14 @@ export class CatalogProductsController {
    *                     2026-09-10: the catalog replace retired 733 listings
    *                     and they crowded out the live ones)
    *   limit      — 1..200, default 50
+   *   sort / dir — owner 2026-09-11: click a browser column to sort by it.
+   *                Any of the STORIS columns (PRODUCT_SORT_KEYS); dir asc|desc.
+   *                Every column but the name is derived per row (primary
+   *                variant, stock summed across stores), so a sorted browse
+   *                materialises the matching products (first 5,000 by name),
+   *                sorts the finished rows and pages by offset — the cursor
+   *                is then an offset, not a keyset. Unsorted browsing is the
+   *                keyset path it always was.
    */
   @Get()
   @RequirePermission('products.view')
@@ -179,9 +249,18 @@ export class CatalogProductsController {
     @Query('includeInactive') includeInactiveStr?: string,
     @Query('limit') limitStr?: string,
     @Query('cursor') cursorStr?: string,
+    @Query('sort') sortRaw?: string,
+    @Query('dir') dirRaw?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
     const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
+    const sortKey = (PRODUCT_SORT_KEYS as readonly string[]).includes(sortRaw ?? '')
+      ? (sortRaw as ProductSortKey)
+      : null;
+    if (sortRaw && !sortKey) {
+      throw new BadRequestException(`sort must be one of ${PRODUCT_SORT_KEYS.join(', ')}`);
+    }
+    const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
     const filters: ReturnType<typeof and>[] = [];
     if (!includeInactive) filters.push(eq(schema.products.isActive, true));
     if (categoryId) filters.push(eq(schema.products.categoryId, categoryId));
@@ -221,7 +300,31 @@ export class CatalogProductsController {
         )
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))
         .limit(limit);
-      return { data: await this.listRows(tenant, data, locationId), nextCursor: null };
+      const found = await this.listRows(tenant, data, locationId);
+      return { data: sortKey ? sortProductRows(found, sortKey, dir) : found, nextCursor: null };
+    }
+
+    if (sortKey) {
+      // Sorted browse: materialise, sort the finished rows, page by offset.
+      const offset = offsetFromCursor(cursorStr);
+      const all = await this.db
+        .select({
+          id: schema.products.id,
+          sku: schema.products.sku,
+          name: schema.products.name,
+          isActive: schema.products.isActive,
+        })
+        .from(schema.products)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(asc(schema.products.name), asc(schema.products.id))
+        .limit(SORTED_BROWSE_CAP);
+      const sorted = sortProductRows(await this.listRows(tenant, all, locationId), sortKey, dir);
+      const data = sorted.slice(offset, offset + limit);
+      const next = offset + limit;
+      return {
+        data,
+        nextCursor: next < sorted.length ? encodeCursor(next, OFFSET_CURSOR_ID) : null,
+      };
     }
 
     // Default browse: alphabetical by name, with id as the tiebreaker.
@@ -288,11 +391,12 @@ export class CatalogProductsController {
       .where(inArray(schema.productVariants.productId, ids))
       .orderBy(asc(schema.productVariants.createdAt));
     const primary = new Map<string, (typeof variants)[number]>();
+    const rowById = new Map(rows.map((r) => [r.id, r]));
     for (const v of variants) {
       const cur = primary.get(v.productId);
       // The variant that carries the product's own SKU wins; else the
       // first active one; else the first.
-      const row = rows.find((r) => r.id === v.productId);
+      const row = rowById.get(v.productId);
       if (!cur || (v.sku && v.sku === row?.sku) || (!cur.isActive && v.isActive)) {
         if (!cur || !(cur.sku && cur.sku === row?.sku)) primary.set(v.productId, v);
       }

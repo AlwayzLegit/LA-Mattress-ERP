@@ -5241,3 +5241,21 @@ Phase 1 (this branch):
 Phase 2: protection plans + extended warranty (D8); discount codes on
 orders / automated line discounting (D7). Phase 3: signature capture (D9,
 reverses a §13 exclusion — owner to confirm).
+
+### Checkpoint — 2026-09-11 (Products browser: drag columns, click to sort)
+
+Owner, on the Products header row: "Need to be able to click and drag the
+row organize however the user wants and to be able to click on the row and
+sort it by the option between the lists."
+
+- Web: every browser column header is draggable — drop it on another header
+  and it takes that column's place; the order is kept per browser
+  (`jetnine.products.columns`) with a Reset columns link when it differs
+  from the STORIS order. Clicking a header sorts by that column (▲/▼, click
+  again to flip); `?sort=&dir=` in the URL survives reloads. A19 amended.
+- API: `GET /v1/products` accepts `sort` (any of the 15 browser columns) and
+  `dir`; a sorted browse materialises the matching products (≤ 5,000),
+  sorts the finished rows and pages by offset cursor, so Load more follows
+  the sort. Search results sort too. Unknown `sort` → 400.
+- Tests: `catalog.int.spec.ts` gains sort coverage (price desc, offset
+  paging, bad key).
