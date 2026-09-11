@@ -452,6 +452,33 @@ code {
   background: var(--surface2);
 }
 
+/* Products browser (owner 2026-09-11): headers drag to reorder and click
+   to sort. The grip shows on hover; a drop target gets a left rule. */
+.table th[draggable='true'] {
+  cursor: grab;
+}
+.table th[draggable='true']:active {
+  cursor: grabbing;
+}
+.table th .th-grip {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  vertical-align: -2px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition:
+    width 0.12s ease,
+    opacity 0.12s ease;
+}
+.table th:hover .th-grip {
+  width: 12px;
+  opacity: 0.7;
+}
+.table th.th-drop {
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+
 /* P-018 (S01 audit): the one dense-list pattern — tighter rows and a
    header that stays visible inside the list's scroll container. */
 .table-dense td {
