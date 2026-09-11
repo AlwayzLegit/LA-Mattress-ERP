@@ -1,4 +1,10 @@
 export const PERMISSIONS = {
+  'chat.view_assigned': 'View assigned chat conversations',
+  'chat.view_team': 'View team chat conversations',
+  'chat.reply': 'Reply to chats and write private notes',
+  'chat.assign': 'Assign chat conversations',
+  'chat.manage': 'Manage chat settings',
+  'chat.export': 'Export chat transcripts',
   'business.settings.view': 'View business settings',
   'business.settings.update': 'Update business settings',
   'business.billing.view': 'View billing',

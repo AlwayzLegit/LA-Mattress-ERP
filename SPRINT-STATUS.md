@@ -5469,3 +5469,10 @@ sends the return salesperson the API already accepts (slice 6).
   Postgres refused new clients (`sorry, too many clients already`) at 64
   integration specs. `DatabaseModule` now ends the pool in
   `onApplicationShutdown`; the full suite peaks at 10 connections.
+
+### Checkpoint — 2026-09-11 (live chat: persistence foundation, local only)
+
+- [x] Build: chat schema + migration 0099, RLS registries, strict shared DTOs, hashed guest sessions, transactional message/sequence/outbox storage, retry deduplication, visitor-safe history and permission-gated staff writes/private notes.
+- [x] Validation: 11 Postgres chat integration tests and package typechecks; see docs/live-chat-development.md for exact checks and limits.
+- [ ] Build: worker/Ably transport, HTTP boundaries and OpenAPI, inbox, assignments and persistent storefront widget. The service is not registered in AppModule.
+- [ ] Ops: isolated staging services/provider credentials and named testers. Owner confirmed no staging environments or testing accounts yet; local synthetic fixtures unblock development.

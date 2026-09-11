@@ -1,4 +1,5 @@
 export * from './platform';
+export * from './chat';
 export * from './auth';
 export * from './tenancy';
 export * from './audit';
@@ -40,6 +41,11 @@ export * from './schedule';
 // the migration script in src/migrations/rls.sql — when you add a new
 // tenant-scoped table, append it both here and in that file.
 export const TENANT_SCOPED_TABLES = [
+  'chat_integrations',
+  'chat_sessions',
+  'chat_conversations',
+  'chat_messages',
+  'chat_outbox',
   'order_attachments',
   'cash_pickup_receipts',
   'order_change_acks',
