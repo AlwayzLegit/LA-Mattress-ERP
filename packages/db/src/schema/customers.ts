@@ -13,6 +13,9 @@ export const customers = pgTable(
     phone: text('phone'),
     /** Optional secondary phone (owner 2026-08-31) — spouse, work, cell. */
     phone2: text('phone2'),
+    /** A20 (STORIS Billing Information): work phone + extension. */
+    workPhone: text('work_phone'),
+    workPhoneExt: text('work_phone_ext'),
     firstName: text('first_name'),
     lastName: text('last_name'),
     addressesJson: jsonb('addresses_json'),

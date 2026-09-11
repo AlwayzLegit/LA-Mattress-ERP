@@ -1,4 +1,5 @@
 import {
+  boolean,
   check,
   date,
   index,
@@ -123,6 +124,18 @@ export const orders = pgTable(
     billingAddressJson: jsonb('billing_address_json'),
     // Promotion-source tag ("LABOR-DAY-TV"); free text, reportable later.
     marketingCode: text('marketing_code'),
+    // A20 (STORIS Step 1 "Marketing Code 2"): a second attribution tag.
+    marketingCode2: text('marketing_code_2'),
+    /** A20 "Order Source Entry": Walk-in / Phone / Web / Referral … (ops.orderSources). */
+    orderSource: text('order_source'),
+    /** A20 "Assign Payment Terminal": which reader took the card (ops.paymentTerminals). */
+    paymentTerminal: text('payment_terminal'),
+    /** A20 "View/Edit Exception Comments": why this order's exceptions happened. */
+    exceptionNotes: text('exception_notes'),
+    /** A20 "Trade/Designer Information": { name, company, phone, email, note }. */
+    tradeDesignerJson: jsonb('trade_designer_json'),
+    /** A20 "Custom Order Information": [{ label, value }] printed on the invoice. */
+    customInfoJson: jsonb('custom_info_json'),
     // Step-3 charges. Kept as three named buckets (STORIS parity) rather
     // than fee lines; added to total_cents after tax, never taxed (v1).
     deliveryFeeCents: integer('delivery_fee_cents').notNull().default(0),
@@ -253,6 +266,21 @@ export const orderLines = pgTable(
     fulfillmentMethod: text('fulfillment_method'),
     // Per-line promised date when parts of an order arrive separately.
     deliveryDate: date('delivery_date'),
+    // A20 (STORIS Step 2 line details). All optional; none affects money.
+    /** "Line Comments": prints under the line on the invoice and delivery ticket. */
+    comment: text('comment'),
+    /** "Assign Rooms to Order": where the piece goes in the home (ops.rooms). */
+    room: text('room'),
+    /** "Assign Pieces": how many pieces the truck carries for one unit. */
+    pieces: integer('pieces'),
+    /** "Prep Codes": warehouse instructions from ops.prepCodes. */
+    prepCodes: jsonb('prep_codes').$type<string[]>(),
+    /** "Customer's Own Material": { supplied: true, description }. */
+    comJson: jsonb('com_json'),
+    /** "Direct Ship Details": { vendorName, vendorOrderRef, trackingNumber, expectedDate }. */
+    directShipJson: jsonb('direct_ship_json'),
+    /** "Maintain Linked Installation Line": the order's installation fee covers this line. */
+    needsInstall: boolean('needs_install').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -429,6 +457,42 @@ export const deliveryLines = pgTable(
  * Append-only — the order's `notes`/`internal_notes` columns stay the
  * printed/customer-facing text; this is the running conversation.
  */
+/**
+ * A20 (STORIS "Add / Edit / View Attachments"): files pinned to an order
+ * or to one of its lines — a signed quote, a floor-plan photo, a vendor
+ * confirmation. No object store is provisioned, so the bytes live here
+ * (base64, ≤ 5 MB each, 25 per order) and are served through the API
+ * with the order's own permissions.
+ */
+export const orderAttachments = pgTable(
+  'order_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    lineId: uuid('line_id').references(() => orderLines.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    /** Base64 of the file body. */
+    dataBase64: text('data_base64').notNull(),
+    note: text('note'),
+    uploadedByMembershipId: uuid('uploaded_by_membership_id').references(() => memberships.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    orderIdx: index('order_attachments_order_id_idx').on(t.orderId, t.createdAt),
+    businessIdx: index('order_attachments_business_id_idx').on(t.businessId),
+    sizePositive: check('order_attachments_size_positive', sql`${t.sizeBytes} > 0`),
+  }),
+);
+
 export const orderNotes = pgTable(
   'order_notes',
   {

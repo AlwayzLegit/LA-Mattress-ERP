@@ -117,6 +117,40 @@ interface OpsSettings {
     takeWithOpenHours?: number | null;
     lookbackDays?: number | null;
   } | null;
+  /**
+   * A20 (STORIS Enter a Sales Order) pick lists. Each is a plain list of
+   * labels; the order-page pickers accept free text too, so a missing
+   * entry never blocks a sale. Null/absent = no suggestions.
+   */
+  marketingCodes?: string[] | null;
+  orderSources?: string[] | null;
+  prepCodes?: string[] | null;
+  rooms?: string[] | null;
+  paymentTerminals?: string[] | null;
+}
+
+/** A20 pick lists: up to 200 labels of up to 60 characters, de-duplicated. */
+const OPS_LIST_KEYS = [
+  'marketingCodes',
+  'orderSources',
+  'prepCodes',
+  'rooms',
+  'paymentTerminals',
+] as const;
+
+function validateOpsList(key: string, value: unknown): string[] | null {
+  if (value === null) return null;
+  if (!Array.isArray(value)) throw new BadRequestException(`ops.${key} must be a list or null`);
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string') throw new BadRequestException(`ops.${key} entries must be text`);
+    const v = raw.trim().replace(/\s+/g, ' ');
+    if (!v) continue;
+    if (v.length > 60) throw new BadRequestException(`ops.${key} entries must be ≤ 60 characters`);
+    if (!out.some((x) => x.toLowerCase() === v.toLowerCase())) out.push(v);
+  }
+  if (out.length > 200) throw new BadRequestException(`ops.${key} holds at most 200 entries`);
+  return out;
 }
 
 /**
@@ -286,6 +320,46 @@ const OPS_SETTINGS_REGISTRY = [
     nullMeans: 'Off — no PO drafts overnight',
     classTags: [],
     readBy: 'Nightly batch runner (JOB-002)',
+  },
+  {
+    key: 'marketingCodes',
+    label: 'Marketing codes (order attribution)',
+    type: 'list',
+    nullMeans: 'No suggestions — the order page accepts any code typed',
+    classTags: [],
+    readBy: 'Order page Marketing Code 1 / 2 pickers; Written Sales report',
+  },
+  {
+    key: 'orderSources',
+    label: 'Order sources',
+    type: 'list',
+    nullMeans: 'No suggestions — the order page accepts any source typed',
+    classTags: [],
+    readBy: 'Order page Order Source Entry',
+  },
+  {
+    key: 'prepCodes',
+    label: 'Prep codes (warehouse instructions)',
+    type: 'list',
+    nullMeans: 'No suggestions — line details accept any code typed',
+    classTags: [],
+    readBy: 'Order line details; delivery ticket and pick list',
+  },
+  {
+    key: 'rooms',
+    label: 'Rooms (where a piece goes in the home)',
+    type: 'list',
+    nullMeans: 'No suggestions — line details accept any room typed',
+    classTags: [],
+    readBy: 'Order line details; delivery ticket',
+  },
+  {
+    key: 'paymentTerminals',
+    label: 'Payment terminals (card readers)',
+    type: 'list',
+    nullMeans: 'No terminals to assign',
+    classTags: [],
+    readBy: 'Order page Assign Payment Terminal',
   },
   {
     key: 'unlockRoleIds',
@@ -542,6 +616,9 @@ function validateOps(input: OpsSettings): OpsSettings {
     }
     out.priceVariance = input.priceVariance;
   }
+  for (const key of OPS_LIST_KEYS) {
+    if (input[key] !== undefined) out[key] = validateOpsList(key, input[key]);
+  }
   if (input.opsReview !== undefined) {
     if (input.opsReview !== null) {
       for (const [key, val] of Object.entries(input.opsReview) as [
@@ -771,6 +848,12 @@ export class SettingsController {
 /** Ops keys safe for every member to read (everything except contact/role plumbing). */
 const POS_VISIBLE_OPS_KEYS = [
   'recyclingFeeCents',
+  // A20 order-page pick lists.
+  'marketingCodes',
+  'orderSources',
+  'prepCodes',
+  'rooms',
+  'paymentTerminals',
   'invoiceHeaderNote',
   'invoiceFooterNote',
   'deliveryDailyCap',

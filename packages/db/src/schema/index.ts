@@ -40,6 +40,7 @@ export * from './schedule';
 // the migration script in src/migrations/rls.sql — when you add a new
 // tenant-scoped table, append it both here and in that file.
 export const TENANT_SCOPED_TABLES = [
+  'order_attachments',
   'cash_pickup_receipts',
   'order_change_acks',
   'staff_shifts',

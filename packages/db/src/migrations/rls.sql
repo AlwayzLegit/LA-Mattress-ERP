@@ -147,6 +147,7 @@ DECLARE
     'exchanges',
     'daily_closeouts',
     'ops_reviews',
+    'order_attachments',
     'order_notes',
     'order_tasks',
     'member_notifications',

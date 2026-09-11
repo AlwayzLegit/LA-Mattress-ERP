@@ -98,6 +98,7 @@ jobs:
       PRODUCT_STOCK_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_product_stock
       STORE_DASHBOARD_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_store_dashboard
       SCHEDULE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_schedule
+      ORDER_ACTIONS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_order_actions
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -126,6 +127,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_customers
           createdb -h localhost -U postgres jetnine_sales
           createdb -h localhost -U postgres jetnine_orders
+          createdb -h localhost -U postgres jetnine_order_actions
           createdb -h localhost -U postgres jetnine_deliveries
           createdb -h localhost -U postgres jetnine_specials
           createdb -h localhost -U postgres jetnine_exchanges
