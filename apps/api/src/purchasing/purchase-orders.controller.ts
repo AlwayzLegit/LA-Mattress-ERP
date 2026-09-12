@@ -189,6 +189,11 @@ interface PoDetail extends PoListRow {
   lines: PoLineRow[];
 }
 
+/** A receipt's answer (redesign Phase 7): the PO after posting plus the orders it unblocked. */
+interface PoReceiveResult extends PoDetail {
+  unblockedOrders: { orderId: string; number: string; units: number }[];
+}
+
 @TenantScoped()
 @Controller('v1/purchase-orders')
 export class PurchaseOrdersController {
@@ -941,7 +946,7 @@ export class PurchaseOrdersController {
     @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
     @Body() body: ReceivePoBody,
-  ): Promise<PoDetail> {
+  ): Promise<PoReceiveResult> {
     if (!body.lines || body.lines.length === 0) {
       throw new BadRequestException('lines must contain at least one entry');
     }
@@ -1006,7 +1011,7 @@ export class PurchaseOrdersController {
     @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
     @Body() body: ReceiveStagesBody,
-  ): Promise<PoDetail> {
+  ): Promise<PoReceiveResult> {
     if (!body.lines || body.lines.length === 0) {
       throw new BadRequestException('lines must contain at least one entry');
     }
@@ -1098,7 +1103,8 @@ export class PurchaseOrdersController {
       rejected?: number;
     }[],
     notes: string | null,
-  ): Promise<PoDetail> {
+  ): Promise<PoReceiveResult> {
+    let unblockedOrders: PoReceiveResult['unblockedOrders'] = [];
     let unitsReceived = 0;
     let unitsAccepted = 0;
     // Q1 landed cost lean: every ordered unit carries the same freight
@@ -1313,6 +1319,11 @@ export class PurchaseOrdersController {
           metadata: { number: a.number, trigger: 'po_receive', poId: po.id, lines: a.lines },
         });
       }
+      unblockedOrders = allocations.map((a) => ({
+        orderId: a.orderId,
+        number: a.number,
+        units: a.lines.reduce((n, l) => n + l.quantity, 0),
+      }));
     }
 
     if (fullyAccepted) {
@@ -1328,7 +1339,25 @@ export class PurchaseOrdersController {
         },
       });
     }
-    return this.hydrate(po.id);
+    // Special orders linked to the received lines were satisfied through
+    // their allocations before allocatePending ran, so they never show up
+    // in `allocations`; the rail promised them, so report them too.
+    const detail = await this.hydrate(po.id);
+    const acceptedLineIds = new Set(entries.filter((e) => e.accepted > 0).map((e) => e.line.id));
+    const byOrder = new Map(unblockedOrders.map((u) => [u.orderId, u]));
+    for (const line of detail.lines) {
+      if (!acceptedLineIds.has(line.id)) continue;
+      for (const lo of line.linkedOrders) {
+        if (!byOrder.has(lo.orderId)) {
+          byOrder.set(lo.orderId, {
+            orderId: lo.orderId,
+            number: lo.orderNumber,
+            units: lo.quantity,
+          });
+        }
+      }
+    }
+    return { ...detail, unblockedOrders: [...byOrder.values()] };
   }
 
   @Post(':id/cancel')

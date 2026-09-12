@@ -1,118 +1,80 @@
 'use client';
 
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { GripVertical, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { GripVertical } from 'lucide-react';
 import {
-  FIRMNESS_LEVELS,
   MATTRESS_SIZES,
   PRODUCT_PURCHASE_STATUS_LABELS,
   PRODUCT_PURCHASE_STATUSES,
-  type ProductPurchaseStatus,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { CsvImport } from '@/components/csv-import';
-import { LoadMore } from '@/components/load-more';
 import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
-import { useCursorList } from '@/lib/use-cursor-list';
 import {
-  Accordion,
   Alert,
   Button,
-  Card,
-  EmptyState,
   Field,
-  FormGrid,
   Input,
   LinkButton,
   LoadingRows,
-  PageHeader,
   Select,
-  Stack,
   StatusBadge,
-  TableWrap,
-  Toolbar,
 } from '@/components/ui';
 
 /**
- * The STORIS product browser (amendment A19, owner 2026-09-10): one row
- * per product with Vendor Model · Vendor · Description · On Hand ·
- * Available · Net On PO · Sales Margin Cost · As-Is On Hand · As-Is
- * Available · Price · Status · As-Is Non-Sellable · Product Group · Brand,
- * across every store or one of them.
+ * Products browser (redesign Phase 7, README §3.3, canvas 6a). The
+ * question is "who has this, anywhere, right now?" — so one row per
+ * SKU and **one column per store** (available = on hand − reserved),
+ * plus the company total, every STORIS column, drag-to-reorder and
+ * click-to-sort headers (order remembered on this browser), a stock
+ * filter (in stock anywhere / short somewhere / out everywhere), and
+ * the colour rules stated in words in the footer: red = 0 with open
+ * demand, amber = positive but below the store's minimum, grey = a
+ * plain zero. Never colour alone.
  */
+
+interface StoreCell {
+  onHand: number;
+  reserved: number;
+  floorSample: number;
+  available: number;
+  min: number | null;
+  demand: number;
+}
 interface ProductRow {
   id: string;
   sku: string | null;
   name: string;
   isActive: boolean;
-  purchaseStatus: ProductPurchaseStatus | string;
+  purchaseStatus: string;
   brandName: string | null;
+  categoryName: string | null;
+  categoryPath: string | null;
+  collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
-  categoryName: string | null;
-  categoryPath: string | null;
   size: string | null;
   firmness: string | null;
-  collectionName: string | null;
   priceCents: number | null;
   costCents: number | null;
   onHand: number;
+  reserved: number;
   available: number;
   netOnPo: number;
   asIsOnHand: number;
   asIsAvailable: number;
   asIsNonSellable: number;
+  stockByLocation: Record<string, StoreCell>;
 }
-
-interface Location {
+interface LocationRow {
   id: string;
   name: string;
-  isActive: boolean;
-}
-
-/**
- * The STORIS "Search for a Product" criteria (A21 D13): each one narrows
- * the browse; blanks are ignored. Every key is a `GET /v1/products` query.
- */
-interface Criteria {
-  sku: string;
-  name: string;
-  brandId: string;
-  vendorModel: string;
-  collectionId: string;
-  categoryId: string;
-  group: string;
-  size: string;
-  firmness: string;
-  purchaseStatus: string;
-  asIsReasonCodeId: string;
-}
-const EMPTY_CRITERIA: Criteria = {
-  sku: '',
-  name: '',
-  brandId: '',
-  vendorModel: '',
-  collectionId: '',
-  categoryId: '',
-  group: '',
-  size: '',
-  firmness: '',
-  purchaseStatus: '',
-  asIsReasonCodeId: '',
-};
-interface Facets {
-  groups: { value: string; count: number }[];
-  sizes: { value: string; count: number }[];
-  firmness: { value: string; count: number }[];
-}
-function criteriaParams(c: Criteria): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(c)) if (v.trim()) out[k] = v.trim();
-  return out;
+  locationType?: string;
+  isActive?: boolean;
 }
 interface RefOption {
   id: string;
@@ -124,18 +86,16 @@ interface CategoryFlat {
   name: string;
   position: number;
 }
+interface ReasonCodeOption {
+  id: string;
+  code: string;
+  description: string;
+}
 
-/**
- * A22.1: categories nest, so the picker reads "Mattresses › Hybrid" —
- * roots in their set order, each one's children right under it. Picking a
- * root filters to everything beneath it.
- */
+/** Categories nest, so the picker reads "Mattresses › Hybrid". */
 function categoryOptions(flat: CategoryFlat[]): RefOption[] {
   const byParent = new Map<string | null, CategoryFlat[]>();
-  for (const c of flat) {
-    const key = c.parentId ?? null;
-    byParent.set(key, [...(byParent.get(key) ?? []), c]);
-  }
+  for (const c of flat) byParent.set(c.parentId, [...(byParent.get(c.parentId) ?? []), c]);
   const out: RefOption[] = [];
   const walk = (parentId: string | null, prefix: string) => {
     const kids = [...(byParent.get(parentId) ?? [])].sort(
@@ -150,29 +110,64 @@ function categoryOptions(flat: CategoryFlat[]): RefOption[] {
   walk(null, '');
   return out;
 }
-interface ReasonCodeOption {
-  id: string;
-  code: string;
-  description: string;
+
+/** Advanced search (canvas 6a): ten fields behind a disclosure. */
+interface Criteria {
+  vendorModel: string;
+  brandId: string;
+  collectionId: string;
+  group: string;
+  purchaseStatus: string;
+  asIsReasonCodeId: string;
+  priceMin: string;
+  priceMax: string;
+  costMin: string;
+  costMax: string;
+}
+const EMPTY_CRITERIA: Criteria = {
+  vendorModel: '',
+  brandId: '',
+  collectionId: '',
+  group: '',
+  purchaseStatus: '',
+  asIsReasonCodeId: '',
+  priceMin: '',
+  priceMax: '',
+  costMin: '',
+  costMax: '',
+};
+const CENTS_KEYS = new Set(['priceMin', 'priceMax', 'costMin', 'costMax']);
+function criteriaParams(c: Criteria): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(c)) {
+    if (!v.trim()) continue;
+    out[k] = CENTS_KEYS.has(k) ? String(Math.round(Number(v) * 100)) : v.trim();
+  }
+  return out;
 }
 
-/**
- * The browser's columns (owner 2026-09-11): drag a header to put the
- * columns in any order — kept per browser in localStorage — and click a
- * header to sort by it (server-side, so every page follows the sort).
- * `sort` is the API key; `num` right-aligns.
- */
+const STOCK_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'anywhere', label: 'In stock anywhere' },
+  { value: 'short', label: 'Short somewhere' },
+  { value: 'out', label: 'Out everywhere' },
+];
+
 interface Column {
   id: string;
   label: string;
+  /** API sort key; store columns sort by `available:<locationId>`. */
   sort: string;
   num?: boolean;
-  render: (p: ProductRow, statusLabel: (p: ProductRow) => string) => ReactNode;
+  store?: LocationRow;
+  render: (p: ProductRow) => ReactNode;
 }
 
-const COLUMNS: Column[] = [
-  // A22: STORIS Search for a Product leads with the category and ends
-  // with the primary collection.
+function statusLabel(p: ProductRow): string {
+  return PRODUCT_PURCHASE_STATUS_LABELS[p.purchaseStatus as never] ?? p.purchaseStatus;
+}
+
+const FIXED_BEFORE_STORES: Column[] = [
   {
     id: 'category',
     label: 'Product category',
@@ -183,31 +178,57 @@ const COLUMNS: Column[] = [
     id: 'product',
     label: 'Product',
     sort: 'sku',
-    render: (p) => <code>{p.sku ?? '—'}</code>,
+    render: (p) => (
+      <Link
+        href={`/products/${p.id}`}
+        className="pb-sku"
+        data-testid="product-link"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {p.sku ?? '—'}
+      </Link>
+    ),
   },
   {
     id: 'vendorModel',
     label: 'Vendor model',
     sort: 'vendorModel',
-    render: (p) => p.vendorModel ?? '—',
+    render: (p) => <span className="pb-mono">{p.vendorModel ?? '—'}</span>,
   },
   { id: 'vendor', label: 'Vendor', sort: 'vendorName', render: (p) => p.vendorName ?? '—' },
   {
     id: 'description',
     label: 'Description',
     sort: 'name',
-    render: (p) => <strong>{p.name}</strong>,
+    render: (p) => (
+      <Link href={`/products/${p.id}`} className="pb-name" onClick={(e) => e.stopPropagation()}>
+        {p.name}
+      </Link>
+    ),
   },
-  { id: 'onHand', label: 'On hand', sort: 'onHand', num: true, render: (p) => p.onHand },
-  { id: 'available', label: 'Available', sort: 'available', num: true, render: (p) => p.available },
+];
+const FIXED_AFTER_STORES: Column[] = [
+  { id: 'onHand', label: 'On hand · company', sort: 'onHand', num: true, render: (p) => p.onHand },
   { id: 'netOnPo', label: 'Net on PO', sort: 'netOnPo', num: true, render: (p) => p.netOnPo },
+  {
+    id: 'available',
+    label: 'Available · ATP',
+    sort: 'available',
+    num: true,
+    render: (p) => (
+      <span title="Available to promise: available now plus units still due on open POs">
+        {p.available}
+        {p.netOnPo > 0 && <span className="pb-atp"> · {p.available + p.netOnPo}</span>}
+      </span>
+    ),
+  },
   {
     id: 'cost',
     label: 'Sales margin cost',
     sort: 'costCents',
     num: true,
     render: (p) =>
-      p.costCents != null ? <Money cents={p.costCents} /> : <em className="muted">hidden</em>,
+      p.costCents == null ? <em className="pb-muted">hidden</em> : <Money cents={p.costCents} />,
   },
   {
     id: 'asIsOnHand',
@@ -228,21 +249,16 @@ const COLUMNS: Column[] = [
     label: 'Price',
     sort: 'priceCents',
     num: true,
-    render: (p) => (p.priceCents != null ? <Money cents={p.priceCents} /> : '—'),
+    render: (p) => (p.priceCents == null ? '—' : <Money cents={p.priceCents} />),
   },
   {
     id: 'status',
     label: 'Status',
     sort: 'purchaseStatus',
-    render: (p, statusLabel) => (
+    render: (p) => (
       <>
         {statusLabel(p)}
-        {!p.isActive && (
-          <>
-            {' '}
-            <StatusBadge status="inactive" />
-          </>
-        )}
+        {!p.isActive && <StatusBadge status="inactive" className="ml-1" />}
       </>
     ),
   },
@@ -253,11 +269,15 @@ const COLUMNS: Column[] = [
     num: true,
     render: (p) => p.asIsNonSellable,
   },
-  { id: 'group', label: 'Product group', sort: 'group', render: (p) => p.group ?? '—' },
-  // A22.2: the canonical size and firmness (variant columns, filterable).
+  {
+    id: 'group',
+    label: 'Product group',
+    sort: 'group',
+    render: (p) => <span className="pb-mono">{p.group ?? '—'}</span>,
+  },
+  { id: 'brand', label: 'Brand', sort: 'brandName', render: (p) => p.brandName ?? '—' },
   { id: 'size', label: 'Size', sort: 'size', render: (p) => p.size ?? '—' },
   { id: 'firmness', label: 'Firmness', sort: 'firmness', render: (p) => p.firmness ?? '—' },
-  { id: 'brand', label: 'Brand', sort: 'brandName', render: (p) => p.brandName ?? '—' },
   {
     id: 'collection',
     label: 'Primary collection',
@@ -265,651 +285,703 @@ const COLUMNS: Column[] = [
     render: (p) => p.collectionName ?? '—',
   },
 ];
-const DEFAULT_ORDER = COLUMNS.map((c) => c.id);
-const COLUMN_ORDER_KEY = 'jetnine.products.columns';
 
-function readColumnOrder(): string[] {
+const COLUMN_ORDER_KEY = 'jetnine.products.columns';
+function readColumnOrder(defaultOrder: string[]): string[] {
   try {
     const raw = localStorage.getItem(COLUMN_ORDER_KEY);
-    if (!raw) return DEFAULT_ORDER;
+    if (!raw) return defaultOrder;
     const saved = JSON.parse(raw) as unknown;
-    if (!Array.isArray(saved)) return DEFAULT_ORDER;
-    const known = saved.filter((id): id is string => DEFAULT_ORDER.includes(String(id)));
-    // Columns added after the order was saved go on the end.
-    return [...known, ...DEFAULT_ORDER.filter((id) => !known.includes(id))];
+    if (!Array.isArray(saved)) return defaultOrder;
+    const known = saved.filter((id): id is string => defaultOrder.includes(String(id)));
+    return [...known, ...defaultOrder.filter((id) => !known.includes(id))];
   } catch {
-    return DEFAULT_ORDER;
+    return defaultOrder;
+  }
+}
+function writeColumnOrder(order: string[], defaultOrder: string[]): void {
+  try {
+    if (order.join() === defaultOrder.join()) localStorage.removeItem(COLUMN_ORDER_KEY);
+    else localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    // storage unavailable — the order lasts for this page only
   }
 }
 
-function writeColumnOrder(order: string[]): void {
-  try {
-    if (order.join() === DEFAULT_ORDER.join()) localStorage.removeItem(COLUMN_ORDER_KEY);
-    else localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(order));
-  } catch {
-    // Storage unavailable — the order lasts for this page only.
-  }
+/** Store cell tone (canvas 6a): red = 0 with demand, amber = under min, grey = plain zero. */
+function cellTone(c: StoreCell | undefined): 'risk' | 'waiting' | 'zero' | 'ok' {
+  const avail = c?.available ?? 0;
+  if (avail <= 0 && (c?.demand ?? 0) > 0) return 'risk';
+  if (avail <= 0) return 'zero';
+  if (c?.min != null && avail < c.min) return 'waiting';
+  return 'ok';
 }
 
 export default function ProductsPage() {
   const router = useRouter();
-  const list = useCursorList<ProductRow>('/v1/products');
-  const [q, setQ] = useState('');
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [locationId, setLocationId] = useState('');
-  // Owner 2026-09-10: the catalog replace retired 733 listings; the browser
-  // lists what is still sellable unless you ask for the rest.
-  const [includeInactive, setIncludeInactive] = useState(false);
-  // Vendor door (owner 2026-09-02): /products?vendorId=…&vendor=Name from
-  // the vendors page's "products we carry" count.
-  const [vendor, setVendor] = useState<{ id: string; name: string } | null>(null);
-  // Owner 2026-09-11: column order (per browser) and sort (in the URL).
-  const [order, setOrder] = useState<string[]>(DEFAULT_ORDER);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropId, setDropId] = useState<string | null>(null);
-  const [sort, setSort] = useState('');
-  const [dir, setDir] = useState<'asc' | 'desc'>('asc');
-  // A21 D13: the STORIS Search for a Product criteria, behind a disclosure.
-  const [criteria, setCriteria] = useState<Criteria>(EMPTY_CRITERIA);
+  const [rows, setRows] = useState<ProductRow[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const initial =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  const [q, setQ] = useState(initial.get('q') ?? '');
+  const [categoryId, setCategoryId] = useState(initial.get('categoryId') ?? '');
+  const [size, setSize] = useState(initial.get('size') ?? '');
+  const [stock, setStock] = useState(initial.get('stock') ?? '');
+  const [includeInactive, setIncludeInactive] = useState(initial.get('includeInactive') === '1');
+  const [vendor, setVendor] = useState<{ id: string; name: string } | null>(() =>
+    initial.get('vendorId')
+      ? { id: initial.get('vendorId')!, name: initial.get('vendor') ?? 'vendor' }
+      : null,
+  );
+  const [sort, setSort] = useState(initial.get('sort') ?? '');
+  const [dir, setDir] = useState<'asc' | 'desc'>(initial.get('dir') === 'desc' ? 'desc' : 'asc');
+  const [criteria, setCriteria] = useState<Criteria>(() => {
+    const c = { ...EMPTY_CRITERIA };
+    for (const k of Object.keys(c) as (keyof Criteria)[]) {
+      const v = initial.get(k);
+      if (v) c[k] = CENTS_KEYS.has(k) ? (Number(v) / 100).toString() : v;
+    }
+    return c;
+  });
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [brands, setBrands] = useState<RefOption[]>([]);
   const [collections, setCollections] = useState<RefOption[]>([]);
   const [categories, setCategories] = useState<RefOption[]>([]);
   const [asIsReasons, setAsIsReasons] = useState<ReasonCodeOption[]>([]);
-  const [facets, setFacets] = useState<Facets>({ groups: [], sizes: [], firmness: [] });
   const [refsLoaded, setRefsLoaded] = useState(false);
-  const { rows, error } = list;
-  const hasCriteria = Object.keys(criteriaParams(criteria)).length > 0;
+  const [order, setOrder] = useState<string[] | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropId, setDropId] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const seq = useRef(0);
 
-  const params = (
-    query: string,
-    v = vendor,
-    loc = locationId,
-    inactive = includeInactive,
-    s = sort,
-    d = dir,
-    c = criteria,
-  ) => ({
-    ...(query ? { q: query } : {}),
-    ...(v ? { vendorId: v.id } : {}),
-    ...(loc ? { locationId: loc } : {}),
-    ...(inactive ? { includeInactive: '1' } : {}),
-    ...(s ? { sort: s, dir: d } : {}),
-    ...criteriaParams(c),
-  });
+  // Store columns: the warehouse first, then the stores by name.
+  const storeColumns = useMemo<Column[]>(
+    () =>
+      [...locations]
+        .filter((l) => l.isActive !== false)
+        .sort((a, b) => {
+          const wa = a.locationType === 'warehouse' ? 0 : 1;
+          const wb = b.locationType === 'warehouse' ? 0 : 1;
+          return wa - wb || a.name.localeCompare(b.name);
+        })
+        .map((l) => ({
+          id: `loc:${l.id}`,
+          label: l.name,
+          sort: `available:${l.id}`,
+          num: true,
+          store: l,
+          render: (p: ProductRow) => {
+            const c = p.stockByLocation[l.id];
+            const tone = cellTone(c);
+            return (
+              <span
+                className={`pb-store is-${tone}`}
+                title={`${l.name}: ${c?.onHand ?? 0} on hand · ${c?.reserved ?? 0} reserved${
+                  c?.min != null ? ` · minimum ${c.min}` : ''
+                }${(c?.demand ?? 0) > 0 ? ` · ${c!.demand} waiting on orders` : ''}`}
+                data-testid="store-cell"
+                data-tone={tone}
+              >
+                {c?.available ?? 0}
+              </span>
+            );
+          },
+        })),
+    [locations],
+  );
+  const allColumns = useMemo(
+    () => [...FIXED_BEFORE_STORES, ...storeColumns, ...FIXED_AFTER_STORES],
+    [storeColumns],
+  );
+  const defaultOrder = useMemo(() => allColumns.map((c) => c.id), [allColumns]);
+  const byId = useMemo(() => new Map(allColumns.map((c) => [c.id, c])), [allColumns]);
+  const showCost = (rows ?? []).some((r) => r.costCents != null);
+  const columns = (order ?? defaultOrder)
+    .map((id) => byId.get(id))
+    .filter((c): c is Column => !!c && (c.id !== 'cost' || showCost));
+  const customOrder = !!order && order.join() !== defaultOrder.join();
 
-  // Reference lists for the criteria pickers, fetched the first time the
-  // disclosure opens.
   useEffect(() => {
-    if (!advancedOpen || refsLoaded) return;
+    void api<CategoryFlat[] | { flat: CategoryFlat[] }>('/v1/categories')
+      .then((r) => setCategories(categoryOptions(Array.isArray(r) ? r : r.flat)))
+      .catch(() => setCategories([]));
+    void api<LocationRow[]>('/v1/business/locations')
+      .then((l) => setLocations(l))
+      .catch(() => setLocations([]));
+  }, []);
+  // The column order is read once the store columns are known.
+  useEffect(() => {
+    if (locations.length === 0 && order !== null) return;
+    setOrder(readColumnOrder(defaultOrder));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultOrder]);
+
+  const loadRefs = useCallback(() => {
+    if (refsLoaded) return;
     setRefsLoaded(true);
-    api<RefOption[]>('/v1/brands')
+    void api<RefOption[]>('/v1/brands')
       .then(setBrands)
       .catch(() => setBrands([]));
-    api<RefOption[]>('/v1/collections')
+    void api<RefOption[]>('/v1/collections')
       .then(setCollections)
       .catch(() => setCollections([]));
-    api<{ flat: CategoryFlat[] }>('/v1/categories')
-      .then((r) => setCategories(categoryOptions(r.flat)))
-      .catch(() => setCategories([]));
-    api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
+    void api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
       .then(setAsIsReasons)
       .catch(() => setAsIsReasons([]));
-    api<Facets>('/v1/products/facets')
-      .then(setFacets)
-      .catch(() => setFacets({ groups: [], sizes: [], firmness: [] }));
-  }, [advancedOpen, refsLoaded]);
+  }, [refsLoaded]);
 
-  function setCriterion<K extends keyof Criteria>(key: K, value: Criteria[K]) {
-    setCriteria((cur) => ({ ...cur, [key]: value }));
-  }
-
-  function clearCriteria() {
-    setCriteria(EMPTY_CRITERIA);
-    void list.load(params(q, vendor, locationId, includeInactive, sort, dir, EMPTY_CRITERIA));
-  }
+  const params = useCallback(
+    (cursor: string | null) => {
+      const p = new URLSearchParams({ limit: '50' });
+      if (q.trim()) p.set('q', q.trim());
+      if (categoryId) p.set('categoryId', categoryId);
+      if (size) p.set('size', size);
+      if (stock) p.set('stock', stock);
+      if (includeInactive) p.set('includeInactive', '1');
+      if (vendor) p.set('vendorId', vendor.id);
+      if (sort) {
+        p.set('sort', sort);
+        p.set('dir', dir);
+      }
+      for (const [k, v] of Object.entries(criteriaParams(criteria))) p.set(k, v);
+      if (cursor) p.set('cursor', cursor);
+      return p;
+    },
+    [q, categoryId, size, stock, includeInactive, vendor, sort, dir, criteria],
+  );
 
   useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const vendorId = sp.get('vendorId');
-    const v = vendorId ? { id: vendorId, name: sp.get('vendor') ?? 'vendor' } : null;
-    setVendor(v);
-    const s = COLUMNS.some((c) => c.sort === sp.get('sort')) ? (sp.get('sort') as string) : '';
-    const d = sp.get('dir') === 'desc' ? 'desc' : 'asc';
-    setSort(s);
-    setDir(d);
-    setOrder(readColumnOrder());
-    void list.load(params('', v, '', false, s, d));
-    api<Location[]>('/v1/business/locations')
-      .then((rows) => setLocations(rows.filter((l) => l.isActive)))
-      .catch(() => setLocations([]));
+    const mine = ++seq.current;
+    // Mirror into the URL (replace, no history spam).
+    const u = params(null);
+    u.delete('limit');
+    if (vendor) u.set('vendor', vendor.name);
+    const qs = u.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    const t = setTimeout(
+      () => {
+        api<{ data: ProductRow[]; nextCursor: string | null }>(
+          `/v1/products?${params(null).toString()}`,
+        )
+          .then((page) => {
+            if (seq.current !== mine) return;
+            setRows(page.data);
+            setNextCursor(page.nextCursor);
+            setError(null);
+          })
+          .catch((e) => {
+            if (seq.current !== mine) return;
+            setError(e instanceof Error ? e.message : String(e));
+          });
+      },
+      rows === null ? 0 : 250,
+    );
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [params, tick]);
 
-  function search(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    void list.load(params(q));
-  }
-
-  function changeLocation(loc: string) {
-    setLocationId(loc);
-    void list.load(params(q, vendor, loc));
-  }
-
-  function toggleInactive(next: boolean) {
-    setIncludeInactive(next);
-    void list.load(params(q, vendor, locationId, next));
-  }
-
-  // Owner 2026-08-31: delete straight from the list — same endpoint as
-  // the product page's button. The server refuses (with the exact
-  // reason) any product that still has stock or document history, so a
-  // wrong click can never gut an invoice; the refusal shows as a toast.
-  async function deleteProduct(p: ProductRow) {
-    if (!confirm(`Permanently delete ${p.name} and all its variants? This cannot be undone.`))
-      return;
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
     try {
-      await api(`/v1/products/${p.id}`, { method: 'DELETE' });
-      toast.success(`${p.name} deleted`);
-      void list.load(params(q));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      const page = await api<{ data: ProductRow[]; nextCursor: string | null }>(
+        `/v1/products?${params(nextCursor).toString()}`,
+      );
+      setRows((prev) => [...(prev ?? []), ...page.data]);
+      setNextCursor(page.nextCursor);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingMore(false);
     }
   }
 
-  const statusLabel = (p: ProductRow) =>
-    PRODUCT_PURCHASE_STATUS_LABELS[p.purchaseStatus as ProductPurchaseStatus] ?? p.purchaseStatus;
-
-  /** Click a header: sort by it; click again to flip. The URL keeps it. */
   function toggleSort(key: string) {
-    const nextDir: 'asc' | 'desc' = sort === key ? (dir === 'asc' ? 'desc' : 'asc') : 'asc';
-    setSort(key);
-    setDir(nextDir);
-    const sp = new URLSearchParams(window.location.search);
-    sp.set('sort', key);
-    sp.set('dir', nextDir);
-    window.history.replaceState(null, '', `${window.location.pathname}?${sp.toString()}`);
-    void list.load(params(q, vendor, locationId, includeInactive, key, nextDir));
+    setRows(null);
+    if (sort === key) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSort(key);
+      setDir('asc');
+    }
   }
-
-  /** Drop a dragged header on another: it takes that column's place. */
   function moveColumn(from: string, to: string) {
-    if (from === to) return;
-    setOrder((prev) => {
-      const next = prev.filter((id) => id !== from);
-      next.splice(next.indexOf(to), 0, from);
-      writeColumnOrder(next);
-      return next;
-    });
+    if (from === to || !order) return;
+    const next = order.filter((id) => id !== from);
+    next.splice(next.indexOf(to), 0, from);
+    setOrder(next);
+    writeColumnOrder(next, defaultOrder);
+  }
+  function resetColumns() {
+    setOrder(defaultOrder);
+    writeColumnOrder(defaultOrder, defaultOrder);
+  }
+  function clearAll() {
+    setQ('');
+    setCategoryId('');
+    setSize('');
+    setStock('');
+    setIncludeInactive(false);
+    setVendor(null);
+    setCriteria(EMPTY_CRITERIA);
   }
 
-  const columns = order
-    .map((id) => COLUMNS.find((c) => c.id === id))
-    .filter((c): c is Column => !!c);
-  const customOrder = order.join() !== DEFAULT_ORDER.join();
+  const hasCriteria = Object.keys(criteriaParams(criteria)).length > 0;
+  const filtered = !!(
+    q.trim() ||
+    categoryId ||
+    size ||
+    stock ||
+    includeInactive ||
+    vendor ||
+    hasCriteria
+  );
+  const critSummary = [
+    criteria.vendorModel && `model “${criteria.vendorModel}”`,
+    criteria.brandId && `brand ${brands.find((b) => b.id === criteria.brandId)?.name ?? ''}`,
+    criteria.collectionId &&
+      `collection ${collections.find((b) => b.id === criteria.collectionId)?.name ?? ''}`,
+    criteria.group && `group ${criteria.group}`,
+    criteria.purchaseStatus &&
+      `status ${PRODUCT_PURCHASE_STATUS_LABELS[criteria.purchaseStatus as never] ?? criteria.purchaseStatus}`,
+    criteria.asIsReasonCodeId && 'As-Is reason',
+    (criteria.priceMin || criteria.priceMax) &&
+      `price ${criteria.priceMin || '0'}–${criteria.priceMax || '∞'}`,
+    (criteria.costMin || criteria.costMax) &&
+      `cost ${criteria.costMin || '0'}–${criteria.costMax || '∞'}`,
+  ].filter(Boolean);
+  const setCrit = (k: keyof Criteria, v: string) => setCriteria((c) => ({ ...c, [k]: v }));
 
   return (
-    <div>
-      <PageHeader
-        title="Products"
-        actions={
-          <>
-            <LinkButton href="/products/duplicates" variant="secondary" size="sm">
-              Find duplicates
-            </LinkButton>
-            <LinkButton href="/products/cleanup" variant="secondary" size="sm">
-              Shopify cleanup
-            </LinkButton>
-            <LinkButton href="/products/pricing" variant="secondary" size="sm">
-              Set prices
-            </LinkButton>
-            <LinkButton href="/products/labels" variant="secondary" size="sm">
-              Print labels
-            </LinkButton>
-            <LinkButton href="/products/new" variant="primary">
-              <Plus size={14} />
-              Create product
-            </LinkButton>
-          </>
-        }
-      />
+    <div className="pb" data-testid="products-browser">
+      <header className="pb-head">
+        <div>
+          <div className="t-label">Stock</div>
+          <div className="pb-title-row">
+            <h1 className="pb-title">Products</h1>
+            <span className="pb-sub" data-testid="products-summary">
+              {rows ? `${rows.length} shown${nextCursor ? ' · more below' : ''}` : '…'} · one row
+              per SKU, one column per store
+            </span>
+          </div>
+        </div>
+        <div className="pb-head-actions">
+          <LinkButton href="/products/receive" size="sm">
+            Receive
+          </LinkButton>
+          <LinkButton href="/products/counts" size="sm">
+            Count
+          </LinkButton>
+          <LinkButton href="/transfers/new" size="sm">
+            Transfer
+          </LinkButton>
+          <LinkButton href="/products/labels" size="sm">
+            Print labels
+          </LinkButton>
+          <LinkButton href="/products/new" variant="primary" size="sm">
+            + Create product
+          </LinkButton>
+        </div>
+      </header>
+
       <ProductsNav />
 
-      <form onSubmit={search}>
-        <Toolbar>
-          <label htmlFor="products-location" className="muted">
-            Location
-          </label>
-          <Select
-            id="products-location"
-            value={locationId}
-            onChange={(e) => changeLocation(e.target.value)}
-            data-testid="products-location"
-          >
-            <option value="">All locations</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-          <Input
-            name="q"
-            placeholder="Search by name, SKU, or barcode"
-            aria-label="Search by name, SKU, or barcode"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <label className="muted flex items-center gap-1.5 whitespace-nowrap">
+      <section className="pb-card" aria-label="Products">
+        <div className="pb-toolbar">
+          <Field label="Search" className="pb-search">
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Name, SKU, barcode or vendor model"
+              data-testid="products-search"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Category">
+            <Select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              data-testid="products-category"
+            >
+              <option value="">Any</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Size">
+            <Select
+              value={size}
+              onChange={(e) => setSize(e.target.value)}
+              data-testid="products-size"
+            >
+              <option value="">Any</option>
+              {MATTRESS_SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Stock">
+            <Select
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+              data-testid="products-stock"
+            >
+              {STOCK_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <label className="pb-check">
             <input
               type="checkbox"
               checked={includeInactive}
-              onChange={(e) => toggleInactive(e.target.checked)}
+              onChange={(e) => setIncludeInactive(e.target.checked)}
               data-testid="products-include-inactive"
             />
             Show inactive
           </label>
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
-          <Button
+          <button
             type="button"
-            variant="ghost"
-            size="sm"
+            className="pb-disclosure"
+            aria-expanded={advancedOpen}
+            aria-controls="products-advanced"
             onClick={() => {
-              setQ('');
-              void list.load(params(''));
+              setAdvancedOpen((v) => !v);
+              loadRefs();
             }}
+            data-testid="products-advanced-toggle"
           >
-            Clear
-          </Button>
-        </Toolbar>
-        <div className="mb-4">
-          <Accordion
-            title="Advanced search"
-            summary={
-              hasCriteria
-                ? 'criteria set'
-                : 'product, description, brand, vendor model, collection, category, group, size, firmness, purchase status, as-is reason'
-            }
-            open={advancedOpen}
-            onToggle={() => setAdvancedOpen((o) => !o)}
-          >
-            <div className="p-3" data-testid="products-advanced-search">
-              <FormGrid cols={3}>
-                <Field label="Product">
-                  <Input
-                    value={criteria.sku}
-                    placeholder="SKU contains"
-                    aria-label="Product"
-                    data-testid="criteria-sku"
-                    onChange={(e) => setCriterion('sku', e.target.value)}
-                  />
-                </Field>
-                <Field label="Description">
-                  <Input
-                    value={criteria.name}
-                    placeholder="Description contains"
-                    aria-label="Description"
-                    data-testid="criteria-name"
-                    onChange={(e) => setCriterion('name', e.target.value)}
-                  />
-                </Field>
-                <Field label="Brand">
-                  <Select
-                    value={criteria.brandId}
-                    aria-label="Brand"
-                    data-testid="criteria-brand"
-                    onChange={(e) => setCriterion('brandId', e.target.value)}
-                  >
-                    <option value="">Any brand</option>
-                    {brands.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Vendor model">
-                  <Input
-                    value={criteria.vendorModel}
-                    placeholder="Vendor model contains"
-                    aria-label="Vendor model"
-                    data-testid="criteria-vendor-model"
-                    onChange={(e) => setCriterion('vendorModel', e.target.value)}
-                  />
-                </Field>
-                <Field label="Collection">
-                  <Select
-                    value={criteria.collectionId}
-                    aria-label="Collection"
-                    data-testid="criteria-collection"
-                    onChange={(e) => setCriterion('collectionId', e.target.value)}
-                  >
-                    <option value="">Any collection</option>
-                    {collections.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Product category">
-                  <Select
-                    value={criteria.categoryId}
-                    aria-label="Product category"
-                    data-testid="criteria-category"
-                    onChange={(e) => setCriterion('categoryId', e.target.value)}
-                  >
-                    <option value="">Any category</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field
-                  label="Product group"
-                  hint="STORIS group code; the list offers the ones in use."
-                >
-                  <Input
-                    value={criteria.group}
-                    placeholder="e.g. QUEEN"
-                    aria-label="Product group"
-                    data-testid="criteria-group"
-                    list="product-group-codes"
-                    onChange={(e) => setCriterion('group', e.target.value)}
-                  />
-                  <datalist id="product-group-codes">
-                    {facets.groups.map((g) => (
-                      <option key={g.value} value={g.value}>
-                        {`${g.value} (${g.count})`}
-                      </option>
-                    ))}
-                  </datalist>
-                </Field>
-                <Field label="Size">
-                  <Select
-                    value={criteria.size}
-                    aria-label="Size"
-                    data-testid="criteria-size"
-                    onChange={(e) => setCriterion('size', e.target.value)}
-                  >
-                    <option value="">Any size</option>
-                    {MATTRESS_SIZES.map((x) => {
-                      const n = facets.sizes.find((f) => f.value === x)?.count ?? 0;
-                      return (
-                        <option key={x} value={x}>
-                          {n > 0 ? `${x} (${n})` : x}
-                        </option>
-                      );
-                    })}
-                  </Select>
-                </Field>
-                <Field label="Firmness">
-                  <Select
-                    value={criteria.firmness}
-                    aria-label="Firmness"
-                    data-testid="criteria-firmness"
-                    onChange={(e) => setCriterion('firmness', e.target.value)}
-                  >
-                    <option value="">Any firmness</option>
-                    {FIRMNESS_LEVELS.map((x) => {
-                      const n = facets.firmness.find((f) => f.value === x)?.count ?? 0;
-                      return (
-                        <option key={x} value={x}>
-                          {n > 0 ? `${x} (${n})` : x}
-                        </option>
-                      );
-                    })}
-                  </Select>
-                </Field>
-                <Field label="Purchase status">
-                  <Select
-                    value={criteria.purchaseStatus}
-                    aria-label="Purchase status"
-                    data-testid="criteria-purchase-status"
-                    onChange={(e) => setCriterion('purchaseStatus', e.target.value)}
-                  >
-                    <option value="">Any status</option>
-                    {PRODUCT_PURCHASE_STATUSES.map((st) => (
-                      <option key={st} value={st}>
-                        {PRODUCT_PURCHASE_STATUS_LABELS[st]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field
-                  label="As-Is reason code"
-                  hint="Products with an as-is piece in review under this reason."
-                >
-                  <Select
-                    value={criteria.asIsReasonCodeId}
-                    aria-label="As-Is reason code"
-                    data-testid="criteria-as-is-reason"
-                    onChange={(e) => setCriterion('asIsReasonCodeId', e.target.value)}
-                  >
-                    <option value="">Any reason</option>
-                    {asIsReasons.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.code} — {r.description}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </FormGrid>
-              <div className="mt-3 flex gap-2">
-                <Button type="submit" variant="primary" size="sm" data-testid="criteria-search">
-                  Search
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearCriteria}
-                  disabled={!hasCriteria}
-                >
-                  Clear criteria
-                </Button>
-              </div>
-            </div>
-          </Accordion>
-        </div>
-      </form>
-
-      <Stack>
-        {vendor && (
-          <Alert
-            tone="info"
-            data-testid="products-vendor-chip"
-            action={
+            Advanced search {advancedOpen ? '▾' : '▸'}
+            {!advancedOpen && critSummary.length > 0 && (
+              <span className="pb-crit-summary"> · {critSummary.join(', ')}</span>
+            )}
+          </button>
+          <span className="pb-toolbar-end">
+            {filtered && (
+              <Button variant="ghost" size="sm" onClick={clearAll} data-testid="clear-filters">
+                Clear filters
+              </Button>
+            )}
+            {customOrder && (
               <Button
-                type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  setVendor(null);
-                  window.history.replaceState(null, '', '/products');
-                  void list.load(params(q, null));
-                }}
+                onClick={resetColumns}
+                data-testid="products-reset-columns"
               >
-                clear
+                Reset columns
               </Button>
-            }
-          >
-            Showing products from <strong>{vendor.name}</strong>
-          </Alert>
-        )}
-        {error && <Alert tone="error">{error}</Alert>}
+            )}
+          </span>
+        </div>
 
-        {rows == null ? (
-          <Card>
-            <LoadingRows />
-          </Card>
-        ) : rows.length === 0 ? (
-          <Card>
-            <EmptyState
-              title={
-                q
-                  ? `No products match "${q}"`
-                  : hasCriteria
-                    ? 'No products match the criteria'
-                    : includeInactive
-                      ? 'No products yet'
-                      : 'No active products'
-              }
-              action={
-                q || hasCriteria ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setQ('');
-                      setCriteria(EMPTY_CRITERIA);
-                      void list.load(
-                        params('', vendor, locationId, includeInactive, sort, dir, EMPTY_CRITERIA),
-                      );
-                    }}
-                  >
-                    Clear search
-                  </Button>
-                ) : (
-                  <LinkButton href="/products/new" variant="secondary" size="sm">
-                    Create product
-                  </LinkButton>
-                )
-              }
-            >
-              {includeInactive
-                ? 'Create a product or import a CSV below.'
-                : 'Tick "Show inactive" to include deactivated products, or create one below.'}
-            </EmptyState>
-          </Card>
-        ) : (
-          <Card flush>
-            <TableWrap>
-              <table className="table" data-testid="products-table">
-                <thead>
-                  <tr>
-                    {columns.map((c) => {
-                      const active = sort === c.sort;
-                      return (
-                        <th
-                          key={c.id}
-                          className={[c.num ? 'num' : '', dropId === c.id ? 'th-drop' : '']
-                            .filter(Boolean)
-                            .join(' ')}
-                          aria-sort={
-                            active ? (dir === 'desc' ? 'descending' : 'ascending') : undefined
-                          }
-                          draggable
-                          onDragStart={(e) => {
-                            setDragId(c.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                            e.dataTransfer.setData('text/plain', c.id);
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            if (dropId !== c.id) setDropId(c.id);
-                          }}
-                          onDragLeave={() => setDropId((d) => (d === c.id ? null : d))}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            const from = dragId ?? e.dataTransfer.getData('text/plain');
-                            if (from) moveColumn(from, c.id);
-                            setDragId(null);
-                            setDropId(null);
-                          }}
-                          onDragEnd={() => {
-                            setDragId(null);
-                            setDropId(null);
-                          }}
-                          title="Click to sort · drag to move this column"
-                          data-testid={`products-col-${c.id}`}
-                        >
-                          <span className="th-grip" aria-hidden>
-                            <GripVertical size={11} />
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(c.sort)}
-                            data-testid={`products-sort-${c.id}`}
-                            className="cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [letter-spacing:inherit] [text-transform:inherit]"
-                          >
-                            {c.label}
-                            {active ? (dir === 'desc' ? ' ▼' : ' ▲') : ''}
-                          </button>
-                        </th>
-                      );
-                    })}
-                    <th className="actions">
-                      {customOrder && (
+        {advancedOpen && (
+          <div
+            id="products-advanced"
+            className="pb-advanced"
+            data-testid="products-advanced-search"
+          >
+            <Field label="Vendor model">
+              <Input
+                value={criteria.vendorModel}
+                onChange={(e) => setCrit('vendorModel', e.target.value)}
+                placeholder="contains"
+                data-testid="criteria-vendor-model"
+              />
+            </Field>
+            <Field label="Brand">
+              <Select
+                value={criteria.brandId}
+                onChange={(e) => setCrit('brandId', e.target.value)}
+                data-testid="criteria-brand"
+              >
+                <option value="">Any</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Collection">
+              <Select
+                value={criteria.collectionId}
+                onChange={(e) => setCrit('collectionId', e.target.value)}
+                data-testid="criteria-collection"
+              >
+                <option value="">Any</option>
+                {collections.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Product group">
+              <Input
+                value={criteria.group}
+                onChange={(e) => setCrit('group', e.target.value)}
+                placeholder="e.g. QUEEN"
+                data-testid="criteria-group"
+              />
+            </Field>
+            <Field label="Purchase status">
+              <Select
+                value={criteria.purchaseStatus}
+                onChange={(e) => setCrit('purchaseStatus', e.target.value)}
+                data-testid="criteria-purchase-status"
+              >
+                <option value="">Any</option>
+                {PRODUCT_PURCHASE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {PRODUCT_PURCHASE_STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="As-Is reason">
+              <Select
+                value={criteria.asIsReasonCodeId}
+                onChange={(e) => setCrit('asIsReasonCodeId', e.target.value)}
+                data-testid="criteria-as-is-reason"
+              >
+                <option value="">Any</option>
+                {asIsReasons.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.code} — {r.description}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Price from ($)">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={criteria.priceMin}
+                onChange={(e) => setCrit('priceMin', e.target.value)}
+                className="input-num"
+                data-testid="criteria-price-min"
+              />
+            </Field>
+            <Field label="Price to ($)">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={criteria.priceMax}
+                onChange={(e) => setCrit('priceMax', e.target.value)}
+                className="input-num"
+                data-testid="criteria-price-max"
+              />
+            </Field>
+            {showCost && (
+              <>
+                <Field label="Cost from ($)">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={criteria.costMin}
+                    onChange={(e) => setCrit('costMin', e.target.value)}
+                    className="input-num"
+                    data-testid="criteria-cost-min"
+                  />
+                </Field>
+                <Field label="Cost to ($)">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={criteria.costMax}
+                    onChange={(e) => setCrit('costMax', e.target.value)}
+                    className="input-num"
+                    data-testid="criteria-cost-max"
+                  />
+                </Field>
+              </>
+            )}
+            <div className="pb-advanced-actions">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCriteria(EMPTY_CRITERIA)}
+                disabled={!hasCriteria}
+              >
+                Clear criteria
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {vendor && (
+          <div className="pb-chips" data-testid="products-vendor-chip">
+            <span className="pb-chips-label">Showing</span>
+            <span className="pb-chip">
+              products from {vendor.name}
+              <button
+                type="button"
+                onClick={() => setVendor(null)}
+                aria-label="Remove vendor filter"
+              >
+                ×
+              </button>
+            </span>
+          </div>
+        )}
+
+        <div className="pb-sheet">
+          {error && (
+            <div style={{ padding: 12 }}>
+              <Alert tone="error">{error}</Alert>
+            </div>
+          )}
+          {!rows && !error && (
+            <div style={{ padding: 12 }}>
+              <LoadingRows rows={8} height={34} what="Products" />
+            </div>
+          )}
+          {rows && (
+            <table className="table table-sticky pb-table" data-testid="products-table">
+              <thead>
+                <tr>
+                  {columns.map((c) => {
+                    const on = sort === c.sort;
+                    return (
+                      <th
+                        key={c.id}
+                        draggable
+                        onDragStart={() => setDragId(c.id)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dropId !== c.id) setDropId(c.id);
+                        }}
+                        onDragLeave={() => dropId === c.id && setDropId(null)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (dragId) moveColumn(dragId, c.id);
+                          setDragId(null);
+                          setDropId(null);
+                        }}
+                        onDragEnd={() => {
+                          setDragId(null);
+                          setDropId(null);
+                        }}
+                        aria-sort={on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                        className={[
+                          c.num ? 'num' : '',
+                          c.store ? 'pb-store-th' : '',
+                          dropId === c.id && dragId !== c.id ? 'th-drop' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        title="Click to sort · drag to move this column"
+                        data-testid={`products-col-${c.id}`}
+                      >
+                        <span className="th-grip" aria-hidden>
+                          <GripVertical size={12} />
+                        </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            setOrder(DEFAULT_ORDER);
-                            writeColumnOrder(DEFAULT_ORDER);
-                          }}
-                          className="cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [letter-spacing:inherit] [text-transform:inherit]"
-                          title="Put the columns back in the standard order"
-                          data-testid="products-reset-columns"
+                          className={`pb-sort${on ? ' is-on' : ''}`}
+                          onClick={() => toggleSort(c.sort)}
+                          data-testid={`products-sort-${c.id}`}
                         >
-                          Reset columns
+                          {c.label}
+                          <span className="pb-sort-arrow" aria-hidden>
+                            {on ? (dir === 'asc' ? '▲' : '▼') : ''}
+                          </span>
                         </button>
-                      )}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((p) => (
-                    <tr
-                      key={p.id}
-                      data-testid="product-row"
-                      className="cursor-pointer"
-                      onClick={() => router.push(`/products/${p.id}`)}
-                    >
-                      {columns.map((c) => (
-                        <td key={c.id} className={c.num ? 'num' : undefined}>
-                          {c.render(p, statusLabel)}
-                        </td>
-                      ))}
-                      <td className="actions" onClick={(e) => e.stopPropagation()}>
-                        <LinkButton href={`/products/${p.id}`} variant="secondary" size="sm">
-                          Open
-                        </LinkButton>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => void deleteProduct(p)}
-                          aria-label={`Delete ${p.name}`}
-                          title="Delete this product (only when unused — no stock, no documents)"
-                          data-testid="product-row-delete"
-                        >
-                          Delete
-                        </Button>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p) => (
+                  <tr
+                    key={p.id}
+                    data-testid="product-row"
+                    className={p.isActive ? undefined : 'is-inactive'}
+                    onClick={() => router.push(`/products/${p.id}`)}
+                  >
+                    {columns.map((c) => (
+                      <td
+                        key={c.id}
+                        className={
+                          [c.num ? 'num' : '', c.id === 'description' ? 'pb-desc-cell' : '']
+                            .filter(Boolean)
+                            .join(' ') || undefined
+                        }
+                      >
+                        {c.render(p)}
                       </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-            <LoadMore state={list} noun="products" />
-          </Card>
-        )}
-
-        <Card>
-          <details data-testid="products-csv-import">
-            <summary className="section-title cursor-pointer">
-              Import products from a CSV file
-            </summary>
-            <div className="pt-3">
-              <CsvImport entity="product" onCommitted={() => list.load(params(q))} />
+                    ))}
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={columns.length} className="pb-empty">
+                      <div className="pb-empty-title">Nothing matches</div>
+                      <div>Try fewer words or clear a filter.</div>
+                      {filtered && (
+                        <Button size="sm" onClick={clearAll} style={{ marginTop: 10 }}>
+                          Clear filters
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+          {nextCursor && (
+            <div className="pb-more">
+              <Button
+                size="sm"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                data-testid="load-more"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </Button>
             </div>
-          </details>
-        </Card>
-      </Stack>
+          )}
+        </div>
+
+        <div className="pb-foot" data-testid="products-footer">
+          <span>
+            Showing <strong>{rows?.length ?? 0}</strong>
+            {nextCursor ? ' · more available' : ''}
+          </span>
+          <span>
+            Store columns show <strong>available</strong> (on hand − reserved); red = 0 with open
+            demand, amber = below the store minimum, grey = a plain zero.
+          </span>
+          <span>
+            Sales margin cost{' '}
+            {showCost ? 'shows for your role' : 'hides for roles without cost access'}. Column order
+            is saved on this browser.
+          </span>
+        </div>
+      </section>
+
+      <details className="pb-import" data-testid="products-csv-import">
+        <summary>Import products from CSV</summary>
+        <CsvImport entity="product" onCommitted={() => setTick((n) => n + 1)} />
+      </details>
     </div>
   );
 }

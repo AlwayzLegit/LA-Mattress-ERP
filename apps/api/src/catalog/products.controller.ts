@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Body,
   ConflictException,
   Controller,
@@ -42,6 +43,8 @@ import {
   loadProductStockTotals,
   type LocationStockRow,
   type StockTotals,
+  loadProductStoreCells,
+  type StoreCell,
 } from './product-stock';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import { loadCategoryIndex } from './category-tree';
@@ -164,6 +167,9 @@ interface ProductListRow {
   asIsOnHand: number;
   asIsAvailable: number;
   asIsNonSellable: number;
+  /** Redesign Phase 7: reserved across locations and one cell per store. */
+  reserved: number;
+  stockByLocation: Record<string, StoreCell>;
 }
 
 interface VariantOut {
@@ -339,18 +345,83 @@ export class CatalogProductsController {
     @Query('firmness') firmnessQ?: string,
     @Query('purchaseStatus') purchaseStatusQ?: string,
     @Query('asIsReasonCodeId') asIsReasonCodeId?: string,
+    // Redesign Phase 7 (README §3.3): the stock filter and the price /
+    // cost ranges of Advanced search; `sort=available:<locationId>` sorts
+    // one store's column.
+    @Query('stock') stockQ?: string,
+    @Query('priceMin') priceMinQ?: string,
+    @Query('priceMax') priceMaxQ?: string,
+    @Query('costMin') costMinQ?: string,
+    @Query('costMax') costMaxQ?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
     const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
+    const storeSort = /^available:([0-9a-f-]{36})$/i.exec(sortRaw ?? '')?.[1] ?? null;
     const sortKey = (PRODUCT_SORT_KEYS as readonly string[]).includes(sortRaw ?? '')
       ? (sortRaw as ProductSortKey)
       : null;
-    if (sortRaw && !sortKey) {
-      throw new BadRequestException(`sort must be one of ${PRODUCT_SORT_KEYS.join(', ')}`);
+    if (sortRaw && !sortKey && !storeSort) {
+      throw new BadRequestException(
+        `sort must be one of ${PRODUCT_SORT_KEYS.join(', ')} or available:<locationId>`,
+      );
     }
     const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
+    const sortRows = (rows: ProductListRow[]): ProductListRow[] => {
+      if (storeSort) {
+        const sign = dir === 'desc' ? -1 : 1;
+        return [...rows].sort(
+          (a, b) =>
+            sign *
+              ((a.stockByLocation[storeSort]?.available ?? 0) -
+                (b.stockByLocation[storeSort]?.available ?? 0)) || a.name.localeCompare(b.name),
+        );
+      }
+      return sortKey ? sortProductRows(rows, sortKey, dir) : rows;
+    };
     const filters: ReturnType<typeof and>[] = [];
     if (!includeInactive) filters.push(eq(schema.products.isActive, true));
+    const availAt = sql`(il.on_hand - il.reserved - il.floor_sample)`;
+    const levelsOf = sql`FROM inventory_levels il INNER JOIN product_variants v ON v.id = il.variant_id WHERE v.product_id = ${schema.products.id}`;
+    if (stockQ === 'anywhere') {
+      filters.push(sql`EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
+    } else if (stockQ === 'out') {
+      filters.push(sql`NOT EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
+    } else if (stockQ === 'short') {
+      // Short somewhere: a store at zero with units reserved or waiting on
+      // an open order, or a store under its own minimum.
+      filters.push(
+        sql`(EXISTS (SELECT 1 ${levelsOf} AND ((${availAt} <= 0 AND il.reserved > 0) OR (il.reorder_point IS NOT NULL AND ${availAt} < il.reorder_point)))
+          OR EXISTS (SELECT 1 FROM order_lines ol INNER JOIN orders o ON o.id = ol.order_id INNER JOIN product_variants v2 ON v2.id = ol.variant_id
+            WHERE v2.product_id = ${schema.products.id} AND o.status IN ('open','partially_fulfilled') AND ol.line_type = 'stock'
+              AND ol.quantity - ol.qty_reserved - ol.qty_fulfilled > 0))`,
+      );
+    } else if (stockQ) {
+      throw new BadRequestException('stock must be one of anywhere, short, out');
+    }
+    const cents = (raw: string | undefined, name: string): number | null => {
+      if (raw == null || raw === '') return null;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 0)
+        throw new BadRequestException(`${name} must be a non-negative integer of cents`);
+      return n;
+    };
+    const priceMin = cents(priceMinQ, 'priceMin');
+    const priceMax = cents(priceMaxQ, 'priceMax');
+    if (priceMin != null || priceMax != null) {
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.priceCents} >= ${priceMin ?? 0} AND ${schema.productVariants.priceCents} <= ${priceMax ?? 2_147_483_647})`,
+      );
+    }
+    const costMin = cents(costMinQ, 'costMin');
+    const costMax = cents(costMaxQ, 'costMax');
+    if (costMin != null || costMax != null) {
+      if (!(tenant.isSuperAdmin || tenant.permissions.has('products.cost.view'))) {
+        throw new ForbiddenException('Filtering by cost needs product cost access');
+      }
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.costCents} IS NOT NULL AND ${schema.productVariants.costCents} >= ${costMin ?? 0} AND ${schema.productVariants.costCents} <= ${costMax ?? 2_147_483_647})`,
+      );
+    }
     if (categoryId) {
       // A22.1: categories nest — picking "Mattresses" returns the hybrids too.
       const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
@@ -451,10 +522,10 @@ export class CatalogProductsController {
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))
         .limit(limit);
       const found = await this.listRows(tenant, data, locationId);
-      return { data: sortKey ? sortProductRows(found, sortKey, dir) : found, nextCursor: null };
+      return { data: sortRows(found), nextCursor: null };
     }
 
-    if (sortKey) {
+    if (sortKey || storeSort) {
       // Sorted browse: materialise, sort the finished rows, page by offset.
       const offset = offsetFromCursor(cursorStr);
       const all = await this.db
@@ -468,7 +539,7 @@ export class CatalogProductsController {
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(asc(schema.products.name), asc(schema.products.id))
         .limit(SORTED_BROWSE_CAP);
-      const sorted = sortProductRows(await this.listRows(tenant, all, locationId), sortKey, dir);
+      const sorted = sortRows(await this.listRows(tenant, all, locationId));
       const data = sorted.slice(offset, offset + limit);
       const next = offset + limit;
       return {
@@ -561,6 +632,7 @@ export class CatalogProductsController {
     const extra = new Map(products.map((p) => [p.id, p]));
     const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
     const totals = await loadProductStockTotals(this.db, tenant.businessId!, ids, locationId);
+    const cells = await loadProductStoreCells(this.db, tenant.businessId!, ids);
     return rows.map((r) => {
       const p = extra.get(r.id);
       const v = primary.get(r.id);
@@ -588,6 +660,8 @@ export class CatalogProductsController {
         asIsOnHand: t?.asIsOnHand ?? 0,
         asIsAvailable: t?.asIsAvailable ?? 0,
         asIsNonSellable: t?.asIsNonSellable ?? 0,
+        reserved: t?.reserved ?? 0,
+        stockByLocation: cells.get(r.id) ?? {},
       };
     });
   }
