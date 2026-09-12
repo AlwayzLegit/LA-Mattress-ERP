@@ -320,6 +320,13 @@ const LINE_METADATA_FIELDS = new Set([
 
 interface CancelOrderBody {
   reason?: string | null;
+  /**
+   * Redesign Phase 6 (README §3.2): where money already collected goes
+   * when the order is cancelled — store credit for the customer (the
+   * default the confirm offers) or back to the original tender. Without
+   * it a paid order still refuses to cancel.
+   */
+  depositTo?: 'store_credit' | 'original' | null;
 }
 
 interface OrderListRow {
@@ -759,6 +766,8 @@ export class OrdersController {
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
     @Query('display') display?: string,
+    @Query('salespersonMembershipId') salespersonFilter?: string,
+    @Query('balanceDue') balanceDueOnly?: string,
     @Query('start') startQ?: string,
     @Query('end') endQ?: string,
   ): Promise<
@@ -766,11 +775,17 @@ export class OrdersController {
       id: string;
       number: string;
       customerName: string;
+      customerPhone: string | null;
       displayStatus: string;
       poNumber: string | null;
       deliveryDate: string | null;
       balanceDueCents: number;
+      creditDueCents: number;
       salespersonName: string | null;
+      salespersonMembershipId: string | null;
+      locationId: string;
+      locationName: string | null;
+      lockedAt: Date | null;
       totalCents: number;
       createdAt: Date;
       lineSummary: {
@@ -779,7 +794,10 @@ export class OrdersController {
         fulfilled: number;
         specialOrder: number;
       } | null;
-    }>
+    }> & {
+      /** The whole filtered set, not just this page (redesign §3.2 title line). */
+      summary: { count: number; balanceDueCents: number };
+    }
   > {
     const limit = clampLimit(limitStr);
     // P-014 (BA-0018/BA-0024): sortable columns. Delivery date and
@@ -797,7 +815,17 @@ export class OrdersController {
       balanceDue: sql`greatest(0, ${schema.orders.totalCents} - coalesce(
         (select sum(p.amount_cents) from payments p
           where p.order_id = ${schema.orders.id} and p.status = 'succeeded'), 0))`,
+      // Redesign Phase 6 (README §3.2): every column sorts.
+      store: sql`${schema.locations.name}`,
+      status: sql`${schema.orders.status}`,
+      salesperson: sql`${schema.users.name}`,
+      total: sql`${schema.orders.totalCents}`,
+      written: sql`${schema.orders.createdAt}`,
+      reserved: sql`coalesce(
+        (select sum(l.qty_reserved)::float / nullif(sum(l.quantity), 0) from order_lines l
+          where l.order_id = ${schema.orders.id} and l.line_type <> 'custom'), 0)`,
     };
+    const BALANCE_EXPR = SORTS.balanceDue!;
     const sortExpr = sort ? SORTS[sort] : undefined;
     const sortDesc = dir === 'desc';
     const offset = sortExpr && cursorStr?.startsWith('o:') ? Number(cursorStr.slice(2)) || 0 : 0;
@@ -859,6 +887,40 @@ export class OrdersController {
       );
     }
     if (locationIdFilter) filters.push(eq(schema.orders.locationId, locationIdFilter));
+    if (salespersonFilter) {
+      filters.push(
+        or(
+          eq(schema.orders.salespersonMembershipId, salespersonFilter),
+          eq(schema.orders.secondSalespersonMembershipId, salespersonFilter),
+        )!,
+      );
+    }
+    // "Balance due only": something is still owed and the order is live.
+    if (balanceDueOnly === '1' || balanceDueOnly === 'true') {
+      filters.push(
+        sql`${schema.orders.status} not in ('cancelled', 'draft', 'quote')`,
+        sql`${BALANCE_EXPR} > 0`,
+      );
+    }
+    // The title line counts the whole filtered set (before paging).
+    const [summaryRow] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+        balanceDueCents: sql<number>`coalesce(sum(case when ${schema.orders.status} in ('cancelled','draft','quote') then 0 else ${BALANCE_EXPR} end), 0)::int`,
+      })
+      .from(schema.orders)
+      .innerJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
+      .leftJoin(schema.locations, eq(schema.locations.id, schema.orders.locationId))
+      .leftJoin(
+        schema.memberships,
+        eq(schema.memberships.id, schema.orders.salespersonMembershipId),
+      )
+      .leftJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+      .where(filters.length > 0 ? and(...filters) : undefined);
+    const summary = {
+      count: summaryRow?.count ?? 0,
+      balanceDueCents: summaryRow?.balanceDueCents ?? 0,
+    };
     const cursorWhere = timestampCursorWhere(schema.orders.createdAt, schema.orders.id, cursor);
     if (cursorWhere) filters.push(cursorWhere);
 
@@ -871,12 +933,18 @@ export class OrdersController {
         totalCents: schema.orders.totalCents,
         requestedDate: schema.orders.requestedDate,
         createdAt: schema.orders.createdAt,
+        lockedAt: schema.orders.lockedAt,
+        locationId: schema.orders.locationId,
+        locationName: schema.locations.name,
+        salespersonMembershipId: schema.orders.salespersonMembershipId,
         firstName: schema.customers.firstName,
         lastName: schema.customers.lastName,
+        customerPhone: schema.customers.phone,
         salespersonName: schema.users.name,
       })
       .from(schema.orders)
       .innerJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
+      .leftJoin(schema.locations, eq(schema.locations.id, schema.orders.locationId))
       .leftJoin(
         schema.memberships,
         eq(schema.memberships.id, schema.orders.salespersonMembershipId),
@@ -1066,12 +1134,17 @@ export class OrdersController {
         id: r.id,
         number: r.number,
         customerName: [r.firstName, r.lastName].filter(Boolean).join(' ') || '—',
+        customerPhone: r.customerPhone ?? null,
         displayStatus,
         poNumber: displayStatus === 'On PO' ? (poByOrder.get(r.id) ?? null) : null,
         deliveryDate: trip?.date ?? r.requestedDate,
         balanceDueCents: balance,
         creditDueCents: credit,
         salespersonName: r.salespersonName ?? null,
+        salespersonMembershipId: r.salespersonMembershipId ?? null,
+        locationId: r.locationId,
+        locationName: r.locationName ?? null,
+        lockedAt: r.lockedAt ?? null,
         lineSummary: lineSummaryByOrder.get(r.id) ?? null,
         totalCents: r.totalCents,
         createdAt: r.createdAt,
@@ -1087,6 +1160,7 @@ export class OrdersController {
             ? `o:${offset + limit}`
             : encodeCursor(last.createdAt, last.id)
           : null,
+      summary,
     };
   }
 
@@ -3830,11 +3904,53 @@ export class OrdersController {
     await this.assertNotOnOpenRun(id);
 
     const payments = await this.db
-      .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
+      .select({
+        amountCents: schema.payments.amountCents,
+        status: schema.payments.status,
+        method: schema.payments.method,
+      })
       .from(schema.payments)
-      .where(eq(schema.payments.orderId, id));
-    if (paidCents(payments) > 0) {
+      .where(eq(schema.payments.orderId, id))
+      .orderBy(desc(schema.payments.createdAt));
+    const collected = paidCents(payments);
+    const depositTo =
+      body.depositTo === 'store_credit' || body.depositTo === 'original' ? body.depositTo : null;
+    if (collected > 0 && !depositTo) {
       throw new ForbiddenException('Refund the money collected on this order before cancelling it');
+    }
+    if (collected > 0 && depositTo) {
+      // The deposit leaves the order either way (negative adjustment
+      // rows against each tender, newest first); store credit also
+      // books the same amount to the customer's ledger.
+      let remaining = collected;
+      for (const p of payments) {
+        if (remaining <= 0) break;
+        if (p.status !== 'succeeded' || p.amountCents <= 0) continue;
+        const slice = Math.min(remaining, p.amountCents);
+        await this.db.insert(schema.payments).values({
+          businessId: tenant.businessId!,
+          saleId: null,
+          orderId: id,
+          kind: 'adjustment',
+          method: depositTo === 'store_credit' ? 'store_credit' : p.method,
+          amountCents: -slice,
+          status: 'succeeded',
+        });
+        remaining -= slice;
+      }
+      if (depositTo === 'store_credit') {
+        await this.storeCredit.issue(this.db, {
+          businessId: tenant.businessId!,
+          customerId: order.customerId,
+          amountCents: collected,
+          reason: body.reason
+            ? `Order ${order.number} cancelled: ${body.reason}`
+            : `Order ${order.number} cancelled`,
+          referenceType: 'refund',
+          referenceId: order.id,
+          actorUserId: actor?.id ?? null,
+        });
+      }
     }
 
     await this.orders.releaseOrder(this.db, {
@@ -3843,6 +3959,26 @@ export class OrdersController {
       locationId: order.stockLocationId ?? order.locationId,
       actorUserId: actor?.id ?? null,
     });
+    // The confirm sentence promises the delivery leaves the board: any
+    // trip still editable (scheduled / loaded) is cancelled with the order.
+    const boardTrips = await this.db
+      .update(schema.deliveries)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.deliveries.orderId, id),
+          inArray(schema.deliveries.status, ['scheduled', 'loaded']),
+        ),
+      )
+      .returning({ id: schema.deliveries.id });
+    for (const trip of boardTrips) {
+      await this.audit.log({
+        action: 'delivery.cancel',
+        targetType: 'delivery',
+        targetId: trip.id,
+        after: { reason: 'order cancelled' },
+      });
+    }
     await this.db
       .update(schema.orders)
       .set({
@@ -3860,7 +3996,13 @@ export class OrdersController {
       targetType: 'order',
       targetId: id,
       before: { status: order.status },
-      after: { status: 'cancelled', reason: body.reason ?? null },
+      after: {
+        status: 'cancelled',
+        reason: body.reason ?? null,
+        depositCents: collected,
+        depositTo: collected > 0 ? depositTo : null,
+        deliveriesCancelled: boardTrips.length,
+      },
     });
 
     const detail = await this.loadDetail(id);

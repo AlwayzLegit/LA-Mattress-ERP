@@ -4547,3 +4547,575 @@ select.picker-from {
 .picker-foot .kbd {
   background: var(--surface);
 }
+
+/* ------------------------------------------------------------------
+   Orders book (redesign Phase 6, canvas 5a). One section: toolbar,
+   filter chips, the table that scrolls, a footer. Management density.
+   ------------------------------------------------------------------ */
+.ob {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: calc(100vh - var(--topbar-height) - 40px);
+}
+.ob-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ob-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ob-title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ob-summary {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ob-head-actions {
+  display: flex;
+  gap: 8px;
+}
+.ob-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ob-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.ob-toolbar .field {
+  margin: 0;
+}
+.ob-toolbar .select,
+.ob-toolbar .input {
+  height: 30px;
+  font-size: 13px;
+}
+.ob-toolbar .select {
+  min-width: 128px;
+}
+.ob-find {
+  flex: 1;
+  min-width: 220px;
+}
+.ob-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ob-check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+.ob-chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--surface-2);
+  font-size: 12px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ob-chips-label {
+  color: var(--muted);
+}
+.ob-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  background: var(--bg);
+}
+.ob-chip button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ob-chip button:hover {
+  color: var(--text);
+}
+.ob-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - var(--topbar-height) - 250px);
+}
+.ob-table {
+  font-size: 13px;
+}
+.ob-table thead th {
+  background: var(--surface);
+  white-space: nowrap;
+}
+.ob-table th:first-child,
+.ob-table td:first-child {
+  padding-left: 14px;
+}
+.ob-table th:last-child,
+.ob-table td:last-child {
+  padding-right: 14px;
+}
+.ob-table tbody tr {
+  height: 36px;
+  cursor: pointer;
+}
+.ob-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--muted);
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ob-sort.is-on {
+  color: var(--text);
+}
+.ob-sort-arrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  min-width: 8px;
+}
+.ob-num-cell {
+  white-space: nowrap;
+}
+.ob-num {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ob-num:hover {
+  text-decoration: underline;
+}
+.ob-lock {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  color: var(--status-scheduled-fg);
+}
+.ob-customer {
+  font-weight: 500;
+}
+.ob-phone {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.ob-muted {
+  color: var(--text-2);
+}
+.ob-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ob-res-cell {
+  min-width: 120px;
+}
+.ob-res {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ob-res-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ob-res-fill {
+  height: 100%;
+  background: var(--border);
+}
+.ob-res-fill.is-full {
+  background: var(--status-fulfilled-fg);
+}
+.ob-res-fill.is-part {
+  background: var(--status-waiting-fg);
+}
+.ob-res-fill.is-zero {
+  background: var(--status-risk-fg);
+}
+.ob-res-frac {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 34px;
+  text-align: right;
+}
+.ob-balance.is-due {
+  font-weight: 600;
+  color: var(--text);
+}
+.ob-balance:not(.is-due) {
+  color: var(--text-2);
+}
+.ob-credit {
+  color: var(--status-risk-fg);
+}
+.ob-empty {
+  text-align: center;
+  padding: 48px 12px !important;
+  color: var(--text-2);
+}
+.ob-empty-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.ob-more {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+}
+.ob-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--muted);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+}
+.ob-foot-keys {
+  margin-left: auto;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ob-foot .kbd {
+  background: var(--surface);
+}
+
+/* ------------------------------------------------------------------
+   Order slide-over (canvas 5b/5c). 640px; lock banner; one action row
+   with Cancel alone at the right; 3-col summary; lines; payments; a
+   timeline whose dot colour follows the kind of change.
+   ------------------------------------------------------------------ */
+.osh .slide-over-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.osh .slide-over-head {
+  padding: 14px 20px;
+}
+.osh-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.osh-lock {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 20px;
+  background: var(--status-scheduled-bg);
+  border-bottom: 1px solid var(--status-scheduled-border);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.osh-lock.is-run {
+  background: var(--status-risk-bg);
+  border-bottom-color: var(--status-risk-border);
+}
+.osh-lock-glyph {
+  font-family: var(--font-mono);
+  color: var(--status-scheduled-fg);
+}
+.osh-lock.is-run .osh-lock-glyph {
+  color: var(--status-risk-fg);
+}
+.osh-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.osh-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.osh-cancel {
+  margin-left: auto;
+}
+.osh-more {
+  position: relative;
+}
+.osh-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  z-index: 5;
+}
+.osh-menu .menu-item {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+.osh-alert {
+  padding: 10px 20px 0;
+}
+.osh-pay {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 20px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.osh-pay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px minmax(0, 1fr);
+  gap: 8px;
+}
+.osh-pay-grid .field {
+  margin: 0;
+}
+.osh-pay-grid .input-num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.osh-pay-actions {
+  display: flex;
+  gap: 8px;
+}
+.osh-pay-actions .btn[type='submit'] {
+  margin-left: auto;
+}
+.osh-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.osh-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 16px 20px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.osh-strong {
+  font-weight: 600;
+}
+.osh-strong-500 {
+  font-weight: 500;
+}
+.osh-muted {
+  color: var(--text-2);
+}
+.osh-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.osh-total {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.osh-balance {
+  font-weight: 600;
+}
+.osh-balance.is-due {
+  color: var(--status-waiting-fg);
+}
+.osh-balance.is-ok {
+  color: var(--status-fulfilled-fg);
+}
+.osh-section {
+  padding: 18px 20px 0;
+}
+.osh-section:last-of-type {
+  padding-bottom: 20px;
+}
+.osh-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.osh-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-text);
+}
+.osh-section-head .osh-muted {
+  font-size: 12px;
+}
+.osh-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.osh-table thead th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.osh-table th:first-child,
+.osh-table td:first-child {
+  padding-left: 0;
+}
+.osh-table th:last-child,
+.osh-table td:last-child {
+  padding-right: 0;
+}
+.osh-table th.num,
+.osh-table td.num {
+  text-align: right;
+}
+.osh-table tbody tr {
+  height: 34px;
+}
+.osh-table td {
+  padding: 0 8px;
+  border-bottom: 1px solid var(--surface-2);
+}
+.osh-table td.is-ok {
+  color: var(--status-fulfilled-fg);
+}
+.osh-table td.is-short {
+  color: var(--status-waiting-fg);
+}
+.osh-empty {
+  padding: 8px 0;
+  font-size: 12.5px;
+}
+.osh-payments {
+  display: flex;
+  flex-direction: column;
+}
+.osh-payment {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--surface-2);
+  font-size: 12.5px;
+}
+.osh-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.osh-event {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 10px;
+}
+.osh-event-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.osh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex: none;
+  background: var(--accent);
+}
+.osh-dot.is-fulfilled {
+  background: var(--status-fulfilled-fg);
+}
+.osh-dot.is-scheduled {
+  background: var(--status-scheduled-fg);
+}
+.osh-dot.is-waiting {
+  background: var(--status-waiting-fg);
+}
+.osh-dot.is-risk {
+  background: var(--status-risk-fg);
+}
+.osh-dot.is-muted {
+  background: var(--muted);
+}
+.osh-line {
+  width: 1px;
+  flex: 1;
+  background: var(--border);
+}
+.osh-event:last-child .osh-line {
+  display: none;
+}
+.osh-event-body {
+  padding-bottom: 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.osh-when {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+@media (max-width: 720px) {
+  .osh-summary {
+    grid-template-columns: 1fr;
+  }
+  .osh-pay-grid {
+    grid-template-columns: 1fr;
+  }
+}
