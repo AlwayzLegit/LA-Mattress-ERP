@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   Inject,
@@ -104,7 +105,8 @@ export interface CloseOutReport {
   exceptions: { open: number; total: number };
   events: CloseOutEvent[];
   signoff: { name: string; at: string; openExceptionCount: number; note: string | null } | null;
-  viewer: { canSignOff: boolean };
+  /** `signable`: the day's close has run, so the sheet is final enough to sign. */
+  viewer: { canSignOff: boolean; signable: boolean };
 }
 
 const RECOUNT_TYPE = 'cash_recount_requested';
@@ -123,6 +125,12 @@ function usd(cents: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+/** "short" / "over" from the signed variance; a suspended drawer says so too. */
+function varianceWord(varianceCents: number, suspended: boolean): string {
+  const dir = varianceCents < 0 ? 'short' : varianceCents > 0 ? 'over' : 'balanced';
+  return suspended ? `suspended, ${dir}` : dir;
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -324,11 +332,17 @@ export class CloseOutReportController {
         .groupBy(schema.payments.method)
         .orderBy(desc(sql`coalesce(sum(${schema.payments.amountCents}), 0)`));
     const outFor = async (d: string) => {
-      const rows = await paymentsQuery().where(paymentsBase(d, 'out'));
-      return {
-        count: rows.reduce((n, r) => n + r.count, 0),
-        cents: -rows.reduce((n, r) => n + r.cents, 0),
-      };
+      const [row] = await this.db
+        .select({
+          count: sql<number>`count(*)::int`,
+          cents: sql<number>`coalesce(sum(${schema.payments.amountCents}), 0)::int`,
+        })
+        .from(schema.payments)
+        .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
+        .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
+        .leftJoin(schema.serviceOrders, eq(schema.serviceOrders.id, schema.payments.serviceOrderId))
+        .where(paymentsBase(d, 'out'));
+      return { count: row?.count ?? 0, cents: -(row?.cents ?? 0) };
     };
     const registerRefundsFor = async (d: string) => {
       const [row] = await this.db
@@ -586,7 +600,7 @@ export class CloseOutReportController {
       for (const d of drawers) {
         if (d.status === 'short' || d.status === 'over' || d.status === 'suspended') {
           const amt = usd(Math.abs(d.varianceCents ?? 0));
-          const word = d.status === 'suspended' ? 'suspended' : d.status;
+          const word = varianceWord(d.varianceCents ?? 0, d.status === 'suspended');
           did.push(
             d.reason
               ? {
@@ -629,7 +643,7 @@ export class CloseOutReportController {
         if (d.status === 'short' || d.status === 'over' || d.status === 'suspended') {
           did.push({
             tone: d.reason ? 'ok' : 'risk',
-            text: `Drawer ${d.number} ${d.status} ${usd(Math.abs(d.varianceCents ?? 0))}${
+            text: `Drawer ${d.number} ${varianceWord(d.varianceCents ?? 0, d.status === 'suspended')} ${usd(Math.abs(d.varianceCents ?? 0))}${
               d.reason
                 ? ` — reason recorded by ${d.reason.by}`
                 : d.recount
@@ -810,7 +824,10 @@ export class CloseOutReportController {
             note: signRow.note,
           }
         : null,
-      viewer: { canSignOff: tenant.permissions.has('reports.closeout.sign_off') },
+      viewer: {
+        canSignOff: tenant.permissions.has('reports.closeout.sign_off'),
+        signable: closeRow != null,
+      },
     };
   }
 
@@ -832,6 +849,13 @@ export class CloseOutReportController {
     const note = body.note?.trim().slice(0, 200) || null;
     const sheet = await this.report(tenant, body.date, store.id);
     if (sheet.signoff) return sheet;
+    // The sheet is a snapshot of a finished day: the sign-off is permanent
+    // and one-per-day, so it waits for the close to have run.
+    if (!sheet.close) {
+      throw new ConflictException(
+        `The ${store.name} close-out for ${body.date} has not run yet — sign off after the ${localClock(new Date(Date.UTC(2000, 0, 1, closeHour())), 'UTC')} close`,
+      );
+    }
 
     const name = actor?.name ?? actor?.email ?? 'a manager';
     const [inserted] = await this.db

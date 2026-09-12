@@ -801,6 +801,8 @@ Sales competitions are Phase 11.
   drawer's numbers as counted; the reason is the info event's text.
 - Signing never acknowledges an exception (README §3.5: "the exception stays open until
   resolved"); the sign-off row remembers how many were open when the manager signed.
+  Signing waits for the day's close to have run (409 before that; the button says when it
+  opens) — the sheet is a snapshot of a finished day and the sign-off is one per day.
 - Operations keeps the time-clock strip as the member's own clock (as on the manager home).
 
 ### Later

@@ -72,7 +72,7 @@ export interface CloseOutReport {
     at: string;
   }[];
   signoff: { name: string; at: string; openExceptionCount: number; note: string | null } | null;
-  viewer: { canSignOff: boolean };
+  viewer: { canSignOff: boolean; signable: boolean };
 }
 
 const GLYPH = { ok: '✓', risk: '▲', hold: '◔', info: '·' } as const;
@@ -106,6 +106,10 @@ function firstName(name: string | null): string {
   if (!name) return '—';
   const [first, ...rest] = name.split(' ');
   return rest.length ? `${first} ${rest[rest.length - 1]![0]}.` : first!;
+}
+/** Over / short from the signed variance, never from the suspension flag. */
+function varianceWord(varianceCents: number): 'short' | 'over' | 'balanced' {
+  return varianceCents < 0 ? 'short' : varianceCents > 0 ? 'over' : 'balanced';
 }
 function signed(cents: number): string {
   return cents < 0 ? `−${usdCents(-cents)}` : usdCents(cents);
@@ -467,7 +471,7 @@ export default function CloseOutSheet({
 
           {flagged.map((d) => {
             const amt = usdCents(Math.abs(d.varianceCents ?? 0));
-            const word = d.status === 'over' ? 'over' : 'short';
+            const word = varianceWord(d.varianceCents ?? 0);
             return (
               <div className="zr-exception" key={d.id} data-testid="zr-exception">
                 <div className="zr-exception-glyph" aria-hidden>
@@ -476,11 +480,13 @@ export default function CloseOutSheet({
                 <div style={{ minWidth: 0 }}>
                   <p>
                     <strong>
-                      Drawer {d.number} is {word} {amt}.
+                      Drawer {d.number} is {word}
+                      {word === 'balanced' ? '' : ` ${amt}`}
+                      {d.status === 'suspended' ? ' and was suspended' : ''}.
                     </strong>{' '}
                     {d.closedBy ?? 'The cashier'} closed at{' '}
                     {d.closedAt ? clockTime(d.closedAt, tz) : '—'}
-                    {d.status === 'suspended' ? ' after the drawer was suspended' : ''}
+                    {d.status === 'suspended' ? ' after the blind count ran out of attempts' : ''}
                     {d.recount
                       ? `; ${d.recount.by} asked for a recount at ${clockTime(d.recount.at, tz)}.`
                       : ' without a recount.'}{' '}
@@ -608,19 +614,25 @@ export default function CloseOutSheet({
               <Button
                 variant="primary"
                 className="zr-sign"
-                disabled={!data.viewer.canSignOff || busy != null}
+                disabled={!data.viewer.canSignOff || !data.viewer.signable || busy != null}
                 onClick={() => setSigning(true)}
                 data-testid="zr-sign"
                 title={
-                  data.viewer.canSignOff
-                    ? undefined
-                    : 'Signing needs the close-out sign-off permission'
+                  !data.viewer.canSignOff
+                    ? 'Signing needs the close-out sign-off permission'
+                    : !data.viewer.signable
+                      ? `Available once the ${hourLabel(data.closeHour)} close has run`
+                      : undefined
                 }
               >
                 Sign off close-out
               </Button>
               <div className="zr-sign-copy">
-                Signing records your name and time; the exception stays open until resolved.
+                {data.viewer.signable
+                  ? 'Signing records your name and time; the exception stays open until resolved.'
+                  : isToday
+                    ? `Signing opens after the ${hourLabel(data.closeHour)} close; it records your name and time, and any exception stays open until resolved.`
+                    : 'The close never ran for this day, so there is no sheet to sign. Run it from Close-outs first.'}
               </div>
             </div>
           )}
@@ -711,7 +723,9 @@ function ReasonDialog({
   const amt = usdCents(Math.abs(drawer.varianceCents ?? 0));
   return (
     <Dialog
-      title={`Record Drawer ${drawer.number} ${drawer.status === 'over' ? 'over' : 'short'} ${amt}`}
+      title={`Record Drawer ${drawer.number} ${varianceWord(drawer.varianceCents ?? 0)}${
+        (drawer.varianceCents ?? 0) === 0 ? '' : ` ${amt}`
+      }${drawer.status === 'suspended' ? ' (suspended)' : ''}`}
       description={`Closed by ${drawer.closedBy ?? 'the cashier'} at ${
         drawer.closedAt ? clockTime(drawer.closedAt, tz) : '—'
       }. The reason goes on the owner's exceptions with your name; the drawer's numbers do not change.`}

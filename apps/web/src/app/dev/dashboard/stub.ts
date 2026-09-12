@@ -1767,7 +1767,7 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
             ]
           : [],
         signoff: isFixtureDay ? zSign : null,
-        viewer: { canSignOff: true },
+        viewer: { canSignOff: true, signable: zDate < today },
       });
     }
     if (p.startsWith('/v1/')) return json({ message: `stub: ${p}` }, 404);
