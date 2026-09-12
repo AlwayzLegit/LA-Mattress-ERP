@@ -2,6 +2,13 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import {
+  firmnessFromText,
+  normalizeFirmness,
+  normalizeSize,
+  sizeFromGroupCode,
+  sizeFromText,
+} from '@jetnine/shared';
 import { LEGACY_CATEGORY_NAMES } from './legacy-categories';
 import { DRIZZLE } from '../database/database.module';
 import {
@@ -993,6 +1000,18 @@ export class ImportService {
           : {};
       variantValues.attributesJson = { ...prior, group: n.group.trim() } as never;
     }
+    // A22.2: size and firmness — the file's own column when it has one,
+    // else the STORIS group code, else the description. A value already on
+    // the variant is never cleared by a file that says nothing.
+    const size =
+      normalizeSize(typeof n.size === 'string' ? n.size : null) ??
+      sizeFromGroupCode(typeof n.group === 'string' ? n.group : null) ??
+      sizeFromText(n.name as string);
+    if (size) variantValues.size = size;
+    const firmness =
+      normalizeFirmness(typeof n.firmness === 'string' ? n.firmness : null) ??
+      firmnessFromText(n.name as string);
+    if (firmness) variantValues.firmness = firmness;
     variantValues.isActive = true;
     if (variant) {
       await this.db

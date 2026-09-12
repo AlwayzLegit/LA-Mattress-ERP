@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { Plus } from 'lucide-react';
+import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import {
   Alert,
@@ -15,6 +16,7 @@ import {
   Input,
   PageHeader,
   Stack,
+  Select,
 } from '@/components/ui';
 
 interface VariantInput {
@@ -23,6 +25,8 @@ interface VariantInput {
   priceDollars: string;
   costDollars: string;
   barcode: string;
+  size: string;
+  firmness: string;
 }
 
 const blankVariant: VariantInput = {
@@ -31,6 +35,8 @@ const blankVariant: VariantInput = {
   priceDollars: '',
   costDollars: '',
   barcode: '',
+  size: '',
+  firmness: '',
 };
 
 export default function NewProductPage() {
@@ -61,6 +67,9 @@ export default function NewProductPage() {
             priceCents: Math.round(Number(v.priceDollars) * 100),
             costCents: v.costDollars ? Math.round(Number(v.costDollars) * 100) : null,
             barcode: v.barcode || null,
+            // A22.2: blank → the API reads the size / firmness off the names.
+            ...(v.size ? { size: v.size } : {}),
+            ...(v.firmness ? { firmness: v.firmness } : {}),
           })),
       };
       const result = await api<{ id: string }>('/v1/products', {
@@ -104,7 +113,7 @@ export default function NewProductPage() {
               {variants.map((v, i) => (
                 <div
                   key={i}
-                  className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto]"
+                  className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(7,minmax(0,1fr))_auto]"
                 >
                   <Field label="SKU">
                     <Input value={v.sku} onChange={(e) => setVariant(i, { sku: e.target.value })} />
@@ -138,6 +147,34 @@ export default function NewProductPage() {
                       value={v.barcode}
                       onChange={(e) => setVariant(i, { barcode: e.target.value })}
                     />
+                  </Field>
+                  <Field label="Size" hint="Blank: read off the name.">
+                    <Select
+                      value={v.size}
+                      aria-label="Size"
+                      onChange={(e) => setVariant(i, { size: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      {MATTRESS_SIZES.map((x) => (
+                        <option key={x} value={x}>
+                          {x}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Firmness">
+                    <Select
+                      value={v.firmness}
+                      aria-label="Firmness"
+                      onChange={(e) => setVariant(i, { firmness: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      {FIRMNESS_LEVELS.map((x) => (
+                        <option key={x} value={x}>
+                          {x}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
                   <Button
                     type="button"

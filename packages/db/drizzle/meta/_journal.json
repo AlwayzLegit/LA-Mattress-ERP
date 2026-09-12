@@ -694,6 +694,13 @@
       "when": 1789111931264,
       "tag": "0098_a22_po_print_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1789173914359,
+      "tag": "0099_a22_variant_size_firmness",
+      "breakpoints": true
     }
   ]
 }

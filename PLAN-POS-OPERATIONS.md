@@ -1531,6 +1531,45 @@ could only narrow to a code. Mapping and sources:
   root when no code category exists, and a product already in a subcategory
   of that root keeps it.
 
+### 12.20 Size and firmness — first-class variant fields (amendment A22.2, owner 2026-09-12)
+
+Owner ask: "when you search for a product and select size, if it's not in
+the product name it will not show; make sure the remaining fields work with
+industry standards." Until now the register popup read size and firmness
+off the product name with a regex at query time, so a CKSHEE sheet set or a
+QUPRO protector — whose STORIS description never says the size — matched no
+size pick at all.
+
+- **D47 One vocabulary.** `MATTRESS_SIZES` (Twin, Twin XL, Full, Full XL,
+  Queen, Olympic Queen, King, Cal King, Split Queen, Split King, Split Cal
+  King, Custom) and `FIRMNESS_LEVELS` (Plush, Medium, Medium Firm, Firm,
+  Extra Firm) live in `@jetnine/shared` with the parsers every layer uses:
+  `normalizeSize` (labels, long forms, STORIS / SKU abbreviations — "CA
+  King", "California King", "CK" all land on Cal King), `sizeFromGroupCode`
+  (QUEEN / QUFND / QUADJ / QUPRO / QUSHEE / QUPCAS…), `sizeFromText` (one
+  size per name; a slash list such as T/F/Q/K/CK or QUEEN/FULL is a
+  multi-size item and gets none) and `firmnessFromText` (STORIS shorthand
+  included: X-FIRM, XFIRM, ULTR FM, FM, MED, SOFT).
+- **D48 Stored on the variant, backfilled once.** `product_variants.size` and
+  `.firmness` (migration `0099`, indexed by business + size). The migration
+  fills them for every existing variant — its own attributes first, then
+  the STORIS group code, then the product + variant name — with SQL that
+  mirrors the shared parsers; the categorize spec proves the two agree on
+  all 1,948 STORIS rows. The catalog import sets them the same way (an
+  explicit SIZE / FIRMNESS column wins) and never clears a value a file
+  says nothing about. Product create derives them from the names unless
+  told; the product page edits them per variant; any spelling is accepted,
+  an unknown value is refused. The variant search vector now carries both,
+  so free text finds "cal king bamboo sheets".
+- **D49 Every product search uses the columns.** The register's Add
+  Product popup filters on the stored size / firmness (falling back to the
+  names only for a variant nobody has filed) and matches every search word
+  in any order across product name, variant name, SKU, size, firmness and
+  brand. The product browser gains `size` and `firmness` criteria and
+  sortable columns; `GET /v1/products/facets` feeds the pickers (group
+  codes, sizes and firmness levels in use, with counts) so the Product
+  group criterion offers the codes instead of asking for one.
+
 ## 14. Build Order
 
 1. Schema: order types/statuses, store prefixes + per-store sequences, fee settings

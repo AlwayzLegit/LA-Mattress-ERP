@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { GripVertical, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  PRODUCT_PURCHASE_STATUSES,
+  FIRMNESS_LEVELS,
+  MATTRESS_SIZES,
   PRODUCT_PURCHASE_STATUS_LABELS,
+  PRODUCT_PURCHASE_STATUSES,
   type ProductPurchaseStatus,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
@@ -53,6 +55,8 @@ interface ProductRow {
   group: string | null;
   categoryName: string | null;
   categoryPath: string | null;
+  size: string | null;
+  firmness: string | null;
   collectionName: string | null;
   priceCents: number | null;
   costCents: number | null;
@@ -82,6 +86,8 @@ interface Criteria {
   collectionId: string;
   categoryId: string;
   group: string;
+  size: string;
+  firmness: string;
   purchaseStatus: string;
   asIsReasonCodeId: string;
 }
@@ -93,9 +99,16 @@ const EMPTY_CRITERIA: Criteria = {
   collectionId: '',
   categoryId: '',
   group: '',
+  size: '',
+  firmness: '',
   purchaseStatus: '',
   asIsReasonCodeId: '',
 };
+interface Facets {
+  groups: { value: string; count: number }[];
+  sizes: { value: string; count: number }[];
+  firmness: { value: string; count: number }[];
+}
 function criteriaParams(c: Criteria): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(c)) if (v.trim()) out[k] = v.trim();
@@ -241,6 +254,9 @@ const COLUMNS: Column[] = [
     render: (p) => p.asIsNonSellable,
   },
   { id: 'group', label: 'Product group', sort: 'group', render: (p) => p.group ?? '—' },
+  // A22.2: the canonical size and firmness (variant columns, filterable).
+  { id: 'size', label: 'Size', sort: 'size', render: (p) => p.size ?? '—' },
+  { id: 'firmness', label: 'Firmness', sort: 'firmness', render: (p) => p.firmness ?? '—' },
   { id: 'brand', label: 'Brand', sort: 'brandName', render: (p) => p.brandName ?? '—' },
   {
     id: 'collection',
@@ -300,6 +316,7 @@ export default function ProductsPage() {
   const [collections, setCollections] = useState<RefOption[]>([]);
   const [categories, setCategories] = useState<RefOption[]>([]);
   const [asIsReasons, setAsIsReasons] = useState<ReasonCodeOption[]>([]);
+  const [facets, setFacets] = useState<Facets>({ groups: [], sizes: [], firmness: [] });
   const [refsLoaded, setRefsLoaded] = useState(false);
   const { rows, error } = list;
   const hasCriteria = Object.keys(criteriaParams(criteria)).length > 0;
@@ -338,6 +355,9 @@ export default function ProductsPage() {
     api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
       .then(setAsIsReasons)
       .catch(() => setAsIsReasons([]));
+    api<Facets>('/v1/products/facets')
+      .then(setFacets)
+      .catch(() => setFacets({ groups: [], sizes: [], firmness: [] }));
   }, [advancedOpen, refsLoaded]);
 
   function setCriterion<K extends keyof Criteria>(key: K, value: Criteria[K]) {
@@ -510,7 +530,7 @@ export default function ProductsPage() {
             summary={
               hasCriteria
                 ? 'criteria set'
-                : 'product, description, brand, vendor model, collection, category, group, purchase status, as-is reason'
+                : 'product, description, brand, vendor model, collection, category, group, size, firmness, purchase status, as-is reason'
             }
             open={advancedOpen}
             onToggle={() => setAdvancedOpen((o) => !o)}
@@ -589,14 +609,61 @@ export default function ProductsPage() {
                     ))}
                   </Select>
                 </Field>
-                <Field label="Product group">
+                <Field
+                  label="Product group"
+                  hint="STORIS group code; the list offers the ones in use."
+                >
                   <Input
                     value={criteria.group}
                     placeholder="e.g. QUEEN"
                     aria-label="Product group"
                     data-testid="criteria-group"
+                    list="product-group-codes"
                     onChange={(e) => setCriterion('group', e.target.value)}
                   />
+                  <datalist id="product-group-codes">
+                    {facets.groups.map((g) => (
+                      <option key={g.value} value={g.value}>
+                        {`${g.value} (${g.count})`}
+                      </option>
+                    ))}
+                  </datalist>
+                </Field>
+                <Field label="Size">
+                  <Select
+                    value={criteria.size}
+                    aria-label="Size"
+                    data-testid="criteria-size"
+                    onChange={(e) => setCriterion('size', e.target.value)}
+                  >
+                    <option value="">Any size</option>
+                    {MATTRESS_SIZES.map((x) => {
+                      const n = facets.sizes.find((f) => f.value === x)?.count ?? 0;
+                      return (
+                        <option key={x} value={x}>
+                          {n > 0 ? `${x} (${n})` : x}
+                        </option>
+                      );
+                    })}
+                  </Select>
+                </Field>
+                <Field label="Firmness">
+                  <Select
+                    value={criteria.firmness}
+                    aria-label="Firmness"
+                    data-testid="criteria-firmness"
+                    onChange={(e) => setCriterion('firmness', e.target.value)}
+                  >
+                    <option value="">Any firmness</option>
+                    {FIRMNESS_LEVELS.map((x) => {
+                      const n = facets.firmness.find((f) => f.value === x)?.count ?? 0;
+                      return (
+                        <option key={x} value={x}>
+                          {n > 0 ? `${x} (${n})` : x}
+                        </option>
+                      );
+                    })}
+                  </Select>
                 </Field>
                 <Field label="Purchase status">
                   <Select

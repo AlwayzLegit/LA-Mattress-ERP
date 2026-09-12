@@ -795,3 +795,132 @@ describe('Nested categories in the browser (A22.1)', () => {
     expect(detail.body.categoryPath).toBe('Mattresses (tree test) › Hybrid');
   });
 });
+
+describe('Size and firmness (A22.2)', () => {
+  const h = () => ({ Cookie: ownerCookie, 'X-Business-Id': businessId });
+  let sheetsId = '';
+  let sheetsVariantId = '';
+
+  it('a new product reads size and firmness off its names unless told otherwise', async () => {
+    const sheets = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set(h())
+      .send({
+        sku: 'SZ-SHEETS',
+        name: 'BAMBOO SHEETS WHITE',
+        variants: [{ sku: 'SZ-SHEETS-CK', name: 'Cal King', priceCents: 7100 }],
+      })
+      .expect(201);
+    sheetsId = sheets.body.id as string;
+    sheetsVariantId = sheets.body.variants[0].id as string;
+    expect(sheets.body.variants[0]).toMatchObject({ size: 'Cal King', firmness: null });
+
+    const mattress = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set(h())
+      .send({
+        sku: 'SZ-MICAH',
+        name: 'Queen Micah Extra Firm Mattress',
+        variants: [{ sku: 'SZ-MICAH-Q', priceCents: 129900 }],
+      })
+      .expect(201);
+    expect(mattress.body.variants[0]).toMatchObject({ size: 'Queen', firmness: 'Extra Firm' });
+
+    // Told outright, in any spelling — and a bad value is refused.
+    const told = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set(h())
+      .send({
+        sku: 'SZ-TOLD',
+        name: 'Universal Frame',
+        variants: [
+          { sku: 'SZ-TOLD-1', priceCents: 100, size: 'california king', firmness: 'soft' },
+        ],
+      })
+      .expect(201);
+    expect(told.body.variants[0]).toMatchObject({ size: 'Cal King', firmness: 'Plush' });
+    await request(app.getHttpServer())
+      .post('/v1/products')
+      .set(h())
+      .send({
+        sku: 'SZ-BAD',
+        name: 'Bad',
+        variants: [{ sku: 'SZ-BAD-1', priceCents: 1, size: 'Huge' }],
+      })
+      .expect(400);
+  });
+
+  it('the browser filters by size and firmness, lists them, and offers the facets', async () => {
+    const bySize = await request(app.getHttpServer())
+      .get('/v1/products?size=CK')
+      .set(h())
+      .expect(200);
+    const rows = bySize.body.data as { id: string; size: string | null; firmness: string | null }[];
+    expect(rows.map((r) => r.id)).toContain(sheetsId);
+    expect(rows.find((r) => r.id === sheetsId)).toMatchObject({ size: 'Cal King' });
+    expect(rows.every((r) => r.size === 'Cal King')).toBe(true);
+
+    const byFirmness = await request(app.getHttpServer())
+      .get('/v1/products?firmness=Extra%20Firm')
+      .set(h())
+      .expect(200);
+    expect((byFirmness.body.data as { sku: string }[]).map((r) => r.sku)).toEqual(['SZ-MICAH']);
+
+    await request(app.getHttpServer()).get('/v1/products?size=Huge').set(h()).expect(400);
+
+    // Free text: the size lives on the variant, the words on the product.
+    const q = await request(app.getHttpServer())
+      .get('/v1/products?q=cal%20king%20bamboo%20sheets')
+      .set(h())
+      .expect(200);
+    expect((q.body.data as { id: string }[]).map((r) => r.id)).toContain(sheetsId);
+    const miss = await request(app.getHttpServer())
+      .get('/v1/products?q=queen%20bamboo%20sheets')
+      .set(h())
+      .expect(200);
+    expect((miss.body.data as { id: string }[]).map((r) => r.id)).not.toContain(sheetsId);
+
+    const facets = await request(app.getHttpServer())
+      .get('/v1/products/facets')
+      .set(h())
+      .expect(200);
+    expect(facets.body.sizes.map((f: { value: string }) => f.value)).toEqual(
+      expect.arrayContaining(['Queen', 'Cal King']),
+    );
+    expect(facets.body.firmness).toEqual(
+      expect.arrayContaining([{ value: 'Extra Firm', count: 1 }]),
+    );
+  });
+
+  it('a variant can be refiled or cleared from the product page', async () => {
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sheetsVariantId}`)
+      .set(h())
+      .send({ size: 'split cal king', firmness: 'medium firm' })
+      .expect(200);
+    let detail = await request(app.getHttpServer())
+      .get(`/v1/products/${sheetsId}`)
+      .set(h())
+      .expect(200);
+    expect(detail.body.variants[0]).toMatchObject({
+      size: 'Split Cal King',
+      firmness: 'Medium Firm',
+    });
+    expect(detail.body).toMatchObject({ size: 'Split Cal King', firmness: 'Medium Firm' });
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sheetsVariantId}`)
+      .set(h())
+      .send({ size: null })
+      .expect(200);
+    detail = await request(app.getHttpServer())
+      .get(`/v1/products/${sheetsId}`)
+      .set(h())
+      .expect(200);
+    expect(detail.body.variants[0].size).toBeNull();
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sheetsVariantId}`)
+      .set(h())
+      .send({ firmness: 'rock hard' })
+      .expect(400);
+  });
+});

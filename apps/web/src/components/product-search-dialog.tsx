@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
 import { Button, Card, Input, Select, TableEmpty, TableWrap, Toolbar } from '@/components/ui';
@@ -40,17 +41,9 @@ interface VendorRow {
   id: string;
   name: string;
 }
-const SIZES = [
-  'Twin',
-  'Twin XL',
-  'Full',
-  'Queen',
-  'King',
-  'Cal King',
-  'Split King',
-  'Split Cal King',
-];
-const FIRMNESS = ['Plush', 'Medium', 'Medium Firm', 'Firm', 'Extra Firm'];
+// A22.2: one vocabulary with the API and the product page.
+const SIZES = MATTRESS_SIZES;
+const FIRMNESS = FIRMNESS_LEVELS;
 export function ProductSearchDialog({
   locationId,
   locationName,
@@ -199,7 +192,7 @@ export function ProductSearchDialog({
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search model, brand, size…"
+              placeholder="Search model, brand, size, SKU — any order"
               aria-label="Search products"
               data-testid="product-query"
             />
@@ -280,6 +273,7 @@ export function ProductSearchDialog({
               <thead>
                 <tr>
                   <th>Product</th>
+                  <th>Size</th>
                   <th>SKU</th>
                   <th>Vendor</th>
                   <th className="num">Price</th>
@@ -308,6 +302,10 @@ export function ProductSearchDialog({
                       {r.productName}
                       {r.variantName ? ` — ${r.variantName}` : ''}
                     </td>
+                    <td data-testid="result-size">
+                      {r.size ?? '—'}
+                      {r.firmness ? <span className="muted"> · {r.firmness}</span> : null}
+                    </td>
                     <td>
                       <code>{r.sku ?? '—'}</code>
                     </td>
@@ -335,7 +333,7 @@ export function ProductSearchDialog({
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && <TableEmpty colSpan={7}>No matches.</TableEmpty>}
+                {rows.length === 0 && <TableEmpty colSpan={8}>No matches.</TableEmpty>}
               </tbody>
             </table>
           </TableWrap>

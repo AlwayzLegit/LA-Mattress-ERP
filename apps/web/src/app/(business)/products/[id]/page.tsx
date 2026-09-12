@@ -6,8 +6,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   centsToInputString,
-  PRODUCT_PURCHASE_STATUSES,
+  FIRMNESS_LEVELS,
+  MATTRESS_SIZES,
   PRODUCT_PURCHASE_STATUS_LABELS,
+  PRODUCT_PURCHASE_STATUSES,
   type ProductPurchaseStatus,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
@@ -54,6 +56,9 @@ interface Variant {
   barcode: string | null;
   priceCents: number;
   costCents: number | null;
+  /** A22.2: canonical size / firmness, null when the item fits several sizes or has none. */
+  size: string | null;
+  firmness: string | null;
   isActive: boolean;
   reorderPoint: number | null;
   reorderQty: number | null;
@@ -119,6 +124,8 @@ interface Product {
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
+  size: string | null;
+  firmness: string | null;
   // A21 General Information (D9) + serial tracking for the Serial/Reference tab.
   serialTracked: boolean;
   suggestedRetailCents: number | null;
@@ -232,6 +239,23 @@ export default function ProductDetailPage() {
       });
       if (kind === 'brand') setNewBrand('');
       else setNewCollection('');
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // A22.2: size and firmness live on the variant; any spelling the API
+  // knows ("cal king", "CK") lands as the canonical label.
+  async function setVariantSizing(variantId: string, patch: { size?: string; firmness?: string }) {
+    try {
+      await api(`/v1/products/variants/${variantId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...(patch.size !== undefined ? { size: patch.size || null } : {}),
+          ...(patch.firmness !== undefined ? { firmness: patch.firmness || null } : {}),
+        }),
+      });
       void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -705,6 +729,12 @@ export default function ProductDetailPage() {
                   <Field label="Group" hint="STORIS size / product group from the import.">
                     <Input value={p.group ?? ''} readOnly aria-label="Group" />
                   </Field>
+                  <Field label="Size" hint="Set per variant in the Variants card below.">
+                    <Input value={p.size ?? ''} readOnly aria-label="Size" />
+                  </Field>
+                  <Field label="Firmness" hint="Set per variant in the Variants card below.">
+                    <Input value={p.firmness ?? ''} readOnly aria-label="Firmness" />
+                  </Field>
                   <Field label="Category">
                     <Input value={p.categoryName ?? ''} readOnly aria-label="Category" />
                   </Field>
@@ -903,6 +933,8 @@ export default function ProductDetailPage() {
                       <tr>
                         <th>Name</th>
                         <th>SKU</th>
+                        <th>Size</th>
+                        <th>Firmness</th>
                         <th>Barcode</th>
                         <th className="num">Price</th>
                         <th className="num">Cost</th>
@@ -911,13 +943,47 @@ export default function ProductDetailPage() {
                     </thead>
                     <tbody>
                       {p.variants.length === 0 && (
-                        <TableEmpty colSpan={6}>This product has no variants.</TableEmpty>
+                        <TableEmpty colSpan={8}>This product has no variants.</TableEmpty>
                       )}
                       {p.variants.map((v) => (
                         <tr key={v.id}>
                           <td>{v.name ?? '—'}</td>
                           <td>
                             <code>{v.sku ?? '—'}</code>
+                          </td>
+                          <td>
+                            <Select
+                              value={v.size ?? ''}
+                              aria-label={`Size for ${v.name ?? v.sku ?? 'variant'}`}
+                              data-testid="variant-size"
+                              onChange={(e) =>
+                                void setVariantSizing(v.id, { size: e.target.value })
+                              }
+                            >
+                              <option value="">—</option>
+                              {MATTRESS_SIZES.map((x) => (
+                                <option key={x} value={x}>
+                                  {x}
+                                </option>
+                              ))}
+                            </Select>
+                          </td>
+                          <td>
+                            <Select
+                              value={v.firmness ?? ''}
+                              aria-label={`Firmness for ${v.name ?? v.sku ?? 'variant'}`}
+                              data-testid="variant-firmness"
+                              onChange={(e) =>
+                                void setVariantSizing(v.id, { firmness: e.target.value })
+                              }
+                            >
+                              <option value="">—</option>
+                              {FIRMNESS_LEVELS.map((x) => (
+                                <option key={x} value={x}>
+                                  {x}
+                                </option>
+                              ))}
+                            </Select>
                           </td>
                           <td>
                             <code>{v.barcode ?? '—'}</code>

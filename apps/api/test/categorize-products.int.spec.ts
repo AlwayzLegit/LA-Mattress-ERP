@@ -10,11 +10,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql as sqlTag } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { schema } from '@jetnine/db';
+import { sizeFromGroupCode } from '@jetnine/shared';
 import { buildCategoryIndex } from '../src/catalog/category-tree';
 import { resolveImportFile, runCatalogImport } from '../src/ops/catalog-import';
 import {
@@ -312,4 +313,76 @@ describe('product-categories.csv (A22.1)', () => {
     expect(s.unlistedSkus).toHaveLength(ROWS - 1);
     expect(s.unchanged).toBe(1);
   });
+});
+
+describe('size and firmness on the STORIS catalog (A22.2)', () => {
+  async function sizing() {
+    return db
+      .select({
+        sku: schema.productVariants.sku,
+        size: schema.productVariants.size,
+        firmness: schema.productVariants.firmness,
+        group: sqlTag<string | null>`${schema.productVariants.attributesJson} ->> 'group'`,
+      })
+      .from(schema.productVariants)
+      .where(eq(schema.productVariants.businessId, businessId));
+  }
+
+  it('the import files every sized group code and leaves multi-size items alone', async () => {
+    const rows = await sizing();
+    expect(rows).toHaveLength(ROWS);
+    const sized = rows.filter((r) => sizeFromGroupCode(r.group) !== null);
+    expect(sized.length).toBeGreaterThan(1500);
+    expect(sized.filter((r) => r.size === null)).toEqual([]);
+    const by = new Map(rows.map((r) => [r.sku, r]));
+    expect(by.get('7703-6/6')).toMatchObject({ size: 'King', firmness: 'Firm' }); // E KING MICAH FIRM
+    expect(by.get('MA25CKWHBS')).toMatchObject({ size: 'Cal King', firmness: null }); // BAMBOO SHEETS WHITE, CKSHEE
+    expect(by.get('CS72')).toMatchObject({ size: 'Cal King' }); // 10" ZIPPED ENCASEMENT, CKPRO
+    expect(by.get('8245-QSB')).toMatchObject({ size: 'Queen' }); // SPLIT QN BB … FND 2" (QUFND)
+    expect(by.get('HEXMI66-7680')).toMatchObject({ size: 'King', firmness: 'Medium' }); // E KINGMIDNIGHT LUXE MED
+    expect(by.get('7921-3X')).toMatchObject({ size: 'Twin XL', firmness: 'Extra Firm' }); // AVALON ULTRA-X-FIRM
+    expect(by.get('53007731')).toMatchObject({ size: 'Twin XL', firmness: 'Extra Firm' }); // LUX-ESTATE ULTRA FM TT
+    expect(by.get('K88')).toMatchObject({ size: null }); // EK/CK/QN FRAME
+    expect(by.get('KB2007-G')).toMatchObject({ size: null }); // T/F/Q/K/CK 3-LEG SUPPORT FRAME
+    expect(by.get('CM7880BG-HB-FQ')).toMatchObject({ size: null }); // FULL/QUEEN HASSELT HEADBOARD
+    expect(by.get('HDBB-1')).toMatchObject({ size: null }); // HEADBOARD BRACKETS ALL SIZES
+  });
+
+  it('the migration backfill agrees with the importer on every variant', async () => {
+    const before = await sizing();
+    const migration = readFileSync(
+      join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'packages',
+        'db',
+        'drizzle',
+        '0099_a22_variant_size_firmness.sql',
+      ),
+      'utf8',
+    );
+    const start = migration.indexOf('-- backfill:start');
+    const end = migration.indexOf('-- backfill:end');
+    expect(start).toBeGreaterThan(0);
+    const backfill = migration.slice(start + '-- backfill:start'.length, end);
+    await sql.unsafe(
+      `UPDATE product_variants SET size = NULL, firmness = NULL WHERE business_id = '${businessId}'`,
+    );
+    await sql.unsafe(backfill);
+    const after = await sizing();
+    const afterBySku = new Map(after.map((r) => [r.sku, r]));
+    const diffs = before
+      .filter((r) => {
+        const a = afterBySku.get(r.sku);
+        return a?.size !== r.size || a?.firmness !== r.firmness;
+      })
+      .map((r) => ({
+        sku: r.sku,
+        ts: [r.size, r.firmness],
+        sql: [afterBySku.get(r.sku)?.size, afterBySku.get(r.sku)?.firmness],
+      }));
+    expect(diffs).toEqual([]);
+  }, 60_000);
 });
