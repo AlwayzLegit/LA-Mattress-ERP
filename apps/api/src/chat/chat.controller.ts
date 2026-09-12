@@ -4,6 +4,7 @@ import {
   Sse,
   ServiceUnavailableException,
   ForbiddenException,
+  NotFoundException,
   Body,
   Controller,
   Get,
@@ -41,7 +42,10 @@ function credentials(headers: Record<string, string | string[] | undefined>): Ch
 @UseGuards(ChatHttpGuard)
 @Controller('v1/chat/visitor')
 export class ChatVisitorController {
-  constructor(@Inject(ChatService) private readonly chat: ChatService) {}
+  constructor(
+    @Inject(ChatService) private readonly chat: ChatService,
+    @Inject(ConfigService) private readonly config: ConfigService,
+  ) {}
   @Post('session')
   @Header('Cache-Control', 'no-store')
   session(@Headers() headers: Record<string, string | undefined>) {
@@ -60,6 +64,37 @@ export class ChatVisitorController {
     @Body() body: unknown,
   ) {
     return this.chat.sendVisitorMessage(credentials(headers), id, body);
+  }
+  @Sse('conversations/:id/live')
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Accel-Buffering', 'no')
+  live(
+    @Headers() headers: Record<string, string | undefined>,
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ) {
+    const auth = credentials(headers);
+    let cursor = query;
+    return timer(0, 1000).pipe(
+      exhaustMap(async () => {
+        if (this.config.get('CHAT_ENABLED') !== 'true')
+          throw new ServiceUnavailableException('Chat unavailable');
+        const page = await this.chat.visitorHistory(auth, id, cursor);
+        cursor = { afterSequence: page.nextSequence, limit: 100 };
+        return page;
+      }),
+      map((page) => ({ type: 'messages', data: page })),
+      takeUntil(timer(25000)),
+      catchError((error: unknown) =>
+        of({
+          type:
+            error instanceof UnauthorizedException || error instanceof NotFoundException
+              ? 'session-expired'
+              : 'unavailable',
+          data: {},
+        }),
+      ),
+    );
   }
   @Get('conversations/:id/history')
   @Header('Cache-Control', 'no-store')

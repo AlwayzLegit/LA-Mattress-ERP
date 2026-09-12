@@ -173,3 +173,20 @@ restart recovery without losing the selected conversation. The in-app browser
 returned notification permission denied; its blocked-permission feedback was
 verified. An actual OS notification and audible hardware output were not verified.
 Preview remains local at http://localhost:3000/chat with synthetic data only.
+
+## Slice 4: customer widget integration (September 12, 2026)
+
+Added a visitor SSE endpoint at `/v1/chat/visitor/conversations/:id/live` using
+existing guest authentication and public-history filtering on every read. It
+expires connections after 25 seconds, rechecks CHAT_ENABLED on every tick, and
+emits generic expired/unavailable events. The storefront adapter holds the guest
+credential in a first-party HttpOnly cookie and forwards only narrow visitor
+operations. Public-only stream and new staff reply delivery are covered in the
+16 passing database/API tests, including kill-switch termination. API build and
+changed-file lint pass. Browser-tested customer send -> ERP reply -> customer
+arrival, reload/draft recovery and failed-send retry using synthetic data.
+
+Storefront changes are in the adjacent LA-Mattress-Headless isolated snapshot;
+its docs/live-chat-implementation.md records source provenance and remaining
+checks. No production changes or Ably provisioning occurred. This is a working
+local end-to-end slice, not a completed production rollout.

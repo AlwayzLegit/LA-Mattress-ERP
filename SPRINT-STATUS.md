@@ -5497,3 +5497,14 @@ sends the return salesperson the API already accepts (slice 6).
       do not provide closed-browser Web Push. In-app browser denied OS notifications.
 
 See `docs/live-chat-development.md` slice 3 for transport limits and remaining work.
+
+### 2026-09-12 — Customer widget integration
+
+- [x] Visitor public-only SSE with session revalidation, cursor recovery, bounded
+      connections and kill-switch checks. Existing 16 API tests pass with visitor
+      stream assertions; API build and changed-file lint pass.
+- [x] Local storefront adapter/widget connects to the ERP inbox. Browser-tested
+      sends and replies, reload/draft recovery, interruption/retry. Four adapter tests
+      and storefront typecheck/lint pass. See slice 4 development notes.
+- [ ] Ops: source reconciliation and isolated staging provisioning before rollout;
+      responsive mobile checks, production build and scalable provider verification remain.

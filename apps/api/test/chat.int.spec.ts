@@ -337,6 +337,39 @@ describe('chat persistence foundation on Postgres', () => {
         .set(staffHeaders)
         .expect(200);
       expect(staffHistory.body.data).toHaveLength(4);
+      const visitorAbort = new AbortController();
+      const visitorTimeout = setTimeout(() => visitorAbort.abort(), 8000);
+      try {
+        const stream = await fetch(
+          `${await app.getUrl()}/v1/chat/visitor/conversations/${id}/live?afterSequence=0&limit=100`,
+          { headers: visitorHeaders, signal: visitorAbort.signal },
+        );
+        expect(stream.status).toBe(200);
+        const reader = stream.body!.getReader();
+        let received = '';
+        while (!received.includes('HTTP reply'))
+          received += new TextDecoder().decode((await reader.read()).value);
+        expect(received).toContain('event: messages');
+        expect(received).not.toContain('Private HTTP note');
+        await service.sendStaffMessage(staff, id, input('Realtime staff answer'));
+        received = '';
+        while (!received.includes('Realtime staff answer'))
+          received += new TextDecoder().decode((await reader.read()).value);
+        expect(received).not.toContain('Private HTTP note');
+        process.env.CHAT_ENABLED = 'false';
+        received = '';
+        while (!received.includes('event: unavailable')) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          received += new TextDecoder().decode(chunk.value);
+        }
+        expect(received).toContain('event: unavailable');
+        process.env.CHAT_ENABLED = 'true';
+      } finally {
+        visitorAbort.abort();
+        clearTimeout(visitorTimeout);
+      }
+
       await request(app.getHttpServer())
         .post(`/v1/chat/conversations/${id}/messages`)
         .set({ ...staffHeaders, Origin: 'https://untrusted.test' })
