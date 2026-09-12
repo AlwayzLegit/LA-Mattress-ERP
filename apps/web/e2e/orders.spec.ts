@@ -280,6 +280,7 @@ test.describe('Day 2 — order writer', () => {
     await result.click();
 
     // Partial payment = a deposit on a delivery order.
+    await page.getByTestId('take-payment').click();
     await page.getByTestId('pay-amount').fill('2.50');
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');

@@ -13,6 +13,7 @@ import {
   lineWarning,
   pickerDefaultSource,
   resourceUntouched,
+  singleWarehouse,
   sourceLabel,
   type Fulfillment,
   type SourcingContext,
@@ -245,6 +246,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [payMethod, setPayMethod] = useState<Tender>('card');
   const [payAmount, setPayAmount] = useState('');
   const [payRef, setPayRef] = useState('');
+  /** The "Take a payment" rail panel is open (F8 or the 44px button). */
+  const [paying, setPaying] = useState(false);
   const [zeroOk, setZeroOk] = useState(false);
   const payAmountInput = useRef<HTMLInputElement>(null);
 
@@ -732,6 +735,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     ]);
     setPayAmount('');
     setPayRef('');
+    // Repeat to $0: the panel stays open for the next tender and closes on
+    // its own once nothing is left to collect (canvas 4d).
+    if (totals.balanceCents - cents <= 0) setPaying(false);
+    else payAmountInput.current?.focus();
   }
 
   async function resumeDraft(id: string) {
@@ -1091,6 +1098,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     setPayments([]);
     setPayAmount('');
     setPayRef('');
+    setPaying(false);
     setOrderDiscount('');
     setInstallFee('');
     setDeliveryFee('');
@@ -1127,6 +1135,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         setShowProductSearch(true);
       } else if (e.key === 'F8' && !locked) {
         e.preventDefault();
+        setPaying(true);
         payAmountInput.current?.focus();
         payAmountInput.current?.select();
       } else if (!typing && locked && (e.key === 'p' || e.key === 'P')) {
@@ -1142,9 +1151,33 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, resetAll]);
 
+  // Opening the panel (button or F8) puts the cursor in Amount.
+  useEffect(() => {
+    if (!paying) return;
+    const id = window.requestAnimationFrame(() => {
+      payAmountInput.current?.focus();
+      payAmountInput.current?.select();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [paying]);
+
   // ---------------------------------------------------------------- render
 
   const pickerLocation = pickerFrom ?? (locationId ? pickerDefaultSource(ctx) : '');
+  // Footer sentence in the picker: where added lines will source from and why.
+  const pickerNote = !locationId
+    ? ''
+    : pickerFrom
+      ? '(your choice for this draft)'
+      : fulfillment === 'take_with'
+        ? 'because the order is take-with'
+        : pickerLocation !== locationId
+          ? '— the default; take-with lines switch to the store'
+          : singleWarehouse(ctx.locations)
+            ? '— the default'
+            : '';
+  const payDisabled = zeroBlock || lines.length === 0 || totals.balanceCents === 0;
+  const payAmountCents = payAmount.trim() ? parseDollars(payAmount) : 0;
   const dueLabel =
     totals.balanceCents === 0 && lines.length > 0
       ? 'Paid in full'
@@ -1818,95 +1851,136 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   </label>
                 </div>
               )}
-              <div className="reg-pay">
-                <div className="reg-two">
-                  <Field label="Method">
-                    <Select
-                      value={payMethod}
-                      onChange={(e) => setPayMethod(e.target.value as Tender)}
-                      data-testid="pay-method"
-                    >
-                      {TENDERS.map((t) => (
-                        <option key={t.value} value={t.value}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Amount">
-                    <Input
-                      ref={payAmountInput}
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      placeholder={(totals.balanceCents / 100).toFixed(2)}
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      data-testid="pay-amount"
-                      className="input-num"
-                      disabled={zeroBlock}
-                    />
-                  </Field>
-                </div>
-                <Field
-                  label={payMethod === 'cash' ? 'Reference (optional)' : 'Card last 4 / approval #'}
+              {paying ? (
+                <div
+                  className="reg-pay-panel"
+                  role="group"
+                  aria-labelledby="reg-pay-title"
+                  data-testid="pay-panel"
                 >
-                  <Input
-                    value={payRef}
-                    onChange={(e) => setPayRef(e.target.value)}
-                    className="input-mono"
-                    disabled={zeroBlock}
-                  />
-                </Field>
-                <div className="reg-pay-quick">
-                  <Button
-                    size="sm"
-                    onClick={() => setPayAmount((totals.balanceCents / 100).toFixed(2))}
-                    disabled={zeroBlock || totals.balanceCents === 0}
-                  >
-                    Pay in full
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      setPayAmount((Math.round(totals.totalCents / 2) / 100).toFixed(2))
-                    }
-                    disabled={zeroBlock || totals.totalCents === 0}
-                  >
-                    50% deposit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    kbd="F8"
-                    onClick={addPayment}
-                    disabled={zeroBlock}
-                    data-testid="add-payment"
-                    className="reg-record"
-                  >
-                    Record
-                  </Button>
+                  <h2 id="reg-pay-title" className="reg-pay-title">
+                    Take a payment
+                  </h2>
+                  <div className="reg-pay-grid">
+                    <Field label="Method">
+                      <Select
+                        value={payMethod}
+                        onChange={(e) => setPayMethod(e.target.value as Tender)}
+                        data-testid="pay-method"
+                      >
+                        {TENDERS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Amount">
+                      <Input
+                        ref={payAmountInput}
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        placeholder={(totals.balanceCents / 100).toFixed(2)}
+                        value={payAmount}
+                        onChange={(e) => setPayAmount(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addPayment();
+                          }
+                        }}
+                        data-testid="pay-amount"
+                        className="input-num reg-cell-input"
+                        disabled={zeroBlock}
+                      />
+                    </Field>
+                  </div>
+                  {payMethod === 'card' ? (
+                    <Field label="Card last 4">
+                      <Input
+                        value={payRef}
+                        onChange={(e) => setPayRef(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                        inputMode="numeric"
+                        placeholder="4412"
+                        className="input-mono"
+                        data-testid="pay-ref"
+                        disabled={zeroBlock}
+                      />
+                    </Field>
+                  ) : payMethod !== 'cash' ? (
+                    <Field label="Reference (optional)">
+                      <Input
+                        value={payRef}
+                        onChange={(e) => setPayRef(e.target.value)}
+                        className="input-mono"
+                        data-testid="pay-ref"
+                        disabled={zeroBlock}
+                      />
+                    </Field>
+                  ) : null}
+                  <div className="reg-pay-quick">
+                    <Button
+                      size="sm"
+                      onClick={() => setPayAmount((totals.balanceCents / 100).toFixed(2))}
+                      disabled={zeroBlock || totals.balanceCents === 0}
+                      data-testid="pay-full"
+                    >
+                      Pay in full
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        setPayAmount((Math.round(totals.totalCents / 2) / 100).toFixed(2))
+                      }
+                      disabled={zeroBlock || totals.totalCents === 0}
+                      data-testid="pay-half"
+                    >
+                      50% deposit
+                    </Button>
+                  </div>
+                  <div className="reg-pay-actions">
+                    <Button
+                      variant="primary"
+                      onClick={addPayment}
+                      disabled={zeroBlock}
+                      data-testid="add-payment"
+                      className="reg-record"
+                    >
+                      Record{payAmountCents > 0 ? ` ${formatMoney(payAmountCents)}` : ''}
+                    </Button>
+                    <Button onClick={() => setPaying(false)} data-testid="pay-done">
+                      Done
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <Button
-                variant="primary"
-                className="reg-complete"
-                disabled={busy || zeroBlock || !customer || lines.length === 0}
-                onClick={() => void submit('complete')}
-                data-testid="complete-sale"
-              >
-                {busy ? 'Working…' : `${completeLabel} · ${formatMoney(totals.totalCents)}`}
-              </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  kbd="F8"
+                  className="reg-take-payment"
+                  disabled={payDisabled}
+                  onClick={() => setPaying(true)}
+                  data-testid="take-payment"
+                >
+                  Take payment
+                </Button>
+              )}
               <div className="reg-two">
+                <Button
+                  className="reg-complete"
+                  disabled={busy || zeroBlock || !customer || lines.length === 0}
+                  onClick={() => void submit('complete')}
+                  data-testid="complete-sale"
+                >
+                  {busy ? 'Working…' : completeLabel}
+                </Button>
                 <Button
                   onClick={() => void submit('draft')}
                   disabled={busy}
                   data-testid="save-draft"
                 >
                   Save draft
-                </Button>
-                <Button variant="ghost" onClick={resetAll} disabled={busy || !dirty}>
-                  Clear
                 </Button>
               </div>
               <div className="reg-hint">{completeHint}</div>
@@ -1999,6 +2073,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           storeId={locationId}
           onChangeLocation={(id) => setPickerFrom(id)}
           onAdd={(row) => addProduct(row, pickerLocation || locationId)}
+          sourceNote={pickerNote}
           onClose={() => setShowProductSearch(false)}
         />
       )}

@@ -4270,26 +4270,6 @@ kbd.key {
   flex-direction: column;
   gap: 8px;
 }
-.reg-pay {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-.reg-pay-quick {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.reg-record {
-  margin-left: auto;
-}
-.reg-complete {
-  width: 100%;
-  height: 44px;
-  font-size: 14px;
-}
 .reg-hint {
   font-size: 12.5px;
   color: var(--muted);
@@ -4342,4 +4322,228 @@ kbd.key {
 }
 .reg-done-title::after {
   content: '.';
+}
+
+/* ------------------------------------------------------------------
+   Register — payments panel (redesign Phase 5, canvas 4d). "Take
+   payment" is the loudest thing in the rail (44px, accent). The panel
+   that replaces it has an accent border so the eye stays on the money.
+   ------------------------------------------------------------------ */
+.reg-take-payment {
+  width: 100%;
+  height: 44px;
+  font-size: 15px;
+  gap: 10px;
+}
+.reg-take-payment .kbd {
+  border-color: rgb(255 255 255 / 0.4);
+  color: rgb(255 255 255 / 0.85);
+  background: transparent;
+}
+.reg-pay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -12px -14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.reg-pay-title {
+  margin: 0;
+  font-family: var(--font-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.reg-pay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  gap: 8px;
+}
+.reg-pay-grid .input-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.reg-pay-quick {
+  display: flex;
+  gap: 6px;
+}
+.reg-pay-quick .btn {
+  flex: 1;
+  height: 30px;
+}
+.reg-pay-actions {
+  display: flex;
+  gap: 8px;
+}
+.reg-pay-actions .reg-record {
+  flex: 1;
+  height: 38px;
+  margin: 0;
+}
+.reg-complete {
+  height: 36px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------
+   Add Product dialog (redesign Phase 5, canvas 4c). 1080px, a fixed
+   height so the list scrolls inside while the toolbar and the footer
+   stay put. "From" is accent-filled: the whole risk of the warehouse
+   default is a salesperson not noticing where a line will pull from.
+   ------------------------------------------------------------------ */
+.dialog.picker {
+  display: flex;
+  flex-direction: column;
+  height: min(800px, 90vh);
+  overflow: hidden;
+}
+.picker .dialog-head {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  position: static;
+}
+.picker .dialog-head-main {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.picker .dialog-title {
+  font-size: 18px;
+}
+.picker .dialog-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.picker .dialog-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+}
+.picker-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.picker-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.picker-toolbar .field {
+  margin: 0;
+}
+.picker-search {
+  flex: 1;
+  min-width: 240px;
+}
+.picker-toolbar .select {
+  min-width: 120px;
+}
+.picker-from .select,
+.picker-from.select,
+select.picker-from {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 190px;
+}
+.picker-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h, 38px);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.picker-check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+}
+.picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.picker-table {
+  font-size: 14px;
+}
+.picker-table thead th {
+  background: var(--surface);
+}
+.picker-table th:first-child,
+.picker-table td:first-child {
+  padding-left: 18px;
+}
+.picker-table th:last-child,
+.picker-table td:last-child {
+  padding-right: 18px;
+}
+.picker-table tbody tr {
+  height: 44px;
+  cursor: pointer;
+}
+.picker-table thead th.num:nth-child(6) {
+  color: var(--accent);
+}
+.picker-table abbr[title] {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+.picker-name {
+  font-weight: 500;
+}
+.picker-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.picker-here {
+  font-weight: 600;
+}
+.picker-here.is-in {
+  color: var(--status-fulfilled-fg);
+}
+.picker-here.is-out {
+  color: var(--status-risk-fg);
+}
+.picker-table .row-action {
+  height: 32px;
+  padding: 0 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.picker-foot strong {
+  color: var(--text);
+}
+.picker-foot-keys {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.picker-foot .kbd {
+  background: var(--surface);
 }
