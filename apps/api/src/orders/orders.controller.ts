@@ -630,10 +630,13 @@ export class OrdersController {
   ) {}
 
   /**
-   * Business default stock source (ops.defaultSourceLocationId), else the
-   * one location typed `warehouse`, else null (the caller falls back to
-   * the order's store). Never throws: a deleted or unset warehouse must
-   * not stop a sale.
+   * The business's configured default stock source
+   * (ops.defaultSourceLocationId), or null. Only an explicit setting moves
+   * a source-less line off the order's store: the register already sends
+   * the warehouse explicitly when its rules resolve there, and every other
+   * writer (order page, exchanges, auto transfers, imports) relies on a
+   * bare line reserving at the order's stock location. Never throws: a
+   * deleted default must not stop a sale.
    */
   private async resolveDefaultSource(businessId: string): Promise<string | null> {
     const [biz] = await this.db
@@ -643,22 +646,13 @@ export class OrdersController {
       .limit(1);
     const configured = (biz?.opsSettingsJson as { defaultSourceLocationId?: string | null } | null)
       ?.defaultSourceLocationId;
-    if (configured) {
-      const [loc] = await this.db
-        .select({ id: schema.locations.id })
-        .from(schema.locations)
-        .where(and(eq(schema.locations.id, configured), eq(schema.locations.isActive, true)))
-        .limit(1);
-      if (loc) return loc.id;
-    }
-    const warehouses = await this.db
+    if (!configured) return null;
+    const [loc] = await this.db
       .select({ id: schema.locations.id })
       .from(schema.locations)
-      .where(
-        and(eq(schema.locations.locationType, 'warehouse'), eq(schema.locations.isActive, true)),
-      )
-      .limit(2);
-    return warehouses.length === 1 ? warehouses[0]!.id : null;
+      .where(and(eq(schema.locations.id, configured), eq(schema.locations.isActive, true)))
+      .limit(1);
+    return loc?.id ?? null;
   }
 
   @Get('orders')
@@ -1812,11 +1806,12 @@ export class OrdersController {
 
     const orderDefaultSource = order.stockLocationId ?? order.locationId;
     // Redesign Phase 4 (HANDOFF_inventory_source_defaults §4): a line that
-    // names no source follows the same resolution order the register uses,
-    // so drafts written elsewhere behave identically —
+    // names no source follows the register's rule when the business has
+    // configured a default source —
     //   take-with           -> the order's store
-    //   otherwise           -> business default source, else the single
-    //                          warehouse, else the order's store.
+    //   otherwise           -> the configured default, else the order's store.
+    // The implicit single-warehouse step stays client-side (see
+    // resolveDefaultSource) so bare API lines keep reserving at the store.
     const resolvedDefaultSource = await this.resolveDefaultSource(tenant.businessId!);
     const lineSourceFor = (input: OrderLineInput | undefined): string | null => {
       if (input?.sourceLocationId) {

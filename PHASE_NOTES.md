@@ -286,7 +286,10 @@ lives in the ops settings registry like every other operational knob.
 - **Server side** — `ops.defaultSourceLocationId` (registry entry, validated against the
   business's locations, visible to the register through `/settings/pos`, editable under
   Settings → Store operations as "Default stock source for new sale lines"). Order create
-  applies the same resolution order to lines that name no source, and the `order.create`
+  applies the configured default to lines that name no source (take-with lines stay on the
+  order's store; without a configured default a bare line keeps reserving at the order's
+  stock location, which the order page, exchanges and auto transfers depend on — the
+  implicit single-warehouse step stays client-side), and the `order.create`
   audit row carries `takeWithOffStore` when a take-with line is sourced from another store
   (allowed, on the record). Reservations already use `line.source_location_id`.
 - **Guards and states** — `$0.00 is intentional` checkbox blocks Record and Complete until
