@@ -167,7 +167,7 @@ test.describe('Day 9 — QA sweep', () => {
     test.slow();
     const order = await createOrder([{ variantId, quantity: 2 }]);
     await loginAndPickBusiness(page);
-    await page.goto(`/orders/${order.id}`);
+    await page.goto(`/orders/${order.id}/full`);
     await expect(page.getByTestId('balance-due')).toContainText('$20.00');
 
     await expect(page.getByTestId('payment-plan-card')).toBeVisible();

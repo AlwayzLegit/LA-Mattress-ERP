@@ -383,3 +383,86 @@ row · esc closes`.
   open-PO units per variant.
 - Server-side "in stock first" ordering and paging past 100 rows.
 - Mattress/base detection from the category for the add-on chips (carried from Phase 4).
+
+## Phase 6 — Orders book and order slide-over (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** `/orders` rebuilt as the book
+(`components/orders/orders-book.tsx`), `/orders/[id]` as a 640px slide-over over it
+(`components/orders/order-sheet.tsx`, `cancel-order-dialog.tsx`), the existing full order
+workspace moved to `/orders/[id]/full`, and the list endpoint extended. No schema change.
+
+### What changed
+
+- **Routes** — `app/(business)/orders/(book)/layout.tsx` mounts the book once; `/orders` renders
+  nothing inside it and `/orders/[id]` renders the sheet, so the URL names the order and the
+  list never remounts behind it (filters, scroll and highlight survive open/close). The 3,300-line
+  order page with its line editor, payment plans, returns, exchanges, notes and tasks is
+  unchanged at **`/orders/[id]/full`**; the sheet's _Edit lines_ and _More ▾ → Open full order
+  page_ lead there. Every existing link to `/orders/{id}` (dashboard, customer activity,
+  deliveries, New Sale's _Open order_) now lands on the quick answer first.
+- **Book** (README §3.2, canvas 5a) — toolbar Store (default = the signed-in "Acting for"
+  store; "— your store" marked in the list), Status (the display ladder plus _Past due_),
+  Written (7 / 30 / 90 / all, default 30), Salesperson, Find (number, customer or phone),
+  Balance due only, Clear filters; active filters as removable chips under the toolbar. Title
+  line "N of M · $X balance due" from the server summary. Columns Order (anchor, mono, a ◷ when
+  locked) · Customer + phone · Store · Status chip · Reserved (6px bar + `done/total`, green full
+  / amber partial / red none) · Promised · Salesperson · Total · Balance (bold when > 0,
+  "Credit $x" in red, — when cancelled). Every header is a button with `aria-sort`; sticky
+  header; footer "{count} orders · sorted by … · {Store} is your store, so it is the default
+  filter" and the key hints. ↑↓ move the highlight (also from the Find box), ↵ opens, Esc
+  closes the sheet. Empty: "No orders match. Widen the date range or clear a filter."
+- **Status chips** — the server's owner-facing vocabulary (P-013) stays the word; the six
+  Phase 2 tones carry the state (`chipFor`, unit-tested): Draft/Quote → draft, Pending / On PO /
+  Layaway / Awaiting return pickup → waiting, Reserved / Scheduled / Out for delivery →
+  scheduled, Delivered / Returned / Exchanged → fulfilled, Cancelled → cancelled, and an
+  undelivered order whose promised date has passed → **risk "Past due"**.
+- **Slide-over** (canvas 5b/5c) — title = number in mono + chip + "{customer} · {store} ·
+  written 2d ago by {rep}". **Lock banner** (accent-soft) "Locked — delivery ticket printed
+  {when}. Lines, prices and addresses cannot change. Unlock (owner and store manager only;
+  written to history)" — Unlock opens the existing security-override dialog (`orders.unlock`
+  or an authorising login, typed reason, audited); a separate red banner when the order is on
+  an open delivery run. Action row: **Take payment** (primary; opens an inline panel — Method,
+  Amount, Card last 4 / Reference, Pay in full, Record $X, Done; closes itself at $0), Edit
+  lines (disabled when locked), Schedule / Reschedule delivery (inline date, over-capacity
+  confirm), Print, More ▾ (Open full order page, Invoice this order only, Delivery ticket,
+  Pick list, Share status link), **Cancel order** alone at the right in the destructive tier.
+  3-col summary Customer / Fulfillment / Money (total in Archivo 22px, balance line amber or
+  green); Lines (item, fulfillment · from, reserved fraction coloured, amount); Payments
+  (method ••last4 · kind · when); Change history as a timeline from the order's audit rows,
+  dot colour by kind (payment green, lock/schedule blue, short amber, cancel grey, written
+  navy), actor on every entry.
+- **Cancel** (canvas 5d) — `role=alertdialog` "Cancel {number}?" whose sentence names the
+  deposit destination ("The $500.00 already paid becomes store credit for {customer}" / "is
+  refunded to the original tender" / "Nothing has been paid."), the reserved lines returning to
+  stock at their source, the delivery leaving the board, and that it is written to history.
+  Reason select **required**; Deposit select (store credit default / refund) when money was
+  taken; **Keep order** is the default focus.
+- **Server** — `GET /v1/orders/list-view` now returns `customerPhone`, `locationId`/`locationName`,
+  `salespersonMembershipId`, `lockedAt`, `creditDueCents` per row plus `summary { count,
+balanceDueCents }` for the whole filtered set; accepts `salespersonMembershipId` and
+  `balanceDue=1`; sorts `store`, `status`, `salesperson`, `total`, `reserved`, `written`.
+  `POST /v1/orders/:id/cancel` takes `depositTo: 'store_credit' | 'original'` — with money on
+  the order it books negative adjustment rows against each tender (and issues store credit for
+  the store-credit choice) instead of refusing, cancels the order's scheduled/loaded
+  deliveries, and the `order.cancel` audit row carries `depositCents`, `depositTo`,
+  `deliveriesCancelled`. Without `depositTo` a paid order still refuses, as before.
+- e2e: the flows that edit an order (`orders.spec`, `sweep.spec`, `team-workflows.spec`) step
+  through `openFullOrder()` / `/orders/{id}/full`; the list test now expects the sheet.
+
+### Assumptions
+
+- The redesign supersedes the 2026-09-02 "no slide-over — one click lands on the order"
+  decision; the full page is one more click away (Edit lines / More ▾), never gone.
+- "Past due" is a chip state and a Status option (the existing `view=past_due` saved view),
+  not a new stored status.
+- The summary count follows the SQL filters; for display states the server narrows in JS
+  (Pending / On PO / Reserved / Scheduled / Out for delivery) the count is the wider
+  open-order set.
+- Reschedule from the sheet moves the live trip in place (`PATCH /v1/deliveries/:id`); with no
+  live trip it books one. Cancel refuses while a stop is out for delivery.
+
+### Later
+
+- Per-store order prefix (GL-10437) — kept `SO-` per the owner; the Store column carries it.
+- Server-side "reserved" sort counts units, not lines; the bar shows units too.
+- A first-class order history endpoint with actor names (the timeline shows the audit e-mail).

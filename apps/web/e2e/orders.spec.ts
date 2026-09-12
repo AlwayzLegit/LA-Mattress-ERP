@@ -11,7 +11,7 @@
  * "Save as order / take deposit" → confirmed order with the deposit
  * already posted.
  */
-import { expect, request, test } from '@playwright/test';
+import { expect, request, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -84,6 +84,18 @@ async function loginAndPickBusiness(page: import('@playwright/test').Page): Prom
   );
 }
 
+/**
+ * Redesign Phase 6: `/orders/[id]` is the slide-over over the book — the
+ * quick answer. Editing lines, taking money and scheduling happen on the
+ * full order page at `/orders/[id]/full`.
+ */
+async function openFullOrder(page: Page) {
+  const m = /\/orders\/([0-9a-f-]{36})/.exec(page.url());
+  if (!m) throw new Error(`not on an order: ${page.url()}`);
+  await page.goto(`/orders/${m[1]}/full`);
+  await expect(page.getByTestId('order-status')).toBeVisible();
+}
+
 test.describe('Day 2 — order writer', () => {
   test('write order → deposit → committed stock visible → board', async ({ page }) => {
     test.slow();
@@ -112,6 +124,7 @@ test.describe('Day 2 — order writer', () => {
 
     // --- Detail: open, line reserved, no money yet ---
     await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await openFullOrder(page);
     const lineRow = page.locator('tbody tr').first();
     await expect(lineRow).toContainText('Widget'); // seeded product name
     // Columns mirror New Sale (item, type, qty, price, disc, fulfillment,
@@ -127,7 +140,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('take-payment').click();
     await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
-    const orderUrl = page.url();
+    const orderId = /\/orders\/([0-9a-f-]{36})/.exec(page.url())![1]!;
 
     // --- Committed stock visible in inventory ---
     await page.goto('/inventory');
@@ -138,11 +151,12 @@ test.describe('Day 2 — order writer', () => {
     await expect(invRow.locator('td').nth(4)).toHaveText('1');
     await expect(invRow.locator('td').nth(6)).toHaveText('99');
 
-    // --- Orders table row opens the full order page directly (no slide-over) ---
+    // --- Orders book: the row opens the order's slide-over at /orders/[id] ---
     await page.goto('/orders');
     await expect(page.getByTestId('orders-table')).toBeVisible();
     await page.getByTestId('order-row').first().click();
-    await page.waitForURL(orderUrl);
+    await page.waitForURL(new RegExp(`/orders/${orderId}(\\?.*)?$`));
+    await expect(page.getByTestId('order-sheet')).toBeVisible();
     await expect(page.getByTestId('order-status')).toBeVisible();
 
     // --- View Customer Activity: lookup → open orders and deposits agree with the order ---
@@ -232,6 +246,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await openFullOrder(page);
 
     // Schedule a delivery for today.
     const today = new Date().toISOString().slice(0, 10);
@@ -253,6 +268,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByRole('link', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId('order-status')).toHaveText(/delivered/i);
+    await openFullOrder(page);
 
     // Collect the whole balance, then complete.
     await page.getByTestId('payment-amount').fill('10.00');
@@ -289,6 +305,7 @@ test.describe('Day 2 — order writer', () => {
 
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await openFullOrder(page);
     await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
   });

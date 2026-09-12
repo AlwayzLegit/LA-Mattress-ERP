@@ -37,10 +37,10 @@ import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { OrderNotesCard } from '@/components/order-notes-card';
 import { TeamTasks } from '@/components/team-tasks';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
-import { OrderActionsMenu } from './actions/actions-menu';
-import { OrderHeaderDialog } from './actions/header-dialog';
-import { LineDetailsDialog } from './actions/edit-dialogs';
-import type { CostedLines, OpsLists } from './actions/types';
+import { OrderActionsMenu } from '../actions/actions-menu';
+import { OrderHeaderDialog } from '../actions/header-dialog';
+import { LineDetailsDialog } from '../actions/edit-dialogs';
+import type { CostedLines, OpsLists } from '../actions/types';
 
 /**
  * Order detail (STORIS cutover Day 2): the working view of one sales
