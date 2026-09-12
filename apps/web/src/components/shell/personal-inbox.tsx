@@ -171,7 +171,15 @@ export function PersonalInbox({
                 data-testid="inbox-update"
               >
                 <Link
-                  href={`/orders/${n.orderId}${n.taskId ? '#team-tasks' : n.noteId ? '#order-notes' : ''}`}
+                  // Tasks and notes live on the full order page; a plain
+                  // order update opens the quick slide-over.
+                  href={
+                    n.taskId
+                      ? `/orders/${n.orderId}/full#team-tasks`
+                      : n.noteId
+                        ? `/orders/${n.orderId}/full#order-notes`
+                        : `/orders/${n.orderId}`
+                  }
                   className="block px-5 py-4 hover:bg-surface-2"
                   onClick={() => {
                     if (!n.readAt) void inbox.markRead([n.id]);
