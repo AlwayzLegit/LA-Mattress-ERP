@@ -1,10 +1,12 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
+import { Button, Dialog } from '@/components/ui';
 
 /**
- * The design's small confirmation card: title, one paragraph, optional
- * extra content, Cancel + a primary (or danger) action.
+ * Confirmation (canvas 2e): `role=alertdialog`, the title is the
+ * question, one paragraph says what happens, the safe button is the
+ * default focus, and a destructive action is outlined — never filled.
  */
 export function ConfirmDialog({
   title,
@@ -27,38 +29,33 @@ export function ConfirmDialog({
   onCancel: () => void;
   testid?: string;
 }) {
+  const safe = useRef<HTMLButtonElement>(null);
   return (
-    <div className="overlay overlay-center" style={{ zIndex: 70 }} onClick={onCancel}>
-      <div
-        role="alertdialog"
-        aria-modal
-        aria-label={title}
-        data-testid={testid}
-        className="dialog"
-        style={{ width: 420, padding: 20 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600 }}>{title}</h3>
-        <div style={{ color: 'var(--text2)', fontSize: 13, marginBottom: 16 }}>{children}</div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
+    <Dialog
+      alert
+      size="sm"
+      title={title}
+      onClose={onCancel}
+      initialFocus={safe}
+      hideClose
+      testId={testid}
+      style={{ zIndex: 71 }}
+      foot={
+        <>
+          <Button ref={safe} onClick={onCancel} disabled={busy}>
             {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            style={
-              tone === 'danger'
-                ? { background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }
-                : undefined
-            }
+          </Button>
+          <Button
+            variant={tone === 'danger' ? 'destructive' : 'primary'}
             onClick={onConfirm}
             disabled={busy}
           >
             {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      {children}
+    </Dialog>
   );
 }

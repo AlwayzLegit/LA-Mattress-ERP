@@ -401,7 +401,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
-        <PageHead title="Warehouse" sub={<>Loading… {who}</>} />
+        <PageHead title="Warehouse" sub={who} />
         <KpiStrip
           loading
           tiles={['inbound', 'dock', 'loadout', 'pick', 'pickups', 'arrived'].map((key) => ({
