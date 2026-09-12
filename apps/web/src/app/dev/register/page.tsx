@@ -101,6 +101,16 @@ const PRODUCTS = CAT.map(([name, sku, size, firm, price, vendor, model, avail, p
   vendorName: vendor,
   size,
   firmness: firm,
+  categoryName:
+    /mattress|hybrid|adapt/i.test(name) && !/protector/i.test(name)
+      ? 'Mattresses'
+      : /adjustable/i.test(name)
+        ? 'Adjustable Bases'
+        : /protector/i.test(name)
+          ? 'Mattress Protection'
+          : /pillow/i.test(name)
+            ? 'Pillows'
+            : null,
   model,
   avail: Object.fromEntries(IDS.map((id, j) => [id, avail[j]])) as Record<string, number>,
   po,

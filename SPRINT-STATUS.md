@@ -5564,3 +5564,16 @@ pino `errWithCause` serializer so the next failure logs the Postgres message and
 `nav-counts` returns 403 instead of a TypeError when RLS hides the business row (12
 such 500s 21:52–22:03Z). Read-only production query blocked in-session — owner to allow
 or run. Root cause still open.
+
+### Checkpoint — 2026-09-12 (Register: add-on chips on real products, new-customer form)
+
+Owner: "the recycle removal declined foundation are not showing up" + the new-customer
+form overflowing its card. The chips were keyed on a name regex (/mattress|base|…/) that no
+STORIS name matches ("E KING MICAH FIRM"). They now follow the catalog category
+(`lib/pos-addons.ts`: Mattresses, Adjustable Bases, Foundations & Box Springs; name
+fallback only without a category, accessories excluded) — `/v1/pos/product-search` and
+`GET /v1/orders/:id` lines carry `categoryName` so picked and resumed lines both know.
+Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the 316px
+rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
+specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
+the rail with nothing overflowing.

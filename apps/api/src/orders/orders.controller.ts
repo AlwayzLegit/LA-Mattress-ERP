@@ -5296,6 +5296,19 @@ export class OrdersController {
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, id))
       .orderBy(schema.orderLines.createdAt);
+    // The register keys its add-on chips on the catalog category, so a
+    // resumed draft needs it back (2026-09-12).
+    const lineVariantIds = lines.map((l) => l.variantId).filter((v): v is string => !!v);
+    const categoryByVariant = new Map<string, string | null>();
+    if (lineVariantIds.length > 0) {
+      const cats = await this.db
+        .select({ variantId: schema.productVariants.id, categoryName: schema.categories.name })
+        .from(schema.productVariants)
+        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+        .where(inArray(schema.productVariants.id, lineVariantIds));
+      for (const c of cats) categoryByVariant.set(c.variantId, c.categoryName);
+    }
 
     const payments = await this.db
       .select()
@@ -5429,6 +5442,7 @@ export class OrdersController {
         fulfillmentMethod: l.fulfillmentMethod,
         sourceLocationId: l.sourceLocationId,
         deliveryDate: l.deliveryDate,
+        categoryName: l.variantId ? (categoryByVariant.get(l.variantId) ?? null) : null,
         comment: l.comment,
         room: l.room,
         pieces: l.pieces,

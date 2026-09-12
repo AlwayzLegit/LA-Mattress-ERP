@@ -4174,8 +4174,17 @@ kbd.key {
 }
 .reg-two {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): a bare 1fr floors at the input's intrinsic width, so two
+     inputs plus the gap ran past the 316px rail (owner 2026-09-12). */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
+}
+.reg-two > * {
+  min-width: 0;
+}
+.reg-stack > .input,
+.reg-two > .input {
+  width: 100%;
 }
 .reg-more {
   border: 0;

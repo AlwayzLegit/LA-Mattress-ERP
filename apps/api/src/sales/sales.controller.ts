@@ -285,6 +285,8 @@ export class SalesController {
       size: string | null;
       /** Canonical firmness read off the name/attributes, or null. */
       firmness: string | null;
+      /** Catalog category name; the register keys the add-on chips on it. */
+      categoryName: string | null;
       availableHere: number;
       availableTotal: number;
       atpDate: string | null;
@@ -356,6 +358,7 @@ export class SalesController {
         vendorName: schema.vendors.name,
         size: sql<string | null>`${SIZE_EXPR}`,
         firmness: sql<string | null>`${FIRMNESS_EXPR}`,
+        categoryName: schema.categories.name,
         taxRateBps: sql<number | null>`coalesce(
           ${
             locationId
@@ -373,6 +376,7 @@ export class SalesController {
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
       .leftJoin(
         schema.inventoryLevels,
         eq(schema.inventoryLevels.variantId, schema.productVariants.id),
@@ -383,6 +387,7 @@ export class SalesController {
         schema.products.id,
         schema.vendors.name,
         schema.brands.name,
+        schema.categories.name,
       )
       .having(
         inStock === '1'
