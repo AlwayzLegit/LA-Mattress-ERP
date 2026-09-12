@@ -1914,7 +1914,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           ) : (
             <section className="reg-card reg-done" aria-label="Sale complete">
               <p className="reg-done-line">
-                <strong>Sale complete.</strong>{' '}
+                <h2 className="reg-done-title">Sale complete</h2>{' '}
                 {lines.filter((l) => l.lineType !== 'custom').length} line
                 {lines.filter((l) => l.lineType !== 'custom').length === 1 ? '' : 's'}
                 {done!.sources.length > 0 ? ` reserved at ${listJoin(done!.sources)}` : ''}.{' '}

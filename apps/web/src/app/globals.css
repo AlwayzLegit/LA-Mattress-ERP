@@ -4332,3 +4332,14 @@ kbd.key {
   color: var(--text-2);
   border-color: var(--surface-2);
 }
+.reg-done-title {
+  display: inline;
+  margin: 0;
+  font-family: var(--font-text);
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+}
+.reg-done-title::after {
+  content: '.';
+}
