@@ -5239,7 +5239,8 @@ Phase 1 (this branch):
       info; payment terminal — _2026-09-10: `orders/[id]/actions/` (menu +
       dialogs), Order details card, ⋯ per line, `?scope=order` invoice;
       phase-2/3 items stay on the menu and say so instead of hiding._
-- [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
+- [x] Tests (int spec for the new endpoints), docs, CI green, merge —
+      _2026-09-12: box ticked late — PR #154 merged 2026-09-10 23:50Z._
       _2026-09-10: `order-actions.int.spec.ts` (5; CI db
       `jetnine_order_actions`); `orders.int.spec.ts` (101),
       `order-detail-extras` (4) and `customers` (16) still green; PR #154.
@@ -5531,3 +5532,16 @@ Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment
   in the document payload; `orders.int.spec.ts` +1 proves the round trip.
 - Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
   JSX for web component tests).
+
+### Checkpoint — 2026-09-12 (Cost column: "hidden" vs no cost on file)
+
+HANDOFF §5 cosmetic: the product screens printed "hidden" both when the viewer lacks
+`products.cost.view` and when the cost is genuinely null. `/v1/business/members/me` now
+carries `canSeeCost` (super-admin or `products.cost.view`), the acting-store snapshot
+exposes it, and the Products browser, product page (Sales margin cost field + variants
+table), General panel cost figures and Sales history cost column say **hidden** only
+without access and **—** for a missing cost. The browser's cost column now follows the
+permission instead of guessing from whether any row carried a cost. Tests:
+`business.int.spec.ts` (owner true) and `cashier.int.spec.ts` (cashier false).
+Also this session: HANDOFF §4a marked closed (email went live 2026-08-27 — the brief
+predated it) and a dated update block added at its top; PR #154's box ticked.

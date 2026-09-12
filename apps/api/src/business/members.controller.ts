@@ -172,6 +172,12 @@ export class MembersController {
     /** And the Cashier's My Day (§12.3). */
     cashierDashboard: boolean;
     canDeleteMembers: boolean;
+    /**
+     * Whether cost figures come back at all. The product screens use this
+     * to tell "you may not see cost" (hidden) from "no cost on file" (—),
+     * which the null `costCents` projection alone cannot.
+     */
+    canSeeCost: boolean;
   }> {
     let hiddenNav: string[] = [];
     let managerDashboard = false;
@@ -215,6 +221,7 @@ export class MembersController {
         tenant.roleName === 'Cashier' && tenant.permissions.has('cashier.dashboard.view'),
       /** Owner 2026-09-02: the Members page shows Delete only to who may. */
       canDeleteMembers: tenant.permissions.has('users.delete'),
+      canSeeCost: tenant.isSuperAdmin || tenant.permissions.has('products.cost.view'),
     };
   }
 

@@ -576,6 +576,7 @@ export function installProductsStub() {
         hiddenNav: [],
         sellingScope: 'all',
         scopeLocations: LOCS,
+        canSeeCost: true,
       });
     if (p === '/v1/business/members/me/acting-store') return json({ ok: true });
     if (p === '/v1/business/locations' || p === '/v1/pos/locations') return json(LOCS);
