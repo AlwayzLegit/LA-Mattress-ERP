@@ -1339,7 +1339,25 @@ export class PurchaseOrdersController {
         },
       });
     }
-    return { ...(await this.hydrate(po.id)), unblockedOrders };
+    // Special orders linked to the received lines were satisfied through
+    // their allocations before allocatePending ran, so they never show up
+    // in `allocations`; the rail promised them, so report them too.
+    const detail = await this.hydrate(po.id);
+    const acceptedLineIds = new Set(entries.filter((e) => e.accepted > 0).map((e) => e.line.id));
+    const byOrder = new Map(unblockedOrders.map((u) => [u.orderId, u]));
+    for (const line of detail.lines) {
+      if (!acceptedLineIds.has(line.id)) continue;
+      for (const lo of line.linkedOrders) {
+        if (!byOrder.has(lo.orderId)) {
+          byOrder.set(lo.orderId, {
+            orderId: lo.orderId,
+            number: lo.orderNumber,
+            units: lo.quantity,
+          });
+        }
+      }
+    }
+    return { ...detail, unblockedOrders: [...byOrder.values()] };
   }
 
   @Post(':id/cancel')

@@ -211,7 +211,7 @@ export default function ReceivePage() {
     !busy &&
     totals.received + totals.damaged > 0 &&
     overs.length === 0 &&
-    (totals.damaged === 0 || !!dmgReason);
+    (totals.damaged === 0 || (!!dmgReason && dmgNote.trim().length > 0));
 
   async function post() {
     if (!po || !canPost) return;
@@ -351,18 +351,12 @@ export default function ReceivePage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Into">
-                <Select
-                  value={into}
-                  onChange={(e) => setInto(e.target.value)}
+              <Field label="Into" hint="Set by the purchase order">
+                <Input
+                  value={po?.locationName ?? locations.find((l) => l.id === into)?.name ?? ''}
+                  readOnly
                   data-testid="receive-into"
-                >
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </Select>
+                />
               </Field>
               <Field label="Packing slip #">
                 <Input
@@ -534,11 +528,13 @@ export default function ReceivePage() {
                     ))}
                   </Select>
                 </Field>
-                <Field label="Note">
+                <Field label="Note" required>
                   <Input
                     value={dmgNote}
                     onChange={(e) => setDmgNote(e.target.value)}
                     placeholder="Where the damage is"
+                    required
+                    data-testid="receive-damage-note"
                   />
                 </Field>
               </div>

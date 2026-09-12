@@ -64,7 +64,9 @@ export function AdjustStockDialog({
   const [locationId, setLocationId] = useState(initialLocationId ?? locations[0]?.locationId ?? '');
   const [codes, setCodes] = useState<ReasonCode[] | null>(null);
   const [reasonCodeId, setReasonCodeId] = useState('');
-  const [fallbackType, setFallbackType] = useState<AdjustType>('count_correction');
+  // The server's adjustment type is an explicit choice (reason codes are
+  // tenant text); picking a code only pre-fills it.
+  const [type, setType] = useState<AdjustType>('count_correction');
   const [change, setChange] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,8 +85,6 @@ export function AdjustStockDialog({
   const delta = change.trim() === '' || change.trim() === '-' ? 0 : Math.trunc(Number(change));
   const validDelta = Number.isFinite(delta);
   const after = now + (validDelta ? delta : 0);
-  const code = codes?.find((c) => c.id === reasonCodeId);
-  const type: AdjustType = codes && codes.length > 0 ? typeFor(code) : fallbackType;
   const needsCode = (codes?.length ?? 0) > 0 && !reasonCodeId;
   const noteRequired = type === 'count_correction' && Math.abs(delta) > 2;
 
@@ -197,7 +197,10 @@ export function AdjustStockDialog({
             {codes && codes.length > 0 ? (
               <Select
                 value={reasonCodeId}
-                onChange={(e) => setReasonCodeId(e.target.value)}
+                onChange={(e) => {
+                  setReasonCodeId(e.target.value);
+                  setType(typeFor(codes?.find((c) => c.id === e.target.value)));
+                }}
                 data-testid="adjust-reason"
               >
                 <option value="">Choose…</option>
@@ -208,17 +211,20 @@ export function AdjustStockDialog({
                 ))}
               </Select>
             ) : (
-              <Select
-                value={fallbackType}
-                onChange={(e) => setFallbackType(e.target.value as AdjustType)}
-                data-testid="adjust-reason"
-              >
-                <option value="count_correction">Count correction</option>
-                <option value="damage">Damaged</option>
-                <option value="theft">Theft or loss</option>
-                <option value="other">Other</option>
-              </Select>
+              <Input value="No reason codes set up — pick a type" readOnly />
             )}
+          </Field>
+          <Field label="Type">
+            <Select
+              value={type}
+              onChange={(e) => setType(e.target.value as AdjustType)}
+              data-testid="adjust-type"
+            >
+              <option value="count_correction">Count correction</option>
+              <option value="damage">Damaged</option>
+              <option value="theft">Theft or loss</option>
+              <option value="other">Other</option>
+            </Select>
           </Field>
         </div>
 

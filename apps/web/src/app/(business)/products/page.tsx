@@ -357,6 +357,7 @@ export default function ProductsPage() {
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
   const seq = useRef(0);
 
   // Store columns: the warehouse first, then the stores by name.
@@ -483,7 +484,7 @@ export default function ProductsPage() {
     );
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+  }, [params, tick]);
 
   async function loadMore() {
     if (!nextCursor) return;
@@ -979,7 +980,7 @@ export default function ProductsPage() {
 
       <details className="pb-import" data-testid="products-csv-import">
         <summary>Import products from CSV</summary>
-        <CsvImport entity="product" onCommitted={() => setStock((s) => s)} />
+        <CsvImport entity="product" onCommitted={() => setTick((n) => n + 1)} />
       </details>
     </div>
   );

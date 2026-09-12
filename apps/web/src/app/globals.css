@@ -5589,7 +5589,7 @@ select.picker-from {
 }
 .adj-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1.4fr 1fr;
   gap: 10px;
 }
 .adj-grid .field {

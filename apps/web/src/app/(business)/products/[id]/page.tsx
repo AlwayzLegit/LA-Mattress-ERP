@@ -563,8 +563,16 @@ export default function ProductDetailPage() {
           .sort((a, b) => b.available - a.available);
         const promise = (r: (typeof rows)[number]) => {
           if (r.available > 0) return { text: 'Today', now: true };
+          // Only a placed merchandise PO is a promise: drafts are not
+          // ordered yet and direct-ship stock never reaches the store.
           const po = poRows
-            .filter((x) => x.receivingLocationId === r.locationId && x.quantityDue > 0)
+            .filter(
+              (x) =>
+                x.receivingLocationId === r.locationId &&
+                x.quantityDue > 0 &&
+                x.transactionType === 'merchandise' &&
+                (x.status === 'ordered' || x.status === 'partially_received'),
+            )
             .sort((a, b) => (a.expectedAt ?? '9999').localeCompare(b.expectedAt ?? '9999'))[0];
           if (po) return { text: `${fmtDate(po.expectedAt)} · ${po.number}`, now: false };
           const src = anyAvail.find((x) => x.locationId !== r.locationId);
