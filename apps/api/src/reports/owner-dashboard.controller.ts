@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Inject, Query } from '@nestjs/common';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
@@ -169,7 +169,12 @@ export class OwnerDashboardController {
       .from(schema.businesses)
       .where(eq(schema.businesses.id, businessId))
       .limit(1);
-    return { tz, today: row!.today, yesterday: row!.yesterday };
+    if (!row) {
+      // RLS hid the business row: the request's tenant context does not
+      // match this business. Say so instead of crashing on `undefined`.
+      throw new ForbiddenException('Business is not in scope for this session');
+    }
+    return { tz, today: row.today, yesterday: row.yesterday };
   }
 
   /** Sidebar counts: open orders, past-promise orders, open exceptions, today's trucks. */

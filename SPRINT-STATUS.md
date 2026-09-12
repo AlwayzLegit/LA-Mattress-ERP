@@ -5552,3 +5552,15 @@ Owner ask: "make the sidebar all open not collapsible." README §2 line amended
 (struck + dated), `PHASE_NOTES.md` amendment logged. Sidebar groups are static
 headings with every link visible; no toggle, no remembered open group, no `userKey`
 prop. CSS: `.nav-group-btn` / `.nav-chev` replaced by `.nav-group-head`.
+
+### Checkpoint — 2026-09-12 (Owner dashboard: "Cash on hand is unavailable")
+
+Live: `GET /v1/dashboard/cash-pickups/queue` returns 500 for the owner's business on every
+call since Phase 9 went live (Render logs: `Failed query: select "payments"…` from
+`pendingCash`), so every store card shows "Cash on hand is unavailable right now". One
+other identity got 200 at 17:03Z. Postgres logged no ERROR for the app role, and the API
+logger dropped the wrapped driver error, so the cause is not yet in evidence. Shipped:
+pino `errWithCause` serializer so the next failure logs the Postgres message and code;
+`nav-counts` returns 403 instead of a TypeError when RLS hides the business row (12
+such 500s 21:52–22:03Z). Read-only production query blocked in-session — owner to allow
+or run. Root cause still open.

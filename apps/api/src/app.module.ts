@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import pino from 'pino';
 import { randomUUID } from 'node:crypto';
 import { TerminusModule } from '@nestjs/terminus';
 import { AdminModule } from './admin/admin.module';
@@ -68,6 +69,10 @@ import { WebhooksModule } from './webhooks/webhooks.module';
           return id;
         },
         customProps: (req) => ({ requestId: req.id }),
+        // Drizzle wraps driver failures in "Failed query: …" and keeps the
+        // Postgres error on `cause`; pino's default serializer drops it, so
+        // production logs showed the SQL but never the reason it failed.
+        serializers: { err: pino.stdSerializers.errWithCause },
         redact: {
           paths: [
             'req.headers.authorization',
