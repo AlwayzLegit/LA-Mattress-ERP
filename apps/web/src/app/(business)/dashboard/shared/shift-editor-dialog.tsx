@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useFocusTrap } from '@/components/ui';
+
+import { useEffect, useState, useRef } from 'react';
 import { minutesLabel } from './kit';
 
 /**
@@ -35,17 +37,14 @@ export function ShiftEditorDialog({
   const invalid = e <= s;
   const hours = ((e - s) / 60).toFixed(1);
 
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Escape, the focus trap and the return of focus come from the shared hook.
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, { onClose });
 
   return (
     <div className="overlay overlay-center" onClick={onClose} data-noprint="true">
       <div
+        ref={panel}
         role="dialog"
         aria-modal
         aria-label={`Shift for ${name}`}

@@ -15,6 +15,7 @@ import {
   Stack,
   TableEmpty,
   TableWrap,
+  rowKeys,
 } from '@/components/ui';
 
 /**
@@ -116,6 +117,7 @@ export default function GlAccountActivityPage() {
                   const selected = periodFilter === p.period;
                   return (
                     <tr
+                      {...rowKeys}
                       key={p.period}
                       className="cursor-pointer"
                       aria-selected={selected}

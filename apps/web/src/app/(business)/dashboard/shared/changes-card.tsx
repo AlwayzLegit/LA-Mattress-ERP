@@ -1,5 +1,7 @@
 'use client';
 
+import { rowKeys } from '@/components/ui';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -222,6 +224,7 @@ export function ChangesCard({
                 const cls = r.moneyRelated ? (seen ? ' is-seen' : ' is-unseen') : '';
                 return (
                   <tr
+                    {...rowKeys}
                     key={r.id}
                     className={`is-clickable${cls}`}
                     onClick={() => router.push(`/orders/${r.orderId}`)}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Select } from '@/components/ui';
+import { Alert, Select, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
   EmptyRow,
@@ -401,7 +401,16 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
         <PageHead title="Warehouse" sub={who} />
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => void load(null)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </div>
     );
   }

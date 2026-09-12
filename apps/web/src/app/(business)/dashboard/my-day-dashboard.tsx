@@ -15,6 +15,7 @@ import {
   StatTile,
   StatusBadge,
   TableWrap,
+  Button,
 } from '@/components/ui';
 import { Money } from '@/components/money';
 import { api } from '@/lib/api';
@@ -207,7 +208,16 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
     return (
       <>
         <PageHeader title={title} />
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => void load(null)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </>
     );
   }

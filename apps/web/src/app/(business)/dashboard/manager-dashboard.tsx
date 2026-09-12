@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react';
-import { Alert, LinkButton, Select } from '@/components/ui';
+import { Alert, LinkButton, Select, rowKeys, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
   EmptyRow,
@@ -293,7 +293,16 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
         {header}
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => void load(locationId)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </div>
     );
   }
@@ -914,6 +923,7 @@ function OpsPanel({
           ) : (
             rows.map((r) => (
               <tr
+                {...rowKeys}
                 key={r.key}
                 className="is-clickable"
                 title={r.title}
@@ -1117,6 +1127,7 @@ function QueueTable({
             const late = !!r.requestedDate && r.requestedDate < today;
             return (
               <tr
+                {...rowKeys}
                 key={r.id}
                 className="is-clickable"
                 onClick={(e) => rowClick(e, () => onOpen(r.id))}

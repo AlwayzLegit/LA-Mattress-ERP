@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Card, EmptyState, LoadingRows, StatTile, TableWrap } from '@/components/ui';
+import { Card, EmptyState, LoadingRows, TableWrap } from '@/components/ui';
 
 /**
  * Small helpers shared by the role dashboards (owner, manager, operations,
@@ -50,36 +49,6 @@ export function TableCard({
       )}
     </Card>
   );
-}
-
-/** A KPI tile that is also a link to the screen behind the number. */
-export function StatLink({
-  href,
-  testid,
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  href: string;
-  testid?: string;
-  label: ReactNode;
-  value: ReactNode;
-  sub?: ReactNode;
-  tone?: 'success' | 'warning' | 'danger' | 'brand';
-}) {
-  return (
-    <Link href={href} className="block h-full text-inherit no-underline" data-testid={testid}>
-      <StatTile className="card-hover" label={label} value={value} sub={sub} tone={tone} />
-    </Link>
-  );
-}
-
-/** "$1.2k" / "$412.00" — compact money for tile sub-lines and bar labels. */
-export function usdShort(cents: number): string {
-  return cents >= 100_000
-    ? `$${(cents / 100_000).toFixed(1)}k`
-    : `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 }
 
 /** Plain "$412.00" for inline text where a `<Money>` element is awkward. */

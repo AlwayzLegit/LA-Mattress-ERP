@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { signOut } from '@/lib/auth-client';
 import { ConfirmDialog } from './confirm-dialog';
@@ -41,6 +41,14 @@ export function UserMenu({
   const [confirm, setConfirm] = useState(false);
   const [others, setOthers] = useState(false);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   const initials = initialsOf(user.name, user.email);
   const first = (user.name?.trim().split(/\s+/)[0] ?? user.email.split('@')[0]) || 'You';
 

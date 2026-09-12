@@ -234,6 +234,7 @@ export default function InventoryPage() {
           )}
           <Input
             name="q"
+            aria-label="Search stock by name, SKU, or barcode"
             placeholder="Search by name, SKU, or barcode"
             value={q}
             onChange={(e) => setQ(e.target.value)}

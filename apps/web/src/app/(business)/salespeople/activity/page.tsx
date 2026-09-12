@@ -15,6 +15,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  rowKeys,
 } from '@/components/ui';
 
 /**
@@ -95,6 +96,7 @@ export default function SalespersonActivityLookupPage() {
                 {hits.length === 0 && <TableEmpty colSpan={4}>No salespeople match.</TableEmpty>}
                 {hits.map((m) => (
                   <tr
+                    {...rowKeys}
                     key={m.membershipId}
                     data-testid="sp-lookup-hit"
                     onClick={() => router.push(`/salespeople/${m.membershipId}/activity`)}

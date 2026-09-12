@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
-import { Button, Dialog, Field, Input, Kbd, LoadingRows, Select } from '@/components/ui';
+import { Button, Dialog, Field, Input, Kbd, LoadingRows, Select, rowKeys } from '@/components/ui';
 
 /**
  * Add Product (redesign Phase 5, README §3.1, canvas 4c): a real dialog
@@ -277,6 +277,7 @@ export function ProductSearchDialog({
               <tbody>
                 {shown.map((r, i) => (
                   <tr
+                    {...rowKeys}
                     key={r.variantId}
                     onClick={() => onAdd(r)}
                     onMouseEnter={() => setHi(i)}

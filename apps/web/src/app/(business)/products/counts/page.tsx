@@ -23,6 +23,7 @@ import {
   StatusBadge,
   TableEmpty,
   TableWrap,
+  rowKeys,
 } from '@/components/ui';
 
 interface Location {
@@ -148,6 +149,7 @@ export default function PhysicalCountsPage() {
                   )}
                   {counts.map((c) => (
                     <tr
+                      {...rowKeys}
                       key={c.id}
                       className="cursor-pointer"
                       onClick={() => router.push(`/products/counts/${c.id}`)}

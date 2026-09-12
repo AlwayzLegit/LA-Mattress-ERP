@@ -125,17 +125,19 @@ export default function DaySheetPage() {
   const [rows, setRows] = useState<DeliveryRow[] | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [printedAt] = useState(() => new Date());
 
   useEffect(() => {
     if (!date) return;
+    setError(null);
     void api<DeliveryRow[]>(`/v1/deliveries?from=${date}&to=${date}`)
       .then((all) => setRows(all.filter((r) => r.status !== 'cancelled')))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
     void api<RunRow[]>(`/v1/delivery-runs?date=${date}`)
       .then((r) => setRuns(Array.isArray(r) ? r : []))
       .catch(() => setRuns([]));
-  }, [date]);
+  }, [date, reloadKey]);
 
   const stops = useMemo(
     () =>
@@ -198,7 +200,18 @@ export default function DaySheetPage() {
           Print day sheet
         </Button>
       </div>
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && (
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => setReloadKey((n) => n + 1)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
 
       <article className="ds-page" aria-label={`Day sheet ${date}`}>
         <header className="ds-head">

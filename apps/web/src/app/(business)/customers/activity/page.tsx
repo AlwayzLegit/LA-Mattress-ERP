@@ -15,6 +15,7 @@ import {
   PageHeader,
   Stack,
   TableWrap,
+  rowKeys,
 } from '@/components/ui';
 
 /**
@@ -115,6 +116,7 @@ export default function CustomerActivityLookupPage() {
                 <tbody>
                   {hits.map((h) => (
                     <tr
+                      {...rowKeys}
                       key={h.id}
                       data-testid="activity-lookup-hit"
                       onClick={() => router.push(`/customers/${h.id}/activity`)}

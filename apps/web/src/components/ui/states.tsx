@@ -131,7 +131,13 @@ export function LoadingRows({
     );
   }
   return (
-    <div className="loading-rows" role="status" aria-live="polite" aria-label={label}>
+    <div
+      className="loading-rows"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={label}
+    >
       {Array.from({ length: rows }, (_, i) => (
         <Skeleton key={i} style={{ height }} />
       ))}

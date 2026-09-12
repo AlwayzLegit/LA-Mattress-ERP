@@ -345,6 +345,14 @@ pre {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Flush controls (segmented buttons, KPI cells, figure tiles) keep the
+   ring inside so the container never clips it. */
+.seg-btn:focus-visible,
+.kpi-cell:focus-visible,
+.wh-fig:focus-visible,
+.stores-foot-cell:focus-visible {
+  outline-offset: -2px;
+}
 
 /* ---------- Type scale (canvas 2d) ---------- */
 
@@ -427,6 +435,16 @@ pre {
     animation-iteration-count: 1 !important;
     transition-duration: 0ms !important;
     scroll-behavior: auto !important;
+  }
+  /* A frozen spinner reads as "stuck": hide it and let the copy carry "busy". */
+  .spin {
+    animation: none !important;
+    visibility: hidden;
+  }
+  /* Motion spec (9c): the drag lift becomes a border change only. */
+  .db-card.is-lifted {
+    transform: none !important;
+    box-shadow: none !important;
   }
   /* The skeleton shimmer is the one loop; it becomes a static two-tone bar. */
   .skeleton,
@@ -924,20 +942,12 @@ pre {
 
 /* ---------- Skeletons ---------- */
 
-@keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
-}
-
+/* `@keyframes shimmer` lives with .shimmer below; .skeleton shares it. */
 .skeleton {
   border-radius: var(--radius-chip);
   background: linear-gradient(90deg, var(--surface-2) 25%, var(--bg) 50%, var(--surface-2) 75%);
-  background-size: 800px 100%;
-  animation: shimmer 1.4s infinite linear;
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
   min-height: 14px;
 }
 
@@ -2653,13 +2663,6 @@ kbd.key {
   text-align: left;
   white-space: nowrap;
   user-select: none;
-}
-.dt th.is-sortable {
-  cursor: pointer;
-}
-.dt th.is-sortable:hover,
-.dt th.is-sorted {
-  color: var(--text);
 }
 .dt td {
   padding: var(--rowy) 10px;
@@ -6144,18 +6147,6 @@ select.picker-from {
 @media (max-width: 1100px) {
   .db-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .db-card,
-  .db-day,
-  .db-bar-fill {
-    transition: none;
-  }
-  /* Motion spec (9c): the drag lift becomes a border change only. */
-  .db-card.is-lifted {
-    transform: none;
-    box-shadow: none;
   }
 }
 

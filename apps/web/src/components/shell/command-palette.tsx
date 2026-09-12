@@ -233,13 +233,19 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
         <div className="palette-foot">
           <span>
-            <Kbd>↑↓</Kbd> move
+            <Kbd keys="up" />
+            <Kbd keys="down" /> move
           </span>
           <span>
             <Kbd keys="enter" /> open
           </span>
           <span>
-            <Kbd>g o</Kbd> orders · <Kbd>g d</Kbd> deliveries · <Kbd>g p</Kbd> products
+            {(['o', 'd', 'p'] as const).map((k, i) => (
+              <span key={k}>
+                {i > 0 && ' · '}
+                <Kbd keys={`g ${k}`} /> {GO_KEYS[k]!.label.toLowerCase()}
+              </span>
+            ))}
           </span>
           <span className="palette-foot-note">phone digits match customers</span>
         </div>

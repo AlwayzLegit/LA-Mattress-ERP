@@ -207,7 +207,7 @@ jobs:
         run: pnpm build
 
   e2e:
-    name: Playwright E2E (auth)
+    name: Playwright E2E
     runs-on: ubuntu-latest
     needs: verify
     services:

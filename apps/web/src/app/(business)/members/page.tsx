@@ -21,6 +21,7 @@ import {
   StatusBadge,
   TableEmpty,
   TableWrap,
+  rowKeys,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -274,6 +275,7 @@ export default function MembersPage() {
                   )}
                   {members.map((m) => (
                     <tr
+                      {...rowKeys}
                       key={m.membershipId}
                       className="cursor-pointer"
                       onClick={() => router.push(`/members/${m.membershipId}`)}
