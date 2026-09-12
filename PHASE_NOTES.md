@@ -466,3 +466,86 @@ balanceDueCents }` for the whole filtered set; accepts `salespersonMembershipId`
 - Per-store order prefix (GL-10437) — kept `SO-` per the owner; the Store column carries it.
 - Server-side "reserved" sort counts units, not lines; the bar shows units too.
 - A first-class order history endpoint with actor names (the timeline shows the audit e-mail).
+
+## Phase 7 — Products browser, product page, adjust, receive (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** `/products` rebuilt, `/products/[id]` led by
+"Where it is", a new Adjust stock dialog, `/products/receive` rebuilt around the PO, and the
+list / stock / receiving endpoints extended. No schema change.
+
+### What changed
+
+- **Browser** (README §3.3, canvas 6a) — one row per SKU, **one column per store**: the
+  active locations (warehouse first) become ordinary draggable columns right after
+  Description, showing _available_ (on hand − reserved − floor) with the tone rules stated in
+  the footer — red = 0 with open demand (units on open order lines waiting there), amber =
+  below the store's own minimum (`inventory_levels.reorder_point`), grey = a plain zero. Then
+  On hand · company, Net on PO, Available · ATP, Sales margin cost (only when the role gets
+  cost back), As-Is on hand / available, Price, Status, As-Is non-sellable, Product group,
+  Brand, Size, Firmness, Primary collection. Toolbar: Search, Category (nested), Size,
+  **Stock** (any / in stock anywhere / short somewhere / out everywhere), Show inactive,
+  Advanced search disclosure (Vendor model, Brand, Collection, Product group, Purchase status,
+  As-Is reason, Price from/to, Cost from/to), Reset columns only when the order differs.
+  Drag-to-reorder + click-to-sort with `aria-sort` kept; order persisted in
+  `localStorage['jetnine.products.columns']` (store columns included, keyed by location id).
+  Table `min-width: 2600px` scrolling inside the sheet. Header actions Receive · Count ·
+  Transfer · Print labels · + Create product. The per-row Delete is gone (canvas 6a — delete
+  lives on the product page).
+- **Product page** (canvas 6b) — identity header (breadcrumb, name, SKU, Active chip,
+  vendor · model · category · size · firmness · price) with **Adjust stock · Transfer · Print
+  label · Edit product** (Edit opens the existing General tab), Deactivate / Delete as ghost
+  actions. **"Where it is"** first: one row per location with On hand, Reserved, Floor,
+  Available (toned), On PO, ATP, **Min**, **Next promise** (Today / `Sep 15 · PO-4471` /
+  `Transfer from Warehouse · 2 days` / `Special order · ~3 weeks` / Discontinued / Order from
+  vendor) and a per-row Adjust; company totals in the section header. The STORIS activity
+  views follow as a horizontal tab strip **with counts** (open orders, POs, transfers in/out,
+  As-Is, serials fetched once); every existing panel and test id is unchanged, the old
+  18-column Location availability card is the "Availability detail" tab.
+- **Adjust stock** (canvas 6c, `components/adjust-stock-dialog.tsx`) — Location, **coded
+  Reason** (`reason-codes?usageClass=inventory_adjustment`, the server's adjustment type read
+  off the code), the **On hand now → Change → After** strip, Note (required for count
+  corrections over 2 units). Guards: After < 0 disables and names the largest allowed change;
+  After < reserved shows the red "reassign the reservation first" and disables; posts
+  `POST /v1/inventory/adjust` (audited). "More stock actions…" opens the existing wide dialog
+  (bins, As-Is, write-off, serials) for the same location.
+- **Receive** (canvas 6d) — PO select (open + partly received, due/overdue in the label),
+  Into, Packing slip #, Blind count (defaults from the PO's `blindReceiving`); lines with
+  Ordered · Already in · **Received now** · **Damaged** · Bin · Still open and the waiting
+  sales orders from `linkedOrders`; the rail totals Units received, Damaged → As-Is (reason
+  DMG/MFG/PKG + note, required when damaged > 0), Still open on PO, **Orders unblocked**
+  (estimated from the linked orders before posting, exact from the server after). Post →
+  `POST /v1/purchase-orders/:id/receiving` with received = inspected = now + damaged,
+  accepted = now, rejected = damaged (rejected units already become As-Is pieces server-side);
+  chosen bins are assigned after. Over-receiving is refused in the rail; short lines stay open.
+  **Receive without PO** is the secondary mode and requires a reason (posts the existing
+  `POST /v1/inventory/receive` with the reason in the notes).
+- **Server** — `GET /v1/products`: rows gain `reserved` and `stockByLocation`
+  (`{ onHand, reserved, floorSample, available, min, demand }` per location id); new params
+  `stock=anywhere|short|out` (SQL, so every browse mode pages correctly), `priceMin/Max`,
+  `costMin/Max` (cents; cost needs `products.cost.view`), and `sort=available:<locationId>`.
+  `GET /v1/products/:id` location rows carry `reorderPoint`. `POST /v1/purchase-orders/:id/receive`
+  and `/receiving` return `unblockedOrders: [{ orderId, number, units }]` from the pending
+  allocation the receipt triggered.
+- `/dev/products`, `/dev/products/p1`, `/dev/products/receive` preview the four screens on
+  fixtures.
+
+### Assumptions
+
+- "Open demand" for the red tone = units on open, unlocked order lines sourced at that
+  location still waiting for stock; the product page uses reserved > 0 at zero available.
+- Next promise reads PO expected dates from the product's PO activity by receiving location;
+  transfer lead time is a fixed "2 days" and special-order "~3 weeks" until lead times are
+  modelled.
+- The cost column's visibility follows whether the API returned a cost on the loaded rows
+  (the server already nulls it without `products.cost.view`).
+- The quick Adjust acts on the product's primary variant (the one carrying the product SKU);
+  other variants adjust from the Availability detail rows as before.
+- Damage reasons on receipt are fixed codes in the receipt note; the server's `rejected`
+  path already creates the As-Is pieces and the `po_reject` exception.
+
+### Later
+
+- A sticky first column past 1440 and a Cost column for financial roles by permission
+  rather than by returned data.
+- Modelled transfer / special-order lead times behind Next promise.
+- A dedicated `/v1/reason-codes` class for receiving damage.

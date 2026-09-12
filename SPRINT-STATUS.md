@@ -13,8 +13,8 @@
 > fonts) merged 2026-09-12 (PR #162); Phase 2 (component kit) merged
 > 2026-09-12 (PR #163); Phase 3 (shell) PR #164; Phase 4 (New Sale layout, lines,
 > sourcing) PR #165; Phase 5 (Add Product dialog + payments) PR #166; Phase 6 (Orders book
->
-> - slide-over) follows on the same branch; Phase 7 (Products) is next.
+> and slide-over) PR #167; Phase 7 (Products browser, product page, adjust, receive) follows
+> on the same branch; Phase 8 (Deliveries board) is next.
 
 ---
 

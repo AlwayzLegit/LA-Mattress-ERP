@@ -17,11 +17,14 @@ import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
 import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog';
+import { AdjustStockDialog } from '@/components/adjust-stock-dialog';
+import { StatusChip } from '@/components/ui';
+import type { PurchaseOrderRow } from './activity/types';
 import { AsIsPanel } from './activity/as-is-panel';
 import { AtpCard } from './activity/atp-card';
 import { GeneralPanel } from './activity/general-panel';
 import { InventoryDetailPanel } from './activity/inventory-detail-panel';
-import { fmtDate, ProductSectionNav } from './activity/kit';
+import { fmtDate } from './activity/kit';
 import { OpenOrdersPanel } from './activity/open-orders-panel';
 import { PurchaseOrdersPanel } from './activity/purchase-orders-panel';
 import { SalesHistoryPanel } from './activity/sales-history-panel';
@@ -99,6 +102,7 @@ interface LocationStockRow extends StockTotals {
   locationActive: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
+  reorderPoint: number | null;
 }
 interface Product {
   id: string;
@@ -120,6 +124,7 @@ interface Product {
   logisticalCartonTransfers: boolean;
   brandName: string | null;
   categoryName: string | null;
+  categoryPath?: string | null;
   collectionName: string | null;
   vendorName: string | null;
   vendorModel: string | null;
@@ -159,6 +164,33 @@ export default function ProductDetailPage() {
   // lives in the URL so a reload or a shared link lands on the same tab.
   const [tab, setTab] = useState<ProductTab>('availability');
   const [atp, setAtp] = useState<AtpResult | null>(null);
+  // Redesign Phase 7 (README §3.3): the quick Adjust dialog, the counts
+  // on the activity tabs, and the open POs behind "Next promise".
+  const [quickAdjustAt, setQuickAdjustAt] = useState<string | null | false>(false);
+  const [counts, setCounts] = useState<Partial<Record<ProductTab, number>>>({});
+  const [poRows, setPoRows] = useState<PurchaseOrderRow[]>([]);
+
+  useEffect(() => {
+    if (!id) return;
+    const count = (url: string, key: ProductTab) =>
+      api<{ rows?: unknown[] } | unknown[]>(url)
+        .then((r) => {
+          const n = Array.isArray(r) ? r.length : Array.isArray(r.rows) ? r.rows.length : null;
+          if (n != null) setCounts((c) => ({ ...c, [key]: n }));
+        })
+        .catch(() => undefined);
+    void count(`/v1/products/${id}/activity/open-orders`, 'open-orders');
+    void api<{ rows: PurchaseOrderRow[] }>(`/v1/products/${id}/activity/purchase-orders`)
+      .then((r) => {
+        setPoRows(r.rows ?? []);
+        setCounts((c) => ({ ...c, 'purchase-orders': (r.rows ?? []).length }));
+      })
+      .catch(() => undefined);
+    void count(`/v1/products/${id}/activity/transfers?direction=in`, 'inbound');
+    void count(`/v1/products/${id}/activity/transfers?direction=out`, 'outbound');
+    void count(`/v1/products/${id}/activity/as-is`, 'as-is');
+    void count(`/v1/products/${id}/activity/serials`, 'serials');
+  }, [id]);
 
   useEffect(() => {
     const initial = new URLSearchParams(window.location.search).get('tab');
@@ -402,51 +434,254 @@ export default function ProductDetailPage() {
 
   return (
     <div>
-      <PageHeader
-        eyebrow={<BackLink href="/products">All products</BackLink>}
-        title={p.name}
-        meta={
-          <>
-            <StatusBadge status={p.isActive ? 'active' : 'inactive'} />
-            {p.purchaseStatus !== 'active' && (
-              <StatusBadge status={String(p.purchaseStatus)} className="ml-1" />
-            )}
-          </>
-        }
-        sub={
-          <>
-            Product <code>{p.sku ?? '—'}</code>
-            {p.secondDescription ? <> · {p.secondDescription}</> : null}
-            {p.vendorName ? <> · Vendor {p.vendorName}</> : null}
-            {p.brandName ? <> · Brand {p.brandName}</> : null}
-          </>
-        }
-        actions={
-          <>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void toggleProductActive()}
-              data-testid="product-toggle-active"
-            >
-              {p.isActive ? 'Deactivate' : 'Reactivate'}
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => void deleteProduct()}
-              data-testid="product-delete"
-            >
-              Delete product…
-            </Button>
-          </>
-        }
-      />
+      {(() => {
+        const v = primaryVariant(p);
+        const identity = [
+          p.vendorName,
+          p.vendorModel,
+          p.categoryPath ?? p.categoryName,
+          v?.size ?? p.size,
+          v?.firmness ?? p.firmness,
+          v ? `Price ${centsToInputString(v.priceCents).replace(/^/, '$')}` : null,
+        ].filter(Boolean);
+        return (
+          <header className="pp-head" data-testid="product-header">
+            <div>
+              <div className="pp-crumb">
+                <Link href="/products">Products</Link> / {p.name}
+              </div>
+              <div className="pp-title-row">
+                <h1 className="pp-title">{p.name}</h1>
+                <span className="pp-sku">
+                  <code>{p.sku ?? '—'}</code>
+                </span>
+                <StatusChip
+                  status={p.isActive ? 'fulfilled' : 'cancelled'}
+                  label={p.isActive ? 'Active' : 'Inactive'}
+                />
+                {p.purchaseStatus !== 'active' && <StatusBadge status={String(p.purchaseStatus)} />}
+              </div>
+              <div className="pp-identity">
+                {identity.join(' · ')}
+                {p.secondDescription ? ` · ${p.secondDescription}` : ''}
+              </div>
+            </div>
+            <div className="pp-actions">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => setQuickAdjustAt(null)}
+                disabled={!v}
+                data-testid="product-adjust-stock"
+              >
+                Adjust stock
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => router.push(`/transfers/new${v ? `?variantId=${v.id}` : ''}`)}
+                data-testid="product-transfer"
+              >
+                Transfer
+              </Button>
+              <Button
+                size="sm"
+                onClick={() =>
+                  router.push(`/products/labels${p.sku ? `?q=${encodeURIComponent(p.sku)}` : ''}`)
+                }
+                data-testid="product-print-label"
+              >
+                Print label
+              </Button>
+              <Button size="sm" onClick={() => pickTab('general')} data-testid="product-edit">
+                Edit product
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void toggleProductActive()}
+                data-testid="product-toggle-active"
+              >
+                {p.isActive ? 'Deactivate' : 'Reactivate'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-danger"
+                onClick={() => void deleteProduct()}
+                data-testid="product-delete"
+              >
+                Delete…
+              </Button>
+            </div>
+          </header>
+        );
+      })()}
 
       <ProductsNav />
 
-      <div className="grid items-start gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <ProductSectionNav tab={tab} onPick={pickTab} />
+      {(() => {
+        // "Where it is" (canvas 6b): one row per location, every variant summed,
+        // with the store minimum and the next promise for a customer.
+        const byLoc = new Map<
+          string,
+          {
+            locationId: string;
+            locationName: string;
+            onHand: number;
+            reserved: number;
+            floorSample: number;
+            available: number;
+            netOnPo: number;
+            min: number | null;
+            skus: string[];
+          }
+        >();
+        for (const r of p.stock.byLocation) {
+          const cur = byLoc.get(r.locationId) ?? {
+            locationId: r.locationId,
+            locationName: r.locationName,
+            onHand: 0,
+            reserved: 0,
+            floorSample: 0,
+            available: 0,
+            netOnPo: 0,
+            min: null as number | null,
+            skus: [] as string[],
+          };
+          cur.onHand += r.onHand;
+          cur.reserved += r.reserved;
+          cur.floorSample += r.floorSample;
+          cur.available += r.available;
+          cur.netOnPo += r.netOnPo;
+          if (r.reorderPoint != null) cur.min = Math.max(cur.min ?? 0, r.reorderPoint);
+          if (r.variantSku) cur.skus.push(r.variantSku);
+          byLoc.set(r.locationId, cur);
+        }
+        const rows = [...byLoc.values()];
+        const anyAvail = rows
+          .filter((r) => r.available > 0)
+          .sort((a, b) => b.available - a.available);
+        const promise = (r: (typeof rows)[number]) => {
+          if (r.available > 0) return { text: 'Today', now: true };
+          const po = poRows
+            .filter((x) => x.receivingLocationId === r.locationId && x.quantityDue > 0)
+            .sort((a, b) => (a.expectedAt ?? '9999').localeCompare(b.expectedAt ?? '9999'))[0];
+          if (po) return { text: `${fmtDate(po.expectedAt)} · ${po.number}`, now: false };
+          const src = anyAvail.find((x) => x.locationId !== r.locationId);
+          if (src) return { text: `Transfer from ${src.locationName} · 2 days`, now: false };
+          if (p.purchaseStatus === 'special_order')
+            return { text: 'Special order · ~3 weeks', now: false };
+          if (p.purchaseStatus === 'discontinued')
+            return { text: 'Discontinued — none coming', now: false };
+          return { text: 'Order from vendor', now: false };
+        };
+        const tone = (r: (typeof rows)[number]) =>
+          r.available <= 0 && r.reserved > 0
+            ? 'is-risk'
+            : r.available <= 0
+              ? 'is-zero'
+              : r.min != null && r.available < r.min
+                ? 'is-waiting'
+                : 'is-ok';
+        const totalAtp = p.stock.totals.available + p.stock.totals.netOnPo;
+        const v = primaryVariant(p);
+        return (
+          <section className="pp-where" aria-label="Where it is" data-testid="product-where">
+            <div className="pp-where-head">
+              <h2>Where it is</h2>
+              <span className="pp-where-sub">
+                available = on hand − reserved · ATP = available + inbound on PO
+              </span>
+              <span className="pp-where-total" data-testid="product-company-totals">
+                Company: <strong>{p.stock.totals.available}</strong> available ·{' '}
+                <strong>{totalAtp}</strong> ATP
+                {p.stock.totals.reserved > 0 ? ` · ${p.stock.totals.reserved} reserved` : ''}
+              </span>
+            </div>
+            <TableWrap>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Location</th>
+                    <th className="num">On hand</th>
+                    <th className="num">Reserved</th>
+                    <th className="num">Floor</th>
+                    <th className="num">Available</th>
+                    <th className="num">On PO</th>
+                    <th className="num">ATP</th>
+                    <th className="num">Min</th>
+                    <th>Next promise</th>
+                    <th className="actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 && (
+                    <TableEmpty colSpan={10}>No active locations or variants.</TableEmpty>
+                  )}
+                  {rows.map((r) => {
+                    const pr = promise(r);
+                    return (
+                      <tr key={r.locationId} data-testid="where-row">
+                        <td>
+                          <span className="pp-where-loc">{r.locationName}</span>
+                          {r.skus.length === 1 && <span className="pp-where-sku">{r.skus[0]}</span>}
+                        </td>
+                        <td className="num pp-num">{r.onHand}</td>
+                        <td className="num pp-num">{r.reserved}</td>
+                        <td className="num pp-num">{r.floorSample}</td>
+                        <td className={`num pp-num ${tone(r)}`} data-testid="where-available">
+                          {r.available}
+                        </td>
+                        <td className="num pp-num">{r.netOnPo}</td>
+                        <td className="num pp-num">{r.available + r.netOnPo}</td>
+                        <td className="num pp-num">{r.min ?? '—'}</td>
+                        <td
+                          className={`pp-promise${pr.now ? ' is-now' : ''}`}
+                          data-testid="where-promise"
+                        >
+                          {pr.text}
+                        </td>
+                        <td className="actions">
+                          <Button
+                            size="sm"
+                            onClick={() => setQuickAdjustAt(r.locationId)}
+                            disabled={!v}
+                            data-testid="where-adjust"
+                          >
+                            Adjust
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+          </section>
+        );
+      })()}
+
+      <nav className="pp-tabs" aria-label="Product activity views" data-testid="product-tabs">
+        {PRODUCT_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            className="pp-tab"
+            onClick={() => pickTab(t.key)}
+            aria-current={t.key === tab ? 'page' : undefined}
+            data-testid={`product-tab-${t.key}`}
+          >
+            {t.key === 'availability'
+              ? 'Availability detail'
+              : t.key === 'general'
+                ? 'Edit product'
+                : t.label}
+            {counts[t.key] != null && <span className="pp-tab-count">{counts[t.key]}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div>
         <div className="min-w-0">
           {tab === 'availability' && (
             <Stack>
@@ -1067,6 +1302,37 @@ export default function ProductDetailPage() {
           )}
         </div>
       </div>
+      {quickAdjustAt !== false &&
+        (() => {
+          const v = primaryVariant(p);
+          if (!v) return null;
+          const locs = p.stock.byLocation
+            .filter((r) => r.variantId === v.id)
+            .map((r) => ({
+              locationId: r.locationId,
+              locationName: r.locationName,
+              onHand: r.onHand,
+              reserved: r.reserved,
+            }));
+          return (
+            <AdjustStockDialog
+              productName={p.name}
+              sku={v.sku}
+              variantId={v.id}
+              locations={locs}
+              initialLocationId={quickAdjustAt}
+              onClose={() => setQuickAdjustAt(false)}
+              onPosted={() => void load()}
+              onMore={(locationId) => {
+                const row = p.stock.byLocation.find(
+                  (r) => r.variantId === v.id && r.locationId === locationId,
+                );
+                setQuickAdjustAt(false);
+                if (row) setAdjustFor(row);
+              }}
+            />
+          );
+        })()}
       {adjustFor && (
         <StockAdjustmentDialog
           open
