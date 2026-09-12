@@ -458,8 +458,8 @@ balanceDueCents }` for the whole filtered set; accepts `salespersonMembershipId`
 - The summary count follows the SQL filters; for display states the server narrows in JS
   (Pending / On PO / Reserved / Scheduled / Out for delivery) the count is the wider
   open-order set.
-- Reschedule from the sheet books a new trip through the same endpoint the full page uses;
-  moving an existing trip stays on the full page's Deliveries card.
+- Reschedule from the sheet moves the live trip in place (`PATCH /v1/deliveries/:id`); with no
+  live trip it books one. Cancel refuses while a stop is out for delivery.
 
 ### Later
 

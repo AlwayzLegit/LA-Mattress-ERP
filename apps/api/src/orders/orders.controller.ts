@@ -817,12 +817,27 @@ export class OrdersController {
           where p.order_id = ${schema.orders.id} and p.status = 'succeeded'), 0))`,
       // Redesign Phase 6 (README §3.2): every column sorts.
       store: sql`${schema.locations.name}`,
-      status: sql`${schema.orders.status}`,
+      // The display ladder (Draft → Quote → Pending/On PO/Reserved →
+      // Scheduled/Out for delivery → Delivered → Cancelled) ranked from
+      // what SQL can see: lifecycle status plus whether a live trip exists.
+      status: sql`case ${schema.orders.status}
+        when 'draft' then 0
+        when 'quote' then 1
+        when 'open' then case when exists (
+          select 1 from deliveries d where d.order_id = ${schema.orders.id}
+            and d.status in ('scheduled','loaded','out_for_delivery')) then 3 else 2 end
+        when 'partially_fulfilled' then 4
+        when 'fulfilled' then 5
+        when 'completed' then 6
+        when 'cancelled' then 7
+        else 8 end`,
       salesperson: sql`${schema.users.name}`,
       total: sql`${schema.orders.totalCents}`,
       written: sql`${schema.orders.createdAt}`,
+      // Same value the bar shows: reserved + fulfilled over ordered units.
       reserved: sql`coalesce(
-        (select sum(l.qty_reserved)::float / nullif(sum(l.quantity), 0) from order_lines l
+        (select sum(l.qty_reserved + l.qty_fulfilled)::float / nullif(sum(l.quantity), 0)
+          from order_lines l
           where l.order_id = ${schema.orders.id} and l.line_type <> 'custom'), 0)`,
     };
     const BALANCE_EXPR = SORTS.balanceDue!;
@@ -873,8 +888,16 @@ export class OrdersController {
     }
     if (q?.trim()) {
       const like = `%${q.trim()}%`;
+      // Find also takes a phone number (redesign §3.2): three or more
+      // digits match the customer's phones with punctuation stripped.
+      const digits = q.replace(/\D/g, '');
+      const phoneLike = `%${digits}%`;
       filters.push(
-        sql`(${schema.orders.number} ILIKE ${like} OR ${schema.customers.firstName} ILIKE ${like} OR ${schema.customers.lastName} ILIKE ${like})`,
+        digits.length >= 3
+          ? sql`(${schema.orders.number} ILIKE ${like} OR ${schema.customers.firstName} ILIKE ${like} OR ${schema.customers.lastName} ILIKE ${like}
+              OR regexp_replace(coalesce(${schema.customers.phone}, ''), '\D', '', 'g') LIKE ${phoneLike}
+              OR regexp_replace(coalesce(${schema.customers.phone2}, ''), '\D', '', 'g') LIKE ${phoneLike})`
+          : sql`(${schema.orders.number} ILIKE ${like} OR ${schema.customers.firstName} ILIKE ${like} OR ${schema.customers.lastName} ILIKE ${like})`,
       );
     }
     // "My orders" — same semantics as the plain list endpoint.
@@ -3902,6 +3925,21 @@ export class OrdersController {
     }
     this.assertUnlocked(order);
     await this.assertNotOnOpenRun(id);
+    // A stop already on the road (advanced through the status endpoint
+    // without a run) could still complete against a cancelled order;
+    // it has to come back or be delivered first.
+    const [onRoad] = await this.db
+      .select({ id: schema.deliveries.id })
+      .from(schema.deliveries)
+      .where(
+        and(eq(schema.deliveries.orderId, id), eq(schema.deliveries.status, 'out_for_delivery')),
+      )
+      .limit(1);
+    if (onRoad) {
+      throw new ConflictException(
+        'A delivery for this order is out for delivery. Mark it delivered or failed before cancelling the order.',
+      );
+    }
 
     const payments = await this.db
       .select({

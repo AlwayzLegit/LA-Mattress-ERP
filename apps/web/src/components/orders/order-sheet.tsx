@@ -329,11 +329,22 @@ export function OrderSheet({ id }: { id: string }) {
     setBusy(true);
     setActionError(null);
     try {
-      await api(`/v1/orders/${order.id}/deliveries`, {
-        method: 'POST',
-        body: JSON.stringify({ scheduledDate: scheduleDate, confirmOverCapacity }),
-      });
-      toast.success(`${order.number} scheduled for ${fmtDay(scheduleDate)}`);
+      // A live trip moves in place (the create endpoint would only book
+      // whatever units are not already on a trip); otherwise book one.
+      if (liveDelivery) {
+        await api(`/v1/deliveries/${liveDelivery.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ scheduledDate: scheduleDate, confirmOverCapacity }),
+        });
+      } else {
+        await api(`/v1/orders/${order.id}/deliveries`, {
+          method: 'POST',
+          body: JSON.stringify({ scheduledDate: scheduleDate, confirmOverCapacity }),
+        });
+      }
+      toast.success(
+        `${order.number} ${liveDelivery ? 'moved to' : 'scheduled for'} ${fmtDay(scheduleDate)}`,
+      );
       setScheduling(false);
       changed();
       void load();
@@ -693,8 +704,7 @@ export function OrderSheet({ id }: { id: string }) {
           </div>
           {liveDelivery && (
             <div className="osh-hint">
-              Currently {fmtDay(liveDelivery.scheduledDate)}. Moving it books a new trip and cancels
-              this one.
+              Currently {fmtDay(liveDelivery.scheduledDate)}. The same trip moves to the new date.
             </div>
           )}
         </form>
