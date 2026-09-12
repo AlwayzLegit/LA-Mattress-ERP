@@ -3913,11 +3913,16 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() body: CancelOrderBody,
   ): Promise<OrderDetail> {
+    // Every tenant request runs in one transaction (RLS interceptor), so
+    // locking the row here serializes concurrent cancels: the second
+    // waits for the first to commit, re-reads `cancelled`, and stops
+    // before any refund or store credit is booked twice.
     const [order] = await this.db
       .select()
       .from(schema.orders)
       .where(eq(schema.orders.id, id))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!order) throw new NotFoundException('Order not found');
     if (order.status === 'cancelled') throw new BadRequestException('Order is already cancelled');
     if (order.status === 'completed') {
@@ -4017,7 +4022,7 @@ export class OrdersController {
         after: { reason: 'order cancelled' },
       });
     }
-    await this.db
+    const claimed = await this.db
       .update(schema.orders)
       .set({
         status: 'cancelled',
@@ -4027,7 +4032,12 @@ export class OrdersController {
           : order.internalNotes,
         updatedAt: new Date(),
       })
-      .where(eq(schema.orders.id, id));
+      // Belt and braces under the row lock: only the status we read may flip.
+      .where(and(eq(schema.orders.id, id), eq(schema.orders.status, order.status)))
+      .returning({ id: schema.orders.id });
+    if (claimed.length === 0) {
+      throw new ConflictException('The order changed while it was being cancelled — reload it');
+    }
 
     await this.audit.log({
       action: 'order.cancel',
