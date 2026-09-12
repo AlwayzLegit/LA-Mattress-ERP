@@ -1,12 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { formatMoney } from '@jetnine/shared';
 import { ApiError, api } from '@/lib/api';
-import { Alert, Button, Dialog, Field, Input, Kbd, LinkButton, StatusChip } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  Dialog,
+  Field,
+  Input,
+  Kbd,
+  LinkButton,
+  LoadingRows,
+  StatusChip,
+} from '@/components/ui';
 import type { StatusKey } from '@/lib/design-tokens';
 
 /**
@@ -115,15 +125,22 @@ function capNotesFor(rows: DeliveryRow[], date: string): string[] {
 }
 
 export default function DeliveriesBoardPage() {
+  // useSearchParams needs a Suspense boundary so the server and the first
+  // client render agree on the view and the anchor day.
+  return (
+    <Suspense fallback={<LoadingRows rows={6} height={48} what="The board" />}>
+      <DeliveriesBoard />
+    </Suspense>
+  );
+}
+
+function DeliveriesBoard() {
   const router = useRouter();
+  const search = useSearchParams();
   const today = useMemo(() => toDay(new Date()), []);
-  const initial =
-    typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search)
-      : new URLSearchParams();
-  const [mode, setMode] = useState<Mode>(initial.get('view') === 'month' ? 'month' : 'week');
+  const [mode, setMode] = useState<Mode>(search.get('view') === 'month' ? 'month' : 'week');
   const [anchor, setAnchor] = useState<string>(() => {
-    const d = initial.get('d');
+    const d = search.get('d');
     return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : today;
   });
   const [rows, setRows] = useState<DeliveryRow[] | null>(null);

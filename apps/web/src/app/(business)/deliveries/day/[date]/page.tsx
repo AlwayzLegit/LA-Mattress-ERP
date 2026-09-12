@@ -21,6 +21,7 @@ import { Alert, Button, LinkButton, LoadingRows } from '@/components/ui';
 
 interface DeliveryRow {
   id: string;
+  orderId: string;
   kind?: 'delivery' | 'return_pickup';
   orderNumber: string;
   rmaNumber?: string | null;
@@ -40,19 +41,54 @@ interface DeliveryRow {
   addressPostalCode: string | null;
   addressPhone: string | null;
   balanceDueCents: number;
-  lines: { id: string; description: string; quantity: number; lineType?: string }[];
+  lines: {
+    id: string;
+    description: string;
+    quantity: number;
+    /** Physical pieces (quantity × pieces per unit) — one tick box each. */
+    pieces?: number;
+    lineType?: string;
+  }[];
 }
 interface RunRow {
   id: string;
   route: string | null;
   truck: string | null;
   driverMembershipId: string | null;
+  driverName?: string | null;
   status: string;
   notes: string | null;
 }
-interface MemberRow {
-  membershipId: string;
-  name: string | null;
+/** One truck's part of the day: its run (null = stops not on any run) and its stops. */
+interface Group {
+  run: RunRow | null;
+  stops: DeliveryRow[];
+}
+
+/** Physical pieces on a line — what the crew loads and ticks. */
+function piecesOf(l: DeliveryRow['lines'][number]): number {
+  return Math.max(1, l.pieces ?? l.quantity);
+}
+function piecesIn(stops: DeliveryRow[]): number {
+  return stops.reduce((n, s) => n + s.lines.reduce((m, l) => m + piecesOf(l), 0), 0);
+}
+/**
+ * COD across stops, counted once per order: two stops for one order both
+ * carry the order's whole balance, and the driver collects it once.
+ */
+function codOf(stops: DeliveryRow[]): number {
+  const byOrder = new Map<string, number>();
+  for (const s of stops) {
+    if (s.kind === 'return_pickup') continue;
+    byOrder.set(s.orderId, s.balanceDueCents);
+  }
+  return [...byOrder.values()].reduce((n, c) => n + c, 0);
+}
+function routeOf(run: RunRow | null, stops: DeliveryRow[]): string {
+  return (
+    run?.route ??
+    [...new Set(stops.map((s) => s.route ?? s.addressCity).filter(Boolean))].join(' → ')
+  );
 }
 
 function hhmm(t: string | null): string {
@@ -88,7 +124,6 @@ export default function DaySheetPage() {
   const business = useBusinessName() ?? 'LA Mattress';
   const [rows, setRows] = useState<DeliveryRow[] | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
-  const [members, setMembers] = useState<MemberRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [printedAt] = useState(() => new Date());
 
@@ -100,9 +135,6 @@ export default function DaySheetPage() {
     void api<RunRow[]>(`/v1/delivery-runs?date=${date}`)
       .then((r) => setRuns(Array.isArray(r) ? r : []))
       .catch(() => setRuns([]));
-    void api<MemberRow[]>('/v1/business/members')
-      .then(setMembers)
-      .catch(() => setMembers([]));
   }, [date]);
 
   const stops = useMemo(
@@ -114,15 +146,31 @@ export default function DaySheetPage() {
       ),
     [rows],
   );
-  const pieces = stops.reduce((n, s) => n + s.lines.reduce((m, l) => m + l.quantity, 0), 0);
-  const cod = stops.reduce((n, s) => n + (s.kind === 'return_pickup' ? 0 : s.balanceDueCents), 0);
-  const run = runs[0] ?? null;
-  const driver = run?.driverMembershipId
-    ? (members.find((m) => m.membershipId === run.driverMembershipId)?.name ?? null)
-    : null;
-  const routeText =
-    run?.route ??
-    [...new Set(stops.map((s) => s.route ?? s.addressCity).filter(Boolean))].join(' → ');
+  // One section per truck. A date can carry several runs, each with its
+  // own driver, truck and route, so stops print under their own run and
+  // never under the first run's header. Stops on no run come last.
+  const groups = useMemo<Group[]>(() => {
+    const byRun = new Map<string, DeliveryRow[]>();
+    const loose: DeliveryRow[] = [];
+    for (const s of stops) {
+      if (s.runId && runs.some((r) => r.id === s.runId)) {
+        byRun.set(s.runId, [...(byRun.get(s.runId) ?? []), s]);
+      } else {
+        loose.push(s);
+      }
+    }
+    const out: Group[] = runs
+      .map((run) => ({ run, stops: byRun.get(run.id) ?? [] }))
+      .filter((g) => g.stops.length > 0);
+    if (loose.length > 0 || out.length === 0) out.push({ run: null, stops: loose });
+    return out;
+  }, [stops, runs]);
+  const pieces = piecesIn(stops);
+  const cod = codOf(stops);
+  const single = groups.length === 1 ? groups[0]! : null;
+  const run = single?.run ?? null;
+  const driver = run?.driverName ?? null;
+  const routeText = single ? routeOf(single.run, single.stops) : '';
   const notes = capNotes(stops, date);
 
   return (
@@ -158,6 +206,7 @@ export default function DaySheetPage() {
             <div className="ds-eyebrow">
               {business}
               {run?.truck ? ` · ${run.truck}` : ''}
+              {groups.length > 1 ? ` · ${groups.length} trucks` : ''}
             </div>
             <h1 className="ds-title">Day sheet — {longDay(date)}</h1>
           </div>
@@ -210,67 +259,94 @@ export default function DaySheetPage() {
             <LoadingRows rows={4} height={60} what="The day" />
           </div>
         )}
-        {stops.map((s, i) => {
-          const pickup = s.kind === 'return_pickup';
-          const owed = !pickup && s.balanceDueCents > 0;
+        {groups.map((group, gi) => {
+          const offset = groups.slice(0, gi).reduce((n, g) => n + g.stops.length, 0);
+          const gRun = group.run;
           return (
-            <section key={s.id} className="ds-stop" data-testid="ds-stop">
-              <div className="ds-stop-num">{s.routePosition ?? i + 1}</div>
-              <div>
-                <div className="ds-stop-line1">
-                  <span className="ds-stop-order">
-                    {pickup ? (s.rmaNumber ?? s.orderNumber) : s.orderNumber}
+            <section
+              key={gRun?.id ?? 'unassigned'}
+              className="ds-run"
+              data-testid="ds-run"
+              aria-label={gRun ? (gRun.truck ?? 'Run') : 'Not on a run'}
+            >
+              {groups.length > 1 && (
+                <div className="ds-run-head">
+                  <strong>{gRun ? (gRun.truck ?? 'Run') : 'Not on a truck yet'}</strong>
+                  {gRun?.driverName && <span>Driver {gRun.driverName}</span>}
+                  {routeOf(gRun, group.stops) && <span>Route {routeOf(gRun, group.stops)}</span>}
+                  {gRun?.status === 'out' && <span>Departed</span>}
+                  <span className="ds-meta-right">
+                    {group.stops.length} stop{group.stops.length === 1 ? '' : 's'} ·{' '}
+                    {piecesIn(group.stops)} pieces · COD{' '}
+                    <span className="mono">{formatMoney(codOf(group.stops))}</span>
                   </span>
-                  <span className="ds-stop-cust">{s.customerName ?? '—'}</span>
-                  {s.addressPhone && <span className="ds-stop-phone">{s.addressPhone}</span>}
-                  {pickup && <span>PICKUP — bring the goods back</span>}
                 </div>
-                <div className="ds-stop-addr">
-                  {[s.addressLine1, s.addressLine2].filter(Boolean).join(', ')}
-                  {s.addressCity
-                    ? ` — ${[s.addressCity, s.addressRegion, s.addressPostalCode].filter(Boolean).join(', ')}`
-                    : ''}
-                </div>
-                <ul className="ds-pieces">
-                  {s.lines.flatMap((l) =>
-                    Array.from({ length: Math.max(1, l.quantity) }, (_, k) => (
-                      <li key={`${l.id}-${k}`}>
-                        <span className="ds-tick" aria-hidden />
-                        <span>
-                          {l.description}
-                          {l.quantity > 1 ? ` (${k + 1} of ${l.quantity})` : ''}
+              )}
+              {group.stops.map((s, i) => {
+                const pickup = s.kind === 'return_pickup';
+                const owed = !pickup && s.balanceDueCents > 0;
+                return (
+                  <section key={s.id} className="ds-stop" data-testid="ds-stop">
+                    <div className="ds-stop-num">{s.routePosition ?? offset + i + 1}</div>
+                    <div>
+                      <div className="ds-stop-line1">
+                        <span className="ds-stop-order">
+                          {pickup ? (s.rmaNumber ?? s.orderNumber) : s.orderNumber}
                         </span>
-                      </li>
-                    )),
-                  )}
-                </ul>
-                {s.notes &&
-                  s.notes
-                    .split('\n')
-                    .filter((n) => n.trim() && !/^Over cap \d{4}-\d{2}-\d{2}:/.test(n.trim()))
-                    .map((n, k) => (
-                      <div key={k} className="ds-note">
-                        {n}
+                        <span className="ds-stop-cust">{s.customerName ?? '—'}</span>
+                        {s.addressPhone && <span className="ds-stop-phone">{s.addressPhone}</span>}
+                        {pickup && <span>PICKUP — bring the goods back</span>}
                       </div>
-                    ))}
-              </div>
-              <div className="ds-stop-right">
-                <div className="ds-window">
-                  {s.windowStart || s.windowEnd
-                    ? `${hhmm(s.windowStart)}–${hhmm(s.windowEnd)}`
-                    : 'Any time'}
-                </div>
-                <div className="ds-due-label">
-                  {pickup ? 'Return pickup' : owed ? 'Collect at door' : 'Paid in full'}
-                </div>
-                <div className={`ds-due${owed ? ' is-owed' : ''}`}>
-                  {pickup ? '—' : formatMoney(s.balanceDueCents)}
-                </div>
-                <div className="ds-sig">
-                  Signature
-                  <div className="ds-sig-line" />
-                </div>
-              </div>
+                      <div className="ds-stop-addr">
+                        {[s.addressLine1, s.addressLine2].filter(Boolean).join(', ')}
+                        {s.addressCity
+                          ? ` — ${[s.addressCity, s.addressRegion, s.addressPostalCode].filter(Boolean).join(', ')}`
+                          : ''}
+                      </div>
+                      <ul className="ds-pieces">
+                        {s.lines.flatMap((l) => {
+                          const count = piecesOf(l);
+                          return Array.from({ length: count }, (_, k) => (
+                            <li key={`${l.id}-${k}`}>
+                              <span className="ds-tick" aria-hidden />
+                              <span>
+                                {l.description}
+                                {count > 1 ? ` (${k + 1} of ${count})` : ''}
+                              </span>
+                            </li>
+                          ));
+                        })}
+                      </ul>
+                      {s.notes &&
+                        s.notes
+                          .split('\n')
+                          .filter((n) => n.trim() && !/^Over cap \d{4}-\d{2}-\d{2}:/.test(n.trim()))
+                          .map((n, k) => (
+                            <div key={k} className="ds-note">
+                              {n}
+                            </div>
+                          ))}
+                    </div>
+                    <div className="ds-stop-right">
+                      <div className="ds-window">
+                        {s.windowStart || s.windowEnd
+                          ? `${hhmm(s.windowStart)}–${hhmm(s.windowEnd)}`
+                          : 'Any time'}
+                      </div>
+                      <div className="ds-due-label">
+                        {pickup ? 'Return pickup' : owed ? 'Collect at door' : 'Paid in full'}
+                      </div>
+                      <div className={`ds-due${owed ? ' is-owed' : ''}`}>
+                        {pickup ? '—' : formatMoney(s.balanceDueCents)}
+                      </div>
+                      <div className="ds-sig">
+                        Signature
+                        <div className="ds-sig-line" />
+                      </div>
+                    </div>
+                  </section>
+                );
+              })}
             </section>
           );
         })}

@@ -592,6 +592,14 @@ OVER_CAPACITY` with the dimensions, or, with `confirmOverCapacity: true`, a **re
   `overCapacityNote`** that is appended to the stop's notes as `Over cap {date}: {note} — {who}`
   (that line is what the board and the day sheet read), plus the `delivery.cap_override` audit
   row and the `delivery_cap_override` exception the create path already writes.
+- Day sheet review follow-ups: stops print **grouped by run** (one strip per truck with its
+  driver, route, departed state, stops · pieces · COD; stops on no run come last as "Not on a
+  truck yet"), so a second truck's stops never sit under the first driver's header. Tick boxes
+  and the pieces count use the line's physical pieces (`quantity × pieces per unit`, now on
+  every delivery line as `pieces`). COD is counted once per order. The driver's name rides on
+  the run (`driverName`) so a Warehouse or Cashier login with `deliveries.view` sees it without
+  `users.view`. The board reads `?view` / `?d` through `useSearchParams` under Suspense so the
+  server and first client render agree.
 - The day header's `n / cap` counts every stop that used or will use the truck (delivered and
   failed included, cancelled excluded); the capacity endpoint's live-only figure is a floor.
   The board asks the list endpoint for `limit=2000` so a 35-day month is never truncated

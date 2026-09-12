@@ -6225,6 +6225,23 @@ select.picker-from {
 .ds-meta-right {
   margin-left: auto;
 }
+.ds-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 8px 0 4px;
+  margin-top: 10px;
+  border-bottom: 2px solid #000;
+  font-size: 13px;
+  break-after: avoid;
+}
+.ds-run-head strong {
+  font-size: 15px;
+}
+.ds-run + .ds-run {
+  margin-top: 6px;
+}
 .ds-capnote {
   padding: 8px 0;
   border-bottom: 1px solid #bdb9b0;

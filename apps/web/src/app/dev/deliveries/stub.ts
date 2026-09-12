@@ -74,7 +74,7 @@ export interface FxDelivery {
   addressPostalCode: string;
   addressPhone: string;
   balanceDueCents: number;
-  lines: { id: string; description: string; quantity: number; lineType: string }[];
+  lines: { id: string; description: string; quantity: number; pieces: number; lineType: string }[];
 }
 
 export function buildFixtures(today: string): FxDelivery[] {
@@ -126,7 +126,7 @@ export function buildFixtures(today: string): FxDelivery[] {
           status,
           route: city,
           routePosition: i + 1,
-          runId: null,
+          runId: isToday ? (i < 2 ? 'run1' : 'run2') : null,
           notes:
             offset === 1 && i === 15
               ? `Over cap ${date}: Two Glendale reschedules from Thu; second truck requested. — R. Mendoza`
@@ -141,13 +141,21 @@ export function buildFixtures(today: string): FxDelivery[] {
           addressPhone: `(818) 555-01${String(n % 100).padStart(2, '0')}`,
           balanceDueCents: pickup ? 0 : [124017, 0, 145456, 40000, 0][i % 5]!,
           lines: [
-            { id: `l${n}a`, description: item, quantity: 1, lineType: 'stock' },
+            {
+              id: `l${n}a`,
+              description: item,
+              quantity: 1,
+              // A king set rides as two pieces; the sheet ticks each one.
+              pieces: item.endsWith('King') ? 2 : 1,
+              lineType: 'stock',
+            },
             ...(i % 3 === 0
               ? [
                   {
                     id: `l${n}b`,
                     description: 'Adjustable base — Queen',
                     quantity: 1,
+                    pieces: 1,
                     lineType: 'stock',
                   },
                 ]
@@ -234,9 +242,19 @@ export function installDeliveriesStub() {
           ? [
               {
                 id: 'run1',
-                route: 'Glendale → Studio City → West LA → back',
+                route: 'Glendale → Studio City → back',
                 truck: 'Truck A',
                 driverMembershipId: 'm9',
+                driverName: 'R. Mendoza',
+                status: 'out',
+                notes: null,
+              },
+              {
+                id: 'run2',
+                route: 'West LA → Culver City → back',
+                truck: 'Truck B',
+                driverMembershipId: 'm10',
+                driverName: 'D. Okafor',
                 status: 'open',
                 notes: null,
               },

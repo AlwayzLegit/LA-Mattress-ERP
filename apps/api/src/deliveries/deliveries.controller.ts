@@ -157,6 +157,8 @@ interface DeliveryDetail extends DeliveryRow {
     id: string;
     orderLineId: string;
     quantity: number;
+    /** Physical pieces on the truck: quantity × the line's pieces-per-unit. */
+    pieces: number;
     description: string;
     lineType: string;
   }[];
@@ -1254,7 +1256,17 @@ export class DeliveriesController {
       .where(eq(schema.deliveries.runId, run.id))
       .orderBy(asc(schema.deliveries.routePosition), asc(schema.deliveries.createdAt));
     const detailed = await Promise.all(stops.map((s) => this.hydrate(s)));
-    return { ...run, stops: detailed };
+    // The day sheet prints the driver; readers with deliveries.view cannot
+    // list members, so the run carries the name.
+    const [driver] = run.driverMembershipId
+      ? await this.db
+          .select({ name: schema.users.name })
+          .from(schema.memberships)
+          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+          .where(eq(schema.memberships.id, run.driverMembershipId))
+          .limit(1)
+      : [];
+    return { ...run, driverName: driver?.name ?? null, stops: detailed };
   }
 
   // ---------------------------------------------------------------------
@@ -1415,6 +1427,8 @@ export class DeliveriesController {
         id: schema.deliveryLines.id,
         orderLineId: schema.deliveryLines.orderLineId,
         quantity: schema.deliveryLines.quantity,
+        // A20 "Assign Pieces": what the crew loads and ticks, not the unit count.
+        pieces: sql<number>`(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1))::int`,
         description: schema.orderLines.description,
         lineType: schema.orderLines.lineType,
       })
