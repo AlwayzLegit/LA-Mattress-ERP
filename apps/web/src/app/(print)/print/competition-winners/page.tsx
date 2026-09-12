@@ -56,6 +56,7 @@ function Sheet() {
         .cw-name span { font-weight: 400; font-size: 16px; color: #333; }
         .cw-story { font-size: 13px; color: #222; margin-top: 4px; }
         .cw-value { font-size: 26px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .cw-prize { font-size: 12px; font-weight: 400; color: #333; text-align: right; }
         .cw-foot { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; color: #333; padding-top: 14px; }
       `}</style>
       <div className="cw-page" data-testid="winners-sheet">
@@ -65,8 +66,9 @@ function Sheet() {
             <div className="cw-eyebrow">Sales competition</div>
             <h1 className="cw-title">{data.label} winners</h1>
             <div className="cw-sub">
-              {data.winners.length} races · ${Math.round(data.prizeCents / 100)} each · paid{' '}
-              {data.payoutLabel} after returns settle
+              {data.winners.length} races
+              {data.prizeCents != null ? ` · $${Math.round(data.prizeCents / 100)} each` : ''} ·
+              paid {data.payoutLabel} after returns settle
             </div>
             {data.winners.map((w) => (
               <div className="cw-row" key={w.race}>
@@ -78,7 +80,12 @@ function Sheet() {
                   </div>
                   <div className="cw-story">{w.story}</div>
                 </div>
-                <div className="cw-value">{w.value}</div>
+                <div className="cw-value">
+                  {w.value}
+                  {data.prizeCents == null && (
+                    <div className="cw-prize">${Math.round(w.prizeCents / 100)} prize</div>
+                  )}
+                </div>
               </div>
             ))}
             <div className="cw-foot">

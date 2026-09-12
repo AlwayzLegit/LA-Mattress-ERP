@@ -134,7 +134,8 @@ export interface WinnersSheet {
   month: string;
   label: string;
   payoutLabel: string;
-  prizeCents: number;
+  /** One prize for every race, or null when they differ — then each winner shows its own. */
+  prizeCents: number | null;
   winners: WinnerLine[];
   stores: WinnerLine[];
   storesLine: string | null;

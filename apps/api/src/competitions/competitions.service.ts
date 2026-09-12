@@ -5,8 +5,10 @@ import { schema } from '@jetnine/db';
 import { phoneDigits } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { tzDayEndExclusive, tzDayStart } from '../common/date-range';
+import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
 import type { RequestTenantContext } from '../tenancy/request-context';
+import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 
 /**
  * Sales competitions (redesign Phase 11, README §3.6): six races a month,
@@ -133,19 +135,36 @@ export function resolveConfig(raw: unknown): CompetitionConfig {
     sweep?: Partial<CompetitionConfig['sweep']>;
     visibility?: Partial<CompetitionConfig['visibility']>;
   };
+  // Every stored field may be null (SET-002: blank means the documented
+  // default), so each one coalesces on its own — never a spread.
   const cards = {} as CompetitionConfig['cards'];
   for (const k of RACE_KEYS) {
-    cards[k] = { ...DEFAULT_CONFIG.cards[k], ...(r.cards?.[k] ?? {}) };
+    const c = r.cards?.[k];
+    const d = DEFAULT_CONFIG.cards[k];
+    cards[k] = {
+      on: c?.on ?? d.on,
+      prizePeopleCents: c?.prizePeopleCents ?? d.prizePeopleCents,
+      prizeStoreCents: c?.prizeStoreCents ?? d.prizeStoreCents,
+    };
   }
   return {
     enabled: r.enabled ?? DEFAULT_CONFIG.enabled,
     races: r.races ?? DEFAULT_CONFIG.races,
     cards,
-    sweep: { ...DEFAULT_CONFIG.sweep, ...(r.sweep ?? {}) },
+    sweep: {
+      four: r.sweep?.four ?? DEFAULT_CONFIG.sweep.four,
+      five: r.sweep?.five ?? DEFAULT_CONFIG.sweep.five,
+      six: r.sweep?.six ?? DEFAULT_CONFIG.sweep.six,
+    },
     payoutDay: r.payoutDay ?? DEFAULT_CONFIG.payoutDay,
     returnWindowDays: r.returnWindowDays ?? DEFAULT_CONFIG.returnWindowDays,
     bannerDays: r.bannerDays ?? DEFAULT_CONFIG.bannerDays,
-    visibility: { ...DEFAULT_CONFIG.visibility, ...(r.visibility ?? {}) },
+    visibility: {
+      sales: r.visibility?.sales ?? DEFAULT_CONFIG.visibility.sales,
+      managers: r.visibility?.managers ?? DEFAULT_CONFIG.visibility.managers,
+      warehouse: r.visibility?.warehouse ?? DEFAULT_CONFIG.visibility.warehouse,
+      notices: r.visibility?.notices ?? DEFAULT_CONFIG.visibility.notices,
+    },
     leadWindowDays: r.leadWindowDays ?? DEFAULT_CONFIG.leadWindowDays,
   };
 }
@@ -377,6 +396,7 @@ export class CompetitionsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(WebhookDispatcher) private readonly webhooks: WebhookDispatcher,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -555,6 +575,8 @@ export class CompetitionsService {
         createdAt: schema.salesLeads.createdAt,
         convertedAt: schema.salesLeads.convertedAt,
         convertedDay: dayOf(schema.salesLeads.convertedAt),
+        loggedInMonth: sql<boolean>`(${schema.salesLeads.createdAt} >= ${from} AND ${schema.salesLeads.createdAt} < ${to})`,
+        convertedInMonth: sql<boolean>`(${schema.salesLeads.convertedAt} >= ${from} AND ${schema.salesLeads.convertedAt} < ${to})`,
         status: schema.salesLeads.status,
         orderNumber: schema.orders.number,
         orderNet: sql<number>`coalesce(${schema.orders.totalCents} - ${schema.orders.taxCents}, 0)::int`,
@@ -578,7 +600,6 @@ export class CompetitionsService {
     data: Awaited<ReturnType<CompetitionsService['loadMonth']>>,
     names: Map<string, string>,
     stores: { id: string; name: string; code: string }[],
-    monthStartMs: number,
   ): Map<string, Subject> {
     const byStore = new Map(stores.map((s) => [s.id, s]));
     const subjects = new Map<string, Subject>();
@@ -631,8 +652,10 @@ export class CompetitionsService {
     for (const l of data.leadRows) {
       const s = get(l.repId, l.locationId);
       if (!s) continue;
-      if (l.createdAt.getTime() >= monthStartMs) s.leadsLogged += 1;
-      if (l.status === 'converted' && l.convertedAt && l.convertedDay) {
+      if (l.loggedInMonth) s.leadsLogged += 1;
+      // A lead counts as converted in the month it converted — never in
+      // the month it was logged.
+      if (l.status === 'converted' && l.convertedInMonth && l.convertedAt && l.convertedDay) {
         s.leadsConverted.push({
           number: l.orderNumber ?? '—',
           who: l.name || null,
@@ -825,10 +848,9 @@ export class CompetitionsService {
 
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
-    const monthStartMs = Date.parse(`${month}-01T00:00:00Z`) - 14 * 3_600_000;
-    const people = this.buildSubjects('people', data, names, stores, monthStartMs);
+    const people = this.buildSubjects('people', data, names, stores);
     const subjects =
-      scope === 'people' ? people : this.buildSubjects('stores', data, names, stores, monthStartMs);
+      scope === 'people' ? people : this.buildSubjects('stores', data, names, stores);
     const viewerStore = await this.viewerStore(tenant, stores, people);
     const meId = scope === 'people' ? tenant.membershipId : (viewerStore?.id ?? null);
     const isDayOne = data.orders.length === 0 && data.leadRows.length === 0;
@@ -1188,7 +1210,8 @@ export class CompetitionsService {
             ? tenant.membershipId
               ? eq(schema.salesLeads.salespersonMembershipId, tenant.membershipId)
               : sql`false`
-            : undefined,
+            : // Someone else's leads stay behind the viewer's store scope.
+              salesScopeCond(tenant, schema.salesLeads.locationId),
           gte(schema.salesLeads.createdAt, new Date(Date.now() - 90 * 86_400_000)),
         ),
       )
@@ -1294,6 +1317,11 @@ export class CompetitionsService {
       businessId,
       metadata: { orderId: o.id, orderNumber: o.number, conversion: 'auto', name: lead.name },
     });
+    void this.webhooks.fire({
+      businessId,
+      eventType: 'lead.converted',
+      payload: { leadId: lead.id, orderId: o.id, orderNumber: o.number, conversion: 'auto' },
+    });
   }
 
   /** Compare the new People ranks with the stored ones; one notice per race per day. */
@@ -1304,8 +1332,7 @@ export class CompetitionsService {
     const month = today.slice(0, 7);
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
-    const monthStartMs = Date.parse(`${month}-01T00:00:00Z`) - 14 * 3_600_000;
-    const people = this.buildSubjects('people', data, names, stores, monthStartMs);
+    const people = this.buildSubjects('people', data, names, stores);
     const [order] = await this.db
       .select({ repId: schema.orders.salespersonMembershipId, number: schema.orders.number })
       .from(schema.orders)

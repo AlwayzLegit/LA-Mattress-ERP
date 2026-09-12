@@ -86,7 +86,8 @@ export class CompetitionsController {
     month: string;
     label: string;
     payoutLabel: string;
-    prizeCents: number;
+    /** The one prize every race pays, or null when they differ (each winner carries its own). */
+    prizeCents: number | null;
     winners: WinnerLine[];
     stores: WinnerLine[];
     storesLine: string | null;
@@ -115,7 +116,9 @@ export class CompetitionsController {
         timeZone: 'UTC',
       }),
       payoutLabel: `${payMonth} ${cfg.payoutDay}`,
-      prizeCents: cfg.cards.sales.prizePeopleCents,
+      prizeCents: winners.every((w) => w.prizeCents === winners[0]?.prizeCents)
+        ? (winners[0]?.prizeCents ?? null)
+        : null,
       winners,
       stores,
       storesLine: top
@@ -258,8 +261,10 @@ export class CompetitionsController {
       )
       .limit(1);
     if (!lead) throw new NotFoundException('Lead not found');
-    const mine = lead.salespersonMembershipId === tenant.membershipId;
-    if (!mine && tenant.roleName !== 'Owner' && tenant.roleName !== 'Manager') {
+    // The contract: only the salesperson who logged the lead can follow it
+    // up, attach an order or lose it — a manager's verb would move someone
+    // else's Lead Conversion number.
+    if (lead.salespersonMembershipId !== tenant.membershipId) {
       throw new ForbiddenException('Only the salesperson who logged the lead can change it');
     }
     if (lead.status !== 'open')
