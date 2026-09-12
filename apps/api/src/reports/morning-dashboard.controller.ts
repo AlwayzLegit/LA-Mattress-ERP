@@ -1339,25 +1339,62 @@ export class MorningDashboardController {
       writtenOn(lastWeekDay),
       writtenOn(lastMonthDay),
     ]);
-    const repCounts = new Map<string, number>();
+    // Top rep today: orders by their primary salesperson plus register
+    // sales by their associate, folded onto one name per person.
+    const repKeys = new Map<string, number>();
     for (const o of orderRows) {
       if (o.day !== today || !o.primary) continue;
-      repCounts.set(o.primary, (repCounts.get(o.primary) ?? 0) + 1);
+      repKeys.set(`m:${o.primary}`, (repKeys.get(`m:${o.primary}`) ?? 0) + 1);
     }
-    const topRepEntry = [...repCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-    let topRepName: string | null = null;
-    if (topRepEntry) {
-      topRepName = memberName.get(topRepEntry[0]) ?? null;
-      if (!topRepName) {
-        const [m] = await this.db
-          .select({ name: schema.users.name, email: schema.users.email })
-          .from(schema.memberships)
-          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
-          .where(eq(schema.memberships.id, topRepEntry[0]))
-          .limit(1);
-        topRepName = m?.name ?? m?.email ?? null;
+    for (const r of saleRows) {
+      if (r.day !== today || !r.associateUserId) continue;
+      repKeys.set(`u:${r.associateUserId}`, (repKeys.get(`u:${r.associateUserId}`) ?? 0) + 1);
+    }
+    const missingMembers = [...repKeys.keys()]
+      .filter((k) => k.startsWith('m:') && !memberName.has(k.slice(2)))
+      .map((k) => k.slice(2));
+    if (missingMembers.length > 0) {
+      const rows = await this.db
+        .select({
+          id: schema.memberships.id,
+          userId: schema.memberships.userId,
+          name: schema.users.name,
+          email: schema.users.email,
+        })
+        .from(schema.memberships)
+        .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+        .where(inArray(schema.memberships.id, missingMembers));
+      for (const r of rows) {
+        memberName.set(r.id, r.name ?? r.email ?? 'associate');
+        memberUserId.set(r.id, r.userId);
       }
     }
+    const missingUsers = [...repKeys.keys()]
+      .filter(
+        (k) =>
+          k.startsWith('u:') && !userName.has(k.slice(2)) && !userToMembershipName.has(k.slice(2)),
+      )
+      .map((k) => k.slice(2));
+    if (missingUsers.length > 0) {
+      const rows = await this.db
+        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+        .from(schema.users)
+        .where(inArray(schema.users.id, missingUsers));
+      for (const r of rows) userName.set(r.id, r.name ?? r.email ?? 'associate');
+    }
+    const userNameOf = (uid: string) => {
+      for (const [mid, u] of memberUserId) if (u === uid) return memberName.get(mid);
+      return userName.get(uid);
+    };
+    const repCounts = new Map<string, number>();
+    for (const [key, n] of repKeys) {
+      const name =
+        (key.startsWith('m:') ? memberName.get(key.slice(2)) : userNameOf(key.slice(2))) ??
+        'associate';
+      repCounts.set(name, (repCounts.get(name) ?? 0) + n);
+    }
+    const topRepEntry = [...repCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topRepName = topRepEntry?.[0] ?? null;
     const shortOpen = openRows.filter((r) => r.status === 'open' && (shortMap.get(r.id) ?? 0) > 0);
     const lateOpen = openRows.filter(
       (r) => r.status !== 'draft' && r.requestedDate != null && r.requestedDate < today,
@@ -1367,7 +1404,7 @@ export class MorningDashboardController {
       .select({
         closedAt: schema.cashShifts.closedAt,
         varianceCents: schema.cashShifts.varianceCents,
-        suspendedAt: schema.cashShifts.suspendedAt,
+        closedSuspendedAt: schema.cashShifts.suspendedAt,
         byName: schema.users.name,
         byEmail: schema.users.email,
         closeDay: sql<
@@ -1385,28 +1422,23 @@ export class MorningDashboardController {
       )
       .orderBy(desc(schema.cashShifts.closedAt))
       .limit(1);
-    const lastClose: ManagerDashboard['lastClose'] = lastShift?.suspendedAt
-      ? {
-          status: 'suspended',
-          varianceCents: lastShift.closedAt ? (closedShift?.varianceCents ?? null) : null,
-          closedAt: closedShift?.closedAt ?? null,
-          byName: closedShift?.byName ?? closedShift?.byEmail ?? null,
-          closeDay: closedShift?.closeDay ?? null,
-        }
-      : !closedShift
-        ? { status: 'none', varianceCents: null, closedAt: null, byName: null, closeDay: null }
-        : {
-            status:
-              (closedShift.varianceCents ?? 0) === 0
-                ? 'clean'
-                : (closedShift.varianceCents ?? 0) < 0
-                  ? 'short'
-                  : 'over',
-            varianceCents: closedShift.varianceCents ?? 0,
-            closedAt: closedShift.closedAt,
-            byName: closedShift.byName ?? closedShift.byEmail ?? null,
-            closeDay: closedShift.closeDay,
-          };
+    // The tile describes the most recent closed drawer, so its own
+    // suspended flag decides the label — not whichever drawer is open now.
+    const lastClose: ManagerDashboard['lastClose'] = !closedShift
+      ? { status: 'none', varianceCents: null, closedAt: null, byName: null, closeDay: null }
+      : {
+          status: closedShift.closedSuspendedAt
+            ? 'suspended'
+            : (closedShift.varianceCents ?? 0) === 0
+              ? 'clean'
+              : (closedShift.varianceCents ?? 0) < 0
+                ? 'short'
+                : 'over',
+          varianceCents: closedShift.varianceCents ?? 0,
+          closedAt: closedShift.closedAt,
+          byName: closedShift.byName ?? closedShift.byEmail ?? null,
+          closeDay: closedShift.closeDay,
+        };
 
     return {
       headline: {

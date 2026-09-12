@@ -40,6 +40,14 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 
 export const PICKUP_DUE_CENTS = 150_000;
 export const PICKUP_DUE_DAYS = 3;
+/**
+ * How far back the drawer is read. Cash is "on hand" while it has no
+ * pickup receipt, whatever the last pickup's timestamp — a partial
+ * pickup leaves the unticked notes in the drawer — but a tenant with
+ * years of never-ticked history should not wake up with every store due,
+ * so payments older than this never count.
+ */
+export const PICKUP_LOOKBACK_DAYS = 60;
 
 export type PickupStatus = 'none' | 'collected' | 'holding' | 'due';
 
@@ -77,7 +85,7 @@ export interface CashPickupStore {
   pendingCents: number;
   pendingCount: number;
   oldestDays: number | null;
-  /** Start of the "since" window: the last pickup, or the month start. */
+  /** The last pickup's moment, or the start of the lookback window. */
   since: Date;
   lastPickup: PickupSummary | null;
   payments: PendingCashRow[];
@@ -278,15 +286,15 @@ export class CashPickupsController {
 
   /**
    * Cash still in the drawer at each store: succeeded cash payments on
-   * live documents at the store, taken since the store's last pickup
-   * (or since the first of the month when there has never been one),
-   * with no pickup receipt. Legacy-imported documents never count (D8).
+   * live documents at the store with no pickup receipt, taken inside the
+   * lookback window. A payment left unticked by a partial pickup stays
+   * here until it is posted. Legacy-imported documents never count (D8).
    */
   private async pendingCash(
     tenant: RequestTenantContext,
     businessId: string,
     stores: StoreRef[],
-    since: Map<string, Date>,
+    floor: Date,
     names: Map<string, string>,
     byUser: Map<string, string>,
   ): Promise<Map<string, PendingCashRow[]>> {
@@ -294,13 +302,10 @@ export class CashPickupsController {
     if (stores.length === 0) return out;
     const locationExpr = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const customerExpr = sql<string>`COALESCE(${schema.orders.customerId}, ${schema.sales.customerId}, ${schema.serviceOrders.customerId})`;
-    const window = sql`(${sql.join(
-      stores.map(
-        (s) =>
-          sql`(${locationExpr} = ${s.id}::uuid AND ${schema.payments.createdAt} >= ${since.get(s.id) ?? new Date(0)})`,
-      ),
-      sql` OR `,
-    )})`;
+    const window = sql`(${locationExpr} IN (${sql.join(
+      stores.map((s) => sql`${s.id}::uuid`),
+      sql`, `,
+    )}) AND ${schema.payments.createdAt} >= ${floor})`;
     const rows = await this.db
       .select({
         paymentId: schema.payments.id,
@@ -396,13 +401,8 @@ export class CashPickupsController {
       stores.map((s) => s.id),
       names,
     );
-    const monthStart = new Date(`${today.slice(0, 7)}-01T00:00:00`);
-    const since = new Map<string, Date>();
-    for (const s of stores) {
-      const lp = last.get(s.id);
-      since.set(s.id, lp ? lp.recordedAt : monthStart);
-    }
-    const pending = await this.pendingCash(tenant, businessId, stores, since, names, byUser);
+    const floor = new Date(Date.now() - PICKUP_LOOKBACK_DAYS * 86_400_000);
+    const pending = await this.pendingCash(tenant, businessId, stores, floor, names, byUser);
     const cards: CashPickupStore[] = stores.map((s) => {
       const payments = pending.get(s.id) ?? [];
       const pendingCents = payments.reduce((n, p) => n + p.amountCents, 0);
@@ -423,7 +423,7 @@ export class CashPickupsController {
         pendingCents,
         pendingCount: payments.length,
         oldestDays,
-        since: since.get(s.id)!,
+        since: last.get(s.id)?.recordedAt ?? floor,
         lastPickup: last.get(s.id) ?? null,
         payments,
         canRecord: recordable === 'all' || (recordable !== 'none' && recordable.has(s.id)),
@@ -520,8 +520,16 @@ export class CashPickupsController {
     };
   }
 
-  /** Next `PU-nnnn` for the business. */
+  /**
+   * Next `PU-nnnn` for the business. Two posters at once would both read
+   * the same maximum, so the read runs under a per-business transaction
+   * advisory lock: every tenant request is one transaction (the RLS
+   * interceptor), and the lock releases with it.
+   */
   private async nextNumber(businessId: string): Promise<string> {
+    await this.db.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`cash_pickups:${businessId}`}))`,
+    );
     const [row] = await this.db
       .select({
         n: sql<number>`COALESCE(MAX(NULLIF(regexp_replace(${schema.cashPickups.number}, '\\D', '', 'g'), '')::int), 0)::int`,
@@ -596,40 +604,33 @@ export class CashPickupsController {
     const expected = selected.reduce((n, p) => n + p.amountCents, 0);
     const variance = counted - expected;
 
-    // Number then insert; the unique index catches two posters racing.
-    let inserted: { id: string; number: string; recordedAt: Date } | null = null;
-    for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
-      const number = await this.nextNumber(businessId);
-      try {
-        const [row] = await this.db
-          .insert(schema.cashPickups)
-          .values({
-            businessId,
-            locationId: store.id,
-            number,
-            recordedByMembershipId: tenant.membershipId,
-            countedCents: counted,
-            expectedCents: expected,
-            varianceCents: variance,
-            slip,
-            note,
-          })
-          .returning({
-            id: schema.cashPickups.id,
-            number: schema.cashPickups.number,
-            recordedAt: schema.cashPickups.recordedAt,
-          });
-        inserted = row ?? null;
-      } catch (err) {
-        if (attempt === 2) throw err;
-      }
-    }
-    if (!inserted) throw new BadRequestException('Could not number the pickup — try again');
+    // Number under the per-business lock, then insert; the unique index
+    // is the backstop, never the retry loop.
+    const number = await this.nextNumber(businessId);
+    const [inserted] = await this.db
+      .insert(schema.cashPickups)
+      .values({
+        businessId,
+        locationId: store.id,
+        number,
+        recordedByMembershipId: tenant.membershipId,
+        countedCents: counted,
+        expectedCents: expected,
+        varianceCents: variance,
+        slip,
+        note,
+      })
+      .returning({
+        id: schema.cashPickups.id,
+        number: schema.cashPickups.number,
+        recordedAt: schema.cashPickups.recordedAt,
+      });
+    if (!inserted) throw new BadRequestException('Could not save the pickup — try again');
 
     await this.db.insert(schema.cashPickupItems).values(
       selected.map((p) => ({
         businessId,
-        pickupId: inserted!.id,
+        pickupId: inserted.id,
         paymentId: p.paymentId,
         amountCents: p.amountCents,
       })),
@@ -641,7 +642,7 @@ export class CashPickupsController {
           businessId,
           paymentId: p.paymentId,
           receivedByMembershipId: tenant.membershipId,
-          receivedAt: inserted!.recordedAt,
+          receivedAt: inserted.recordedAt,
         })),
       )
       .onConflictDoNothing();

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -852,6 +853,20 @@ export class StoreDashboardController {
     const businessId = tenant.businessId!;
     const p = await this.cashPayment(tenant, businessId, paymentId);
     if (!p.receipt) return;
+    // Redesign Phase 9: a receipt written by a posted pickup is part of
+    // that pickup's ledger (`cash_pickup_items`); the tick cannot be
+    // undone on its own or the slip and the drawer would disagree.
+    const [item] = await this.db
+      .select({ number: schema.cashPickups.number })
+      .from(schema.cashPickupItems)
+      .innerJoin(schema.cashPickups, eq(schema.cashPickups.id, schema.cashPickupItems.pickupId))
+      .where(eq(schema.cashPickupItems.paymentId, paymentId))
+      .limit(1);
+    if (item) {
+      throw new ConflictException(
+        `${p.docNumber} was carried out on pickup ${item.number} — a posted pickup cannot be unticked`,
+      );
+    }
     await this.db
       .delete(schema.cashPickupReceipts)
       .where(

@@ -692,9 +692,11 @@ Record → Post flow. Operations, Warehouse and the Z-report are Phase 10.
 
 ### Assumptions
 
-- **Cash on hand** counts every cash payment with no pickup receipt taken since the store's
-  last posted pickup — or since the first of the month when the store has never posted one —
-  so a tenant with old, never-ticked cash does not wake up with every store "due".
+- **Cash on hand** counts every cash payment with no pickup receipt taken in the last 60 days
+  (`PICKUP_LOOKBACK_DAYS`). A payment left unticked by a partial pickup stays in the drawer
+  until it is posted; the lookback only keeps a tenant with years of never-ticked history from
+  waking up with every store "due". The older per-payment untick refuses a payment that a
+  posted pickup carried out (409), so the slip and the drawer always agree.
 - "Same day last month" is the same calendar day (README §5), clamped to the shorter month;
   "same day last week" is the same weekday. Month to date compares to the same day-range of
   the prior month.
