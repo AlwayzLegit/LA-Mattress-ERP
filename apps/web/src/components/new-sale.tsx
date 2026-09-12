@@ -3,51 +3,62 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Plus, Search, X } from 'lucide-react';
 import { formatMoney } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { setDraftSummary } from '@/lib/api-status';
+import { SELLING_STORE_KEY } from '@/lib/acting-store';
+import {
+  defaultSourceFor,
+  effectiveFulfillment,
+  lineWarning,
+  pickerDefaultSource,
+  resourceUntouched,
+  sourceLabel,
+  type Fulfillment,
+  type SourcingContext,
+} from '@/lib/pos-sourcing';
 import { autofillFromZip, type ZipHit } from '@/lib/zip-lookup';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
 import { Money } from '@/components/money';
 import {
   Alert,
   Button,
-  Card,
   EmptyState,
   Field,
-  FormActions,
-  FormGrid,
   Input,
-  SectionHeading,
+  Kbd,
+  LoadingRows,
   Select,
-  Stack,
-  TableWrap,
-  Toolbar,
+  StatusChip,
 } from '@/components/ui';
 
 /**
- * New Sale — the single-screen order entry from PLAN-POS-OPERATIONS §4
- * (amendment A3: supersedes the three-step wizard; A4: the quick-sale
- * register is retired and take-with flows through here).
+ * New Sale — the register (redesign Phase 4, README §3.1, canvas 4a–4f).
  *
- * Customer, merchandise, and payment all live on one screen: universal
- * customer search up top, an Add Product popup with stock/ATP awareness,
- * one-click Removal/Recycling fee lines, and a pinned totals + payments
- * rail. Complete
- * posts the order (or a plain register sale for a fully-paid take-with),
- * Save as Draft parks it store-wide.
+ * Layout: content grid `minmax(0,1fr) 316px`. The items table takes the
+ * full content width so Amount is always in view; the rail holds only
+ * the customer, the order details, the totals and one action block.
+ *
+ * Sourcing (HANDOFF_inventory_source_defaults): Add Product opens from the
+ * warehouse; a line whose effective fulfillment is take-with follows the
+ * order's Store; untouched lines re-source when the order's fulfillment or
+ * store changes and carry an `auto` badge; a touched line is never moved.
+ * The rules live in `lib/pos-sourcing.ts`.
+ *
+ * Complete posts the order (or a plain register sale for a fully-paid
+ * take-with), Save draft parks it store-wide. Everything locks when done;
+ * the chip turns Scheduled; P prints, N starts the next sale.
  */
 
-const FULFILLMENTS = [
+const FULFILLMENTS: { value: Fulfillment; label: string }[] = [
   { value: 'delivery', label: 'Delivery' },
   { value: 'pickup', label: 'Customer pickup' },
   { value: 'take_with', label: 'Take-with' },
   { value: 'direct_ship', label: 'Direct ship' },
-] as const;
-type Fulfillment = (typeof FULFILLMENTS)[number]['value'];
+];
 
 const TENDERS = [
-  { value: 'card', label: 'Credit card' },
+  { value: 'card', label: 'Card' },
   { value: 'cash', label: 'Cash' },
   { value: 'check', label: 'Check' },
   { value: 'paypal', label: 'PayPal' },
@@ -60,6 +71,8 @@ const TENDERS = [
 type Tender = (typeof TENDERS)[number]['value'];
 
 const RECYCLING_DESC = 'Recycling Fee';
+const REMOVAL_DESC = 'Mattress Removal';
+const DECLINED_DESC = 'Client Declined New Foundation';
 
 interface CustomerHit {
   id: string;
@@ -69,25 +82,31 @@ interface CustomerHit {
   phone: string | null;
   addressesJson: { line1?: string | null; city?: string | null; region?: string | null }[] | null;
 }
+interface Addons {
+  removal: boolean;
+  recycling: boolean;
+  declined: boolean;
+}
 interface Line {
   key: string;
   variantId: string | null;
   description: string;
+  sku: string | null;
+  size: string | null;
   quantity: number;
   unitPriceCents: number;
   lineDiscountCents: number;
   lineType: 'stock' | 'special_order' | 'custom';
   fulfillmentMethod: '' | Fulfillment;
-  /** Per-line fulfill-from location; '' = the selling store. */
+  /** Resolved source location id. */
   sourceLocationId: string;
+  /** True once the salesperson picked the source by hand. */
+  sourceTouched: boolean;
   deliveryDate: string;
-  availableHere?: number;
+  /** Removal / Recycling / Declined foundation toggles on mattress and base lines. */
+  addons: Addons;
   atpDate?: string | null;
-  /**
-   * The product's own tax rate (tax class), null/undefined = the store
-   * rate. 0 marks an untaxed line — installation, services (owner
-   * 2026-09-06). Mirrors what the server charges on the written order.
-   */
+  /** Product's own tax rate (tax class); null = the store rate; 0 = untaxed. */
   taxRateBps?: number | null;
 }
 interface PaymentLine {
@@ -101,7 +120,6 @@ interface LocationRow {
   name: string;
   taxRateBps: number | null;
   locationType?: string;
-  /** Where THIS member may ring a sale; inventory can source from anywhere. */
   canSellHere?: boolean;
 }
 interface MemberRow {
@@ -117,22 +135,20 @@ interface DraftRow {
   totalCents: number;
   createdAt: string;
 }
+interface Avail {
+  availableHere: number;
+  atpDate: string | null;
+  taxRateBps: number | null;
+}
 
 let lineKeySeq = 0;
 const nextKey = () => `l${++lineKeySeq}`;
+const NO_ADDONS: Addons = { removal: false, recycling: false, declined: false };
 
-/**
- * The warehouse that Add Product should default to (owner 2026-08-30:
- * "the default inventory for everyone needs to be warehouse"). Matched
- * by location type first, then by name for locations created before
- * location types existed.
- */
-function findWarehouse<T extends { locationType?: string; name: string }>(
-  locs: T[],
-): T | undefined {
-  return (
-    locs.find((l) => l.locationType === 'warehouse') ??
-    locs.find((l) => /warehouse|whse|\bwh\b/i.test(l.name))
+/** Add-on chips show on mattress and base lines only. */
+function isMattressOrBase(description: string): boolean {
+  return /mattress|foundation|box ?spring|adjustable|\bbase\b|hybrid|posturepedic|tempur/i.test(
+    description,
   );
 }
 
@@ -151,17 +167,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const router = useRouter();
 
   // --- reference data ---
-  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const [locations, setLocations] = useState<LocationRow[] | null>(null);
   const [locationId, setLocationId] = useState('');
-  // The Add Product dialog's "From" location — the source stamped on
-  // each line as it is added ('' = the selling store). Per-line after
-  // that; each row has its own Source select.
-  const [searchSourceId, setSearchSourceId] = useState('');
   const [taxRateBps, setTaxRateBps] = useState(0);
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [recyclingFeeCents, setRecyclingFeeCents] = useState(1050);
+  const [defaultSourceLocationId, setDefaultSourceLocationId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
-  const [resumedDraftId, setResumedDraftId] = useState<string | null>(null);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [resumedDraft, setResumedDraft] = useState<{ id: string; number: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // --- customer ---
   const [customer, setCustomer] = useState<CustomerHit | null>(null);
@@ -169,10 +184,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [openOrders, setOpenOrders] = useState<
     { id: string; number: string; requestedDate: string | null; deliveryDate: string | null }[]
   >([]);
-  const [exchangeOriginal, setExchangeOriginal] = useState<{
-    id: string;
-    number: string;
-  } | null>(null);
+  const [exchangeOriginal, setExchangeOriginal] = useState<{ id: string; number: string } | null>(
+    null,
+  );
   const [custQuery, setCustQuery] = useState('');
   const [custHits, setCustHits] = useState<CustomerHit[]>([]);
   const [custMore, setCustMore] = useState(false);
@@ -180,8 +194,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingBusy, setCreatingBusy] = useState(false);
   const [newCust, setNewCust] = useState(EMPTY_NEW_CUSTOMER);
-  // Dedupe warn-on-create (handoff G4): a matching phone means the
-  // caller probably already exists — offer them, never block.
   const [dupeWarn, setDupeWarn] = useState<{
     id: string;
     name: string;
@@ -189,6 +201,85 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   } | null>(null);
   const [billDiffers, setBillDiffers] = useState(false);
   const [newBill, setNewBill] = useState(EMPTY_ADDRESS);
+  const custTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customerInput = useRef<HTMLInputElement>(null);
+
+  // --- ship to ---
+  const [shipDiffers, setShipDiffers] = useState(false);
+  const [ship, setShip] = useState({
+    line1: '',
+    line2: '',
+    city: '',
+    region: '',
+    postalCode: '',
+    phone: '',
+  });
+  const zipMemo = useRef<{ cust: ZipHit | null; bill: ZipHit | null; ship: ZipHit | null }>({
+    cust: null,
+    bill: null,
+    ship: null,
+  });
+
+  // --- order meta ---
+  const [orderType, setOrderType] = useState<'sales_order' | 'layaway' | 'quote'>('sales_order');
+  const [fulfillment, setFulfillment] = useState<Fulfillment>('delivery');
+  const [requestedDate, setRequestedDate] = useState('');
+  const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
+  const [deliveryInstructions, setDeliveryInstructions] = useState('');
+  const [notes, setNotes] = useState('');
+  const [salespeople, setSalespeople] = useState<string[]>([]);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // --- lines ---
+  const [lines, setLines] = useState<Line[]>([]);
+  const [showProductSearch, setShowProductSearch] = useState(false);
+  /** Explicit "From" chosen in the picker for this draft; null = follows the rules. */
+  const [pickerFrom, setPickerFrom] = useState<string | null>(null);
+  const [avail, setAvail] = useState<Record<string, Avail>>({});
+
+  // --- money ---
+  const [orderDiscount, setOrderDiscount] = useState('');
+  const [installFee, setInstallFee] = useState('');
+  const [deliveryFee, setDeliveryFee] = useState('');
+  const [payments, setPayments] = useState<PaymentLine[]>([]);
+  const [payMethod, setPayMethod] = useState<Tender>('card');
+  const [payAmount, setPayAmount] = useState('');
+  const [payRef, setPayRef] = useState('');
+  const [zeroOk, setZeroOk] = useState(false);
+  const payAmountInput = useRef<HTMLInputElement>(null);
+
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{
+    id: string;
+    number: string;
+    kind: 'order' | 'sale';
+    splitOrders?: { id: string; number: string; requestedDate: string | null }[];
+    takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
+    bookedDeliveries?: string[];
+    sources: string[];
+    dueCents: number;
+    at: Date;
+  } | null>(null);
+  const locked = done != null;
+
+  const locs = useMemo(() => locations ?? [], [locations]);
+  const store = locs.find((l) => l.id === locationId) ?? null;
+  const ctx = useMemo<SourcingContext>(
+    () => ({
+      orderLocationId: locationId,
+      orderFulfillment: fulfillment,
+      locations: locs,
+      defaultSourceLocationId,
+    }),
+    [locationId, fulfillment, locs, defaultSourceLocationId],
+  );
+  const nameOf = useCallback(
+    (id: string) => locs.find((l) => l.id === id)?.name ?? 'the source',
+    [locs],
+  );
+
+  // ---------------------------------------------------------------- effects
 
   useEffect(() => {
     const digits = newCust.phone.replace(/\D/g, '');
@@ -206,89 +297,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     return () => clearTimeout(t);
   }, [creatingCustomer, newCust.phone]);
 
-  async function attachExistingCustomer(idToUse: string) {
-    try {
-      const existing = await api<CustomerHit>(`/v1/customers/${idToUse}`);
-      setCustomer(existing);
-      setCreatingCustomer(false);
-      clearNewCustomer();
-      toast.success('Attached the existing customer — no duplicate created.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-  const custTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // --- ship to ---
-  const [shipDiffers, setShipDiffers] = useState(false);
-  const [ship, setShip] = useState({
-    line1: '',
-    line2: '',
-    city: '',
-    region: '',
-    postalCode: '',
-    phone: '',
-  });
-  // ZIP → city/state (owner 2026-09-01): each address block remembers
-  // what the last autofill wrote so a corrected ZIP can replace it, while
-  // a hand-typed city is never overwritten.
-  const zipMemo = useRef<{ cust: ZipHit | null; bill: ZipHit | null; ship: ZipHit | null }>({
-    cust: null,
-    bill: null,
-    ship: null,
-  });
-
-  // The new-customer panel is plain component state and the form stays
-  // mounted for the whole shift, so every way out of the panel — Cancel,
-  // Create, "Use existing", the post-sale reset — must wipe it, or the next
-  // "+ New customer" opens with the previous shopper's name and phone and
-  // the dedupe banner fires before anyone has typed (owner 2026-09-10).
-  // Opening clears too, so a customer picked from search while the panel
-  // was half-filled cannot bring those fields back later.
-  function clearNewCustomer() {
-    setNewCust(EMPTY_NEW_CUSTOMER);
-    setNewBill(EMPTY_ADDRESS);
-    setBillDiffers(false);
-    setDupeWarn(null);
-    zipMemo.current.cust = null;
-    zipMemo.current.bill = null;
-  }
-
-  // --- order meta ---
-  const [orderType, setOrderType] = useState<'sales_order' | 'layaway' | 'quote'>('sales_order');
-  const [fulfillment, setFulfillment] = useState<Fulfillment>('delivery');
-  const [requestedDate, setRequestedDate] = useState('');
-  const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
-  const [deliveryInstructions, setDeliveryInstructions] = useState('');
-  const [notes, setNotes] = useState('');
-  const [salespeople, setSalespeople] = useState<string[]>([]);
-
-  // --- lines ---
-  const [lines, setLines] = useState<Line[]>([]);
-  const [showProductSearch, setShowProductSearch] = useState(false);
-
-  // --- money ---
-  const [orderDiscount, setOrderDiscount] = useState('');
-  const [installFee, setInstallFee] = useState('');
-  const [deliveryFee, setDeliveryFee] = useState('');
-  const [payments, setPayments] = useState<PaymentLine[]>([]);
-  const [payMethod, setPayMethod] = useState<Tender>('card');
-  const [payAmount, setPayAmount] = useState('');
-  const [payRef, setPayRef] = useState('');
-
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{
-    id: string;
-    number: string;
-    kind: 'order' | 'sale';
-    splitOrders?: { id: string; number: string; requestedDate: string | null }[];
-    takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
-    bookedDeliveries?: string[];
-  } | null>(null);
-
-  // §7: while writing a delivery sale, show how many stops the chosen
-  // day still has against the soft cap.
+  // §7: while writing a delivery sale, show how many stops the chosen day has left.
   useEffect(() => {
     if (fulfillment !== 'delivery' || !requestedDate) {
       setDayCapacity(null);
@@ -307,8 +316,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     };
   }, [fulfillment, requestedDate]);
 
-  // G14: the customer's open orders — two orders, same house, same
-  // week is two trucks and pure margin loss.
+  // G14: the customer's open orders — two trucks to one house is margin loss.
   useEffect(() => {
     if (!customer) {
       setOpenOrders([]);
@@ -327,7 +335,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     };
   }, [customer]);
 
-  // §10: store credit auto-surfaces at checkout.
+  // §10: store credit surfaces at checkout.
   useEffect(() => {
     if (!customer) {
       setStoreCredit(null);
@@ -348,11 +356,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   useEffect(() => {
     if (!exchangeOf) return;
     let stale = false;
-    api<{
-      id: string;
-      number: string;
-      customerId: string;
-    }>(`/v1/orders/${exchangeOf}`)
+    api<{ id: string; number: string; customerId: string }>(`/v1/orders/${exchangeOf}`)
       .then(async (o) => {
         if (stale) return;
         setExchangeOriginal({ id: o.id, number: o.number });
@@ -363,7 +367,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     return () => {
       stale = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchangeOf]);
 
   const loadDrafts = useCallback(() => {
@@ -374,44 +377,57 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   useEffect(() => {
     void api<LocationRow[]>('/v1/pos/locations')
-      .then((locs) => {
-        setLocations(locs);
-        // The store chosen at login (session store) wins: everything
-        // rung this session — money included — counts toward it.
-        let sessionStore: (typeof locs)[number] | undefined;
+      .then((rows) => {
+        setLocations(rows);
+        // The acting store (topbar chip) is the order's Store by default.
+        let acting: LocationRow | undefined;
         try {
-          const raw = sessionStorage.getItem('jetnine.sellingStore');
+          const raw = sessionStorage.getItem(SELLING_STORE_KEY);
           if (raw) {
             const saved = JSON.parse(raw) as { id: string };
-            sessionStore = locs.find((l) => l.id === saved.id);
+            acting = rows.find((l) => l.id === saved.id);
           }
         } catch {
-          sessionStore = undefined;
+          acting = undefined;
         }
-        const selling = sessionStore ?? locs.find((l) => l.locationType !== 'warehouse') ?? locs[0];
+        const selling =
+          acting ?? rows.find((l) => l.canSellHere !== false && l.locationType !== 'warehouse');
         if (selling) {
           setLocationId(selling.id);
           setTaxRateBps(selling.taxRateBps ?? 0);
-          // Goods come off the truck from the warehouse by default —
-          // product search (and each added line's source) starts there;
-          // the cashier flips "From" to the store for floor stock.
-          const wh = findWarehouse(locs);
-          if (wh && wh.id !== selling.id) setSearchSourceId(wh.id);
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
     void api<MemberRow[]>('/v1/business/members')
-      .then((rows) => setMembers(rows.filter((m) => m.status === 'active')))
+      .then((rows) => setMembers(rows.filter((m) => m.status === 'active' && m.name?.trim())))
       .catch(() => setMembers([]));
-    void api<{ ops: { recyclingFeeCents?: number | null } | null }>('/v1/business/settings/pos')
+    void api<{
+      ops: { recyclingFeeCents?: number | null; defaultSourceLocationId?: string | null } | null;
+    }>('/v1/business/settings/pos')
       .then((s) => {
         if (s.ops?.recyclingFeeCents != null) setRecyclingFeeCents(s.ops.recyclingFeeCents);
+        setDefaultSourceLocationId(s.ops?.defaultSourceLocationId ?? null);
       })
       .catch(() => undefined);
     loadDrafts();
   }, [loadDrafts]);
 
-  // Universal customer search: name, phone, email, or address — debounced.
+  // The topbar chip changed the acting store: follow it while nothing is on the ticket.
+  useEffect(() => {
+    const onActing = (e: Event) => {
+      const loc = (e as CustomEvent<{ id: string }>).detail;
+      if (!loc || lines.length > 0 || customer || locked) return;
+      const row = locs.find((l) => l.id === loc.id);
+      if (row && row.canSellHere !== false) {
+        setLocationId(row.id);
+        setTaxRateBps(row.taxRateBps ?? 0);
+      }
+    };
+    window.addEventListener('erp:acting-store', onActing);
+    return () => window.removeEventListener('erp:acting-store', onActing);
+  }, [locs, lines.length, customer, locked]);
+
+  // Universal customer search — debounced.
   useEffect(() => {
     if (custTimer.current) clearTimeout(custTimer.current);
     const q = custQuery.trim();
@@ -425,8 +441,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       )
         .then((r) => {
           setCustHits(r.data);
-          // The q-search branch server-side is a single ranked page with
-          // nextCursor always null, so a full page is the truncation signal.
           setCustMore(r.nextCursor != null || r.data.length >= 20);
           setCustOpen(true);
         })
@@ -437,9 +451,51 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }, 250);
   }, [custQuery]);
 
+  // Sourcing: untouched lines follow the order's fulfillment / store / default.
+  useEffect(() => {
+    if (!locationId) return;
+    setLines((prev) => resourceUntouched(prev, ctx));
+  }, [ctx, locationId]);
+
+  // Availability per (source, variant): fetched once per pair, cached.
+  useEffect(() => {
+    const need = new Map<string, string[]>();
+    for (const l of lines) {
+      if (!l.variantId || !l.sourceLocationId) continue;
+      if (avail[`${l.sourceLocationId}:${l.variantId}`]) continue;
+      need.set(l.sourceLocationId, [...(need.get(l.sourceLocationId) ?? []), l.variantId]);
+    }
+    if (need.size === 0) return;
+    let stale = false;
+    void Promise.all(
+      [...need.entries()].map(async ([loc, ids]) => {
+        try {
+          const rows = await api<SearchRow[]>(
+            `/v1/pos/product-search?locationId=${loc}&variantIds=${[...new Set(ids)].join(',')}&limit=100`,
+          );
+          return rows.map((r) => [
+            `${loc}:${r.variantId}`,
+            {
+              availableHere: r.availableHere,
+              atpDate: r.atpDate,
+              taxRateBps: r.taxRateBps ?? null,
+            } satisfies Avail,
+          ]);
+        } catch {
+          return [] as [string, Avail][];
+        }
+      }),
+    ).then((chunks) => {
+      if (stale) return;
+      const add = Object.fromEntries(chunks.flat() as [string, Avail][]);
+      if (Object.keys(add).length > 0) setAvail((prev) => ({ ...prev, ...add }));
+    });
+    return () => {
+      stale = true;
+    };
+  }, [lines, avail]);
+
   // BA-0001: an in-progress sale must not vanish on a stray nav click.
-  // Guard both browser unload (refresh/close) and in-app anchor
-  // navigation while the sale holds any work and isn't done.
   const dirty = !done && (customer != null || lines.length > 0);
   useEffect(() => {
     if (!dirty) return;
@@ -453,7 +509,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       const href = a.getAttribute('href') ?? '';
       if (!href.startsWith('/') || href.startsWith('/pos')) return;
       if (
-        !window.confirm("This sale isn't saved — leave anyway? Use Save as Draft first to keep it.")
+        !window.confirm("This sale isn't saved — leave anyway? Use Save draft first to keep it.")
       ) {
         e.preventDefault();
         e.stopPropagation();
@@ -467,6 +523,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     };
   }, [dirty]);
 
+  // ---------------------------------------------------------------- totals
+
   const totals = useMemo(() => {
     let merchandise = 0;
     let recycling = 0;
@@ -475,6 +533,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       const gross = l.quantity * l.unitPriceCents;
       if (l.lineType === 'custom' && l.description === RECYCLING_DESC) recycling += gross;
       else merchandise += gross;
+      if (l.addons.recycling) recycling += l.quantity * recyclingFeeCents;
       lineDiscount += Math.min(l.lineDiscountCents, gross);
     }
     const install = parseDollars(installFee);
@@ -482,10 +541,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     const afterLines = merchandise - lineDiscount;
     const orderDisc = Math.min(parseDollars(orderDiscount), Math.max(0, afterLines));
     // Tax mirrors sales/totals.ts: custom lines (fees, removal) are
-    // untaxed; every product line taxes at its own rate — the product's
-    // tax class when it has one (0 for an untaxed service like power
-    // base installation), else the store rate — on its net less its
-    // pro-rata share of the order discount.
+    // untaxed; every product line taxes at its own rate on its net less
+    // its pro-rata share of the order discount.
     const taxableLines = lines
       .filter((l) => l.lineType !== 'custom')
       .map((l) => ({
@@ -514,8 +571,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       merchandise,
       recycling,
       discounts: lineDiscount + orderDisc,
-      // BA-0026: what the order-discount box actually applied, so the UI
-      // can say when the typed number was capped at merchandise.
       orderDiscApplied: orderDisc,
       install,
       delivery,
@@ -525,54 +580,146 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       paidCents,
       balanceCents: Math.max(0, totalCents - paidCents),
     };
-  }, [lines, orderDiscount, installFee, deliveryFee, taxRateBps, payments]);
+  }, [lines, orderDiscount, installFee, deliveryFee, taxRateBps, payments, recyclingFeeCents]);
 
-  function addProduct(row: SearchRow) {
-    setLines((prev) => {
-      const next = [...prev];
-      // Owner 2026-08-30: adding the same product again always makes a
-      // NEW line — a second unit often sells at a different price, and
-      // each line carries its own price box. (Quantity on a line is
-      // still editable when one price covers several units.)
+  const availFor = useCallback(
+    (l: Line): Avail | undefined =>
+      l.variantId ? avail[`${l.sourceLocationId}:${l.variantId}`] : undefined,
+    [avail],
+  );
+  const anyShort = lines.some((l) => {
+    const a = availFor(l);
+    return l.lineType !== 'custom' && a != null && a.availableHere < l.quantity;
+  });
+  const hasZero = lines.some((l) => l.lineType !== 'custom' && l.unitPriceCents === 0);
+  const zeroBlock = hasZero && !zeroOk;
+  const status: 'draft' | 'waiting' | 'scheduled' = locked
+    ? 'scheduled'
+    : anyShort
+      ? 'waiting'
+      : 'draft';
+
+  // Name the draft for the shell's outage banner.
+  useEffect(() => {
+    if (lines.length === 0 || locked) {
+      setDraftSummary(null);
+      return;
+    }
+    const n = resumedDraft?.number ?? 'this draft';
+    setDraftSummary(
+      `${n} (${lines.length} line${lines.length === 1 ? '' : 's'}, ${formatMoney(totals.totalCents)})`,
+    );
+    return () => setDraftSummary(null);
+  }, [lines.length, totals.totalCents, resumedDraft, locked]);
+
+  // ---------------------------------------------------------------- lines
+
+  function addProduct(row: SearchRow, fromId: string) {
+    const auto = defaultSourceFor(fulfillment, ctx);
+    setAvail((prev) => ({
+      ...prev,
+      [`${fromId}:${row.variantId}`]: {
+        availableHere: row.availableHere,
+        atpDate: row.atpDate,
+        taxRateBps: row.taxRateBps ?? null,
+      },
+    }));
+    setLines((prev) => [
+      ...prev,
+      // Adding the same product again always makes a NEW line — a second
+      // unit often sells at a different price.
       {
-        next.push({
-          key: nextKey(),
-          variantId: row.variantId,
-          description: [row.productName, row.variantName].filter(Boolean).join(' — '),
-          quantity: 1,
-          unitPriceCents: row.priceCents,
-          lineDiscountCents: 0,
-          lineType: 'stock',
-          fulfillmentMethod: '',
-          // Take-with hands goods over the counter, so the line pulls
-          // from the store the member is logged into (owner 2026-08-30);
-          // delivery lines keep coming off the warehouse search source.
-          // The per-line "From" select changes either.
-          sourceLocationId:
-            fulfillment === 'take_with'
-              ? ''
-              : searchSourceId && searchSourceId !== locationId
-                ? searchSourceId
-                : '',
-          deliveryDate: '',
-          availableHere: row.availableHere,
-          atpDate: row.atpDate,
-          taxRateBps: row.taxRateBps ?? null,
-        });
-      }
-      return next;
-    });
+        key: nextKey(),
+        variantId: row.variantId,
+        description: [row.productName, row.variantName].filter(Boolean).join(' — '),
+        sku: row.sku,
+        size: row.size,
+        quantity: 1,
+        unitPriceCents: row.priceCents,
+        lineDiscountCents: 0,
+        lineType: 'stock',
+        fulfillmentMethod: '',
+        sourceLocationId: fromId,
+        // A "From" the salesperson picked in the dialog is their choice;
+        // the rules only move lines they have not touched.
+        sourceTouched: fromId !== auto,
+        deliveryDate: '',
+        addons: { ...NO_ADDONS },
+        atpDate: row.atpDate,
+        taxRateBps: row.taxRateBps ?? null,
+      },
+    ]);
     setShowProductSearch(false);
+    toast.success(
+      `${row.productName}${row.size ? `, ${row.size}` : ''} added · from ${nameOf(fromId)}`,
+    );
   }
 
   function patchLine(key: string, patch: Partial<Line>) {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
+  function setLineFulfillment(key: string, next: '' | Fulfillment) {
+    setLines((prev) =>
+      resourceUntouched(
+        prev.map((l) => (l.key === key ? { ...l, fulfillmentMethod: next } : l)),
+        ctx,
+      ),
+    );
+  }
+
+  function setLineSource(key: string, id: string) {
+    patchLine(key, { sourceLocationId: id, sourceTouched: true });
+  }
+
+  function toggleAddon(key: string, which: keyof Addons) {
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key ? { ...l, addons: { ...l.addons, [which]: !l.addons[which] } } : l,
+      ),
+    );
+  }
+
+  /** Lines as the API wants them: add-ons become the custom fee lines the invoice prints. */
+  function expandLines() {
+    const out: {
+      variantId?: string;
+      description?: string;
+      quantity: number;
+      unitPriceCents: number;
+      lineDiscountCents?: number;
+      lineType: Line['lineType'];
+      fulfillmentMethod?: Fulfillment;
+      sourceLocationId?: string;
+      deliveryDate?: string;
+    }[] = [];
+    const fee = (description: string, quantity: number, unitPriceCents: number) =>
+      out.push({ description, quantity, unitPriceCents, lineType: 'custom' });
+    for (const l of lines) {
+      out.push({
+        variantId: l.variantId ?? undefined,
+        description: l.lineType === 'custom' ? l.description : undefined,
+        quantity: l.quantity,
+        unitPriceCents: l.unitPriceCents,
+        lineDiscountCents: l.lineDiscountCents || undefined,
+        lineType: l.lineType,
+        fulfillmentMethod: l.fulfillmentMethod || undefined,
+        // Sent whenever it differs from the order's store; the server
+        // applies the same resolution order for anything left blank.
+        sourceLocationId:
+          l.lineType !== 'custom' && l.sourceLocationId && l.sourceLocationId !== locationId
+            ? l.sourceLocationId
+            : undefined,
+        deliveryDate: l.deliveryDate || undefined,
+      });
+      if (l.addons.removal) fee(REMOVAL_DESC, l.quantity, 0);
+      if (l.addons.recycling) fee(RECYCLING_DESC, l.quantity, recyclingFeeCents);
+      if (l.addons.declined) fee(DECLINED_DESC, 1, 0);
+    }
+    return out;
+  }
+
   function addPayment() {
-    // BA-0027: an empty box used to record the full balance straight from
-    // the grey placeholder. Commit the default into the field first so
-    // the amount is visible before it becomes money.
     if (!payAmount.trim()) {
       if (totals.balanceCents > 0) setPayAmount((totals.balanceCents / 100).toFixed(2));
       return;
@@ -589,9 +736,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   async function resumeDraft(id: string) {
     setError(null);
+    setDraftsOpen(false);
     try {
       const o = await api<{
         id: string;
+        number: string;
         customerId: string;
         locationId: string;
         fulfillmentType: string;
@@ -615,9 +764,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         }[];
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
+      const f = (o.fulfillmentType as Fulfillment) ?? 'delivery';
+      const nextCtx: SourcingContext = {
+        ...ctx,
+        orderLocationId: o.locationId,
+        orderFulfillment: f,
+      };
       setCustomer(cust);
       setLocationId(o.locationId);
-      setFulfillment((o.fulfillmentType as Fulfillment) ?? 'delivery');
+      setTaxRateBps(locs.find((l) => l.id === o.locationId)?.taxRateBps ?? taxRateBps);
+      setFulfillment(f);
       setRequestedDate(o.requestedDate ?? '');
       setDeliveryInstructions(o.deliveryInstructions ?? '');
       setNotes(o.notes ?? '');
@@ -625,73 +781,39 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setInstallFee(o.installFeeCents ? (o.installFeeCents / 100).toFixed(2) : '');
       setDeliveryFee(o.deliveryFeeCents ? (o.deliveryFeeCents / 100).toFixed(2) : '');
       setLines(
-        o.lines.map((l) => ({
-          key: nextKey(),
-          variantId: l.variantId,
-          description: l.description,
-          quantity: l.quantity,
-          unitPriceCents: l.unitPriceCents,
-          lineDiscountCents: l.discountCents,
-          lineType: (l.lineType as Line['lineType']) ?? 'stock',
-          fulfillmentMethod: (l.fulfillmentMethod as Line['fulfillmentMethod']) ?? '',
-          sourceLocationId: l.sourceLocationId ?? '',
-          deliveryDate: l.deliveryDate ?? '',
-          // The written line's rate (its tax class at write time); the
-          // availability refresh below overrides it with the live one.
-          taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
-        })),
-      );
-      setResumedDraftId(id);
-      // BA-0021: the special-order/stock warning must follow the line —
-      // re-check availability for the restored variants per source.
-      const byLoc = new Map<string, string[]>();
-      for (const l of o.lines) {
-        if (!l.variantId) continue;
-        const loc = l.sourceLocationId ?? o.locationId;
-        byLoc.set(loc, [...(byLoc.get(loc) ?? []), l.variantId]);
-      }
-      const avail = new Map<
-        string,
-        { availableHere: number; atpDate: string | null; taxRateBps: number | null }
-      >();
-      await Promise.all(
-        [...byLoc.entries()].map(async ([loc, ids]) => {
-          try {
-            const rows = await api<SearchRow[]>(
-              `/v1/pos/product-search?locationId=${loc}&variantIds=${ids.join(',')}&limit=100`,
-            );
-            for (const r of rows)
-              avail.set(`${loc}:${r.variantId}`, {
-                availableHere: r.availableHere,
-                atpDate: r.atpDate,
-                taxRateBps: r.taxRateBps ?? null,
-              });
-          } catch {
-            // availability refresh is best-effort — the draft still loads
-          }
+        o.lines.map((l) => {
+          const fm = (l.fulfillmentMethod as Line['fulfillmentMethod']) ?? '';
+          const eff = effectiveFulfillment({ fulfillmentMethod: fm }, f);
+          const autoSource = defaultSourceFor(eff, nextCtx);
+          const source = l.sourceLocationId ?? o.locationId;
+          return {
+            key: nextKey(),
+            variantId: l.variantId,
+            description: l.description,
+            sku: null,
+            size: null,
+            quantity: l.quantity,
+            unitPriceCents: l.unitPriceCents,
+            lineDiscountCents: l.discountCents,
+            lineType: (l.lineType as Line['lineType']) ?? 'stock',
+            fulfillmentMethod: fm,
+            sourceLocationId: source,
+            // A stored source that differs from the rule was a choice.
+            sourceTouched: source !== autoSource,
+            deliveryDate: l.deliveryDate ?? '',
+            addons: { ...NO_ADDONS },
+            taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
+          };
         }),
       );
-      if (avail.size > 0) {
-        setLines((prev) =>
-          prev.map((l) => {
-            if (!l.variantId) return l;
-            const hit = avail.get(`${l.sourceLocationId || o.locationId}:${l.variantId}`);
-            return hit
-              ? {
-                  ...l,
-                  availableHere: hit.availableHere,
-                  atpDate: hit.atpDate,
-                  taxRateBps: hit.taxRateBps,
-                }
-              : l;
-          }),
-        );
-      }
-      toast.success('Draft loaded — completing it will replace the draft');
+      setResumedDraft({ id, number: o.number });
+      toast.success(`${o.number} resumed — completing it replaces the draft`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
+
+  // ---------------------------------------------------------------- submit
 
   async function submit(mode: 'complete' | 'draft') {
     setError(null);
@@ -703,15 +825,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setError('Add at least one line.');
       return;
     }
-    // BA-0002: money typed in the amount box must never vanish on
-    // Complete. Block with the reason instead of silently dropping it.
+    if (mode === 'complete' && zeroBlock) {
+      setError('A line is priced at $0.00 — fix the price or confirm it is intentional.');
+      return;
+    }
     if (mode === 'complete' && parseDollars(payAmount) > 0) {
       setError(
-        `You typed $${payAmount} in the payment box but didn't add it — press Add payment, or clear the box, then Complete.`,
+        `You typed $${payAmount} in the payment box but didn't record it — press Record, or clear the box, then Complete.`,
       );
       return;
     }
-    // BA-0005: a past delivery date now books a real truck stop.
     if (mode === 'complete' && fulfillment === 'delivery' && requestedDate) {
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -724,14 +847,15 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setError('Layaway needs a minimum $100 deposit to open.');
       return;
     }
-    // G14: promising a date before the goods can arrive is the #1
-    // customer-service failure in furniture — make it a deliberate act.
     if (mode === 'complete' && requestedDate) {
-      const lateLines = lines.filter((l) => l.atpDate && l.atpDate > requestedDate);
+      const lateLines = lines.filter((l) => {
+        const a = availFor(l);
+        return a?.atpDate && a.atpDate > requestedDate;
+      });
       if (lateLines.length > 0) {
         const ok = window.confirm(
           `Promised ${requestedDate}, but not expected until ${lateLines
-            .map((l) => `${l.description} (${l.atpDate})`)
+            .map((l) => `${l.description} (${availFor(l)?.atpDate})`)
             .join(', ')}. Promise it anyway?`,
         );
         if (!ok) return;
@@ -749,206 +873,184 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   async function doSubmit(mode: 'complete' | 'draft') {
     if (!customer) throw new Error('Attach a customer first.');
-    {
-      const linePayload = lines.map((l) => ({
-        variantId: l.variantId ?? undefined,
-        description: l.lineType === 'custom' ? l.description : undefined,
-        quantity: l.quantity,
-        unitPriceCents: l.unitPriceCents,
-        lineDiscountCents: l.lineDiscountCents || undefined,
-        lineType: l.lineType,
-        fulfillmentMethod: l.fulfillmentMethod || undefined,
-        sourceLocationId:
-          l.sourceLocationId && l.sourceLocationId !== locationId ? l.sourceLocationId : undefined,
-        deliveryDate: l.deliveryDate || undefined,
-      }));
+    const linePayload = expandLines();
+    const sources = [
+      ...new Set(
+        lines.filter((l) => l.lineType !== 'custom').map((l) => nameOf(l.sourceLocationId)),
+      ),
+    ];
 
-      // Take-with fully paid, all real stock → a plain register sale.
-      // (Exchanges always stay orders — the document must print as an
-      // Exchange Order against the original invoice.)
-      const allSellable = lines.every((l) => l.lineType !== 'special_order');
-      if (
-        !exchangeOriginal &&
-        mode === 'complete' &&
-        orderType === 'sales_order' &&
-        fulfillment === 'take_with' &&
-        // Custom fee lines (the recycling fee) can't ride the plain-sale
-        // shortcut — it prices variants only, so the fee would vanish
-        // from the document. The order path carries them, untaxed.
-        lines.every((l) => l.lineType !== 'custom') &&
-        lines.every((l) => !l.sourceLocationId || l.sourceLocationId === locationId) &&
-        allSellable &&
-        totals.paidCents >= totals.totalCents &&
-        totals.totalCents > 0
-      ) {
-        const sale = await api<{ id: string; number: string }>('/v1/sales', {
-          method: 'POST',
-          body: JSON.stringify({
-            locationId,
-            customerId: customer.id,
-            lines: lines
-              .filter((l) => l.variantId)
-              .map((l) => ({
-                variantId: l.variantId,
-                quantity: l.quantity,
-                unitPriceCents: l.unitPriceCents,
-                lineDiscountCents: l.lineDiscountCents || undefined,
-              })),
-            orderDiscountCents: parseDollars(orderDiscount) || undefined,
-            // The register honours the same G6 discount gate as an
-            // order, so the reason/override travels with it.
-            payments: [
-              {
-                method: payments[0]?.method === 'cash' ? 'cash' : 'card',
-                amountCents: totals.totalCents,
-              },
-            ],
-          }),
-        });
-        if (resumedDraftId) await cancelDraft(resumedDraftId);
-        setDone({ id: sale.id, number: sale.number, kind: 'sale' });
-        return;
-      }
-
-      const sp = salespeople.filter(Boolean);
-      const createPath = exchangeOriginal
-        ? `/v1/orders/${exchangeOriginal.id}/exchange`
-        : '/v1/orders';
-      const order = await api<{
-        id: string;
-        number: string;
-        totalCents: number;
-        splitOrders?: { id: string; number: string; requestedDate: string | null }[];
-      }>(createPath, {
+    // Take-with fully paid, all real stock, no fee lines → a plain register sale.
+    const allSellable = lines.every((l) => l.lineType !== 'special_order');
+    if (
+      !exchangeOriginal &&
+      mode === 'complete' &&
+      orderType === 'sales_order' &&
+      fulfillment === 'take_with' &&
+      linePayload.every((l) => l.lineType !== 'custom') &&
+      lines.every((l) => !l.sourceLocationId || l.sourceLocationId === locationId) &&
+      allSellable &&
+      totals.paidCents >= totals.totalCents &&
+      totals.totalCents > 0
+    ) {
+      const sale = await api<{ id: string; number: string }>('/v1/sales', {
         method: 'POST',
         body: JSON.stringify({
           locationId,
           customerId: customer.id,
-          orderKind: orderType === 'layaway' ? 'layaway' : 'sales_order',
-          fulfillmentType: fulfillment,
-          requestedDate: requestedDate || null,
-          deliveryInstructions: deliveryInstructions || null,
-          notes: notes || null,
-          address: shipDiffers
-            ? {
-                line1: ship.line1 || null,
-                line2: ship.line2 || null,
-                city: ship.city || null,
-                region: ship.region || null,
-                postalCode: ship.postalCode || null,
-                phone: ship.phone || null,
-              }
-            : addressFromCustomer(customer),
-          salespersonMembershipId: sp[0] || undefined,
-          secondSalespersonMembershipId: sp[1] || undefined,
-          // Equal split by default (PLAN-POS-OPERATIONS §4/§9).
-          splitBps: sp.length === 2 ? 5000 : undefined,
-          lines: linePayload,
+          lines: lines
+            .filter((l) => l.variantId)
+            .map((l) => ({
+              variantId: l.variantId,
+              quantity: l.quantity,
+              unitPriceCents: l.unitPriceCents,
+              lineDiscountCents: l.lineDiscountCents || undefined,
+            })),
           orderDiscountCents: parseDollars(orderDiscount) || undefined,
-          installFeeCents: parseDollars(installFee) || undefined,
-          deliveryFeeCents: parseDollars(deliveryFee) || undefined,
-          draft: mode === 'draft' ? true : undefined,
-          confirm: mode === 'complete' && orderType !== 'quote' ? true : undefined,
-          // Lines promised on a different date split into -A/-B sibling
-          // orders server-side (backorder split at the register).
-          splitByDeliveryDate: true,
+          payments: [
+            {
+              method: payments[0]?.method === 'cash' ? 'cash' : 'card',
+              amountCents: totals.totalCents,
+            },
+          ],
         }),
       });
+      if (resumedDraft) await cancelDraft(resumedDraft.id);
+      setDone({
+        id: sale.id,
+        number: sale.number,
+        kind: 'sale',
+        sources,
+        dueCents: 0,
+        at: new Date(),
+      });
+      return;
+    }
 
-      if (mode === 'complete') {
-        for (const p of payments) {
-          await api(`/v1/orders/${order.id}/payments`, {
-            method: 'POST',
-            body: JSON.stringify({
-              method: p.method,
-              amountCents: p.amountCents,
-              kind: 'deposit',
-              processorRef: p.ref || undefined,
-            }),
-          });
-        }
-      }
-      if (resumedDraftId && resumedDraftId !== order.id) await cancelDraft(resumedDraftId);
+    const sp = salespeople.filter(Boolean);
+    const createPath = exchangeOriginal
+      ? `/v1/orders/${exchangeOriginal.id}/exchange`
+      : '/v1/orders';
+    const order = await api<{
+      id: string;
+      number: string;
+      totalCents: number;
+      splitOrders?: { id: string; number: string; requestedDate: string | null }[];
+    }>(createPath, {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId,
+        customerId: customer.id,
+        orderKind: orderType === 'layaway' ? 'layaway' : 'sales_order',
+        fulfillmentType: fulfillment,
+        requestedDate: requestedDate || null,
+        deliveryInstructions: deliveryInstructions || null,
+        notes: notes || null,
+        address: shipDiffers
+          ? {
+              line1: ship.line1 || null,
+              line2: ship.line2 || null,
+              city: ship.city || null,
+              region: ship.region || null,
+              postalCode: ship.postalCode || null,
+              phone: ship.phone || null,
+            }
+          : addressFromCustomer(customer),
+        salespersonMembershipId: sp[0] || undefined,
+        secondSalespersonMembershipId: sp[1] || undefined,
+        splitBps: sp.length === 2 ? 5000 : undefined,
+        lines: linePayload,
+        orderDiscountCents: parseDollars(orderDiscount) || undefined,
+        installFeeCents: parseDollars(installFee) || undefined,
+        deliveryFeeCents: parseDollars(deliveryFee) || undefined,
+        draft: mode === 'draft' ? true : undefined,
+        confirm: mode === 'complete' && orderType !== 'quote' ? true : undefined,
+        splitByDeliveryDate: true,
+      }),
+    });
 
-      // Take-with hand-over (owner 2026-08-31): completing a sale with
-      // take-with lines splits them to a -A piece and completes it when
-      // stock and money allow. Runs after payments so the money can
-      // cover the walking goods first; a failure here never loses the
-      // sale — the order page carries the same Complete button.
-      let takeWith: NonNullable<typeof done>['takeWith'];
-      if (
-        mode === 'complete' &&
-        orderType !== 'quote' &&
-        lines.some(
-          (l) => (l.fulfillmentMethod || fulfillment) === 'take_with' && l.lineType !== 'custom',
-        )
-      ) {
-        try {
-          const res = await api<{
-            takeWith?: {
-              orderId: string;
-              number: string;
-              completed: boolean;
-              reason: string | null;
-            };
-          }>(`/v1/orders/${order.id}/complete`, { method: 'POST', body: JSON.stringify({}) });
-          takeWith = res.takeWith;
-        } catch {
-          takeWith = undefined;
-        }
-      }
-
-      // Owner 2026-08-31: the delivery date BOOKS the truck. Promising a
-      // date and then re-entering it on the order page was double work —
-      // completing a delivery sale now schedules the real delivery (and
-      // one per split sibling on its own date). Reschedules happen from
-      // the order page or the calendar.
-      const bookedDeliveries: string[] = [];
-      if (mode === 'complete' && orderType !== 'quote' && fulfillment === 'delivery') {
-        const truckBound = lines.some(
-          (l) =>
-            l.lineType !== 'custom' &&
-            !['take_with', 'pickup'].includes(l.fulfillmentMethod || fulfillment),
-        );
-        const targets = [
-          ...(requestedDate && truckBound
-            ? [{ id: order.id, number: order.number, date: requestedDate }]
-            : []),
-          ...(order.splitOrders ?? [])
-            .filter((sib) => sib.requestedDate)
-            .map((sib) => ({ id: sib.id, number: sib.number, date: sib.requestedDate! })),
-        ];
-        for (const t of targets) {
-          try {
-            await api(`/v1/orders/${t.id}/deliveries`, {
-              method: 'POST',
-              // The capacity hint next to the date already warned the
-              // writer; over-cap bookings log the standard exception.
-              body: JSON.stringify({ scheduledDate: t.date, confirmOverCapacity: true }),
-            });
-            bookedDeliveries.push(`${t.number} on ${t.date}`);
-          } catch {
-            toast.error(
-              `${t.number}: could not book the delivery — schedule it from the order page.`,
-            );
-          }
-        }
-      }
-
-      if (mode === 'draft') {
-        toast.success(`Draft ${order.number} saved — visible store-wide`);
-        resetAll();
-        loadDrafts();
-      } else {
-        setDone({
-          id: order.id,
-          number: order.number,
-          kind: 'order',
-          splitOrders: order.splitOrders,
-          takeWith,
-          bookedDeliveries,
+    if (mode === 'complete') {
+      for (const p of payments) {
+        await api(`/v1/orders/${order.id}/payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            method: p.method,
+            amountCents: p.amountCents,
+            kind: 'deposit',
+            processorRef: p.ref || undefined,
+          }),
         });
       }
+    }
+    if (resumedDraft && resumedDraft.id !== order.id) await cancelDraft(resumedDraft.id);
+
+    // Take-with hand-over: completing a sale with take-with lines splits
+    // them to a -A piece and completes it when stock and money allow.
+    let takeWith: NonNullable<typeof done>['takeWith'];
+    if (
+      mode === 'complete' &&
+      orderType !== 'quote' &&
+      lines.some(
+        (l) => effectiveFulfillment(l, fulfillment) === 'take_with' && l.lineType !== 'custom',
+      )
+    ) {
+      try {
+        const res = await api<{
+          takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
+        }>(`/v1/orders/${order.id}/complete`, { method: 'POST', body: JSON.stringify({}) });
+        takeWith = res.takeWith;
+      } catch {
+        takeWith = undefined;
+      }
+    }
+
+    // The delivery date books the truck (one per split sibling on its own date).
+    const bookedDeliveries: string[] = [];
+    if (mode === 'complete' && orderType !== 'quote' && fulfillment === 'delivery') {
+      const truckBound = lines.some(
+        (l) =>
+          l.lineType !== 'custom' &&
+          !['take_with', 'pickup'].includes(effectiveFulfillment(l, fulfillment)),
+      );
+      const targets = [
+        ...(requestedDate && truckBound
+          ? [{ id: order.id, number: order.number, date: requestedDate }]
+          : []),
+        ...(order.splitOrders ?? [])
+          .filter((sib) => sib.requestedDate)
+          .map((sib) => ({ id: sib.id, number: sib.number, date: sib.requestedDate! })),
+      ];
+      for (const t of targets) {
+        try {
+          await api(`/v1/orders/${t.id}/deliveries`, {
+            method: 'POST',
+            body: JSON.stringify({ scheduledDate: t.date, confirmOverCapacity: true }),
+          });
+          bookedDeliveries.push(`${t.number} on ${t.date}`);
+        } catch {
+          toast.error(
+            `${t.number}: could not book the delivery — schedule it from the order page.`,
+          );
+        }
+      }
+    }
+
+    if (mode === 'draft') {
+      toast.success(`Draft ${order.number} saved — visible store-wide`);
+      resetAll();
+      loadDrafts();
+    } else {
+      setDone({
+        id: order.id,
+        number: order.number,
+        kind: 'order',
+        splitOrders: order.splitOrders,
+        takeWith,
+        bookedDeliveries,
+        sources,
+        dueCents: Math.max(0, order.totalCents - totals.paidCents),
+        at: new Date(),
+      });
     }
   }
 
@@ -959,13 +1061,36 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }).catch(() => undefined);
   }
 
-  function resetAll() {
+  function clearNewCustomer() {
+    setNewCust(EMPTY_NEW_CUSTOMER);
+    setNewBill(EMPTY_ADDRESS);
+    setBillDiffers(false);
+    setDupeWarn(null);
+    zipMemo.current.cust = null;
+    zipMemo.current.bill = null;
+  }
+
+  async function attachExistingCustomer(idToUse: string) {
+    try {
+      const existing = await api<CustomerHit>(`/v1/customers/${idToUse}`);
+      setCustomer(existing);
+      setCreatingCustomer(false);
+      clearNewCustomer();
+      toast.success('Attached the existing customer — no duplicate created.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const resetAll = useCallback(() => {
     setCustomer(null);
     setCustQuery('');
     setCreatingCustomer(false);
     clearNewCustomer();
     setLines([]);
     setPayments([]);
+    setPayAmount('');
+    setPayRef('');
     setOrderDiscount('');
     setInstallFee('');
     setDeliveryFee('');
@@ -973,595 +1098,239 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     setDeliveryInstructions('');
     setRequestedDate('');
     setShipDiffers(false);
-    {
-      const wh = findWarehouse(locations);
-      setSearchSourceId(wh && wh.id !== locationId ? wh.id : '');
-    }
-    setResumedDraftId(null);
+    setPickerFrom(null);
+    setZeroOk(false);
+    setResumedDraft(null);
     setOrderType('sales_order');
+    setError(null);
     setDone(null);
+    // After a completed sale the cursor rests on New sale, not the search.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function printReceipt() {
+    if (!done) return;
+    const href =
+      done.kind === 'sale' ? `/sales/${done.id}` : `/print/orders/${done.id}/invoice?scope=order`;
+    window.open(href, '_blank', 'noopener');
   }
 
-  if (done) {
-    return (
-      <Card title={`${done.kind === 'sale' ? 'Sale' : 'Order'} ${done.number} complete`}>
-        {done.splitOrders && done.splitOrders.length > 0 && (
-          <Alert tone="info" data-testid="split-siblings">
-            Backordered lines split into{' '}
-            {done.splitOrders.map((s, i) => (
-              <span key={s.id}>
-                {i > 0 && ', '}
-                <a href={`/orders/${s.id}`}>{s.number}</a>
-                {s.requestedDate ? ` (promised ${s.requestedDate})` : ''}
-              </span>
-            ))}{' '}
-            — one payment covers them all: money taken at the register lands on each order up to
-            what it owes.
-          </Alert>
-        )}
-        {done.bookedDeliveries && done.bookedDeliveries.length > 0 && (
-          <Alert tone="success" data-testid="booked-deliveries">
-            Delivery booked: {done.bookedDeliveries.join(', ')} — it&apos;s on the Deliveries
-            calendar. Change the date from the order page if plans move.
-          </Alert>
-        )}
-        {done.takeWith && (
-          <Alert
-            tone={done.takeWith.completed ? 'success' : 'warning'}
-            data-testid="take-with-result"
-          >
-            {done.takeWith.completed ? (
-              <>
-                Take-with items went out on{' '}
-                <a href={`/orders/${done.takeWith.orderId}`}>{done.takeWith.number}</a> — paid and
-                completed.
-              </>
-            ) : (
-              <>
-                Take-with items split to{' '}
-                <a href={`/orders/${done.takeWith.orderId}`}>{done.takeWith.number}</a>, waiting:{' '}
-                {done.takeWith.reason ?? 'not ready yet'}. Finish it with Complete on that order.
-              </>
-            )}
-          </Alert>
-        )}
-        <p className="muted">Open the {done.kind} page to print the invoice or receipt.</p>
-        <FormActions>
-          <Button variant="secondary" onClick={resetAll} data-testid="new-sale-again">
-            New Sale
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() =>
-              router.push(done.kind === 'sale' ? `/sales/${done.id}` : `/orders/${done.id}`)
-            }
-          >
-            Open {done.kind}
-          </Button>
-        </FormActions>
-      </Card>
-    );
-  }
+  // Register keys: F2 add product, F8 take payment, Esc closes the picker,
+  // P prints when complete, N starts the next sale when complete.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target && (/INPUT|TEXTAREA|SELECT/.test(target.tagName) || target.isContentEditable);
+      if (e.key === 'F2' && !locked) {
+        e.preventDefault();
+        setShowProductSearch(true);
+      } else if (e.key === 'F8' && !locked) {
+        e.preventDefault();
+        payAmountInput.current?.focus();
+        payAmountInput.current?.select();
+      } else if (!typing && locked && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        printReceipt();
+      } else if (!typing && locked && (e.key === 'n' || e.key === 'N')) {
+        e.preventDefault();
+        resetAll();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, resetAll]);
+
+  // ---------------------------------------------------------------- render
+
+  const pickerLocation = pickerFrom ?? (locationId ? pickerDefaultSource(ctx) : '');
+  const dueLabel =
+    totals.balanceCents === 0 && lines.length > 0
+      ? 'Paid in full'
+      : totals.paidCents > 0
+        ? 'Balance due'
+        : 'Due';
+  const completeLabel =
+    orderType === 'quote'
+      ? 'Save quote'
+      : totals.balanceCents === 0 && lines.length > 0
+        ? 'Complete sale'
+        : 'Complete with balance';
+  const completeHint = !customer
+    ? 'Add a customer to complete'
+    : lines.length === 0
+      ? ' '
+      : totals.balanceCents > 0
+        ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
+        : "Reserves stock at each line's source";
+  const draftNumber = done?.number ?? resumedDraft?.number ?? null;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_340px]" data-testid="new-sale">
-      <div className="flex min-w-0 flex-col">
-        {/* Banners are DOM-first and visually first; `order` only exists
-            because the draft strip below is DOM-last (BA-0036). */}
-        {exchangeOriginal && (
-          <Alert tone="warning" data-testid="exchange-banner" className="-order-2">
-            Writing an <strong>Exchange Order</strong> against original invoice{' '}
-            <strong>{exchangeOriginal.number}</strong> — the document prints with the original
-            number, and the customer is fixed to the original order&apos;s.
-          </Alert>
-        )}
-        {!exchangeOriginal && openOrders.length > 0 && (
-          <Alert tone="warning" data-testid="duplicate-order-banner" className="-order-2">
-            This customer already has {openOrders.length === 1 ? 'an open order' : 'open orders'}:{' '}
-            {openOrders.map((o, i) => (
-              <span key={o.id}>
-                {i > 0 && ', '}
-                <strong>{o.number}</strong>
-                {(o.deliveryDate ?? o.requestedDate) && ` (${o.deliveryDate ?? o.requestedDate})`}
-              </span>
-            ))}
-            {' — '}consider one truck: add to the existing order or match its delivery date.
-          </Alert>
-        )}
+    <div className="register" data-density="register" data-testid="new-sale">
+      <header className="reg-head">
+        <div>
+          <div className="t-label">Sell · {store?.name ?? '…'}</div>
+          <div className="reg-title-row">
+            <h1 className="reg-title">{locked ? 'Sale' : 'New sale'}</h1>
+            {draftNumber && <span className="reg-number">{draftNumber}</span>}
+            <StatusChip status={status} data-testid="register-status" />
+          </div>
+        </div>
+        <div className="reg-head-end">
+          <span className="reg-save-note">
+            {locked
+              ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+              : resumedDraft
+                ? 'Draft resumed · completing it replaces the draft'
+                : lines.length > 0
+                  ? 'Save draft keeps this for the store'
+                  : ' '}
+          </span>
+          {!locked && drafts.length > 0 && (
+            <Button size="sm" onClick={() => setDraftsOpen((v) => !v)} aria-expanded={draftsOpen}>
+              Resume a draft <span className="mono">{drafts.length}</span>
+            </Button>
+          )}
+        </div>
+      </header>
 
-        <Card title={<StepTitle n={1} label="Customer" />}>
-          <Stack gap="sm">
-            {customer ? (
-              <div className="flex items-center gap-3">
-                <div className="min-w-0">
-                  <strong data-testid="order-customer">{customerName(customer)}</strong>
-                  <div className="muted">
-                    {[customer.phone, customer.email, addressPreview(customer)]
-                      .filter(Boolean)
-                      .join(' · ') || '—'}
-                  </div>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => setCustomer(null)}>
-                  Change
-                </Button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Input
-                  value={custQuery}
-                  onChange={(e) => setCustQuery(e.target.value)}
-                  placeholder="Search name, phone, email, or address…"
-                  aria-label="Search customers"
-                  className="w-full"
-                  data-testid="customer-search"
-                  autoFocus
-                />
-                {custOpen && custHits.length > 0 && (
-                  <Card flush className="absolute top-[105%] left-0 right-0 z-20">
-                    <div className="max-h-[280px] overflow-y-auto p-1.5">
-                      {custHits.map((c) => (
-                        <button
-                          key={c.id}
-                          style={hitBtn}
-                          data-testid="customer-hit"
-                          onClick={() => {
-                            setCustomer(c);
-                            setCustOpen(false);
-                            setCustQuery('');
-                          }}
-                        >
-                          <strong>{customerName(c)}</strong>{' '}
-                          <span className="muted">
-                            {[c.phone, addressPreview(c)].filter(Boolean).join(' · ')}
-                          </span>
-                        </button>
-                      ))}
-                      {custMore && (
-                        <div className="muted px-2 py-1">More matches — keep typing.</div>
-                      )}
-                    </div>
-                  </Card>
-                )}
-              </div>
-            )}
-            {!customer &&
-              (creatingCustomer ? (
-                // Every cell needs min-w-0: grid/flex items refuse to
-                // shrink below their content width by default, and on a
-                // narrow column the overflowing Create button lands
-                // *under* the totals rail, which then swallows its
-                // clicks (caught by the checkpoint-8 e2e run).
-                <Stack gap="sm">
-                  <SectionHeading as="h3" title="New customer" />
-                  <div className="grid gap-2 sm:grid-cols-5">
-                    <Input
-                      placeholder="First name"
-                      aria-label="First name"
-                      value={newCust.firstName}
-                      onChange={(e) => setNewCust({ ...newCust, firstName: e.target.value })}
-                      className="min-w-0"
-                    />
-                    <Input
-                      placeholder="Last name"
-                      aria-label="Last name"
-                      value={newCust.lastName}
-                      onChange={(e) => setNewCust({ ...newCust, lastName: e.target.value })}
-                      className="min-w-0"
-                    />
-                    <Input
-                      placeholder="Phone"
-                      aria-label="Phone"
-                      value={newCust.phone}
-                      onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })}
-                      className="min-w-0"
-                    />
-                    <Input
-                      placeholder="2nd phone (optional)"
-                      aria-label="2nd phone (optional)"
-                      value={newCust.phone2}
-                      onChange={(e) => setNewCust({ ...newCust, phone2: e.target.value })}
-                      className="min-w-0"
-                      data-testid="new-customer-phone2"
-                    />
-                    <Input
-                      placeholder="Email"
-                      aria-label="Email"
-                      value={newCust.email}
-                      onChange={(e) => setNewCust({ ...newCust, email: e.target.value })}
-                      className="min-w-0"
-                    />
-                  </div>
-                  {dupeWarn && (
-                    <Alert
-                      tone="warning"
-                      data-testid="dupe-warning"
-                      action={
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          data-testid="use-existing-customer"
-                          onClick={() => void attachExistingCustomer(dupeWarn.id)}
-                        >
-                          Use existing
-                        </Button>
-                      }
-                    >
-                      Looks like <strong>{dupeWarn.name}</strong>
-                      {dupeWarn.phone ? ` (${dupeWarn.phone})` : ''} already exists — use them
-                      instead?
-                    </Alert>
-                  )}
-                  <SectionHeading as="h3" title="Delivery address" />
-                  <div className="grid gap-2 sm:grid-cols-5">
-                    <Input
-                      placeholder="Delivery address"
-                      aria-label="Delivery address"
-                      value={newCust.line1}
-                      onChange={(e) => setNewCust({ ...newCust, line1: e.target.value })}
-                      className="min-w-0 sm:col-span-2"
-                      data-testid="new-customer-address"
-                    />
-                    <Input
-                      placeholder="Apt / unit"
-                      aria-label="Apt / unit"
-                      value={newCust.line2}
-                      onChange={(e) => setNewCust({ ...newCust, line2: e.target.value })}
-                      className="min-w-0"
-                    />
-                    <Input
-                      placeholder="City"
-                      aria-label="City"
-                      value={newCust.city}
-                      onChange={(e) => setNewCust({ ...newCust, city: e.target.value })}
-                      className="min-w-0"
-                    />
-                    <div className="flex min-w-0 gap-2">
-                      <Input
-                        placeholder="State"
-                        aria-label="State"
-                        value={newCust.region}
-                        onChange={(e) => setNewCust({ ...newCust, region: e.target.value })}
-                        className="w-16 min-w-0"
-                      />
-                      <Input
-                        placeholder="ZIP"
-                        aria-label="ZIP"
-                        value={newCust.postalCode}
-                        onChange={(e) =>
-                          autofillFromZip(e.target.value, setNewCust, zipMemo.current, 'cust')
-                        }
-                        className="min-w-0 flex-1"
-                      />
-                    </div>
-                  </div>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={billDiffers}
-                      onChange={(e) => setBillDiffers(e.target.checked)}
-                    />
-                    Billing address is different
-                  </label>
-                  {billDiffers && <SectionHeading as="h3" title="Billing address" />}
-                  {billDiffers && (
-                    <div className="grid gap-2 sm:grid-cols-5">
-                      <Input
-                        placeholder="Billing address"
-                        aria-label="Billing address"
-                        value={newBill.line1}
-                        onChange={(e) => setNewBill({ ...newBill, line1: e.target.value })}
-                        className="min-w-0 sm:col-span-2"
-                        data-testid="new-customer-billing"
-                      />
-                      <Input
-                        placeholder="Apt / unit"
-                        aria-label="Apt / unit"
-                        value={newBill.line2}
-                        onChange={(e) => setNewBill({ ...newBill, line2: e.target.value })}
-                        className="min-w-0"
-                      />
-                      <Input
-                        placeholder="City"
-                        aria-label="City"
-                        value={newBill.city}
-                        onChange={(e) => setNewBill({ ...newBill, city: e.target.value })}
-                        className="min-w-0"
-                      />
-                      <div className="flex min-w-0 gap-2">
-                        <Input
-                          placeholder="State"
-                          aria-label="State"
-                          value={newBill.region}
-                          onChange={(e) => setNewBill({ ...newBill, region: e.target.value })}
-                          className="w-16 min-w-0"
-                        />
-                        <Input
-                          placeholder="ZIP"
-                          aria-label="ZIP"
-                          value={newBill.postalCode}
-                          onChange={(e) =>
-                            autofillFromZip(e.target.value, setNewBill, zipMemo.current, 'bill')
-                          }
-                          className="min-w-0 flex-1"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <Field label="How did they hear about us?">
-                    <Input
-                      placeholder="Walk-in, Google, referral…"
-                      aria-label="How did they hear about us?"
-                      value={newCust.referralSource}
-                      onChange={(e) => setNewCust({ ...newCust, referralSource: e.target.value })}
-                      list="referral-sources"
-                      data-testid="new-customer-referral"
-                    />
-                    <datalist id="referral-sources">
-                      {[
-                        'Walk-in / drive-by',
-                        'Google search',
-                        'Yelp',
-                        'Facebook / Instagram',
-                        'TV / radio',
-                        'Referred by friend or family',
-                        'Repeat customer',
-                        'Billboard',
-                      ].map((s) => (
-                        <option key={s} value={s} />
-                      ))}
-                    </datalist>
-                  </Field>
-                  <FormActions>
-                    <Button
-                      variant="secondary"
-                      disabled={creatingBusy}
-                      onClick={() => {
-                        setCreatingCustomer(false);
-                        clearNewCustomer();
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="primary"
-                      data-testid="create-customer"
-                      disabled={creatingBusy}
-                      onClick={() => {
-                        const addr = (a: {
-                          line1: string;
-                          line2: string;
-                          city: string;
-                          region: string;
-                          postalCode: string;
-                        }) => ({
-                          line1: a.line1.trim() || null,
-                          line2: a.line2.trim() || null,
-                          city: a.city.trim() || null,
-                          region: a.region.trim() || null,
-                          postalCode: a.postalCode.trim() || null,
-                        });
-                        const hasAddr = (a: { line1: string; city: string }) =>
-                          Boolean(a.line1.trim() || a.city.trim());
-                        // Entry 0 is the delivery address (the delivery
-                        // flow reads it); billing rides second.
-                        const addresses = [
-                          ...(hasAddr(newCust) ? [{ label: 'delivery', ...addr(newCust) }] : []),
-                          ...(billDiffers && hasAddr(newBill)
-                            ? [{ label: 'billing', ...addr(newBill) }]
-                            : []),
-                        ];
-                        setCreatingBusy(true);
-                        void api<CustomerHit>('/v1/customers', {
-                          method: 'POST',
-                          body: JSON.stringify({
-                            firstName: newCust.firstName || null,
-                            lastName: newCust.lastName || null,
-                            phone: newCust.phone || null,
-                            phone2: newCust.phone2 || null,
-                            email: newCust.email || null,
-                            referralSource: newCust.referralSource || null,
-                            ...(addresses.length > 0 ? { addressesJson: addresses } : {}),
-                          }),
-                        })
-                          .then((c) => {
-                            setCustomer(c);
-                            setCreatingCustomer(false);
-                            clearNewCustomer();
-                          })
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err)),
-                          )
-                          .finally(() => setCreatingBusy(false));
-                      }}
-                    >
-                      {creatingBusy ? 'Creating…' : 'Create'}
-                    </Button>
-                  </FormActions>
-                </Stack>
-              ) : (
-                <div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      clearNewCustomer();
-                      setCreatingCustomer(true);
-                    }}
-                  >
-                    <Plus size={13} aria-hidden /> New customer
-                  </Button>
-                </div>
-              ))}
-            {customer && fulfillment !== 'take_with' && (
-              <Stack gap="sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={shipDiffers}
-                    onChange={(e) => setShipDiffers(e.target.checked)}
-                  />
-                  Ship to a different address (default: billing address)
-                </label>
-                {shipDiffers && (
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Input
-                      placeholder="Address line 1"
-                      aria-label="Address line 1"
-                      value={ship.line1}
-                      onChange={(e) => setShip({ ...ship, line1: e.target.value })}
-                    />
-                    <Input
-                      placeholder="Line 2"
-                      aria-label="Line 2"
-                      value={ship.line2}
-                      onChange={(e) => setShip({ ...ship, line2: e.target.value })}
-                    />
-                    <Input
-                      placeholder="City"
-                      aria-label="City"
-                      value={ship.city}
-                      onChange={(e) => setShip({ ...ship, city: e.target.value })}
-                    />
-                    <Input
-                      placeholder="State"
-                      aria-label="State"
-                      value={ship.region}
-                      onChange={(e) => setShip({ ...ship, region: e.target.value })}
-                    />
-                    <Input
-                      placeholder="ZIP"
-                      aria-label="ZIP"
-                      value={ship.postalCode}
-                      onChange={(e) =>
-                        autofillFromZip(e.target.value, setShip, zipMemo.current, 'ship')
-                      }
-                    />
-                    <Input
-                      placeholder="Phone at address"
-                      aria-label="Phone at address"
-                      value={ship.phone}
-                      onChange={(e) => setShip({ ...ship, phone: e.target.value })}
-                    />
-                  </div>
-                )}
-              </Stack>
-            )}
-          </Stack>
-        </Card>
-
-        <Card
-          title={<StepTitle n={2} label="Items" />}
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  setLines((prev) => [
-                    ...prev,
-                    {
-                      key: nextKey(),
-                      variantId: null,
-                      description: 'Mattress Removal',
-                      quantity: 1,
-                      unitPriceCents: 0,
-                      lineDiscountCents: 0,
-                      lineType: 'custom',
-                      fulfillmentMethod: '',
-                      sourceLocationId: '',
-                      deliveryDate: '',
-                    },
-                  ])
-                }
+      {draftsOpen && drafts.length > 0 && (
+        <div className="reg-drafts" data-testid="draft-chips">
+          {drafts.map((d) => (
+            <div key={d.id} className="reg-draft-row">
+              <button
+                type="button"
+                className="reg-draft-btn"
+                onClick={() => void resumeDraft(d.id)}
               >
-                + Removal ($0)
-              </Button>
+                <span className="mono">{d.number}</span>
+                <span className="reg-draft-when">{ago(d.createdAt)}</span>
+                <span className="mono reg-draft-total">{formatMoney(d.totalCents)}</span>
+              </button>
               <Button
                 size="sm"
                 variant="ghost"
-                data-testid="add-recycling-fee"
-                onClick={() =>
-                  // Owner 2026-08-30: the CA recycling fee is added by
-                  // hand like Removal, never automatically. One untaxed
-                  // fee line; each click counts one more unit on it.
-                  setLines((prev) => {
-                    const next = prev.map((l) => ({ ...l }));
-                    const fee = next.find(
-                      (l) => l.lineType === 'custom' && l.description === RECYCLING_DESC,
-                    );
-                    if (fee) fee.quantity += 1;
-                    else
-                      next.push({
-                        key: nextKey(),
-                        variantId: null,
-                        description: RECYCLING_DESC,
-                        quantity: 1,
-                        unitPriceCents: recyclingFeeCents,
-                        lineDiscountCents: 0,
-                        lineType: 'custom',
-                        fulfillmentMethod: '',
-                        sourceLocationId: '',
-                        deliveryDate: '',
-                      });
-                    return next;
+                aria-label={`Delete draft ${d.number}`}
+                data-testid="delete-draft"
+                onClick={() => {
+                  if (!confirm(`Delete draft ${d.number}? This cannot be undone.`)) return;
+                  void api(`/v1/orders/${d.id}/cancel`, {
+                    method: 'POST',
+                    body: JSON.stringify({ reason: 'draft deleted at the register' }),
                   })
-                }
+                    .then(() => {
+                      toast.success(`Draft ${d.number} deleted`);
+                      loadDrafts();
+                    })
+                    .catch((err) => toast.error(err instanceof Error ? err.message : String(err)));
+                }}
               >
-                + Recycling (${(recyclingFeeCents / 100).toFixed(2)})
+                Delete
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                data-testid="add-declined-foundation"
-                onClick={() =>
-                  // Owner 2026-08-31: documents on the invoice that the
-                  // customer declined a new foundation — a no-charge
-                  // line, added by hand like Removal.
-                  setLines((prev) => [
-                    ...prev,
-                    {
-                      key: nextKey(),
-                      variantId: null,
-                      description: 'Client Declined New Foundation',
-                      quantity: 1,
-                      unitPriceCents: 0,
-                      lineDiscountCents: 0,
-                      lineType: 'custom',
-                      fulfillmentMethod: '',
-                      sourceLocationId: '',
-                      deliveryDate: '',
-                    },
-                  ])
-                }
-              >
-                + Declined foundation ($0)
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => setShowProductSearch(true)}
-                data-testid="add-product"
-              >
-                <Search size={13} aria-hidden /> Add Product
-              </Button>
-            </>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {exchangeOriginal && (
+        <Alert tone="warning" data-testid="exchange-banner">
+          Writing an <strong>Exchange Order</strong> against original invoice{' '}
+          <strong>{exchangeOriginal.number}</strong> — the document prints with the original number,
+          and the customer is fixed to the original order&apos;s.
+        </Alert>
+      )}
+      {!exchangeOriginal && openOrders.length > 0 && (
+        <Alert tone="warning" data-testid="duplicate-order-banner">
+          This customer already has {openOrders.length === 1 ? 'an open order' : 'open orders'}:{' '}
+          {openOrders.map((o, i) => (
+            <span key={o.id}>
+              {i > 0 && ', '}
+              <strong>{o.number}</strong>
+              {(o.deliveryDate ?? o.requestedDate) && ` (${o.deliveryDate ?? o.requestedDate})`}
+            </span>
+          ))}
+          {' — '}consider one truck: add to the existing order or match its delivery date.
+        </Alert>
+      )}
+      {loadError && (
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => location.reload()}>
+              Retry
+            </Button>
           }
         >
-          {lines.length === 0 ? (
-            <EmptyState>No items yet — Add Product to start.</EmptyState>
+          The register could not load its stores: {loadError}
+        </Alert>
+      )}
+
+      <div className="reg-grid">
+        {/* ---------------------------------------------------------- items */}
+        <section className="reg-items" aria-labelledby="reg-items-title">
+          <div className="reg-section-head">
+            <h2 id="reg-items-title" className="t-title">
+              Items
+            </h2>
+            <span className="reg-count mono">
+              {lines.length} line{lines.length === 1 ? '' : 's'}
+            </span>
+            <span className="reg-section-note">Stock is reserved when the sale completes</span>
+            <Button
+              variant="primary"
+              kbd="F2"
+              onClick={() => setShowProductSearch(true)}
+              disabled={locked || !locationId}
+              data-testid="add-product"
+            >
+              Add product
+            </Button>
+          </div>
+          {locations == null ? (
+            <LoadingRows rows={4} height={44} what="The register" />
+          ) : lines.length === 0 ? (
+            <EmptyState
+              title="No items yet"
+              action={
+                <>
+                  <Button
+                    variant="primary"
+                    onClick={() => setShowProductSearch(true)}
+                    disabled={locked}
+                  >
+                    Add product
+                  </Button>
+                  {drafts.length > 0 && (
+                    <Button onClick={() => setDraftsOpen(true)}>Resume a draft</Button>
+                  )}
+                </>
+              }
+            >
+              Press <Kbd keys="F2" /> or Add product. Lines source from the{' '}
+              {nameOf(defaultSourceFor('delivery', ctx))} unless the customer is taking them today.
+            </EmptyState>
           ) : (
-            <TableWrap>
-              <table className="table">
+            <div className="reg-table-wrap">
+              <table className="table reg-table">
+                <colgroup>
+                  <col />
+                  <col style={{ width: 62 }} />
+                  <col style={{ width: 100 }} />
+                  <col style={{ width: 80 }} />
+                  <col style={{ width: 148 }} />
+                  <col style={{ width: 172 }} />
+                  <col style={{ width: 104 }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Item</th>
-                    <th>Qty</th>
-                    <th>Price $</th>
-                    <th>Disc $</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Price</th>
+                    <th className="num">Disc</th>
                     <th>Fulfillment</th>
                     <th>Inventory from</th>
                     <th className="num">Amount</th>
-                    <th className="actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1569,92 +1338,280 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     <LineRow
                       key={l.key}
                       line={l}
-                      storeId={locationId}
-                      locations={locations}
+                      locked={locked}
+                      ctx={ctx}
+                      storeName={store?.name ?? 'the store'}
+                      avail={availFor(l)}
+                      recyclingFeeCents={recyclingFeeCents}
                       onPatch={patchLine}
+                      onFulfillment={setLineFulfillment}
+                      onSource={setLineSource}
+                      onAddon={toggleAddon}
                       onRemove={(k) => setLines((p) => p.filter((x) => x.key !== k))}
                     />
                   ))}
                 </tbody>
               </table>
-            </TableWrap>
+            </div>
           )}
-        </Card>
+        </section>
 
-        <Card title={<StepTitle n={3} label="Order details" />}>
-          <FormGrid cols={3}>
-            <Field label="Order type">
-              <Select
-                value={orderType}
-                onChange={(e) => setOrderType(e.target.value as typeof orderType)}
-                data-testid="order-type"
-              >
-                <option value="sales_order">Sales order</option>
-                <option value="layaway">Layaway ($100 min deposit)</option>
-                <option value="quote">Sales quote</option>
-              </Select>
-            </Field>
-            <Field label="Store">
-              <Select
-                value={locationId}
-                onChange={(e) => {
-                  setLocationId(e.target.value);
-                  const next = locations.find((l) => l.id === e.target.value);
-                  if (next) setTaxRateBps(next.taxRateBps ?? taxRateBps);
+        {/* ----------------------------------------------------------- rail */}
+        <aside className="reg-rail">
+          <section className="reg-card" aria-labelledby="reg-cust-title">
+            <div className="reg-card-head">
+              <h2 id="reg-cust-title" className="t-title">
+                Customer
+              </h2>
+              {customer && (
+                <a href={`/customers/${customer.id}`} className="reg-link">
+                  History
+                </a>
+              )}
+            </div>
+            {customer ? (
+              <div className="reg-customer">
+                <div style={{ minWidth: 0 }}>
+                  <div className="reg-customer-name" data-testid="order-customer">
+                    {customerName(customer)}
+                  </div>
+                  <div className="reg-customer-sub mono">{customer.phone ?? '—'}</div>
+                  <div className="reg-customer-sub">
+                    {[customer.email, addressPreview(customer)].filter(Boolean).join(' · ')}
+                    {storeCredit != null && storeCredit > 0 && (
+                      <span data-testid="store-credit-chip">
+                        {' · '}
+                        {formatMoney(storeCredit)} store credit
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setCustomer(null)}
+                  disabled={locked}
+                >
+                  Change
+                </Button>
+              </div>
+            ) : creatingCustomer ? (
+              <NewCustomerForm
+                value={newCust}
+                onChange={setNewCust}
+                bill={newBill}
+                onBill={setNewBill}
+                billDiffers={billDiffers}
+                onBillDiffers={setBillDiffers}
+                zipMemo={zipMemo}
+                dupeWarn={dupeWarn}
+                onUseExisting={(id) => void attachExistingCustomer(id)}
+                busy={creatingBusy}
+                onCancel={() => {
+                  setCreatingCustomer(false);
+                  clearNewCustomer();
                 }}
-              >
-                {locations
-                  .filter((l) => l.canSellHere !== false)
-                  .map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
+                onCreate={() => {
+                  const addr = (a: typeof EMPTY_ADDRESS) => ({
+                    line1: a.line1.trim() || null,
+                    line2: a.line2.trim() || null,
+                    city: a.city.trim() || null,
+                    region: a.region.trim() || null,
+                    postalCode: a.postalCode.trim() || null,
+                  });
+                  const hasAddr = (a: { line1: string; city: string }) =>
+                    Boolean(a.line1.trim() || a.city.trim());
+                  const addresses = [
+                    ...(hasAddr(newCust) ? [{ label: 'delivery', ...addr(newCust) }] : []),
+                    ...(billDiffers && hasAddr(newBill)
+                      ? [{ label: 'billing', ...addr(newBill) }]
+                      : []),
+                  ];
+                  setCreatingBusy(true);
+                  void api<CustomerHit>('/v1/customers', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      firstName: newCust.firstName || null,
+                      lastName: newCust.lastName || null,
+                      phone: newCust.phone || null,
+                      phone2: newCust.phone2 || null,
+                      email: newCust.email || null,
+                      referralSource: newCust.referralSource || null,
+                      ...(addresses.length > 0 ? { addressesJson: addresses } : {}),
+                    }),
+                  })
+                    .then((c) => {
+                      setCustomer(c);
+                      setCreatingCustomer(false);
+                      clearNewCustomer();
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                    .finally(() => setCreatingBusy(false));
+                }}
+              />
+            ) : (
+              <div className="reg-cust-search">
+                <Field label="Phone or name">
+                  <Input
+                    ref={customerInput}
+                    value={custQuery}
+                    onChange={(e) => setCustQuery(e.target.value)}
+                    placeholder="(818) 555-…"
+                    data-testid="customer-search"
+                    autoFocus
+                    autoComplete="off"
+                  />
+                </Field>
+                {custOpen && custHits.length > 0 && (
+                  <div className="reg-cust-hits" role="listbox" aria-label="Matching customers">
+                    {custHits.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        className="reg-cust-hit"
+                        data-testid="customer-hit"
+                        onClick={() => {
+                          setCustomer(c);
+                          setCustOpen(false);
+                          setCustQuery('');
+                        }}
+                      >
+                        <span className="reg-cust-hit-name">{customerName(c)}</span>
+                        <span className="reg-cust-hit-sub">{addressPreview(c)}</span>
+                        <span className="mono reg-cust-hit-phone">{c.phone ?? ''}</span>
+                      </button>
+                    ))}
+                    {custMore && <div className="reg-cust-more">More matches — keep typing.</div>}
+                  </div>
+                )}
+                <Button
+                  onClick={() => {
+                    clearNewCustomer();
+                    setCreatingCustomer(true);
+                  }}
+                  disabled={locked}
+                >
+                  New customer
+                </Button>
+              </div>
+            )}
+            {customer && fulfillment !== 'take_with' && (
+              <label className="reg-check">
+                <input
+                  type="checkbox"
+                  checked={shipDiffers}
+                  onChange={(e) => setShipDiffers(e.target.checked)}
+                  disabled={locked}
+                />
+                Ship to a different address
+              </label>
+            )}
+            {customer && shipDiffers && fulfillment !== 'take_with' && (
+              <div className="reg-stack">
+                <Input
+                  placeholder="Address line 1"
+                  aria-label="Address line 1"
+                  value={ship.line1}
+                  onChange={(e) => setShip({ ...ship, line1: e.target.value })}
+                  disabled={locked}
+                />
+                <Input
+                  placeholder="Line 2"
+                  aria-label="Line 2"
+                  value={ship.line2}
+                  onChange={(e) => setShip({ ...ship, line2: e.target.value })}
+                  disabled={locked}
+                />
+                <div className="reg-two">
+                  <Input
+                    placeholder="City"
+                    aria-label="City"
+                    value={ship.city}
+                    onChange={(e) => setShip({ ...ship, city: e.target.value })}
+                    disabled={locked}
+                  />
+                  <Input
+                    placeholder="State"
+                    aria-label="State"
+                    value={ship.region}
+                    onChange={(e) => setShip({ ...ship, region: e.target.value })}
+                    disabled={locked}
+                  />
+                </div>
+                <div className="reg-two">
+                  <Input
+                    placeholder="ZIP"
+                    aria-label="ZIP"
+                    value={ship.postalCode}
+                    onChange={(e) =>
+                      autofillFromZip(e.target.value, setShip, zipMemo.current, 'ship')
+                    }
+                    disabled={locked}
+                  />
+                  <Input
+                    placeholder="Phone at address"
+                    aria-label="Phone at address"
+                    value={ship.phone}
+                    onChange={(e) => setShip({ ...ship, phone: e.target.value })}
+                    disabled={locked}
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="reg-card" aria-labelledby="reg-order-title">
+            <h2 id="reg-order-title" className="t-title">
+              Order details
+            </h2>
+            <div className="reg-two">
+              <Field label="Store">
+                <Select
+                  value={locationId}
+                  onChange={(e) => {
+                    setLocationId(e.target.value);
+                    const next = locs.find((l) => l.id === e.target.value);
+                    if (next) setTaxRateBps(next.taxRateBps ?? taxRateBps);
+                  }}
+                  disabled={locked}
+                  data-testid="order-store"
+                >
+                  {locs
+                    .filter((l) => l.canSellHere !== false && l.locationType !== 'warehouse')
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              <Field label="Fulfillment">
+                <Select
+                  value={fulfillment}
+                  onChange={(e) => {
+                    setFulfillment(e.target.value as Fulfillment);
+                    setPickerFrom(null);
+                  }}
+                  disabled={locked}
+                  data-testid="fulfillment-method"
+                >
+                  {FULFILLMENTS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
                     </option>
                   ))}
-              </Select>
-            </Field>
-            <Field label="Fulfillment">
-              <Select
-                value={fulfillment}
-                onChange={(e) => {
-                  const next = e.target.value as Fulfillment;
-                  setFulfillment(next);
-                  // Re-default every stock line's source for the new mode:
-                  // take-with pulls from the login store, delivery from
-                  // the warehouse. The per-line "From" select still wins
-                  // after this.
-                  const wh = findWarehouse(locations);
-                  setLines((prev) =>
-                    prev.map((l) =>
-                      l.lineType === 'custom'
-                        ? l
-                        : {
-                            ...l,
-                            sourceLocationId:
-                              next === 'take_with' ? '' : wh && wh.id !== locationId ? wh.id : '',
-                          },
-                    ),
-                  );
-                }}
-                data-testid="fulfillment-method"
-              >
-                {FULFILLMENTS.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            {fulfillment !== 'take_with' && (
+                </Select>
+              </Field>
               <Field
-                label={fulfillment === 'pickup' ? 'Pickup date' : 'Delivery date'}
-                // The capacity note rides the field: muted while stops
-                // remain, red (and marked invalid) once the day is full.
+                label={fulfillment === 'take_with' ? 'Taken' : 'Promised'}
                 hint={
                   fulfillment === 'delivery' &&
                   dayCapacity &&
                   dayCapacity.booked < dayCapacity.cap ? (
                     <span data-testid="newsale-capacity">
-                      {`${dayCapacity.cap - dayCapacity.booked} of ${dayCapacity.cap} stops left that day`}
+                      {dayCapacity.cap - dayCapacity.booked} of {dayCapacity.cap} stops left
                     </span>
                   ) : undefined
                 }
@@ -1663,38 +1620,66 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   dayCapacity &&
                   dayCapacity.booked >= dayCapacity.cap ? (
                     <span data-testid="newsale-capacity">
-                      {`Full — ${dayCapacity.booked}/${dayCapacity.cap} stops (booking will need a capacity override)`}
+                      Full — {dayCapacity.booked}/{dayCapacity.cap} stops
                     </span>
                   ) : undefined
                 }
               >
                 <Input
                   type="date"
-                  value={requestedDate}
+                  value={
+                    fulfillment === 'take_with'
+                      ? new Date().toISOString().slice(0, 10)
+                      : requestedDate
+                  }
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setRequestedDate(e.target.value)}
+                  disabled={locked || fulfillment === 'take_with'}
+                  className="input-mono"
                 />
               </Field>
-            )}
-            {members.length > 0 && (
-              <>
-                <Field label="Salesperson">
+              <Field label="Salesperson">
+                <Select
+                  value={salespeople[0] ?? ''}
+                  onChange={(e) => setSalespeople([e.target.value, salespeople[1] ?? ''])}
+                  disabled={locked}
+                >
+                  <option value="">Me (signed in)</option>
+                  {members.map((m) => (
+                    <option key={m.membershipId} value={m.membershipId}>
+                      {m.name?.trim() || m.email}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <button
+              type="button"
+              className="reg-more"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((v) => !v)}
+            >
+              {moreOpen ? '▾' : '▸'} More — type, second salesperson, notes, fees
+            </button>
+            {moreOpen && (
+              <div className="reg-stack">
+                <Field label="Order type">
                   <Select
-                    value={salespeople[0] ?? ''}
-                    onChange={(e) => setSalespeople([e.target.value, salespeople[1] ?? ''])}
+                    value={orderType}
+                    onChange={(e) => setOrderType(e.target.value as typeof orderType)}
+                    disabled={locked}
+                    data-testid="order-type"
                   >
-                    <option value="">Me (signed in)</option>
-                    {members.map((m) => (
-                      <option key={m.membershipId} value={m.membershipId}>
-                        {m.name?.trim() || m.email}
-                      </option>
-                    ))}
+                    <option value="sales_order">Sales order</option>
+                    <option value="layaway">Layaway ($100 min deposit)</option>
+                    <option value="quote">Sales quote</option>
                   </Select>
                 </Field>
                 <Field label="2nd salesperson (equal split)">
                   <Select
                     value={salespeople[1] ?? ''}
                     onChange={(e) => setSalespeople([salespeople[0] ?? '', e.target.value])}
+                    disabled={locked}
                   >
                     <option value="">None</option>
                     {members.map((m) => (
@@ -1704,266 +1689,316 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     ))}
                   </Select>
                 </Field>
-              </>
-            )}
-            {fulfillment !== 'take_with' && (
-              <Field label="Delivery / pickup instructions" className="form-span">
-                <textarea
-                  value={deliveryInstructions}
-                  onChange={(e) => setDeliveryInstructions(e.target.value)}
-                  rows={2}
-                  className="textarea"
-                />
-              </Field>
-            )}
-            <Field label="Order notes (printed on the invoice)" className="form-span">
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="textarea"
-              />
-            </Field>
-          </FormGrid>
-        </Card>
-        {/* BA-0036: DOM-last so the entry path gets the first tab stops;
-            CSS order keeps the strip visually on top. */}
-        {drafts.length > 0 && (
-          <Toolbar className="-order-1" data-testid="draft-chips">
-            <span className="muted">Drafts:</span>
-            {drafts.map((d) => (
-              <span key={d.id} className="inline-flex items-center gap-1">
-                <Button size="sm" variant="secondary" onClick={() => void resumeDraft(d.id)}>
-                  {d.number} · {formatMoney(d.totalCents)}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Delete draft ${d.number}`}
-                  title="Delete this draft"
-                  data-testid="delete-draft"
-                  onClick={() => {
-                    if (!confirm(`Delete draft ${d.number}? This cannot be undone.`)) return;
-                    void api(`/v1/orders/${d.id}/cancel`, {
-                      method: 'POST',
-                      body: JSON.stringify({ reason: 'draft deleted at the register' }),
-                    })
-                      .then(() => {
-                        toast.success(`Draft ${d.number} deleted`);
-                        loadDrafts();
-                      })
-                      .catch((err) =>
-                        toast.error(err instanceof Error ? err.message : String(err)),
-                      );
-                  }}
-                >
-                  ✕
-                </Button>
-              </span>
-            ))}
-          </Toolbar>
-        )}
-      </div>
-
-      {/* Pinned totals + payments rail */}
-      <div>
-        <Stack className="sticky top-3">
-          <Card title="Totals">
-            <Stack gap="sm" data-testid="totals-panel">
-              <div>
-                <TotalRow label="Merchandise" cents={totals.merchandise} />
-                <TotalRow label="Discounts" cents={-totals.discounts} />
-              </div>
-              <FormGrid cols={2}>
-                <Field label="Installation $">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={installFee}
-                    onChange={(e) => setInstallFee(e.target.value)}
-                  />
-                </Field>
-                <Field label="Delivery $">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(e.target.value)}
-                  />
-                </Field>
-              </FormGrid>
-              <div>
-                <TotalRow label="Recycling" cents={totals.recycling} />
-                <TotalRow
-                  label={
-                    `Tax (${(taxRateBps / 100).toFixed(2)}%)` +
-                    (totals.untaxedLines
-                      ? ` · ${totals.untaxedLines} untaxed line${totals.untaxedLines === 1 ? '' : 's'}`
-                      : '')
+                <div className="reg-two">
+                  <Field label="Delivery fee">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(e.target.value)}
+                      disabled={locked}
+                      className="input-num"
+                    />
+                  </Field>
+                  <Field label="Installation">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={installFee}
+                      onChange={(e) => setInstallFee(e.target.value)}
+                      disabled={locked}
+                      className="input-num"
+                    />
+                  </Field>
+                </div>
+                <Field
+                  label="Order discount"
+                  hint={
+                    parseDollars(orderDiscount) > totals.orderDiscApplied
+                      ? `Capped at the merchandise total — ${formatMoney(totals.orderDiscApplied)} applied.`
+                      : undefined
                   }
-                  cents={totals.taxCents}
-                />
+                >
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={orderDiscount}
+                    onChange={(e) => setOrderDiscount(e.target.value)}
+                    disabled={locked}
+                    className="input-num"
+                  />
+                </Field>
+                {fulfillment !== 'take_with' && (
+                  <Field label="Delivery / pickup instructions">
+                    <textarea
+                      value={deliveryInstructions}
+                      onChange={(e) => setDeliveryInstructions(e.target.value)}
+                      rows={2}
+                      className="textarea"
+                      disabled={locked}
+                    />
+                  </Field>
+                )}
+                <Field label="Order notes (printed on the invoice)">
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={2}
+                    className="textarea"
+                    disabled={locked}
+                  />
+                </Field>
               </div>
-              <Field
-                label="Order discount $"
-                hint={
-                  parseDollars(orderDiscount) > totals.orderDiscApplied
-                    ? `Capped at the merchandise total — ${formatMoney(totals.orderDiscApplied)} applied.`
-                    : undefined
-                }
-              >
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={orderDiscount}
-                  onChange={(e) => setOrderDiscount(e.target.value)}
-                />
-              </Field>
-              <div>
-                <div className="flex justify-between text-lg font-bold">
-                  <span>Total</span>
-                  <span data-testid="grand-total">
-                    <Money cents={totals.totalCents} />
-                  </span>
-                </div>
-                <TotalRow label="Amount paid" cents={totals.paidCents} />
-                <div className="flex justify-between font-semibold">
-                  <span>Balance due</span>
-                  <span data-testid="balance-due">
-                    <Money cents={totals.balanceCents} />
-                  </span>
-                </div>
-              </div>
-            </Stack>
-          </Card>
-
-          <Card title="Payments">
-            {storeCredit != null && storeCredit > 0 && (
-              <Alert tone="success" data-testid="store-credit-chip">
-                Store credit available: <strong>{formatMoney(storeCredit)}</strong> — use the “Store
-                credit” tender to apply it.
-              </Alert>
             )}
-            <Stack gap="sm">
-              {payments.length > 0 && (
-                <div>
-                  {payments.map((p) => (
-                    <div key={p.key} className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1">
-                        {TENDERS.find((t) => t.value === p.method)?.label}
-                        {p.ref ? ` · ${p.ref}` : ''}
-                      </span>
-                      <Money cents={p.amountCents} />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setPayments((prev) => prev.filter((x) => x.key !== p.key))}
-                        aria-label="Remove payment"
-                      >
-                        <X size={13} aria-hidden />
-                      </Button>
-                    </div>
-                  ))}
+          </section>
+
+          <section className="reg-card reg-totals" aria-label="Totals" data-testid="totals-panel">
+            <TotalRow label="Merchandise" cents={totals.merchandise} />
+            <TotalRow label="Discounts" cents={-totals.discounts} />
+            {totals.recycling > 0 && <TotalRow label="Recycling" cents={totals.recycling} />}
+            {totals.install > 0 && <TotalRow label="Installation" cents={totals.install} />}
+            <TotalRow label="Delivery" cents={totals.delivery} />
+            <TotalRow
+              label={`Tax ${(taxRateBps / 100).toFixed(taxRateBps % 100 === 0 ? 0 : 2)}%${
+                totals.untaxedLines ? ` · ${totals.untaxedLines} untaxed` : ''
+              }`}
+              cents={totals.taxCents}
+            />
+            <div className="reg-total">
+              <span>Total</span>
+              <span className="reg-total-value" data-testid="grand-total">
+                <Money cents={totals.totalCents} />
+              </span>
+            </div>
+            {payments.map((p) => (
+              <div key={p.key} className="reg-total-row reg-payment">
+                <span>
+                  {TENDERS.find((t) => t.value === p.method)?.label}
+                  {p.ref ? <span className="mono"> ••{p.ref.slice(-4)}</span> : null}
+                  {!locked && (
+                    <button
+                      type="button"
+                      className="reg-text-btn"
+                      onClick={() => setPayments((prev) => prev.filter((x) => x.key !== p.key))}
+                    >
+                      remove
+                    </button>
+                  )}
+                </span>
+                <span className="mono">−{formatMoney(p.amountCents)}</span>
+              </div>
+            ))}
+            <div
+              className={`reg-due${totals.balanceCents === 0 && lines.length > 0 ? ' is-paid' : ''}`}
+            >
+              <span>{dueLabel}</span>
+              <span className="mono" data-testid="balance-due">
+                <Money cents={totals.balanceCents} />
+              </span>
+            </div>
+          </section>
+
+          {!locked ? (
+            <section className="reg-card reg-actions" aria-label="Payment and completion">
+              <div aria-live="polite">{error && <Alert tone="error">{error}</Alert>}</div>
+              {hasZero && (
+                <div className="reg-zero" data-testid="zero-guard">
+                  <strong>A line is priced at $0.00.</strong> Fix the price, or confirm it is
+                  intentional (floor model, warranty replacement) before taking payment.
+                  <label className="reg-check">
+                    <input
+                      type="checkbox"
+                      checked={zeroOk}
+                      onChange={(e) => setZeroOk(e.target.checked)}
+                    />
+                    $0.00 is intentional
+                  </label>
                 </div>
               )}
-              <div className="grid grid-cols-[1fr_90px] gap-2">
-                <Select
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value as Tender)}
-                  data-testid="pay-method"
-                  aria-label="Payment method"
+              <div className="reg-pay">
+                <div className="reg-two">
+                  <Field label="Method">
+                    <Select
+                      value={payMethod}
+                      onChange={(e) => setPayMethod(e.target.value as Tender)}
+                      data-testid="pay-method"
+                    >
+                      {TENDERS.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Amount">
+                    <Input
+                      ref={payAmountInput}
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      placeholder={(totals.balanceCents / 100).toFixed(2)}
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      data-testid="pay-amount"
+                      className="input-num"
+                      disabled={zeroBlock}
+                    />
+                  </Field>
+                </div>
+                <Field
+                  label={payMethod === 'cash' ? 'Reference (optional)' : 'Card last 4 / approval #'}
                 >
-                  {TENDERS.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </Select>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  placeholder={(totals.balanceCents / 100).toFixed(2)}
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  data-testid="pay-amount"
-                  aria-label="Payment amount"
-                />
-              </div>
-              {/* BA-0003: this field renders for every method so the rail
-                keeps one height and Complete never moves mid-aim. */}
-              <Input
-                placeholder={
-                  payMethod === 'cash' ? 'Reference (optional)' : 'Reference / last 4 / approval #'
-                }
-                value={payRef}
-                onChange={(e) => setPayRef(e.target.value)}
-                aria-label="Payment reference"
-                className="w-full"
-              />
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={addPayment}
-                  data-testid="add-payment"
-                >
-                  Add payment
-                </Button>
-                {totals.balanceCents > 0 && (
+                  <Input
+                    value={payRef}
+                    onChange={(e) => setPayRef(e.target.value)}
+                    className="input-mono"
+                    disabled={zeroBlock}
+                  />
+                </Field>
+                <div className="reg-pay-quick">
                   <Button
                     size="sm"
-                    variant="ghost"
                     onClick={() => setPayAmount((totals.balanceCents / 100).toFixed(2))}
+                    disabled={zeroBlock || totals.balanceCents === 0}
                   >
-                    Exact balance
+                    Pay in full
                   </Button>
-                )}
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      setPayAmount((Math.round(totals.totalCents / 2) / 100).toFixed(2))
+                    }
+                    disabled={zeroBlock || totals.totalCents === 0}
+                  >
+                    50% deposit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    kbd="F8"
+                    onClick={addPayment}
+                    disabled={zeroBlock}
+                    data-testid="add-payment"
+                    className="reg-record"
+                  >
+                    Record
+                  </Button>
+                </div>
               </div>
-            </Stack>
-          </Card>
-
-          <div>
-            <div aria-live="polite">{error && <Alert tone="error">{error}</Alert>}</div>
-            <div className="flex flex-col gap-2">
               <Button
                 variant="primary"
-                disabled={busy}
+                className="reg-complete"
+                disabled={busy || zeroBlock || !customer || lines.length === 0}
                 onClick={() => void submit('complete')}
                 data-testid="complete-sale"
               >
-                {busy
-                  ? 'Working…'
-                  : orderType === 'quote'
-                    ? `Save quote ${formatMoney(totals.totalCents)}`
-                    : `Complete ${formatMoney(totals.totalCents)}`}
+                {busy ? 'Working…' : `${completeLabel} · ${formatMoney(totals.totalCents)}`}
               </Button>
-              <Button
-                variant="secondary"
-                disabled={busy}
-                onClick={() => void submit('draft')}
-                data-testid="save-draft"
-              >
-                Save as Draft
+              <div className="reg-two">
+                <Button
+                  onClick={() => void submit('draft')}
+                  disabled={busy}
+                  data-testid="save-draft"
+                >
+                  Save draft
+                </Button>
+                <Button variant="ghost" onClick={resetAll} disabled={busy || !dirty}>
+                  Clear
+                </Button>
+              </div>
+              <div className="reg-hint">{completeHint}</div>
+            </section>
+          ) : (
+            <section className="reg-card reg-done" aria-label="Sale complete">
+              <p className="reg-done-line">
+                <h2 className="reg-done-title">Sale complete</h2>{' '}
+                {lines.filter((l) => l.lineType !== 'custom').length} line
+                {lines.filter((l) => l.lineType !== 'custom').length === 1 ? '' : 's'}
+                {done!.sources.length > 0 ? ` reserved at ${listJoin(done!.sources)}` : ''}.{' '}
+                {done!.dueCents > 0
+                  ? `${formatMoney(done!.dueCents)} due at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}.`
+                  : 'Paid in full.'}
+                {requestedDate
+                  ? ` ${fulfillment === 'pickup' ? 'Pickup' : 'Delivery'} ${requestedDate}.`
+                  : ''}
+              </p>
+              {done!.splitOrders && done!.splitOrders.length > 0 && (
+                <Alert tone="info" data-testid="split-siblings">
+                  Backordered lines split into{' '}
+                  {done!.splitOrders.map((s, i) => (
+                    <span key={s.id}>
+                      {i > 0 && ', '}
+                      <a href={`/orders/${s.id}`}>{s.number}</a>
+                      {s.requestedDate ? ` (promised ${s.requestedDate})` : ''}
+                    </span>
+                  ))}{' '}
+                  — one payment covers them all.
+                </Alert>
+              )}
+              {done!.bookedDeliveries && done!.bookedDeliveries.length > 0 && (
+                <Alert tone="success" data-testid="booked-deliveries">
+                  Delivery booked: {done!.bookedDeliveries.join(', ')} — it&apos;s on the Deliveries
+                  calendar.
+                </Alert>
+              )}
+              {done!.takeWith && (
+                <Alert
+                  tone={done!.takeWith.completed ? 'success' : 'warning'}
+                  data-testid="take-with-result"
+                >
+                  {done!.takeWith.completed ? (
+                    <>
+                      Take-with items went out on{' '}
+                      <a href={`/orders/${done!.takeWith.orderId}`}>{done!.takeWith.number}</a> —
+                      paid and completed.
+                    </>
+                  ) : (
+                    <>
+                      Take-with items split to{' '}
+                      <a href={`/orders/${done!.takeWith.orderId}`}>{done!.takeWith.number}</a>,
+                      waiting: {done!.takeWith.reason ?? 'not ready yet'}. Finish it with Complete
+                      on that order.
+                    </>
+                  )}
+                </Alert>
+              )}
+              <Button variant="primary" className="reg-complete" kbd="P" onClick={printReceipt}>
+                Print receipt
               </Button>
-            </div>
-          </div>
-        </Stack>
+              <div className="reg-two">
+                <Button
+                  onClick={() =>
+                    router.push(
+                      done!.kind === 'sale' ? `/sales/${done!.id}` : `/orders/${done!.id}`,
+                    )
+                  }
+                >
+                  Open {done!.kind}
+                </Button>
+                <Button kbd="N" onClick={resetAll} data-testid="new-sale-again">
+                  New sale
+                </Button>
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
 
-      {showProductSearch && (
+      {showProductSearch && locationId && (
         <ProductSearchDialog
-          locationId={searchSourceId || locationId}
+          locationId={pickerLocation || locationId}
           locationName={
-            locations.find((l) => l.id === (searchSourceId || locationId))?.name ?? null
+            locs.find((l) => l.id === (pickerLocation || locationId))
+              ? sourceLabel(locs.find((l) => l.id === (pickerLocation || locationId))!, locationId)
+              : null
           }
-          locations={locations}
+          locations={locs}
           storeId={locationId}
-          onChangeLocation={(id) => setSearchSourceId(id === locationId ? '' : id)}
-          onAdd={addProduct}
+          onChangeLocation={(id) => setPickerFrom(id)}
+          onAdd={(row) => addProduct(row, pickerLocation || locationId)}
           onClose={() => setShowProductSearch(false)}
         />
       )}
@@ -1971,181 +2006,477 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   );
 }
 
+// ------------------------------------------------------------------ pieces
+
 function LineRow({
   line: l,
-  storeId,
-  locations,
+  locked,
+  ctx,
+  storeName,
+  avail,
+  recyclingFeeCents,
   onPatch,
+  onFulfillment,
+  onSource,
+  onAddon,
   onRemove,
 }: {
   line: Line;
-  storeId: string;
-  locations: LocationRow[];
+  locked: boolean;
+  ctx: SourcingContext;
+  storeName: string;
+  avail: Avail | undefined;
+  recyclingFeeCents: number;
   onPatch: (key: string, patch: Partial<Line>) => void;
+  onFulfillment: (key: string, f: '' | Fulfillment) => void;
+  onSource: (key: string, id: string) => void;
+  onAddon: (key: string, which: keyof Addons) => void;
   onRemove: (key: string) => void;
 }) {
-  const amount = l.quantity * l.unitPriceCents - l.lineDiscountCents;
-  const outOfStock = l.variantId && (l.availableHere ?? 1) <= 0;
+  const isFee = l.lineType === 'custom';
+  const eff = effectiveFulfillment(l, ctx.orderFulfillment);
+  const sourceName = ctx.locations.find((x) => x.id === l.sourceLocationId)?.name ?? 'the source';
+  const addonCents = l.addons.recycling ? l.quantity * recyclingFeeCents : 0;
+  const amount = l.quantity * l.unitPriceCents - l.lineDiscountCents + addonCents;
+  const zero = !isFee && l.unitPriceCents === 0;
+  const warn = isFee
+    ? null
+    : lineWarning({
+        effective: eff,
+        available: avail?.availableHere,
+        quantity: l.quantity,
+        unitPriceCents: l.unitPriceCents,
+        sourceTouched: l.sourceTouched,
+        sourceLocationId: l.sourceLocationId,
+        orderLocationId: ctx.orderLocationId,
+        sourceName,
+        storeName,
+        atpDate: avail?.atpDate,
+      });
+  const short = avail != null && avail.availableHere < l.quantity;
+  const orderLabel = FULFILLMENTS.find((f) => f.value === ctx.orderFulfillment)?.label ?? '';
+  const sorted = [...ctx.locations].sort((a, b) =>
+    a.locationType === b.locationType
+      ? a.name.localeCompare(b.name)
+      : a.locationType === 'warehouse'
+        ? -1
+        : 1,
+  );
   return (
-    <>
-      <tr>
-        <td className="min-w-[180px]">{l.description}</td>
-        <td>
-          <Input
-            type="number"
-            min={1}
-            max={999}
-            value={l.quantity}
-            aria-label={`Quantity for ${l.description}`}
-            onChange={(e) => {
-              // BA-0004/BA-0006: a typo must not delete the line or book
-              // a billion-dollar order. Removal is the ✕ only; quantity
-              // stays within 1–999.
-              const qty = Math.floor(Number(e.target.value));
-              if (!Number.isFinite(qty) || qty < 1) {
-                if (e.target.value !== '') toast('Quantity stays at 1 — use ✕ to remove the line');
-                onPatch(l.key, { quantity: l.quantity });
-                return;
-              }
-              if (qty > 999) {
-                toast('Quantity capped at 999');
-                onPatch(l.key, { quantity: 999 });
-                return;
-              }
-              onPatch(l.key, { quantity: qty });
-            }}
-            className="w-16"
-          />
-        </td>
-        <td>
-          {/* Price override: click, type, done. Small variances stay frictionless;
-              deep ones hit the G6 reason/manager gate at save. */}
-          <Input
-            type="number"
-            step="0.01"
-            min={0}
-            defaultValue={(l.unitPriceCents / 100).toFixed(2)}
-            onBlur={(e) => onPatch(l.key, { unitPriceCents: parseDollars(e.target.value) })}
-            aria-label={`Unit price for ${l.description}`}
-            className="w-24"
-            data-testid="line-price"
-          />
-        </td>
-        <td>
-          <Input
-            type="number"
-            step="0.01"
-            min={0}
-            placeholder="0.00"
-            aria-label={`Discount for ${l.description}`}
-            onBlur={(e) => onPatch(l.key, { lineDiscountCents: parseDollars(e.target.value) })}
-            className="w-20"
-          />
-        </td>
-        <td>
-          {l.lineType === 'custom' ? (
-            <span className="muted">fee</span>
-          ) : (
-            <Select
-              value={l.fulfillmentMethod}
-              onChange={(e) =>
-                onPatch(l.key, { fulfillmentMethod: e.target.value as Line['fulfillmentMethod'] })
-              }
-              className="w-32"
-              aria-label={`Fulfillment for ${l.description}`}
-            >
-              <option value="">Same as order</option>
-              {FULFILLMENTS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </Select>
+    <tr className={zero ? 'reg-row-zero' : undefined} data-testid="line-row">
+      <td>
+        <div className="reg-line-name">{l.description}</div>
+        <div className="reg-line-meta">
+          {l.sku && <span className="mono">{l.sku}</span>}
+          {l.size && <span>{l.size}</span>}
+          {isFee && <span className="muted">fee</span>}
+          {!locked && (
+            <button type="button" className="reg-text-btn" onClick={() => onRemove(l.key)}>
+              remove
+            </button>
           )}
-        </td>
-        <td>
-          {l.lineType === 'custom' ? (
-            <span className="muted">—</span>
-          ) : (
-            <Select
-              value={l.sourceLocationId || storeId}
-              onChange={(e) =>
-                onPatch(l.key, {
-                  sourceLocationId: e.target.value === storeId ? '' : e.target.value,
-                })
-              }
-              className="w-36"
-              aria-label={`Inventory source for ${l.description}`}
-              data-testid="line-source"
-            >
-              {[...locations]
-                .sort((a, b) =>
-                  a.locationType === b.locationType
-                    ? a.name.localeCompare(b.name)
-                    : a.locationType === 'warehouse'
-                      ? -1
-                      : 1,
-                )
-                .map((loc) => (
+        </div>
+        {!isFee && isMattressOrBase(l.description) && (
+          <div className="reg-addons">
+            {(
+              [
+                ['removal', 'Removal', 0],
+                ['recycling', 'Recycling', recyclingFeeCents],
+                ['declined', 'Declined foundation', 0],
+              ] as const
+            ).map(([k, label, cents]) => (
+              <button
+                key={k}
+                type="button"
+                className={`reg-addon${l.addons[k] ? ' is-on' : ''}`}
+                aria-pressed={l.addons[k]}
+                disabled={locked}
+                onClick={() => onAddon(l.key, k)}
+                data-testid={
+                  k === 'recycling'
+                    ? 'add-recycling-fee'
+                    : k === 'declined'
+                      ? 'add-declined-foundation'
+                      : 'add-removal'
+                }
+              >
+                <span aria-hidden className="mono">
+                  {l.addons[k] ? '✓' : '+'}
+                </span>{' '}
+                {label}{' '}
+                <span className="reg-addon-price">({cents ? formatMoney(cents) : '$0'})</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {warn && (
+          <div
+            className={`reg-warn reg-warn-${warn.tone}`}
+            data-testid={short ? 'atp-banner' : undefined}
+          >
+            <span aria-hidden className="mono">
+              {warn.tone === 'risk' ? '▲' : warn.tone === 'waiting' ? '◔' : '·'}
+            </span>{' '}
+            {warn.text}
+          </div>
+        )}
+      </td>
+      <td className="num">
+        <Input
+          type="number"
+          min={1}
+          max={999}
+          value={l.quantity}
+          aria-label={`Quantity for ${l.description}`}
+          disabled={locked}
+          className="input-num reg-cell-input"
+          onChange={(e) => {
+            const qty = Math.floor(Number(e.target.value));
+            if (!Number.isFinite(qty) || qty < 1) {
+              if (e.target.value !== '') toast('Quantity stays at 1 — use remove to drop the line');
+              onPatch(l.key, { quantity: l.quantity });
+              return;
+            }
+            if (qty > 999) {
+              toast('Quantity capped at 999');
+              onPatch(l.key, { quantity: 999 });
+              return;
+            }
+            onPatch(l.key, { quantity: qty });
+          }}
+        />
+      </td>
+      <td className="num">
+        <Input
+          type="number"
+          step="0.01"
+          min={0}
+          key={`${l.key}-${l.unitPriceCents}`}
+          defaultValue={(l.unitPriceCents / 100).toFixed(2)}
+          onBlur={(e) => onPatch(l.key, { unitPriceCents: parseDollars(e.target.value) })}
+          aria-label={`Unit price for ${l.description}`}
+          aria-invalid={zero || undefined}
+          disabled={locked}
+          className={`input-num reg-cell-input${zero ? ' is-zero' : ''}`}
+          data-testid="line-price"
+        />
+      </td>
+      <td className="num">
+        <Input
+          type="number"
+          step="0.01"
+          min={0}
+          placeholder="0.00"
+          defaultValue={l.lineDiscountCents ? (l.lineDiscountCents / 100).toFixed(2) : ''}
+          aria-label={`Discount for ${l.description}`}
+          onBlur={(e) => onPatch(l.key, { lineDiscountCents: parseDollars(e.target.value) })}
+          disabled={locked}
+          className="input-num reg-cell-input"
+        />
+      </td>
+      <td>
+        {isFee ? (
+          <span className="muted">—</span>
+        ) : (
+          <Select
+            value={l.fulfillmentMethod}
+            onChange={(e) => onFulfillment(l.key, e.target.value as '' | Fulfillment)}
+            aria-label={`Fulfillment for ${l.description}`}
+            disabled={locked}
+            className="reg-cell-input"
+          >
+            <option value="">Same as order · {orderLabel}</option>
+            {FULFILLMENTS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </Select>
+        )}
+      </td>
+      <td>
+        {isFee ? (
+          <span className="muted">—</span>
+        ) : (
+          <>
+            <div className="reg-source">
+              <Select
+                value={l.sourceLocationId}
+                onChange={(e) => onSource(l.key, e.target.value)}
+                aria-label={`Inventory source for ${l.description}`}
+                disabled={locked}
+                className="reg-cell-input"
+                data-testid="line-source"
+              >
+                {sorted.map((loc) => (
                   <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                    {loc.locationType === 'warehouse' ? ' (WH)' : ''}
+                    {sourceLabel(loc, ctx.orderLocationId)}
                   </option>
                 ))}
-            </Select>
-          )}
-        </td>
-        <td className="num">
-          <Money cents={amount} />
-        </td>
-        <td className="actions">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onRemove(l.key)}
-            aria-label="Remove line"
-          >
-            <X size={14} aria-hidden />
-          </Button>
-        </td>
-      </tr>
-      {outOfStock && (
-        <tr>
-          <td colSpan={8}>
-            <Alert tone="warning" data-testid="atp-banner">
-              Not in stock at the selected source location.
-              {l.atpDate
-                ? ` Available ~${new Date(l.atpDate).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  })} via PO.`
-                : ' No open PO — will special-order.'}
-            </Alert>
-          </td>
-        </tr>
-      )}
-    </>
+              </Select>
+              {!l.sourceTouched && (
+                <span className="reg-auto" title="Follows the fulfillment type. Edit to override.">
+                  auto
+                </span>
+              )}
+            </div>
+            <div
+              className={`reg-avail${short ? (eff === 'take_with' ? ' is-risk' : ' is-waiting') : ''}`}
+            >
+              {avail
+                ? `${avail.availableHere} available${avail.atpDate ? ' · on PO' : ''}`
+                : 'checking stock…'}
+            </div>
+          </>
+        )}
+      </td>
+      <td className="num mono reg-amount">
+        <Money cents={amount} />
+      </td>
+    </tr>
   );
 }
 
-function StepTitle({ n, label }: { n: number; label: string }) {
+function NewCustomerForm({
+  value,
+  onChange,
+  bill,
+  onBill,
+  billDiffers,
+  onBillDiffers,
+  zipMemo,
+  dupeWarn,
+  onUseExisting,
+  busy,
+  onCancel,
+  onCreate,
+}: {
+  value: typeof EMPTY_NEW_CUSTOMER;
+  onChange: (v: typeof EMPTY_NEW_CUSTOMER) => void;
+  bill: typeof EMPTY_ADDRESS;
+  onBill: (v: typeof EMPTY_ADDRESS) => void;
+  billDiffers: boolean;
+  onBillDiffers: (v: boolean) => void;
+  zipMemo: React.MutableRefObject<{
+    cust: ZipHit | null;
+    bill: ZipHit | null;
+    ship: ZipHit | null;
+  }>;
+  dupeWarn: { id: string; name: string; phone: string | null } | null;
+  onUseExisting: (id: string) => void;
+  busy: boolean;
+  onCancel: () => void;
+  onCreate: () => void;
+}) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="badge badge-brand">
-        {n}
-      </span>
-      {label}
-    </span>
+    <div className="reg-stack" data-testid="new-customer-form">
+      <div className="t-label">New customer</div>
+      <div className="reg-two">
+        <Input
+          placeholder="First name"
+          aria-label="First name"
+          value={value.firstName}
+          onChange={(e) => onChange({ ...value, firstName: e.target.value })}
+          autoFocus
+        />
+        <Input
+          placeholder="Last name"
+          aria-label="Last name"
+          value={value.lastName}
+          onChange={(e) => onChange({ ...value, lastName: e.target.value })}
+        />
+      </div>
+      <div className="reg-two">
+        <Input
+          placeholder="Phone"
+          aria-label="Phone"
+          value={value.phone}
+          onChange={(e) => onChange({ ...value, phone: e.target.value })}
+          className="input-mono"
+        />
+        <Input
+          placeholder="2nd phone (optional)"
+          aria-label="2nd phone (optional)"
+          value={value.phone2}
+          onChange={(e) => onChange({ ...value, phone2: e.target.value })}
+          className="input-mono"
+          data-testid="new-customer-phone2"
+        />
+      </div>
+      <Input
+        placeholder="Email"
+        aria-label="Email"
+        value={value.email}
+        onChange={(e) => onChange({ ...value, email: e.target.value })}
+      />
+      {dupeWarn && (
+        <Alert
+          tone="warning"
+          data-testid="dupe-warning"
+          action={
+            <Button
+              size="sm"
+              data-testid="use-existing-customer"
+              onClick={() => onUseExisting(dupeWarn.id)}
+            >
+              Use existing
+            </Button>
+          }
+        >
+          Looks like <strong>{dupeWarn.name}</strong>
+          {dupeWarn.phone ? ` (${dupeWarn.phone})` : ''} already exists — use them instead?
+        </Alert>
+      )}
+      <div className="t-label">Delivery address</div>
+      <Input
+        placeholder="Delivery address"
+        aria-label="Delivery address"
+        value={value.line1}
+        onChange={(e) => onChange({ ...value, line1: e.target.value })}
+        data-testid="new-customer-address"
+      />
+      <div className="reg-two">
+        <Input
+          placeholder="Apt / unit"
+          aria-label="Apt / unit"
+          value={value.line2}
+          onChange={(e) => onChange({ ...value, line2: e.target.value })}
+        />
+        <Input
+          placeholder="City"
+          aria-label="City"
+          value={value.city}
+          onChange={(e) => onChange({ ...value, city: e.target.value })}
+        />
+      </div>
+      <div className="reg-two">
+        <Input
+          placeholder="State"
+          aria-label="State"
+          value={value.region}
+          onChange={(e) => onChange({ ...value, region: e.target.value })}
+        />
+        <Input
+          placeholder="ZIP"
+          aria-label="ZIP"
+          value={value.postalCode}
+          onChange={(e) =>
+            autofillFromZip(e.target.value, onChange as never, zipMemo.current, 'cust')
+          }
+          className="input-mono"
+        />
+      </div>
+      <label className="reg-check">
+        <input
+          type="checkbox"
+          checked={billDiffers}
+          onChange={(e) => onBillDiffers(e.target.checked)}
+        />
+        Billing address is different
+      </label>
+      {billDiffers && (
+        <>
+          <div className="t-label">Billing address</div>
+          <Input
+            placeholder="Billing address"
+            aria-label="Billing address"
+            value={bill.line1}
+            onChange={(e) => onBill({ ...bill, line1: e.target.value })}
+            data-testid="new-customer-billing"
+          />
+          <div className="reg-two">
+            <Input
+              placeholder="Apt / unit"
+              aria-label="Apt / unit"
+              value={bill.line2}
+              onChange={(e) => onBill({ ...bill, line2: e.target.value })}
+            />
+            <Input
+              placeholder="City"
+              aria-label="City"
+              value={bill.city}
+              onChange={(e) => onBill({ ...bill, city: e.target.value })}
+            />
+          </div>
+          <div className="reg-two">
+            <Input
+              placeholder="State"
+              aria-label="State"
+              value={bill.region}
+              onChange={(e) => onBill({ ...bill, region: e.target.value })}
+            />
+            <Input
+              placeholder="ZIP"
+              aria-label="ZIP"
+              value={bill.postalCode}
+              onChange={(e) =>
+                autofillFromZip(e.target.value, onBill as never, zipMemo.current, 'bill')
+              }
+              className="input-mono"
+            />
+          </div>
+        </>
+      )}
+      <Field label="How did they hear about us?">
+        <Input
+          placeholder="Walk-in, Google, referral…"
+          value={value.referralSource}
+          onChange={(e) => onChange({ ...value, referralSource: e.target.value })}
+          list="referral-sources"
+          data-testid="new-customer-referral"
+        />
+        <datalist id="referral-sources">
+          {[
+            'Walk-in / drive-by',
+            'Google search',
+            'Yelp',
+            'Facebook / Instagram',
+            'TV / radio',
+            'Referred by friend or family',
+            'Repeat customer',
+            'Billboard',
+          ].map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+      </Field>
+      <div className="reg-two">
+        <Button disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" data-testid="create-customer" disabled={busy} onClick={onCreate}>
+          {busy ? 'Creating…' : 'Create'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
 function TotalRow({ label, cents }: { label: string; cents: number }) {
   return (
-    <div className="flex justify-between muted">
+    <div className="reg-total-row">
       <span>{label}</span>
-      <Money cents={cents} />
+      <span className="mono">
+        {cents < 0 ? '−' : ''}
+        {formatMoney(Math.abs(cents))}
+      </span>
     </div>
   );
+}
+
+/** "A", "A and B", "A, B and C". */
+function listJoin(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+function ago(iso: string): string {
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (days === 0) return `today ${time}`;
+  if (days === 1) return `yesterday ${time}`;
+  return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
 }
 
 function customerName(c: CustomerHit): string {
@@ -2176,16 +2507,3 @@ function parseDollars(s: string): number {
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.round(n * 100);
 }
-
-// Autocomplete option inside the customer popover — no shared listbox
-// primitive exists yet, so the reset stays here (structural only).
-const hitBtn = {
-  display: 'block',
-  width: '100%',
-  textAlign: 'left' as const,
-  padding: '8px 10px',
-  border: 'none',
-  background: 'transparent',
-  cursor: 'pointer',
-  font: 'inherit',
-};

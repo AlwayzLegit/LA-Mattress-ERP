@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Inject, Patch } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { isSupportedCurrency, SUPPORTED_CURRENCIES } from '@jetnine/shared';
@@ -59,6 +59,12 @@ interface OpsSettings {
   /** I4 (RTN-040): days after completion a return is allowed without a
    * manager override (null = no window, returns always allowed). */
   returnWindowDays?: number | null;
+  /**
+   * Redesign Phase 4 (HANDOFF_inventory_source_defaults): where a new sale
+   * line pulls stock from unless the customer takes it today. Null = the
+   * single warehouse location, else the selling store.
+   */
+  defaultSourceLocationId?: string | null;
   /** Exchange pack: % of the return credit charged as a restocking fee
    * on exchanges (null/0 = none). Overridable per exchange with its own
    * permission. */
@@ -191,6 +197,14 @@ const OPS_SETTINGS_REGISTRY = [
     nullMeans: 'No capacity budget',
     classTags: ['TRISTATE'],
     readBy: 'Delivery scheduling',
+  },
+  {
+    key: 'defaultSourceLocationId',
+    label: 'Default stock source for new sale lines',
+    type: 'location',
+    nullMeans: 'The single warehouse location; otherwise the selling store',
+    classTags: [],
+    readBy: 'New Sale (Add Product "From" and untouched line sources); order create',
   },
   {
     key: 'zipRoutes',
@@ -414,6 +428,15 @@ function validateOps(input: OpsSettings): OpsSettings {
       throw new BadRequestException('ops.recyclingFeeCents must be a non-negative integer');
     }
     out.recyclingFeeCents = input.recyclingFeeCents;
+  }
+  if (input.defaultSourceLocationId !== undefined) {
+    if (
+      input.defaultSourceLocationId !== null &&
+      (typeof input.defaultSourceLocationId !== 'string' || !input.defaultSourceLocationId.trim())
+    ) {
+      throw new BadRequestException('ops.defaultSourceLocationId must be a location id or null');
+    }
+    out.defaultSourceLocationId = input.defaultSourceLocationId;
   }
   if (input.deliveryDailyCap !== undefined) {
     if (
@@ -811,6 +834,19 @@ export class SettingsController {
     if (body.ops !== undefined) {
       // Same merge semantics as branding: field-by-field, null clears.
       const patch = validateOps(body.ops);
+      if (patch.defaultSourceLocationId) {
+        const [loc] = await this.db
+          .select({ id: schema.locations.id })
+          .from(schema.locations)
+          .where(
+            and(
+              eq(schema.locations.id, patch.defaultSourceLocationId),
+              eq(schema.locations.businessId, tenant.businessId!),
+            ),
+          )
+          .limit(1);
+        if (!loc) throw new BadRequestException('ops.defaultSourceLocationId is not a location');
+      }
       const current = (existing.opsSettingsJson ?? {}) as OpsSettings;
       const merged: OpsSettings = { ...current, ...patch };
       for (const key of Object.keys(merged) as (keyof OpsSettings)[]) {
@@ -848,6 +884,7 @@ export class SettingsController {
 /** Ops keys safe for every member to read (everything except contact/role plumbing). */
 const POS_VISIBLE_OPS_KEYS = [
   'recyclingFeeCents',
+  'defaultSourceLocationId',
   // A20 order-page pick lists.
   'marketingCodes',
   'orderSources',

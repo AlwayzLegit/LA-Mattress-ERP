@@ -629,6 +629,32 @@ export class OrdersController {
     @Inject(TicketFlagsService) private readonly ticketFlags: TicketFlagsService,
   ) {}
 
+  /**
+   * The business's configured default stock source
+   * (ops.defaultSourceLocationId), or null. Only an explicit setting moves
+   * a source-less line off the order's store: the register already sends
+   * the warehouse explicitly when its rules resolve there, and every other
+   * writer (order page, exchanges, auto transfers, imports) relies on a
+   * bare line reserving at the order's stock location. Never throws: a
+   * deleted default must not stop a sale.
+   */
+  private async resolveDefaultSource(businessId: string): Promise<string | null> {
+    const [biz] = await this.db
+      .select({ opsSettingsJson: schema.businesses.opsSettingsJson })
+      .from(schema.businesses)
+      .where(eq(schema.businesses.id, businessId))
+      .limit(1);
+    const configured = (biz?.opsSettingsJson as { defaultSourceLocationId?: string | null } | null)
+      ?.defaultSourceLocationId;
+    if (!configured) return null;
+    const [loc] = await this.db
+      .select({ id: schema.locations.id })
+      .from(schema.locations)
+      .where(and(eq(schema.locations.id, configured), eq(schema.locations.isActive, true)))
+      .limit(1);
+    return loc?.id ?? null;
+  }
+
   @Get('orders')
   @RequirePermission('orders.view')
   async list(
@@ -1779,6 +1805,30 @@ export class OrdersController {
     if (!order) throw new BadRequestException('failed to create order');
 
     const orderDefaultSource = order.stockLocationId ?? order.locationId;
+    // Redesign Phase 4 (HANDOFF_inventory_source_defaults §4): a line that
+    // names no source follows the register's rule when the business has
+    // configured a default source —
+    //   take-with           -> the order's store
+    //   otherwise           -> the configured default, else the order's store.
+    // The implicit single-warehouse step stays client-side (see
+    // resolveDefaultSource) so bare API lines keep reserving at the store.
+    const resolvedDefaultSource = await this.resolveDefaultSource(tenant.businessId!);
+    const lineSourceFor = (input: OrderLineInput | undefined): string | null => {
+      if (input?.sourceLocationId) {
+        return input.sourceLocationId !== orderDefaultSource ? input.sourceLocationId : null;
+      }
+      const eff = input?.fulfillmentMethod ?? fulfillmentType;
+      if (eff === 'take_with') return null;
+      return resolvedDefaultSource && resolvedDefaultSource !== orderDefaultSource
+        ? resolvedDefaultSource
+        : null;
+    };
+    const takeWithOffStore = (body.lines ?? []).filter(
+      (l) =>
+        (l.fulfillmentMethod ?? fulfillmentType) === 'take_with' &&
+        l.sourceLocationId &&
+        l.sourceLocationId !== order.locationId,
+    ).length;
     await this.db.insert(schema.orderLines).values(
       priced.map((l, i) => ({
         businessId: tenant.businessId!,
@@ -1794,11 +1844,7 @@ export class OrdersController {
         fulfillmentMethod: lineFulfillment(body.lines![i]),
         // Stored only when it actually differs from the order's default,
         // so changing the default later re-inherits cleanly.
-        sourceLocationId:
-          body.lines![i]?.sourceLocationId &&
-          body.lines![i]!.sourceLocationId !== orderDefaultSource
-            ? body.lines![i]!.sourceLocationId!
-            : null,
+        sourceLocationId: lineSourceFor(body.lines![i]),
         deliveryDate: body.lines![i]?.deliveryDate ?? null,
         // Placeholders — recomputeTotals prices every line against the
         // whole cart (the order discount is allocated pro-rata) and
@@ -1854,6 +1900,9 @@ export class OrdersController {
         depositRequiredCents,
         lineCount: priced.length,
         customerId: order.customerId,
+        // Allowed (a manager may sell take-with from another store) but
+        // always on the record — HANDOFF_inventory_source_defaults §4.
+        ...(takeWithOffStore > 0 ? { takeWithOffStore } : {}),
       },
     });
 

@@ -36,6 +36,7 @@ interface Branding {
 
 interface OpsSettings {
   recyclingFeeCents?: number | null;
+  defaultSourceLocationId?: string | null;
   invoiceHeaderNote?: string | null;
   invoiceFooterNote?: string | null;
   deliveryDailyCap?: number | null;
@@ -353,7 +354,15 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [locations, setLocations] = useState<{ id: string; name: string; locationType: string }[]>(
+    [],
+  );
   const ops = settings.ops ?? {};
+  useEffect(() => {
+    void api<{ id: string; name: string; locationType: string }[]>('/v1/business/locations')
+      .then(setLocations)
+      .catch(() => setLocations([]));
+  }, []);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -366,6 +375,7 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
       const capStr = String(data.get('deliveryDailyCap') ?? '').trim();
       const body: OpsSettings = {
         recyclingFeeCents: feeStr === '' ? null : Math.round(Number(feeStr) * 100),
+        defaultSourceLocationId: String(data.get('defaultSourceLocationId') ?? '') || null,
         deliveryDailyCap: capStr === '' ? null : Number(capStr),
         invoiceHeaderNote: String(data.get('invoiceHeaderNote') ?? '').trim() || null,
         invoiceFooterNote: String(data.get('invoiceFooterNote') ?? '').trim() || null,
@@ -437,6 +447,24 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
               }
               data-testid="ops-recycling-fee"
             />
+          </Field>
+          <Field
+            label="Default stock source for new sale lines"
+            hint="Where Add Product opens and untouched lines pull from. Blank = the single warehouse, else the selling store. Take-with lines always follow the order's store."
+          >
+            <Select
+              name="defaultSourceLocationId"
+              defaultValue={ops.defaultSourceLocationId ?? ''}
+              data-testid="ops-default-source"
+            >
+              <option value="">Warehouse (automatic)</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {l.locationType === 'warehouse' ? ' — warehouse' : ''}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field label="Max balance for ticket print ($; blank = no cap)">
             <Input
