@@ -50,6 +50,8 @@ export const WEBHOOK_EVENT_TYPES = [
   // drawer pickup (redesign Phase 9).
   'cash_pickup.posted',
   'close_out.signed_off',
+  'lead.logged',
+  'lead.converted',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

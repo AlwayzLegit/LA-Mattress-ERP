@@ -811,3 +811,118 @@ Sales competitions are Phase 11.
   notification when a recount is requested.
 - A "sign-offs" report across stores and the owner's view of unsigned days.
 - Phase 11: sales competitions.
+
+## Phase 11 — Sales competitions (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** README §3.6 / canvas 10 (`Proto Competition`,
+`Redesign 10 Competitions`): the strip above every role home, six races for People and Stores,
+the leaderboard, leads (form, list, auto-conversion, attach by hand), the winner banner and
+printable sheet, overtaken notices, TV mode and the owner's settings. Migration
+`0102_phase11_competitions`.
+
+### What changed
+
+- **Data** (`packages/db/src/schema/competitions.ts`) — `sales_leads` (salesperson, store, name,
+  phone + normalised digits, wanted size / category / note, status open · converted · lost,
+  converted order, conversion auto · manual, follow-up, expiry), `competition_ranks` (the last
+  rank each person held per race this month, so an overtake is noticed once), and
+  `competition_results` (a closed month's winners, frozen on first read, with the ranking for
+  History). `member_notifications.order_id` is now nullable so a competition notice can sit in
+  the inbox without an order; the inbox list left-joins and keeps the store scope on order
+  notices. New shared helper `phoneDigits / phonesMatch / formatPhone`
+  (`packages/shared/src/phone.ts`). Permissions **`competitions.view`** (every role) and
+  **`competitions.leads.log`** (Owner, Manager, Cashier), grouped as "Sales competitions".
+- **API** (`apps/api/src/competitions/`) — `GET /v1/competitions/current?scope&month` computes
+  the board from the order ledger every call: completed orders in the store-local month, minus
+  any with a completed return inside the return window, imported documents excluded (D8);
+  attributed to the primary salesperson / the order's store. Races: Lead Conversion (converted
+  this month, "of N logged"), Average Ticket (net ÷ orders), Highest Ticket (one order · first
+  name), Most Sales (count, net small), Most Adjustable Beds (line units whose category or
+  description says "adjustable"), Least Exchanges (exchanges on the person's orders ÷ sales;
+  zero sales unranked; ties by most sales). Ties elsewhere break by net, then sales. Per card:
+  full ranking with a ten-bucket sparkline and the orders behind each number, the top three,
+  your pinned row with the gap in the metric's units ("$349 behind Brandon", "sell one to be
+  ranked"), the pace line (leader at today's rate for count races), the sweep chip once anyone
+  leads ≥ 3 cards, the winner banner for the first `bannerDays` of a month. `GET
+/v1/competitions/history` (last 12 closed months, every race, your rank, paid / pays date),
+  `GET /v1/competitions/sheet?month` (the printable winners), `GET/POST /v1/competitions/leads`
+  and `POST …/leads/:id/follow-up | attach | lost` (own leads only; attach checks the order is
+  written under the same salesperson and audits `lead.convert` as manual). On **order
+  completion** `CompetitionsService.onOrderCompleted` converts the newest open lead of the same
+  salesperson whose phone digits match the customer (or the order's address phone) inside the
+  lead's window, then recomputes People ranks, compares with `competition_ranks`, and writes
+  one inbox notice per race per day to anyone who slipped (`competition.overtaken`, event key
+  carries the day). Settings live in `opsSettingsJson.competitions` (validated field by field,
+  registered in the settings registry); webhooks `lead.logged`, `lead.converted`.
+- **Strip** (`components/competition/competition-strip.tsx`, `.cs-*`) — on every `/dashboard`
+  view and `/my-day`, above the home: "{Month} competition · 6 races · $100 each · win 4 →
+  $1,000 · 5 → $1,500 · all 6 → $2,000", People | Stores (owner lands on Stores), days-left chip
+  (22px and navy in the last 48h, the strip border picks up the accent), the sweep chip, + Log
+  lead, Collapse (remembered per browser; collapsed keeps the top three and your row). Six
+  cards → the leaderboard; each with title, prize, top three (rank, name, store code, value,
+  secondary small), pace line (grey leader, navy you, tick at today's rate; expanded only),
+  pinned own row (accent-soft) with the gap, one-line rule; day one shows each card's empty
+  copy instead of zeros. Footer: the four rules, the sweep tiers, "Prizes pay Oct 5, once
+  returns settle · History". Motion: when your rank changes between polls the row slides once
+  (280ms) and the card flashes once (800ms); a new leader flashes the card. Hidden on 403/404
+  so no home breaks. Polls every minute and on `erp:competition-update` / `erp:team-update`.
+- **Leaderboard dialog** (`leaderboard-dialog.tsx`, `.lb-*`) — 880px: This month (# ·
+  Salesperson/Store · Month sparkline · secondary · metric; your row tinted; "The orders behind
+  you / {leader}" on the right; the rule) and History (Month · Winner · people · Result ·
+  Winner · store · Your rank · Paid) with the printable sheet link.
+- **Leads** (`lead-dialog.tsx`, `leads-panel.tsx`) — the form: Name ("First name is enough"),
+  **Phone** required ("This is what matches the sale."), Wanted = Size + Category selects and
+  one free line, "Logged under {you}", Save lead → toast "Lead saved · Marisol · converts if
+  they buy from you by Oct 12". Opens from the strip and from **New Sale's customer card**
+  ("Log as lead instead", pre-filled with what was typed). **My leads** under the strip on the
+  cashier / My Day and manager homes: Customer · Wanted · Logged (days left, follow-up) ·
+  Status chip Open / Converted (order link, "by hand") / Lost · Follow up · Attach order (order
+  number dialog) · Lost; attaching turns the row green once, flashes the Lead Conversion card
+  and toasts "+1".
+- **Winner banner + sheet** — navy banner above the strip for the first 3 days of a month with
+  one line per race, "Print for the break room" → `/print/competition-winners?month=` (letter,
+  black on white: six races, winner · store, one-line story, the number, the stores line), and
+  "Shows until Sep 3 ×".
+- **TV mode** (`/tv/competition`, route group `(tv)`, no shell) — 1920×1080 dark frame: one race
+  in focus at 30px+ rows with the leader tinted, the other five as one-line leaders, the cycle
+  dots, the rules footer, six-second cycle, the clock. People race, no pinned row.
+- **Settings** (`settings/competitions-card.tsx`, `.cset-*`) — per card on/off, People / Stores
+  / Both, prize per race for people and stores, the sweep tiers, competitions on/off, month
+  (calendar, resets 12:01 AM on the 1st — fixed), payout date, return window, banner days, who
+  sees it (salespeople and cashiers, store managers, warehouse and dispatch) and overtaken
+  notices; the footer totals the monthly payout; Save · applies {next month 1}.
+- `/dev/dashboard/competition` previews the strip + My leads on fixtures with the verbs
+  working; the other dashboard previews now carry the strip too.
+
+### Assumptions
+
+- **Completed** means `orders.status = 'completed'` with `completed_at` in the store-local
+  month (the rule copy says "Only completed orders count"); fulfilled-but-not-completed
+  orders are not on the board. An order with a completed return inside the return window
+  comes off entirely.
+- Split orders count for the **primary** salesperson only — the canvas never mentions splits
+  and half a sale on a "Most Sales" card reads wrong. Net = total − tax.
+- "Adjustable bed" units = order lines whose product category or description contains
+  "adjustable" (the catalog has no flag; the categorised names are "Adjustable Bases").
+- Exchanges are attributed to the original order's salesperson / store, counted when opened
+  (not cancelled) in the month.
+- Lead Conversion's denominator is leads logged this month; a lead logged late last month that
+  converts this month counts in the numerator. A lead matches on the last ten digits of the
+  customer's phone, phone 2 or the order's address phone, same salesperson, logged before the
+  order completed and inside its 30-day window; the newest such lead converts.
+- There is no Salesperson role: "salesperson home" is the Cashier / My Day view, where My leads
+  renders; the owner and Operations get the strip without the leads panel.
+- An overtaken notice is one inbox row per race per day (the event key is
+  `competition:{month}:{race}:{day}`), sent only when the setting allows and never to the person
+  whose order caused the move.
+- Closed months are frozen the first time anyone reads them (History, banner, sheet) — after
+  the month ends, not after the return window; the payout line still reads "pays Oct 5" until
+  that date.
+
+### Later
+
+- A recount of ranks on return completion (a return today only takes effect on the next read;
+  ranks / notices only recompute on order completion).
+- Store-manager notices for the Stores race; a "who won" push at month end.
+- The leads list for managers across their store (the API supports `?all=1`; the panel shows
+  the viewer's own).

@@ -338,10 +338,13 @@ export class TasksController {
   @RequirePermission('orders.view')
   async inbox(@CurrentTenant() tenant: RequestTenantContext) {
     const n = schema.memberNotifications;
+    // A competition notice has no order (redesign Phase 11); order notices
+    // stay behind the viewer's store scope.
+    const scope = salesScopeCond(tenant, schema.orders.locationId);
     const filter = and(
       eq(n.businessId, tenant.businessId!),
       tenant.membershipId ? eq(n.recipientMembershipId, tenant.membershipId) : sql`false`,
-      salesScopeCond(tenant, schema.orders.locationId),
+      scope ? or(isNull(n.orderId), scope) : undefined,
     );
     const data = await this.db
       .select({
@@ -357,14 +360,14 @@ export class TasksController {
         readAt: n.readAt,
       })
       .from(n)
-      .innerJoin(schema.orders, eq(schema.orders.id, n.orderId))
+      .leftJoin(schema.orders, eq(schema.orders.id, n.orderId))
       .where(filter)
       .orderBy(sql`(${n.readAt} is null) desc`, desc(n.createdAt), desc(n.id))
       .limit(50);
     const [unread] = await this.db
       .select({ value: count() })
       .from(n)
-      .innerJoin(schema.orders, eq(schema.orders.id, n.orderId))
+      .leftJoin(schema.orders, eq(schema.orders.id, n.orderId))
       .where(and(filter, isNull(n.readAt)));
     return {
       data,
@@ -400,7 +403,7 @@ export class TasksController {
           eq(n.businessId, tenant.businessId!),
           eq(n.recipientMembershipId, recipient),
           inArray(n.id, ids),
-          inArray(n.orderId, visibleOrders),
+          or(isNull(n.orderId), inArray(n.orderId, visibleOrders)),
           isNull(n.readAt),
         ),
       )

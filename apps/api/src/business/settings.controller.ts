@@ -102,6 +102,33 @@ interface OpsSettings {
     /** Q3: ship requires a printed transfer ticket. Null/true = required. */
     requireTicketBeforeShip?: boolean | null;
   } | null;
+  /**
+   * Sales competitions (redesign Phase 11, README §3.6). Null block = the
+   * defaults: six cards on, People and Stores, $100 a card, sweep
+   * $1,000 / $1,500 / $2,000, paid on the 5th, 30-day return window,
+   * banner for 3 days, visible to everyone, overtaken notices on.
+   */
+  competitions?: {
+    enabled?: boolean | null;
+    races?: 'people' | 'stores' | 'both' | null;
+    cards?: Partial<
+      Record<
+        'leads' | 'avg' | 'high' | 'sales' | 'beds' | 'ex',
+        { on?: boolean | null; prizePeopleCents?: number | null; prizeStoreCents?: number | null }
+      >
+    > | null;
+    sweep?: { four?: number | null; five?: number | null; six?: number | null } | null;
+    payoutDay?: number | null;
+    returnWindowDays?: number | null;
+    bannerDays?: number | null;
+    visibility?: {
+      sales?: boolean | null;
+      managers?: boolean | null;
+      warehouse?: boolean | null;
+      notices?: boolean | null;
+    } | null;
+    leadWindowDays?: number | null;
+  } | null;
   /** G6 three-tier price-variance thresholds (defaults 5% / $50 / 15%). */
   priceVariance?: {
     tier1Pct?: number | null;
@@ -166,6 +193,15 @@ function validateOpsList(key: string, value: unknown): string[] | null {
  * per the sysadmin pack (SET-003).
  */
 const OPS_SETTINGS_REGISTRY = [
+  {
+    key: 'competitions',
+    label: 'Sales competitions',
+    type: 'object',
+    nullMeans:
+      'Six cards on, People and Stores, $100 a card, sweep $1,000 / $1,500 / $2,000, paid on the 5th, 30-day return window, 3-day winner banner, visible to every role',
+    classTags: [],
+    readBy: 'Competition strip, leaderboards, TV mode, lead conversion',
+  },
   {
     key: 'recyclingFeeCents',
     label: 'Recycling fee per unit',
@@ -418,8 +454,117 @@ interface UpdateBody {
   ops?: OpsSettings;
 }
 
+const COMPETITION_RACES = ['leads', 'avg', 'high', 'sales', 'beds', 'ex'] as const;
+
+/** Redesign Phase 11: every knob typed, cents non-negative, days in range. */
+function validateCompetitions(
+  raw: NonNullable<OpsSettings['competitions']> | null,
+): OpsSettings['competitions'] {
+  if (raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new BadRequestException('ops.competitions must be an object or null');
+  }
+  const out: NonNullable<OpsSettings['competitions']> = {};
+  const bool = (v: unknown, key: string): boolean | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null || typeof v === 'boolean') return v;
+    throw new BadRequestException(`ops.competitions.${key} must be true, false or null`);
+  };
+  const cents = (v: unknown, key: string): number | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null) return null;
+    if (!Number.isInteger(v) || (v as number) < 0 || (v as number) > 100_000_000) {
+      throw new BadRequestException(
+        `ops.competitions.${key} must be a non-negative whole number of cents`,
+      );
+    }
+    return v as number;
+  };
+  const days = (v: unknown, key: string, min: number, max: number): number | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null) return null;
+    if (!Number.isInteger(v) || (v as number) < min || (v as number) > max) {
+      throw new BadRequestException(
+        `ops.competitions.${key} must be a whole number from ${min} to ${max}`,
+      );
+    }
+    return v as number;
+  };
+  const e = bool(raw.enabled, 'enabled');
+  if (e !== undefined) out.enabled = e;
+  if (raw.races !== undefined) {
+    if (raw.races !== null && !['people', 'stores', 'both'].includes(raw.races)) {
+      throw new BadRequestException('ops.competitions.races must be people, stores or both');
+    }
+    out.races = raw.races;
+  }
+  if (raw.cards !== undefined) {
+    if (raw.cards === null) out.cards = null;
+    else {
+      const cards: NonNullable<NonNullable<OpsSettings['competitions']>['cards']> = {};
+      for (const key of COMPETITION_RACES) {
+        const c = raw.cards[key];
+        if (c === undefined) continue;
+        if (c === null || typeof c !== 'object') {
+          throw new BadRequestException(`ops.competitions.cards.${key} must be an object`);
+        }
+        const on = bool(c.on, `cards.${key}.on`);
+        const pp = cents(c.prizePeopleCents, `cards.${key}.prizePeopleCents`);
+        const ps = cents(c.prizeStoreCents, `cards.${key}.prizeStoreCents`);
+        cards[key] = {
+          ...(on !== undefined ? { on } : {}),
+          ...(pp !== undefined ? { prizePeopleCents: pp } : {}),
+          ...(ps !== undefined ? { prizeStoreCents: ps } : {}),
+        };
+      }
+      out.cards = cards;
+    }
+  }
+  if (raw.sweep !== undefined) {
+    if (raw.sweep === null) out.sweep = null;
+    else {
+      const four = cents(raw.sweep.four, 'sweep.four');
+      const five = cents(raw.sweep.five, 'sweep.five');
+      const six = cents(raw.sweep.six, 'sweep.six');
+      out.sweep = {
+        ...(four !== undefined ? { four } : {}),
+        ...(five !== undefined ? { five } : {}),
+        ...(six !== undefined ? { six } : {}),
+      };
+    }
+  }
+  const pd = days(raw.payoutDay, 'payoutDay', 1, 28);
+  if (pd !== undefined) out.payoutDay = pd;
+  const rw = days(raw.returnWindowDays, 'returnWindowDays', 0, 120);
+  if (rw !== undefined) out.returnWindowDays = rw;
+  const bd = days(raw.bannerDays, 'bannerDays', 0, 14);
+  if (bd !== undefined) out.bannerDays = bd;
+  const lw = days(raw.leadWindowDays, 'leadWindowDays', 1, 120);
+  if (lw !== undefined) out.leadWindowDays = lw;
+  if (raw.visibility !== undefined) {
+    if (raw.visibility === null) out.visibility = null;
+    else {
+      const v = raw.visibility;
+      const sales = bool(v.sales, 'visibility.sales');
+      const managers = bool(v.managers, 'visibility.managers');
+      const warehouse = bool(v.warehouse, 'visibility.warehouse');
+      const notices = bool(v.notices, 'visibility.notices');
+      out.visibility = {
+        ...(sales !== undefined ? { sales } : {}),
+        ...(managers !== undefined ? { managers } : {}),
+        ...(warehouse !== undefined ? { warehouse } : {}),
+        ...(notices !== undefined ? { notices } : {}),
+      };
+    }
+  }
+  return out;
+}
+
 function validateOps(input: OpsSettings): OpsSettings {
   const out: OpsSettings = {};
+  if (input.competitions !== undefined) {
+    out.competitions = validateCompetitions(input.competitions);
+  }
   if (input.recyclingFeeCents !== undefined) {
     if (
       input.recyclingFeeCents !== null &&

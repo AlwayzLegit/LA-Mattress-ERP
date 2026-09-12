@@ -35,6 +35,7 @@ import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { CommissionsService } from '../money/commissions.service';
+import { CompetitionsService } from '../competitions/competitions.service';
 import { StoreCreditService } from '../returns/store-credit.service';
 import { OrderReturnsService } from '../returns/order-returns.service';
 import {
@@ -627,6 +628,7 @@ export class OrdersController {
     @Inject(OrdersService) private readonly orders: OrdersService,
     @Inject(WebhookDispatcher) private readonly webhooks: WebhookDispatcher,
     @Inject(CommissionsService) private readonly commissions: CommissionsService,
+    @Inject(CompetitionsService) private readonly competitions: CompetitionsService,
     @Inject(StoreCreditService) private readonly storeCredit: StoreCreditService,
     @Inject(SecurityOverrideService) private readonly overrides: SecurityOverrideService,
     @Inject(OrderReturnsService) private readonly orderReturns: OrderReturnsService,
@@ -3755,6 +3757,9 @@ export class OrdersController {
       businessId: tenant.businessId!,
       orderId: id,
     });
+    // Sales competitions (redesign Phase 11): convert a matching lead and
+    // notice any overtake. Never blocks the completion.
+    await this.competitions.onOrderCompleted(tenant.businessId!, id);
 
     await this.audit.log({
       action: 'order.complete',

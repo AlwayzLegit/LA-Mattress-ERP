@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { LeadDialog } from '@/components/competition/lead-dialog';
 import { formatMoney } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { setDraftSummary } from '@/lib/api-status';
@@ -189,6 +190,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     null,
   );
   const [custQuery, setCustQuery] = useState('');
+  const [leadOpen, setLeadOpen] = useState(false);
   const [custHits, setCustHits] = useState<CustomerHit[]>([]);
   const [custMore, setCustMore] = useState(false);
   const [custOpen, setCustOpen] = useState(false);
@@ -1519,15 +1521,35 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     {custMore && <div className="reg-cust-more">More matches — keep typing.</div>}
                   </div>
                 )}
-                <Button
-                  onClick={() => {
-                    clearNewCustomer();
-                    setCreatingCustomer(true);
-                  }}
-                  disabled={locked}
-                >
-                  New customer
-                </Button>
+                {leadOpen && (
+                  <LeadDialog
+                    onClose={() => setLeadOpen(false)}
+                    actorName={null}
+                    locationId={locationId || null}
+                    initial={/\d{3}/.test(custQuery) ? { phone: custQuery } : { name: custQuery }}
+                    onSaved={() => setCustQuery('')}
+                  />
+                )}
+                <div className="reg-cust-actions">
+                  <Button
+                    onClick={() => {
+                      clearNewCustomer();
+                      setCreatingCustomer(true);
+                    }}
+                    disabled={locked}
+                  >
+                    New customer
+                  </Button>
+                  {/* Redesign Phase 11: the customer who is walking out. */}
+                  <Button
+                    variant="ghost"
+                    onClick={() => setLeadOpen(true)}
+                    disabled={locked}
+                    data-testid="log-as-lead"
+                  >
+                    Log as lead instead
+                  </Button>
+                </div>
               </div>
             )}
             {customer && fulfillment !== 'take_with' && (

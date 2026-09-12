@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CompetitionsModule } from '../competitions/competitions.module';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
 import { AuditModule } from '../audit/audit.module';
 import { MoneyModule } from '../money/money.module';
@@ -26,6 +27,7 @@ import { OrdersService } from './orders.service';
     ControlsModule,
     TransfersModule,
     CostingModule,
+    CompetitionsModule,
   ],
   controllers: [
     OrdersController,

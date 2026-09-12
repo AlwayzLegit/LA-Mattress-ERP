@@ -203,6 +203,27 @@ export function buildFixtures(today: string) {
 
 export type PreviewRole = 'owner' | 'manager' | 'ops' | 'warehouse';
 
+interface StubLead {
+  id: string;
+  name: string;
+  phone: string;
+  wanted: string;
+  wantedSize: string | null;
+  wantedCategory: string | null;
+  note: string | null;
+  status: string;
+  loggedAt: string;
+  expiresAt: string;
+  daysLeft: number;
+  followUpAt: string | null;
+  convertedOrderId: string | null;
+  convertedOrderNumber: string | null;
+  conversion: string | null;
+  salesperson: string;
+  salespersonMembershipId: string;
+  locationId: string;
+}
+
 export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owner' }) {
   const w = window as unknown as { __dashStub?: boolean };
   if (w.__dashStub) return;
@@ -210,6 +231,8 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
   const today = toDay(new Date());
   const { orders, payments } = buildFixtures(today);
   let pickupSeq = 90;
+  // Sales competitions (Phase 11): the leads the viewer logs in the preview.
+  let cLeads: StubLead[] = [];
   // Close-out sheet state (Phase 10): the flagged drawer's verbs and the sign-off.
   let zRecount: { by: string; at: string } | null = null;
   let zReason: { text: string; by: string; at: string } | null = null;
@@ -1769,6 +1792,543 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         signoff: isFixtureDay ? zSign : null,
         viewer: { canSignOff: true, signable: zDate < today },
       });
+    }
+    // ---- Sales competitions (Phase 11) ----
+    if (p.startsWith('/v1/competitions/')) {
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, string>) : {};
+      const scope = q.get('scope') === 'stores' ? 'stores' : 'people';
+      const dim = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0).getDate();
+      const dom = Number(today.slice(8, 10));
+      const daysLeft = Math.max(0, dim - dom);
+      const monthName = new Date(`${today}T12:00:00`).toLocaleDateString('en-US', {
+        month: 'long',
+      });
+      const PEOPLE = [
+        ['p-ronnie', 'Ronnie Alvarez', 'wl'],
+        ['p-elyse', 'Elyse Nakamura', 'sc'],
+        ['p-julio', 'Julio Reyes', 'gl'],
+        ['m1', opts.role === 'manager' ? 'Maya Torres' : 'Arman Petrosyan', 'gl'],
+        ['p-geoff', 'Geoff Lam', 'kt'],
+        ['p-wayne', 'Wayne Brooks', 'lb'],
+        ['p-brandon', 'Brandon Cole', 'sc'],
+      ] as const;
+      const STAT: Record<
+        string,
+        {
+          leads: [number, number];
+          sales: number;
+          net: number;
+          high: number;
+          beds: number;
+          ex: number;
+        }
+      > = {
+        'p-ronnie': { leads: [9, 15], sales: 19, net: 3_872_000, high: 624_000, beds: 4, ex: 2 },
+        'p-elyse': { leads: [6, 11], sales: 17, net: 4_126_000, high: 1_140_000, beds: 7, ex: 0 },
+        'p-julio': { leads: [5, 7], sales: 11, net: 2_310_000, high: 480_000, beds: 6, ex: 1 },
+        m1: { leads: [4, 9], sales: 14, net: 2_984_000, high: 598_000, beds: 5, ex: 1 },
+        'p-geoff': { leads: [3, 8], sales: 9, net: 1_720_000, high: 410_000, beds: 2, ex: 1 },
+        'p-wayne': { leads: [2, 4], sales: 6, net: 1_160_000, high: 390_000, beds: 1, ex: 0 },
+        'p-brandon': { leads: [1, 6], sales: 8, net: 1_984_000, high: 736_000, beds: 3, ex: 0 },
+      };
+      const CODE: Record<string, string> = { gl: 'GL', wl: 'WL', sc: 'SC', kt: 'KT', lb: 'LB' };
+      const usd = (c: number) => `$${Math.round(c / 100).toLocaleString('en-US')}`;
+      const first = (n: string) => n.split(' ')[0]!;
+      type Subj = {
+        id: string;
+        name: string;
+        storeId: string;
+        storeName: string;
+        leads: [number, number];
+        sales: number;
+        net: number;
+        high: number;
+        beds: number;
+        ex: number;
+      };
+      let subjects: Subj[] = PEOPLE.map(([id, name, st]) => ({
+        id,
+        name,
+        storeId: st,
+        storeName: STORES.find((s) => s.id === st)!.name,
+        ...STAT[id]!,
+      }));
+      if (scope === 'stores') {
+        const byStore = new Map<string, Subj>();
+        for (const s of subjects) {
+          const cur = byStore.get(s.storeId) ?? {
+            id: s.storeId,
+            name: s.storeName,
+            storeId: s.storeId,
+            storeName: s.storeName,
+            leads: [0, 0] as [number, number],
+            sales: 0,
+            net: 0,
+            high: 0,
+            beds: 0,
+            ex: 0,
+          };
+          cur.leads = [cur.leads[0] + s.leads[0], cur.leads[1] + s.leads[1]];
+          cur.sales += s.sales;
+          cur.net += s.net;
+          cur.high = Math.max(cur.high, s.high);
+          cur.beds += s.beds;
+          cur.ex += s.ex;
+          byStore.set(s.storeId, cur);
+        }
+        subjects = [...byStore.values()];
+      }
+      const meId = scope === 'people' ? 'm1' : 'gl';
+      const defs = [
+        {
+          key: 'leads',
+          title: 'Lead Conversion',
+          sub: 'converted leads',
+          metricLabel: 'Converted',
+          detailLabel: 'Logged',
+          unit: 'leads',
+          rule: 'Lead converts when a completed order matches the phone within 30 days.',
+          empty: 'No leads logged yet. Log the next customer who walks out without buying.',
+        },
+        {
+          key: 'avg',
+          title: 'Average Ticket',
+          sub: 'net ÷ completed orders',
+          metricLabel: 'Average',
+          detailLabel: 'Orders',
+          unit: '$',
+          rule: 'No minimum order count — a one-sale average is fragile and says so.',
+          empty: 'First completed sale sets the bar.',
+        },
+        {
+          key: 'high',
+          title: 'Highest Ticket',
+          sub: 'one order',
+          metricLabel: 'Order',
+          detailLabel: 'Customer',
+          unit: '$',
+          rule: 'The single largest completed order this month.',
+          empty: 'The first order of the month is the biggest — for now.',
+        },
+        {
+          key: 'sales',
+          title: 'Most Sales',
+          sub: 'completed orders',
+          metricLabel: 'Orders',
+          detailLabel: 'Net',
+          unit: 'sales',
+          rule: 'Count of completed orders; net dollars shown small.',
+          empty: 'Zero across the board. Every store starts even.',
+        },
+        {
+          key: 'beds',
+          title: 'Most Adjustable Beds',
+          sub: 'units on completed orders',
+          metricLabel: 'Beds',
+          detailLabel: '',
+          unit: 'beds',
+          rule: 'Adjustable base units on completed orders.',
+          empty: 'No bases sold yet.',
+        },
+        {
+          key: 'ex',
+          title: 'Least Exchanges',
+          sub: 'fewest, as a fraction of sales',
+          metricLabel: 'Exchanges',
+          detailLabel: 'Sales',
+          unit: 'exchanges',
+          rule: 'Ties break by most sales. Zero sales is not ranked.',
+          empty: 'Nobody has sold, so nobody is ranked. Sell first.',
+        },
+      ] as const;
+      const metric = (s: Subj, k: string) =>
+        k === 'leads'
+          ? s.leads[0]
+          : k === 'avg'
+            ? Math.round(s.net / s.sales)
+            : k === 'high'
+              ? s.high
+              : k === 'sales'
+                ? s.sales
+                : k === 'beds'
+                  ? s.beds
+                  : s.ex;
+      const fmt = (v: number, k: string) => (k === 'avg' || k === 'high' ? usd(v) : String(v));
+      const detail = (s: Subj, k: string) =>
+        k === 'leads'
+          ? `of ${s.leads[1]}`
+          : k === 'avg'
+            ? `${s.sales} sales`
+            : k === 'high'
+              ? `${CODE[s.storeId]}-${10230 + s.sales} · ${['Priya', 'Helen', 'Dana', 'Omar', 'Karen', 'Felix', 'Nadia'][s.sales % 7]}`
+              : k === 'sales'
+                ? usd(s.net)
+                : k === 'beds'
+                  ? ''
+                  : `of ${s.sales}`;
+      const gap = (k: string, lv: number, mv: number, ln: string) => {
+        const d = k === 'ex' ? mv - lv : lv - mv;
+        return k === 'leads'
+          ? `${d} lead${d === 1 ? '' : 's'} behind ${first(ln)}`
+          : k === 'sales'
+            ? `${d} sale${d === 1 ? '' : 's'} behind ${first(ln)}`
+            : k === 'beds'
+              ? `${d} bed${d === 1 ? '' : 's'} behind ${first(ln)}`
+              : k === 'ex'
+                ? `${d} more exchange${d === 1 ? '' : 's'} than ${first(ln)}`
+                : `${usd(d)} behind ${first(ln)}`;
+      };
+      const leadCount = new Map<string, number>();
+      const cards = defs.map((d) => {
+        const ranked = subjects
+          .map((s) => ({ s, v: metric(s, d.key) }))
+          .sort((a, b) => (d.key === 'ex' ? a.v - b.v : b.v - a.v) || b.s.net - a.s.net);
+        const rows = ranked.map((r, i) => ({
+          id: r.s.id,
+          name: r.s.name,
+          storeId: r.s.storeId,
+          storeCode: CODE[r.s.storeId] ?? null,
+          storeName: r.s.storeName,
+          rank: i + 1,
+          value: r.v,
+          valueLabel: fmt(r.v, d.key),
+          detail: detail(r.s, d.key),
+          netCents: r.s.net,
+          sales: r.s.sales,
+          spark: Array.from({ length: 10 }, (_, j) =>
+            Math.max(0, Math.round(((r.v || 1) / 10) * (1 + Math.sin(j + i)))),
+          ),
+          orders: Array.from({ length: Math.min(4, r.s.sales) }, (_, j) => ({
+            id: `o-0-${j}`,
+            number: `${CODE[r.s.storeId]}-${10430 + j * 3}`,
+            who: ['Omar H.', 'Karen L.', 'Dana W.', 'Felix M.'][j]!,
+            amountCents: [129_900, 203_900, 277_900, 351_900][j]!,
+            at: `${today}T1${j}:00:00`,
+          })),
+          isYou: r.s.id === meId,
+        }));
+        const leader = rows[0]!;
+        const mine = rows.find((r) => r.isYou) ?? null;
+        leadCount.set(leader.id, (leadCount.get(leader.id) ?? 0) + 1);
+        const paceV =
+          d.key === 'avg' || d.key === 'high' || d.key === 'ex'
+            ? leader.value
+            : Math.round((leader.value / Math.max(dom, 1)) * dim);
+        const max = Math.max(leader.value, paceV, 1);
+        return {
+          ...d,
+          on: true,
+          prizeCents: 10_000,
+          rows,
+          top: rows.slice(0, 3),
+          you: mine
+            ? {
+                rank: mine.rank,
+                value: mine.value,
+                valueLabel: mine.valueLabel,
+                gap:
+                  mine.rank === 1 ? 'you lead' : gap(d.key, leader.value, mine.value, leader.name),
+              }
+            : null,
+          unranked: null,
+          leader: { name: leader.name, value: leader.value },
+          pace: {
+            leaderPct: Math.round((leader.value / max) * 100),
+            youPct: mine ? Math.round((mine.value / max) * 100) : 0,
+            pacePct: Math.round((paceV / max) * 100),
+            label: fmt(paceV, d.key),
+          },
+        };
+      });
+      const sweepEntry = [...leadCount.entries()].sort((a, b) => b[1] - a[1])[0]!;
+      const sweepName = subjects.find((s) => s.id === sweepEntry[0])!.name;
+      if (p === '/v1/competitions/current') {
+        return json({
+          month: today.slice(0, 7),
+          monthLabel: monthName,
+          today,
+          dayOfMonth: dom,
+          daysInMonth: dim,
+          daysLeft,
+          endsAt: `${new Date(`${today.slice(0, 7)}-${dim}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, 11:59 PM`,
+          last48: daysLeft <= 2 && daysLeft > 0,
+          isDayOne: false,
+          scope,
+          scopes: ['people', 'stores'],
+          config: {
+            prizeCents: 10_000,
+            sweep: { four: 100_000, five: 150_000, six: 200_000 },
+            payoutDay: 5,
+            payoutLabel: `${new Date(`${today.slice(0, 7)}-15T12:00:00`).toLocaleDateString('en-US', { month: 'short' }) === 'Dec' ? 'Jan' : new Date(new Date(`${today}T12:00:00`).setMonth(new Date(`${today}T12:00:00`).getMonth() + 1)).toLocaleDateString('en-US', { month: 'short' })} 5`,
+            returnWindowDays: 30,
+          },
+          viewer: {
+            membershipId: 'm1',
+            name: actor,
+            storeId: 'gl',
+            storeName: 'Glendale',
+            canLog: opts.role !== 'warehouse' && opts.role !== 'ops',
+            defaultScope: opts.role === 'owner' ? 'stores' : 'people',
+          },
+          cards,
+          sweep:
+            sweepEntry[1] >= 3
+              ? {
+                  name: sweepEntry[0] === meId ? 'You' : sweepName,
+                  n: sweepEntry[1],
+                  bonus:
+                    sweepEntry[1] >= 4
+                      ? usd(sweepEntry[1] >= 6 ? 200_000 : sweepEntry[1] >= 5 ? 150_000 : 100_000)
+                      : 'one more for $1,000',
+                  isYou: sweepEntry[0] === meId,
+                }
+              : null,
+          banner:
+            dom <= 3
+              ? {
+                  month: 'prev',
+                  label: 'Last month’s winners',
+                  winners: [
+                    {
+                      race: 'leads',
+                      title: 'Lead Conversion',
+                      name: 'Ronnie Alvarez',
+                      store: 'West LA',
+                      story: '9 leads converted of 14 logged',
+                      short: '9 converted',
+                      value: '9',
+                      prizeCents: 10_000,
+                    },
+                  ],
+                  until: `${today.slice(0, 7)}-03`,
+                  storesLine: 'Stores race: Studio City took 3 of 6. Store prize to the manager.',
+                }
+              : null,
+        });
+      }
+      if (p === '/v1/competitions/history') {
+        return json(
+          defs.flatMap((d, i) => [
+            {
+              month: '2026-08',
+              label: 'August 2026',
+              race: d.key,
+              title: d.title,
+              winner: [
+                'Ronnie Alvarez',
+                'Brandon Cole',
+                'Elyse Nakamura',
+                'Ronnie Alvarez',
+                'Elyse Nakamura',
+                'Wayne Brooks',
+              ][i],
+              winnerStore: [
+                'West LA',
+                'Studio City',
+                'Studio City',
+                'West LA',
+                'Studio City',
+                'La Brea',
+              ][i],
+              result: ['9 converted', '$2,480 avg', '$11,400', '21 sales', '8 beds', '0 of 9'][i],
+              storeWinner: 'Studio City',
+              yourRank: [4, 3, 5, 3, 3, 4][i],
+              paid: 'paid Sep 5',
+            },
+            {
+              month: '2026-07',
+              label: 'July 2026',
+              race: d.key,
+              title: d.title,
+              winner: 'Elyse Nakamura',
+              winnerStore: 'Studio City',
+              result: ['7 converted', '$2,310 avg', '$9,800', '18 sales', '6 beds', '0 of 12'][i],
+              storeWinner: 'Glendale',
+              yourRank: 2,
+              paid: 'paid Aug 5',
+            },
+          ]),
+        );
+      }
+      if (p === '/v1/competitions/sheet') {
+        return json({
+          month: '2026-08',
+          label: 'August 2026',
+          payoutLabel: 'September 5',
+          prizeCents: 10_000,
+          storesLine: 'Stores race: Studio City took 3 of 6. Store prize to the manager.',
+          stores: [],
+          winners: [
+            {
+              race: 'leads',
+              title: 'Lead Conversion',
+              name: 'Ronnie',
+              store: 'West LA',
+              story: '9 leads converted of 14 logged',
+              short: '9 converted',
+              value: '9',
+              prizeCents: 10_000,
+            },
+            {
+              race: 'avg',
+              title: 'Average Ticket',
+              name: 'Brandon',
+              store: 'Studio City',
+              story: '$2,480 across 6 sales',
+              short: '$2,480 avg',
+              value: '$2,480',
+              prizeCents: 10_000,
+            },
+            {
+              race: 'high',
+              title: 'Highest Ticket',
+              name: 'Elyse',
+              store: 'Studio City',
+              story: 'SC-10198, Nadia, a King ProAdapt with two bases',
+              short: '$11,400',
+              value: '$11,400',
+              prizeCents: 10_000,
+            },
+            {
+              race: 'sales',
+              title: 'Most Sales',
+              name: 'Ronnie',
+              store: 'West LA',
+              story: '21 completed orders, $44,120 net',
+              short: '21 sales',
+              value: '21',
+              prizeCents: 10_000,
+            },
+            {
+              race: 'beds',
+              title: 'Most Adjustable Beds',
+              name: 'Elyse',
+              store: 'Studio City',
+              story: '8 bases on completed orders',
+              short: '8 beds',
+              value: '8',
+              prizeCents: 10_000,
+            },
+            {
+              race: 'ex',
+              title: 'Least Exchanges',
+              name: 'Wayne',
+              store: 'La Brea',
+              story: '0 exchanges on 9 sales',
+              short: '0 of 9',
+              value: '0 / 9',
+              prizeCents: 10_000,
+            },
+          ],
+        });
+      }
+      // Leads
+      const mkLead = (
+        i: number,
+        name: string,
+        phone: string,
+        wanted: string,
+        dayAgo: number,
+        status: string,
+        order?: string,
+      ): StubLead => ({
+        id: `lead-${i}`,
+        name,
+        phone,
+        wanted,
+        wantedSize: null,
+        wantedCategory: null,
+        note: null,
+        status,
+        loggedAt: new Date(Date.now() - dayAgo * 86_400_000).toISOString(),
+        expiresAt: new Date(Date.now() + (30 - dayAgo) * 86_400_000).toISOString(),
+        daysLeft: 30 - dayAgo,
+        followUpAt: null,
+        convertedOrderId: order ? 'o-0-1' : null,
+        convertedOrderNumber: order ?? null,
+        conversion: order ? (i === 1 ? 'manual' : 'auto') : null,
+        salesperson: actor,
+        salespersonMembershipId: 'm1',
+        locationId: 'gl',
+      });
+      if (p === '/v1/competitions/leads' && method === 'GET') {
+        return json(
+          cLeads.length
+            ? cLeads
+            : (cLeads = [
+                mkLead(
+                  0,
+                  'Marisol',
+                  '(818) 555-0142',
+                  'Queen, Hybrid, wants to see the ProAdapt again',
+                  2,
+                  'open',
+                ),
+                mkLead(
+                  1,
+                  'Dev',
+                  '(323) 555-0199',
+                  'King, Adjustable base',
+                  5,
+                  'converted',
+                  'GL-10441',
+                ),
+                mkLead(2, 'Walk-in', '(818) 555-0117', 'Full, Memory foam', 9, 'open'),
+                mkLead(
+                  3,
+                  'Tanya',
+                  '(310) 555-0155',
+                  'Cal King, Specific product, Purple 4',
+                  14,
+                  'converted',
+                  'GL-10422',
+                ),
+                mkLead(
+                  4,
+                  'Ken',
+                  '(818) 555-0170',
+                  'Twin, Innerspring, for the guest room',
+                  21,
+                  'lost',
+                ),
+              ]),
+        );
+      }
+      if (p === '/v1/competitions/leads' && method === 'POST') {
+        const digits = (body.phone ?? '').replace(/\D/g, '');
+        const dup = cLeads.find(
+          (x) => x.status === 'open' && x.phone.replace(/\D/g, '') === digits,
+        );
+        if (dup) return json(dup);
+        const l = mkLead(
+          100 + cLeads.length,
+          body.name || 'Walk-in',
+          body.phone ?? '',
+          [body.wantedSize, body.wantedCategory, body.note].filter(Boolean).join(', ') || '—',
+          0,
+          'open',
+        );
+        cLeads = [l, ...cLeads];
+        return json(l);
+      }
+      const verb = /\/v1\/competitions\/leads\/([^/]+)\/(follow-up|attach|lost)$/.exec(p);
+      if (verb) {
+        const l = cLeads.find((x) => x.id === verb[1]);
+        if (!l) return json({ message: 'Lead not found' }, 404);
+        if (verb[2] === 'follow-up') l.followUpAt = new Date(Date.now() + 86_400_000).toISOString();
+        if (verb[2] === 'lost') l.status = 'lost';
+        if (verb[2] === 'attach') {
+          l.status = 'converted';
+          l.convertedOrderId = 'o-0-2';
+          l.convertedOrderNumber = (body.orderNumber || 'GL-10452').toUpperCase();
+          l.conversion = 'manual';
+        }
+        return json(l);
+      }
+    }
+    if (p === '/v1/business/settings' && method === 'PATCH') {
+      const patch = init?.body ? (JSON.parse(String(init.body)) as { ops?: unknown }) : {};
+      return json({ id: 'b1', name: 'LA Mattress', ops: patch.ops ?? null });
     }
     if (p.startsWith('/v1/')) return json({ message: `stub: ${p}` }, 404);
     return real(input, init);

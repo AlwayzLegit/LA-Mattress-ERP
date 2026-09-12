@@ -172,13 +172,16 @@ export function PersonalInbox({
               >
                 <Link
                   // Tasks and notes live on the full order page; a plain
-                  // order update opens the quick slide-over.
+                  // order update opens the quick slide-over; a competition
+                  // notice (no order) goes to the strip on the home.
                   href={
-                    n.taskId
-                      ? `/orders/${n.orderId}/full#team-tasks`
-                      : n.noteId
-                        ? `/orders/${n.orderId}/full#order-notes`
-                        : `/orders/${n.orderId}`
+                    !n.orderId
+                      ? '/dashboard'
+                      : n.taskId
+                        ? `/orders/${n.orderId}/full#team-tasks`
+                        : n.noteId
+                          ? `/orders/${n.orderId}/full#order-notes`
+                          : `/orders/${n.orderId}`
                   }
                   className="block px-5 py-4 hover:bg-surface-2"
                   onClick={() => {
@@ -197,7 +200,9 @@ export function PersonalInbox({
                     </time>
                   </div>
                   <div className="ml-4 mt-1 text-sm">{n.message}</div>
-                  <p className="muted ml-4 mt-2 text-xs">{n.orderNumber} · Open order →</p>
+                  <p className="muted ml-4 mt-2 text-xs">
+                    {n.orderId ? `${n.orderNumber} · Open order →` : 'Open the competition strip →'}
+                  </p>
                 </Link>
               </li>
             ))}

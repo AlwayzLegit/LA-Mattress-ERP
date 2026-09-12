@@ -27,6 +27,7 @@ import {
   TableWrap,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { CompetitionsCard, type CompetitionSettings } from './competitions-card';
 
 interface Branding {
   accentColor?: string | null;
@@ -52,6 +53,8 @@ interface OpsSettings {
   autoReplenishmentEnabled?: boolean | null;
   deliveryDailyPieceCap?: number | null;
   deliveryDailyCapacityUnits?: number | null;
+  /** Redesign Phase 11: sales competitions. */
+  competitions?: CompetitionSettings | null;
   priceVariance?: {
     tier1Pct?: number | null;
     tier1MaxCents?: number | null;
@@ -239,6 +242,7 @@ export default function SettingsPage() {
         </Card>
 
         <OpsCard settings={settings} onSaved={setSettings} />
+        <CompetitionsCard settings={settings} onSaved={setSettings} />
 
         <ReasonCodesCard />
 

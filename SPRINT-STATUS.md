@@ -16,7 +16,8 @@
 > and slide-over) PR #167; Phase 7 (Products browser, product page, adjust, receive) merged
 > 2026-09-12 (PR #168); Phase 8 (Deliveries board + day sheet) merged 2026-09-12 (PR #169);
 > Phase 9 (Owner + Manager dashboards, cash pickups) merged 2026-09-12 (PR #170); Phase 10
-> (Operations, Warehouse, Z-report) in review; Phase 11 (Sales competitions) is next.
+> (Operations, Warehouse, Z-report) merged 2026-09-12 (PR #171); Phase 11 (Sales competitions)
+> in review; Phase 12 (Accessibility pass, states, polish, cleanup) is next.
 
 ---
 

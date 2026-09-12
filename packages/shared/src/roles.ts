@@ -64,6 +64,8 @@ const operationsPermissions: Permission[] = [
   'pos.cash.pickup_record',
   // Redesign Phase 10: signs the Z-report; asks for a recount / records a reason.
   'reports.closeout.sign_off',
+  // Redesign Phase 11: the competition strip and leaderboards (Operations does not sell).
+  'competitions.view',
   // Step 2 (2026-09-10): sets and publishes the staff schedule; punches
   // their own clock like everyone else.
   'schedule.view',
@@ -114,6 +116,9 @@ const operationsPermissions: Permission[] = [
 const cashierPermissions: Permission[] = [
   // My Day (owner 2026-09-01, §12.3): the register's own home.
   'cashier.dashboard.view',
+  // Redesign Phase 11: the strip above My Day, and logging their own leads.
+  'competitions.view',
+  'competitions.leads.log',
   // Reads the schedule, punches the clock (2026-09-10).
   'schedule.view',
   'timeclock.punch',
@@ -154,6 +159,8 @@ const cashierPermissions: Permission[] = [
  * memberships never move.
  */
 const warehousePermissions: Permission[] = [
+  // Redesign Phase 11: the strip (the owner can hide it for Warehouse by setting).
+  'competitions.view',
   'warehouse.dashboard.view',
   // Reads the schedule, punches the clock (2026-09-10).
   'schedule.view',
@@ -186,6 +193,8 @@ const warehousePermissions: Permission[] = [
 ];
 
 const bookkeeperPermissions: Permission[] = [
+  // Redesign Phase 11: History and the winners sheet are payroll facts.
+  'competitions.view',
   // Store list — see the cashier note; the books read per-store too.
   'locations.view',
   'schedule.view',
