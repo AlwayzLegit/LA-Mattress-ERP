@@ -717,3 +717,97 @@ scopes`), which is also what makes them the store's manager on the cards. A mana
   everyone-on-shift strip; that needs a `/v1/timeclock/store` read (Phase 10 with the
   Operations / Warehouse homes).
 - A pickups history page / report (the `history` endpoint exists) and reprinting a slip.
+
+## Phase 10 — Dashboards: operations, warehouse, Z-report (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** the Operations home and the Warehouse home
+restructured per README §3.5 / canvas 8 with every shipped card kept, and the close-out sheet
+(Z-report) built at `/shifts/close/[date]` with its own API, sign-off ledger
+(`close_out_signoffs`, migration `0101_phase10_close_out_signoffs`) and the two drawer verbs.
+Sales competitions are Phase 11.
+
+### What changed
+
+- **Operations home** (`dashboard/operations-dashboard.tsx`) — the time-clock strip and header
+  stay; then the **cash pickups queue** and the **Stores** cards for every store (the Phase 9
+  `StoresSection` with `showQueue`), **Flagged activity** (exception-first, every store, the
+  feed's window; the panel border turns risk-red while a critical row is unseen; link →
+  Exceptions), **Money in by tender** beside **Written business** (14 days, today's bar in
+  accent), **By salesperson** (link → Salespeople), **Flagged activity by person** beside
+  **Store activity**, and the editable **Staff schedule** with Publish last.
+- **Warehouse home** (`warehouse-dashboard.tsx`, `.wh-figs`) — "Acting for {location}" header
+  with Day sheet / Print; six figures **Receiving · On the dock · Trucks out · To pick ·
+  Pickups waiting · Arrived, unscheduled** each with a red delta ("1 overdue", "38 not
+  accepted", "1 short for promise", "1 waiting 7d+") and a sub-line; the truck cards; then
+  **Receiving** beside the **Pick list** (tomorrow, by bin, **Print tickets** → the day-sheet
+  print); **Arrived — book the delivery or call the customer** always rendered; **Dock in
+  progress · Customer pickups**, **Transfers in motion · As-is review**; **Counts & stock
+  health** as a glyph list (open count, negative on-hand first, last post); the read-only
+  schedule. No store cards and no cash on the Warehouse home. Delivery windows are Postgres
+  `time` values — the truck cards now format them as clock times instead of "Invalid Date".
+- **Close-out sheet / Z-report** (`shifts/close/[date]`, `close-out-sheet.tsx`, `.zr-*`) —
+  eyebrow MONEY · {store} (a store picker when more than one is in scope), **Close-out —
+  {weekday, Month D}** with the chip **Auto-closed 10:00 PM · n exceptions** (Closed manually /
+  Closes at 10:00 PM for today / Close never ran), ‹ date › nav (next disabled on today). Six
+  tiles against the **same weekday last week**: Sales (count), Gross, Tax (effective rate),
+  Refunds (red when > 0; count · baseline), Net (accent; ± vs last {weekday}), Order money
+  (deposits on n orders). Then **Tenders** (swatch, count, amount; the **Refunds** line in
+  red; the "tender rows are money taken in…" note), **Cash drawers** (Drawer n + who,
+  Open → close, Expected, Counted, **Over / short** bold: red short, amber over, green $0.00)
+  with the **inline exception** for each short/over/suspended drawer that has no reason yet —
+  "Drawer 2 is short $84.50. Sam Whitfield closed at 8:45 PM without a recount. Ask for a
+  recount or record the variance with a reason; either way it goes to the owner's exceptions."
+  with **Request recount** (primary) and **Record with reason** (dialog) — a recorded reason
+  drops the box and lists under the table with the name and time; **What the 10pm close did**
+  (glyph list: posted n sales and n order payments, drawers checked / flagged, deliveries,
+  open runs, delivered-with-balance, flagged drawers with their recount state, stock released,
+  exceptions still open), **Refunds & cancellations** (document · rep · note · amount), and
+  **Sign off close-out** (dialog with net / drawers / open exceptions and an optional note) →
+  the green **Signed off · Name · time** box. Copy: "Signing records your name and time; the
+  exception stays open until resolved."
+- **Server** — `GET /v1/closeouts/report?date&locationId` (guard `reports.sales.view`; store
+  scope respected; store-local day boundaries; baselines the same weekday last week;
+  drawers = every `cash_shifts` row open at any point of the day, with the closer's name and
+  the recount / reason state read back from the exception register; the day's
+  `daily_closeouts` row and its findings; the sheet's exceptions = the close's own plus the
+  drawers' non-info events, open vs total). `POST /v1/closeouts/sign-off` (`locationId`,
+  `date`, `note?`) inserts the `close_out_signoffs` row (one per store per date; name
+  denormalised; open exception count at signing), audits `closeout.sign_off` and fires
+  `close_out.signed_off`. `POST /v1/closeouts/drawers/:shiftId/recount` records a
+  `cash_recount_requested` warning once per drawer; `POST …/reason` (`reason`, 3–240 chars)
+  records a `cash_variance_reason` info event. Both need a closed drawer with a variance or a
+  suspension. New permission **`reports.closeout.sign_off`**: Owner, Operations, Manager.
+- The manager's **Last night's close** tile now opens `/shifts/close/{closeDay}` for their
+  store.
+- `/dev/dashboard/operations`, `/dev/dashboard/warehouse` and `/dev/dashboard/close` (Glendale,
+  yesterday, with the recount / reason / sign-off verbs working against the stub) preview the
+  three screens on the canvas's fixtures.
+
+### Assumptions
+
+- **Sales / Gross / Tax** on the sheet are register sales completed **plus orders written**
+  that store-day (STORIS's Z counted only the register; this business writes most of its
+  money as orders, and the owner's headline already adds both). **Refunds** = negative
+  payments on orders + register refunds; **Net** = Gross − Refunds; **Order money** = positive
+  payments taken on orders that day (deposits and balances). The older `/v1/reports/z`
+  (register-only, UTC day) is untouched.
+- The baseline is the **same weekday last week** for every tile ("last Wed $16,900"); the tax
+  tile shows the effective rate instead.
+- "What the 10pm close did" is assembled from the day's `daily_closeouts` findings plus the
+  sheet's own drawer facts; the close does not record "reserved stock" or "printed the day
+  sheet", so those canvas lines are not shown.
+- **Request recount** is a register event, not a notification to the cashier — the owner's
+  exceptions and the sheet both show who asked and when. **Record with reason** keeps the
+  drawer's numbers as counted; the reason is the info event's text.
+- Signing never acknowledges an exception (README §3.5: "the exception stays open until
+  resolved"); the sign-off row remembers how many were open when the manager signed.
+  Signing waits for the day's close to have run (409 before that; the button says when it
+  opens) — the sheet is a snapshot of a finished day and the sign-off is one per day.
+- Operations keeps the time-clock strip as the member's own clock (as on the manager home).
+
+### Later
+
+- A cashier-facing recount flow (reopen the drawer for a second blind count) and a
+  notification when a recount is requested.
+- A "sign-offs" report across stores and the owner's view of unsigned days.
+- Phase 11: sales competitions.

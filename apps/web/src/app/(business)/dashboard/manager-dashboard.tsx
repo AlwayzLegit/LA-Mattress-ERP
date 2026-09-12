@@ -411,7 +411,15 @@ export default function ManagerDashboardView({ userName }: { userName: string })
           <span className="dh-side-link">Open the queue →</span>
         </Link>
 
-        <Link href="/shifts" className="panel dh-side" data-testid="dh-last-close">
+        <Link
+          href={
+            data.lastClose.closeDay
+              ? `/shifts/close/${data.lastClose.closeDay}?locationId=${encodeURIComponent(data.location.id)}`
+              : `/shifts/close/${data.date}?locationId=${encodeURIComponent(data.location.id)}`
+          }
+          className="panel dh-side"
+          data-testid="dh-last-close"
+        >
           <div className="dh-label">Last night&apos;s close</div>
           <div
             className="dh-side-value"

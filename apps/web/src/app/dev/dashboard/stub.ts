@@ -201,14 +201,30 @@ export function buildFixtures(today: string) {
   return { orders, payments };
 }
 
-export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { role: 'owner' }) {
+export type PreviewRole = 'owner' | 'manager' | 'ops' | 'warehouse';
+
+export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owner' }) {
   const w = window as unknown as { __dashStub?: boolean };
   if (w.__dashStub) return;
   w.__dashStub = true;
   const today = toDay(new Date());
   const { orders, payments } = buildFixtures(today);
   let pickupSeq = 90;
-  const actor = opts.role === 'manager' ? 'Maya Torres' : 'Alex Rivera';
+  // Close-out sheet state (Phase 10): the flagged drawer's verbs and the sign-off.
+  let zRecount: { by: string; at: string } | null = null;
+  let zReason: { text: string; by: string; at: string } | null = null;
+  let zSign: { name: string; at: string; openExceptionCount: number; note: string | null } | null =
+    null;
+  const zFixtureDay = toDay(new Date(Date.now() - 86_400_000));
+  let zLastDate = zFixtureDay;
+  const actor =
+    opts.role === 'manager'
+      ? 'Maya Torres'
+      : opts.role === 'ops'
+        ? 'Dana Whitmore'
+        : opts.role === 'warehouse'
+          ? 'Rafael Mendoza'
+          : 'Alex Rivera';
   const monthStart = `${today.slice(0, 7)}-01`;
   const dayAge = (day: string) =>
     Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000);
@@ -356,7 +372,7 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
           ageDays: dayAge(p.day),
           amountCents: p.amountCents,
         })),
-      canRecord: opts.role === 'owner' || s.id === 'gl',
+      canRecord: opts.role === 'owner' || opts.role === 'ops' || s.id === 'gl',
     };
   };
   const queue = (ids: string[] | null) => {
@@ -405,7 +421,14 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
     if (p === '/v1/business/members/me')
       return json({
         membershipId: 'm1',
-        roleName: opts.role === 'manager' ? 'Manager' : 'Owner',
+        roleName:
+          opts.role === 'manager'
+            ? 'Manager'
+            : opts.role === 'ops'
+              ? 'Operations'
+              : opts.role === 'warehouse'
+                ? 'Warehouse'
+                : 'Owner',
         hiddenNav: [],
         sellingScope: 'all',
         scopeLocations: [],
@@ -530,7 +553,7 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
         period,
         range:
           period === 'today' ? { start: today, end: today } : { start: monthStart, end: today },
-        viewer: { membershipId: 'm1', canConfirmCashPickup: opts.role === 'owner' },
+        viewer: { membershipId: 'm1', canConfirmCashPickup: opts.role !== 'manager' },
         stores: cards,
         totals: cards.reduce(
           (t, c) => ({
@@ -750,19 +773,26 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
       })();
       const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
       const people: [string, string, string][] =
-        opts.role === 'manager'
+        opts.role === 'warehouse'
           ? [
-              ['Maya Torres', 'Manager', 'gl'],
-              ['Arman Petrosyan', 'Salesperson', 'gl'],
-              ['Priya Nair', 'Cashier', 'gl'],
+              ['Rafael Mendoza', 'Warehouse', 'wh'],
+              ['Tomas Nguyen', 'Driver', 'wh'],
+              ['Chris Okafor', 'Driver', 'wh'],
+              ['Luis Vega', 'Picker', 'wh'],
             ]
-          : [
-              ['Maya Torres', 'Manager', 'gl'],
-              ['Arman Petrosyan', 'Salesperson', 'gl'],
-              ['Devon Park', 'Manager', 'kt'],
-              ['Sam Whitfield', 'Manager', 'wl'],
-              ['Nina Rossi', 'Manager', 'lb'],
-            ];
+          : opts.role === 'manager'
+            ? [
+                ['Maya Torres', 'Manager', 'gl'],
+                ['Arman Petrosyan', 'Salesperson', 'gl'],
+                ['Priya Nair', 'Cashier', 'gl'],
+              ]
+            : [
+                ['Maya Torres', 'Manager', 'gl'],
+                ['Arman Petrosyan', 'Salesperson', 'gl'],
+                ['Devon Park', 'Manager', 'kt'],
+                ['Sam Whitfield', 'Manager', 'wl'],
+                ['Nina Rossi', 'Manager', 'lb'],
+              ];
       const shifts = [null, [540, 1050], [660, 1170], [720, 1200]];
       return json({
         today,
@@ -777,13 +807,13 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
           })),
         },
         locations: STORES.map((s) => ({ id: s.id, name: s.name, locationType: 'store' })),
-        canEdit: opts.role === 'owner',
+        canEdit: opts.role === 'owner' || opts.role === 'ops',
         people: people.map(([name, role, loc], pi) => ({
           membershipId: memberId(name),
           name,
           roleName: role,
           locationId: loc,
-          locationName: STORES.find((s) => s.id === loc)!.name,
+          locationName: STORES.find((s) => s.id === loc)?.name ?? 'Warehouse',
           isLead: role === 'Manager',
           shifts: days
             .map((d, di) => {
@@ -795,21 +825,26 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
             })
             .filter(Boolean),
         })),
-        unpublishedCount: opts.role === 'owner' ? 3 : 0,
+        unpublishedCount: opts.role === 'owner' || opts.role === 'ops' ? 3 : 0,
         lastPublishedAt: atHour(addDays(today, -3), 18),
       });
     }
     if (p === '/v1/timeclock/me') {
-      if (opts.role !== 'manager') return json({ message: 'forbidden' }, 403);
+      if (opts.role === 'owner') return json({ message: 'forbidden' }, 403);
       return json({
         date: today,
         timezone: 'America/Los_Angeles',
         member: {
           membershipId: 'm1',
-          name: 'Maya Torres',
-          roleName: 'Manager',
-          locationId: 'gl',
-          locationName: 'Glendale',
+          name: actor,
+          roleName:
+            opts.role === 'ops'
+              ? 'Operations'
+              : opts.role === 'warehouse'
+                ? 'Warehouse'
+                : 'Manager',
+          locationId: opts.role === 'warehouse' ? 'wh' : 'gl',
+          locationName: opts.role === 'warehouse' ? 'Warehouse' : 'Glendale',
         },
         status: 'in',
         since: atHour(today, 8, 52),
@@ -1022,6 +1057,717 @@ export function installDashboardStub(opts: { role: 'owner' | 'manager' } = { rol
           byName: 'Priya Nair',
           closeDay: addDays(today, -1),
         },
+      });
+    }
+    // ---- Operations home ----
+    if (p === '/v1/dashboard/operations') {
+      const methods = ['card', 'financing', 'cash', 'external_card', 'check', 'gift_card'];
+      return json({
+        date: today,
+        range: { start: q.get('start') ?? today, end: q.get('end') ?? today },
+        stores: STORES.map((x) => ({ id: x.id, name: x.name, timezone: 'America/Los_Angeles' })),
+        money: {
+          inCents: 3321000,
+          outCents: 349800,
+          netCents: 2971200,
+          byTender: methods.map((m) => {
+            const list = payments.filter((x) => x.method === m && x.day === today);
+            return {
+              method: m,
+              cents: list.reduce((n, x) => n + x.amountCents, 0),
+              count: list.length,
+            };
+          }),
+          out: { refundsCents: 349800, returnsCents: 0, writeOffsCents: 0 },
+          exchanges: { count: 1, restockingFeeCents: 0 },
+        },
+        salesByDay: Array.from({ length: 14 }, (_, i) => {
+          const day = addDays(today, i - 13);
+          return {
+            day,
+            writtenCents: i === 13 ? writtenOn(day) : 1800000 + ((i * 3271) % 1400000),
+          };
+        }),
+        byStore: [],
+        ritual: [],
+      });
+    }
+    if (p === '/v1/dashboard/operations/feed') {
+      const rows = [
+        [
+          'critical',
+          'refund',
+          'r1',
+          'Refund over threshold',
+          'no return scanned on SO-10371',
+          -219900,
+          'Sam Whitfield',
+          'wl',
+          'West LA',
+          4,
+          '/orders/o-2-0',
+        ],
+        [
+          'critical',
+          'drawer',
+          'd1',
+          'Drawer variance · short',
+          'La Brea drawer 1 closed short, no recount',
+          -8450,
+          'Nina Rossi',
+          'lb',
+          'La Brea',
+          11,
+          '/shifts',
+        ],
+        [
+          'warning',
+          'closeout',
+          'c1',
+          'Close-out not run',
+          'Koreatown opened 9:58 PM; the 10pm close found the drawer open',
+          null,
+          'Devon Park',
+          'kt',
+          'Koreatown',
+          11,
+          '/shifts',
+        ],
+        [
+          'warning',
+          'discount_note',
+          'dn1',
+          'Discount 18% without note',
+          'SO-10441 · Paul Ng',
+          -23382,
+          'Arman Petrosyan',
+          'gl',
+          'Glendale',
+          15,
+          '/orders/o-0-1',
+        ],
+        [
+          'warning',
+          'override',
+          'ov1',
+          'Price override ×2',
+          'SO-10445 · match competitor',
+          -64000,
+          'Ivan Kaplan',
+          'sc',
+          'Studio City',
+          26,
+          '/orders/o-3-2',
+        ],
+      ] as const;
+      return json({
+        rows: rows.map(
+          ([
+            severity,
+            subjectType,
+            subjectId,
+            kind,
+            summary,
+            amountCents,
+            actorName,
+            locationId,
+            locationName,
+            hoursAgo,
+            href,
+          ]) => ({
+            subjectType,
+            subjectId,
+            severity,
+            kind,
+            summary,
+            amountCents,
+            actorUserId: `u-${actorName}`,
+            actorName,
+            locationId,
+            locationName,
+            href,
+            occurredAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+            clearVia: 'review',
+          }),
+        ),
+        total: 5,
+        thresholds: {
+          refundCents: 50000,
+          discountPct: 15,
+          overrideCents: 20000,
+          drawerVarianceCents: 2000,
+          inventoryAdjustUnits: 5,
+          takeWithOpenHours: 2,
+          lookbackDays: 7,
+        },
+      });
+    }
+    if (p === '/v1/ops-reviews/bulk' && method === 'POST') return json({ cleared: 1 });
+    if (p === '/v1/dashboard/operations/salespeople') {
+      return json(
+        STORES.flatMap((st) =>
+          st.reps.map((r) => {
+            const ro = orders.filter((o) => o.rep === r);
+            const w = ro.reduce((n, o) => n + o.amountCents, 0);
+            const disc = 3 + (r.length % 10);
+            return {
+              key: memberId(r),
+              name: `${r} · ${st.name}`,
+              writtenCents: w,
+              writtenCount: ro.length,
+              collectedCents: payments
+                .filter((x) => x.rep === r)
+                .reduce((n, x) => n + x.amountCents, 0),
+              refundedCents: r === st.manager ? st.refunds : 0,
+              discountCents: Math.round((w * disc) / 100),
+              discountPct: disc,
+            };
+          }),
+        ).sort((a, b) => b.writtenCents - a.writtenCents),
+      );
+    }
+    if (p === '/v1/dashboard/operations/digest') {
+      return json([
+        {
+          actorUserId: 'u1',
+          actorName: 'Sam Whitfield',
+          total: 3,
+          amountCents: 349800,
+          byKind: { 'Refund over threshold': 2, 'Drawer variance': 1 },
+          worstSeverity: 'critical',
+        },
+        {
+          actorUserId: 'u2',
+          actorName: 'Devon Park',
+          total: 1,
+          amountCents: 64000,
+          byKind: { 'Price override': 1 },
+          worstSeverity: 'warning',
+        },
+        {
+          actorUserId: null,
+          actorName: null,
+          total: 3,
+          amountCents: 0,
+          byKind: { 'Inventory adjustment': 3 },
+          worstSeverity: 'info',
+        },
+      ]);
+    }
+    if (p === '/v1/dashboard/operations/activity') {
+      return json([
+        {
+          orderId: 'o-0-0',
+          orderNumber: 'SO-10437',
+          latestAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+          events: [
+            { action: 'payment recorded', actorName: 'Maya', createdAt: today },
+            { action: 'delivery scheduled', actorName: 'Dispatch', createdAt: today },
+            { action: 'written', actorName: 'Priya', createdAt: today },
+          ],
+        },
+        {
+          orderId: 'o-0-1',
+          orderNumber: 'SO-10412',
+          latestAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+          events: [
+            { action: 'discount applied', actorName: 'Maya', createdAt: today },
+            { action: 'written', actorName: 'Tara', createdAt: today },
+          ],
+        },
+        {
+          orderId: 'o-1-3',
+          orderNumber: 'SO-10398',
+          latestAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
+          events: [{ action: 'balance collected', actorName: 'Priya', createdAt: today }],
+        },
+        {
+          orderId: 'o-2-0',
+          orderNumber: 'SO-10371',
+          latestAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+          events: [
+            { action: 'refund issued', actorName: 'Sam', createdAt: today },
+            { action: 'return opened', actorName: 'Sam', createdAt: today },
+          ],
+        },
+      ]);
+    }
+    // ---- Warehouse home ----
+    if (p === '/v1/dashboard/warehouse') {
+      return json({
+        date: today,
+        location: { id: 'wh', name: 'Warehouse', timezone: 'America/Los_Angeles' },
+        locations: [
+          { id: 'wh', name: 'Warehouse', locationType: 'warehouse' },
+          ...STORES.map((x) => ({ id: x.id, name: x.name, locationType: 'store' })),
+        ],
+        inbound: [
+          {
+            id: 'po1',
+            number: 'PO-4471',
+            vendorName: 'Tempur Sealy',
+            locationName: 'Warehouse',
+            expectedAt: atHour(today, 9),
+            orderedUnits: 48,
+            receivedUnits: 0,
+            overdue: false,
+          },
+          {
+            id: 'po2',
+            number: 'PO-4468',
+            vendorName: 'Purple',
+            locationName: 'Warehouse',
+            expectedAt: atHour(today, 9),
+            orderedUnits: 38,
+            receivedUnits: 20,
+            overdue: false,
+          },
+          {
+            id: 'po3',
+            number: 'PO-4462',
+            vendorName: 'Brooklyn Bedding',
+            locationName: 'Warehouse',
+            expectedAt: atHour(addDays(today, -5), 9),
+            orderedUnits: 24,
+            receivedUnits: 0,
+            overdue: true,
+          },
+          {
+            id: 'po4',
+            number: 'PO-4475',
+            vendorName: 'Serta Simmons',
+            locationName: 'Warehouse',
+            expectedAt: atHour(addDays(today, 2), 9),
+            orderedUnits: 60,
+            receivedUnits: 0,
+            overdue: false,
+          },
+        ],
+        dock: [
+          {
+            id: 'po2',
+            number: 'PO-4468',
+            vendorName: 'Purple',
+            locationName: 'Warehouse',
+            unitsInProgress: 20,
+            lastActivityAt: atHour(addDays(today, -2), 14),
+          },
+          {
+            id: 'po5',
+            number: 'PO-4459',
+            vendorName: 'Malouf',
+            locationName: 'Warehouse',
+            unitsInProgress: 18,
+            lastActivityAt: atHour(addDays(today, -5), 11),
+          },
+        ],
+        pickups: [
+          {
+            orderId: 'o-1-1',
+            number: 'SO-10402',
+            customerName: 'Dana Wu',
+            locationName: 'Warehouse',
+            ageDays: 2,
+            ready: true,
+          },
+          {
+            orderId: 'o-1-2',
+            number: 'SO-10419',
+            customerName: 'Felix Moreno',
+            locationName: 'Warehouse',
+            ageDays: 5,
+            ready: false,
+          },
+          {
+            orderId: 'o-1-3',
+            number: 'SO-10388',
+            customerName: 'Grace Kim',
+            locationName: 'Warehouse',
+            ageDays: 9,
+            ready: true,
+          },
+          {
+            orderId: 'o-1-4',
+            number: 'SO-10377',
+            customerName: 'Ivan Petrov',
+            locationName: 'Warehouse',
+            ageDays: 1,
+            ready: true,
+          },
+          {
+            orderId: 'o-1-5',
+            number: 'SO-10366',
+            customerName: 'Lena Fischer',
+            locationName: 'Warehouse',
+            ageDays: 3,
+            ready: false,
+          },
+        ],
+        arrived: [
+          {
+            orderId: 'o-2-1',
+            orderNumber: 'SO-10391',
+            customerName: 'Helen Park',
+            locationName: 'Glendale',
+            description: 'Tempur-Pedic ProAdapt King',
+            quantity: 1,
+            arrivedAt: atHour(addDays(today, -2), 10),
+          },
+          {
+            orderId: 'o-2-2',
+            orderNumber: 'SO-10405',
+            customerName: 'Marco Silva',
+            locationName: 'Koreatown',
+            description: 'Purple Hybrid Queen',
+            quantity: 2,
+            arrivedAt: atHour(today, 8),
+          },
+        ],
+        transfers: {
+          rows: [
+            {
+              id: 't1',
+              number: 'TR-0912',
+              direction: 'outbound',
+              fromName: 'Warehouse',
+              toName: 'Glendale',
+              status: 'in_transit',
+              units: 6,
+              days: 1,
+              awaitingTicket: false,
+            },
+            {
+              id: 't2',
+              number: 'TR-0915',
+              direction: 'outbound',
+              fromName: 'Warehouse',
+              toName: 'Koreatown',
+              status: 'in_transit',
+              units: 4,
+              days: 0,
+              awaitingTicket: true,
+            },
+            {
+              id: 't3',
+              number: 'TR-0908',
+              direction: 'outbound',
+              fromName: 'Warehouse',
+              toName: 'West LA',
+              status: 'in_transit',
+              units: 3,
+              days: 4,
+              awaitingTicket: false,
+            },
+          ],
+          closedShort30d: 1,
+        },
+        asIs: {
+          count: 4,
+          costCents: 184000,
+          oldestAt: atHour(addDays(today, -6), 9),
+          rows: [
+            {
+              id: 'a1',
+              productName: 'Sealy Posturepedic Queen',
+              locationName: 'Warehouse',
+              quantity: 1,
+              condition: 'floor model · scuffed',
+              createdAt: atHour(addDays(today, -6), 9),
+            },
+            {
+              id: 'a2',
+              productName: 'Casper Original Full',
+              locationName: 'Warehouse',
+              quantity: 1,
+              condition: 'returned · open box',
+              createdAt: atHour(addDays(today, -2), 9),
+            },
+            {
+              id: 'a3',
+              productName: 'Malouf pillow',
+              locationName: 'Warehouse',
+              quantity: 2,
+              condition: 'damaged packaging',
+              createdAt: atHour(addDays(today, -1), 9),
+            },
+          ],
+        },
+        counts: {
+          open: [{ id: 'c1', countDate: today, status: 'in_progress', locationName: 'Zone C' }],
+          lastPostedDate: atHour(addDays(today, -15), 18),
+          negative: [
+            {
+              variantId: 'v1',
+              productName: 'Purple Hybrid Queen',
+              sku: 'PH-Q-01',
+              locationName: 'Warehouse',
+              onHand: -1,
+            },
+            {
+              variantId: 'v2',
+              productName: 'Malouf Z pillow',
+              sku: 'MZ-STD',
+              locationName: 'Warehouse',
+              onHand: -2,
+            },
+          ],
+        },
+      });
+    }
+    if (p === '/v1/dashboard/warehouse/loadout') {
+      const mk = (i: number, route: string, driver: string, status: string) => ({
+        deliveryId: `d${i}`,
+        orderId: `o-0-${i % 9}`,
+        orderNumber: `SO-${10430 + i}`,
+        customerName: CUSTOMERS[i % CUSTOMERS.length],
+        locationName: 'Glendale',
+        windowStart: `${String(8 + (i % 4) * 2).padStart(2, '0')}:00`,
+        windowEnd: `${String(11 + (i % 4) * 2).padStart(2, '0')}:00`,
+        route,
+        driverName: driver,
+        status,
+        pieces: 1 + (i % 3),
+        serialShort: i === 7,
+      });
+      const rows = [
+        ...Array.from({ length: 6 }, (_, i) =>
+          mk(
+            i,
+            'Truck A',
+            'R. Mendoza',
+            i < 3 ? 'delivered' : i < 5 ? 'out_for_delivery' : 'loaded',
+          ),
+        ),
+        ...Array.from({ length: 5 }, (_, i) =>
+          mk(6 + i, 'Truck B', 'T. Nguyen', i < 2 ? 'delivered' : 'out_for_delivery'),
+        ),
+        ...Array.from({ length: 3 }, (_, i) => mk(11 + i, 'Truck C', 'C. Okafor', 'scheduled')),
+      ];
+      return json({
+        date: today,
+        cap: 15,
+        stops: rows.length,
+        pieces: rows.reduce((n, r) => n + r.pieces, 0),
+        rows,
+      });
+    }
+    if (p === '/v1/dashboard/warehouse/picklist') {
+      const rows = [
+        ['A-12', 'Tempur-Pedic ProAdapt', 'Queen', 'TP-PA-Q', 2, 4, false],
+        ['B-04', 'Sealy Posturepedic Plus', 'Queen', 'SP-PL-Q', 1, 3, false],
+        ['B-09', 'Adjustable base', 'Queen', 'AB-Q', 2, 1, true],
+        ['C-01', 'Cloud Comfort Mattress', 'Queen', 'CC-Q', 1, 6, false],
+        ['C-07', 'Purple Hybrid 3', 'King', 'PH3-K', 2, 2, false],
+      ] as const;
+      return json({
+        date: addDays(today, 1),
+        rows: rows.map(([bin, productName, variantName, sku, quantity, onHand, short], i) => ({
+          variantId: `pv${i}`,
+          locationId: 'wh',
+          locationName: 'Warehouse',
+          productName,
+          variantName,
+          sku,
+          bin,
+          quantity,
+          onHand,
+          short,
+          serialShort: false,
+        })),
+      });
+    }
+    // ---- Close-out sheet (Z-report, Phase 10) ----
+    if (
+      p === '/v1/closeouts/report' ||
+      p === '/v1/closeouts/sign-off' ||
+      p.startsWith('/v1/closeouts/drawers/')
+    ) {
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, string>) : {};
+      let zDate = q.get('date') ?? body.date ?? today;
+      const zLoc = q.get('locationId') ?? body.locationId ?? 'gl';
+      if (p === '/v1/closeouts/sign-off') {
+        zSign = {
+          name: actor,
+          at: new Date().toISOString(),
+          openExceptionCount: zReason ? 0 : 1,
+          note: body.note || null,
+        };
+      }
+      if (p.endsWith('/recount')) zRecount = { by: actor, at: new Date().toISOString() };
+      if (p.endsWith('/reason'))
+        zReason = { text: body.reason ?? '', by: actor, at: new Date().toISOString() };
+      if (p.startsWith('/v1/closeouts/drawers/')) zDate = zLastDate;
+      zLastDate = zDate;
+      const at = (d: string, hm: string) => new Date(`${d}T${hm}:00`).toISOString();
+      const store = STORES.find((s) => s.id === zLoc) ?? STORES[0]!;
+      const isFixtureDay = zDate === zFixtureDay;
+      const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][
+        new Date(`${zDate}T00:00:00`).getDay()
+      ];
+      const short = zReason ? 'reason recorded' : zRecount ? 'recount requested' : 'no recount';
+      const did = isFixtureDay
+        ? [
+            { tone: 'ok', text: 'Posted 9 sales and 3 order payments to the ledger' },
+            { tone: 'ok', text: 'Checked 2 drawers — every one closed' },
+            { tone: 'ok', text: 'Every delivery scheduled today was completed' },
+            {
+              tone: zReason ? 'ok' : zRecount ? 'hold' : 'risk',
+              text: zReason
+                ? `Drawer 2 short $84.50 — reason recorded by ${actor}`
+                : `Flagged Drawer 2 short $84.50 — ${short}`,
+            },
+            {
+              tone: 'hold',
+              text: 'Released stock on 1 stale order — promised over 30 days ago, no truck booked',
+            },
+            { tone: 'info', text: '1 of 1 exception still open on the register' },
+          ]
+        : zDate >= today
+          ? [{ tone: 'hold', text: 'Runs at 10:00 PM store time — nothing posted yet' }]
+          : [
+              { tone: 'ok', text: 'Posted 6 sales and 2 order payments to the ledger' },
+              { tone: 'ok', text: 'Checked 1 drawer — every one closed' },
+              { tone: 'ok', text: 'Every delivery scheduled today was completed' },
+            ];
+      return json({
+        date: zDate,
+        today,
+        location: {
+          id: store.id,
+          name: store.name,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        locations: STORES.map((s) => ({ id: s.id, name: s.name })),
+        baseline: { date: zDate, label: `last ${wd}` },
+        tiles: isFixtureDay
+          ? {
+              sales: { count: 9, baseline: 8 },
+              gross: { cents: 1_896_000, baseline: 1_690_000 },
+              tax: { cents: 180_120, ratePct: 9.5 },
+              refunds: { cents: 129_900, count: 1, baseline: 0 },
+              net: { cents: 1_766_100, baseline: 1_690_000 },
+              orderMoney: { cents: 412_000, orderCount: 3 },
+            }
+          : {
+              sales: { count: 6, baseline: 7 },
+              gross: { cents: 1_242_000, baseline: 1_318_000 },
+              tax: { cents: 117_990, ratePct: 9.5 },
+              refunds: { cents: 0, count: 0, baseline: 24_900 },
+              net: { cents: 1_242_000, baseline: 1_293_100 },
+              orderMoney: { cents: 260_000, orderCount: 2 },
+            },
+        tenders: isFixtureDay
+          ? [
+              { method: 'card', count: 5, amountCents: 1_124_000 },
+              { method: 'financing', count: 2, amountCents: 630_000 },
+              { method: 'cash', count: 3, amountCents: 188_450 },
+              { method: 'check', count: 1, amountCents: 79_800 },
+            ]
+          : [
+              { method: 'card', count: 4, amountCents: 812_000 },
+              { method: 'cash', count: 2, amountCents: 130_000 },
+            ],
+        refundLine: isFixtureDay
+          ? { count: 1, amountCents: 129_900 }
+          : { count: 0, amountCents: 0 },
+        drawers: isFixtureDay
+          ? [
+              {
+                id: 'sh1',
+                number: 1,
+                openedAt: at(zDate, '09:58'),
+                closedAt: at(zDate, '18:02'),
+                openedBy: 'Maya Torres',
+                closedBy: 'Maya Torres',
+                openingFloatCents: 20_000,
+                expectedCashCents: 61_250,
+                countedCashCents: 61_250,
+                varianceCents: 0,
+                status: 'clean',
+                closeAttempts: 0,
+                recount: null,
+                reason: null,
+              },
+              {
+                id: 'sh2',
+                number: 2,
+                openedAt: at(zDate, '12:00'),
+                closedAt: at(zDate, '20:45'),
+                openedBy: 'Sam Whitfield',
+                closedBy: 'Sam Whitfield',
+                openingFloatCents: 20_000,
+                expectedCashCents: 100_800,
+                countedCashCents: 92_350,
+                varianceCents: -8_450,
+                status: 'short',
+                closeAttempts: 1,
+                recount: zRecount,
+                reason: zReason,
+              },
+            ]
+          : zDate >= today
+            ? []
+            : [
+                {
+                  id: 'sh0',
+                  number: 1,
+                  openedAt: at(zDate, '10:02'),
+                  closedAt: at(zDate, '19:10'),
+                  openedBy: 'Maya Torres',
+                  closedBy: 'Maya Torres',
+                  openingFloatCents: 20_000,
+                  expectedCashCents: 150_000,
+                  countedCashCents: 150_000,
+                  varianceCents: 0,
+                  status: 'clean',
+                  closeAttempts: 0,
+                  recount: null,
+                  reason: null,
+                },
+              ],
+        close:
+          zDate >= today
+            ? null
+            : {
+                id: 'co1',
+                ranAt: at(zDate, '22:00'),
+                trigger: 'scheduler',
+                exceptionCount: isFixtureDay ? 1 : 0,
+                stockReleasedCount: isFixtureDay ? 1 : 0,
+                findings: {
+                  openCashShifts: 0,
+                  undeliveredToday: 0,
+                  openRuns: 0,
+                  deliveredWithBalance: 0,
+                },
+              },
+        closeHour: 22,
+        did,
+        exceptions: isFixtureDay ? { open: 1, total: 1 } : { open: 0, total: 0 },
+        events: isFixtureDay
+          ? [
+              {
+                kind: 'refund',
+                number: 'SO-10371',
+                href: '/orders/o-10371',
+                who: 'Sam Whitfield',
+                note: 'refund, no return scanned',
+                amountCents: -129_900,
+                at: at(zDate, '15:12'),
+              },
+              {
+                kind: 'cancellation',
+                number: 'SO-10412',
+                href: '/orders/o-10412',
+                who: 'Priya Natarajan',
+                note: 'cancelled, $500.00 paid still on the order',
+                amountCents: 50_000,
+                at: at(zDate, '17:40'),
+              },
+            ]
+          : [],
+        signoff: isFixtureDay ? zSign : null,
+        viewer: { canSignOff: true, signable: zDate < today },
       });
     }
     if (p.startsWith('/v1/')) return json({ message: `stub: ${p}` }, 404);

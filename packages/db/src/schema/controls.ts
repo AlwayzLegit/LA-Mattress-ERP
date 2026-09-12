@@ -203,3 +203,38 @@ export const opsReviews = pgTable(
     ),
   }),
 );
+
+/**
+ * Close-out sign-offs (redesign Phase 10, Z-report). The manager on duty
+ * signs the store's close-out sheet for one local date: it records who
+ * read it and when. It is deliberately not a resolution — every
+ * exception the 10pm close raised stays open on the register until it
+ * is acknowledged there — so a signed sheet with a short drawer still
+ * shows the owner both facts. One row per store per date; the name is
+ * denormalised so the sheet reads the same after the member leaves.
+ */
+export const closeOutSignoffs = pgTable(
+  'close_out_signoffs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').notNull(),
+    /** The store-local calendar date the sheet covers (YYYY-MM-DD). */
+    closeDate: text('close_date').notNull(),
+    signedByUserId: uuid('signed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    signedByName: text('signed_by_name').notNull(),
+    signedAt: timestamp('signed_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Open exceptions on the sheet at the moment of signing. */
+    openExceptionCount: integer('open_exception_count').notNull().default(0),
+    note: text('note'),
+  },
+  (t) => ({
+    businessIdx: index('close_out_signoffs_business_id_idx').on(t.businessId),
+    locationDateUnique: uniqueIndex('close_out_signoffs_location_date_uniq').on(
+      t.locationId,
+      t.closeDate,
+    ),
+  }),
+);

@@ -154,6 +154,7 @@ DECLARE
     'cash_pickup_receipts',
     'cash_pickups',
     'cash_pickup_items',
+    'close_out_signoffs',
     'order_change_acks',
     'staff_shifts',
     'time_punches',

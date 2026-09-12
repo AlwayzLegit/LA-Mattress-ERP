@@ -127,6 +127,8 @@ export const PERMISSIONS = {
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',
+  'reports.closeout.sign_off':
+    'Sign off the daily close-out sheet and act on a short drawer — request a recount or record the variance with a reason (Owner, Operations, Manager)',
   'reports.inventory.view': 'View inventory reports',
   'reports.financial.view': 'View financial reports (incl. cost/margin)',
   'reports.export': 'Export reports',

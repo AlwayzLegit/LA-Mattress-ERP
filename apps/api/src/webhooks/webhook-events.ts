@@ -49,6 +49,7 @@ export const WEBHOOK_EVENT_TYPES = [
   // varianceCents, slip, paymentIds, recordedByMembershipId } — a posted
   // drawer pickup (redesign Phase 9).
   'cash_pickup.posted',
+  'close_out.signed_off',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

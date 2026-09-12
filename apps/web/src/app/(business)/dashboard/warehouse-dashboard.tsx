@@ -164,9 +164,17 @@ function ago(iso: string): string {
   return `${days}d`;
 }
 
-function clock(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+/** Delivery windows are Postgres `time` values ("14:00:00"); timestamps also pass. */
+function clock(value: string | null): string {
+  if (!value) return '—';
+  const tod = /^(\d{1,2}):(\d{2})/.exec(value);
+  if (tod && !value.includes('T')) {
+    const h = Number(tod[1]);
+    const m = tod[2];
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return m === '00' ? `${h12} ${h < 12 ? 'AM' : 'PM'}` : `${h12}:${m} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+  return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 function calDay(iso: string): string {
@@ -438,13 +446,16 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   const daySheetHref = `/deliveries/day/${summary.date}`;
   const tomorrowHref = `/deliveries/day/${picklist?.date ?? summary.date}`;
 
+  // Six KPIs at full size (canvas 8e): value, a red qualifier when something
+  // is wrong, and what the number counts.
   const tiles: KpiTile[] = [
     {
       key: 'inbound',
       label: 'Receiving',
       value: String(summary.inbound.length),
-      sub: overdueCount > 0 ? `${overdueCount} overdue` : 'POs due · none overdue',
-      tone: overdueCount > 0 ? 'danger' : undefined,
+      delta: overdueCount > 0 ? `${overdueCount} overdue` : 'none overdue',
+      deltaTone: overdueCount > 0 ? 'down' : 'up',
+      sub: 'POs due',
       href: '/purchase-orders',
       testid: 'wh-kpi-inbound',
     },
@@ -452,7 +463,9 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       key: 'dock',
       label: 'On the dock',
       value: String(dockUnits),
-      sub: 'units received, not accepted',
+      delta: dockUnits > 0 ? 'not accepted' : 'clear',
+      deltaTone: dockUnits > 0 ? 'down' : 'up',
+      sub: 'units received',
       tone: dockUnits > 0 ? 'danger' : undefined,
       href: '/purchase-orders',
       testid: 'wh-kpi-dock',
@@ -461,9 +474,11 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       key: 'loadout',
       label: 'Trucks out',
       value: loadout ? String(trucksOut) : '—',
-      sub: loadout
-        ? `${loadout.stops}${loadout.cap != null ? ` of ${loadout.cap}` : ''} stops today · ${stopsOpen} open`
-        : 'loading…',
+      delta: loadout
+        ? `${loadout.stops}${loadout.cap != null ? ` of ${loadout.cap}` : ''} stops · ${stopsOpen} open`
+        : null,
+      deltaTone: 'up',
+      sub: 'today',
       href: daySheetHref,
       testid: 'wh-kpi-loadout',
     },
@@ -471,11 +486,13 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       key: 'pick',
       label: 'To pick',
       value: picklist ? String(picklist.rows.length) : '—',
-      sub: picklist
+      delta: picklist
         ? pickShort > 0
           ? `${pickShort} short for promise`
-          : `for tomorrow · ${plural(pickPieces, 'piece')}`
-        : 'loading…',
+          : plural(pickPieces, 'piece')
+        : null,
+      deltaTone: pickShort > 0 ? 'down' : 'up',
+      sub: 'for tomorrow',
       tone: pickShort > 0 ? 'danger' : undefined,
       href: tomorrowHref,
       testid: 'wh-kpi-pick',
@@ -484,18 +501,22 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
       key: 'pickups',
       label: 'Pickups waiting',
       value: String(summary.pickups.length),
-      sub: stalePickups > 0 ? `${stalePickups} waiting 7d+` : 'all fresh',
+      delta: stalePickups > 0 ? `${stalePickups} waiting 7d+` : 'all fresh',
+      deltaTone: stalePickups > 0 ? 'down' : 'up',
+      sub: 'customers',
       tone: stalePickups > 0 ? 'danger' : undefined,
-      href: '/orders',
+      href: '/orders?fulfillment=pickup',
       testid: 'wh-kpi-pickups',
     },
     {
       key: 'arrived',
       label: 'Arrived, unscheduled',
       value: String(summary.arrived.length),
-      sub: 'special orders to book',
+      delta: 'special orders',
+      deltaTone: summary.arrived.length > 0 ? 'down' : 'up',
+      sub: 'to book',
       tone: summary.arrived.length > 0 ? 'danger' : undefined,
-      href: '/orders',
+      href: '/special-orders',
       testid: 'wh-kpi-arrived',
     },
   ];
@@ -509,15 +530,13 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   };
 
   return (
-    <div
-      style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
-      data-testid="warehouse-dashboard"
-    >
+    <div className="dh" data-testid="warehouse-dashboard">
       <TimeClockStrip />
       <PageHead
         title={locationLabel}
         sub={
           <>
+            Acting for <strong style={{ fontWeight: 600 }}>{locationLabel}</strong> ·{' '}
             {longDay(summary.date)} · {loadout ? plural(trucksOut, 'truck') : '— trucks'} out ·{' '}
             {picklist ? picklist.rows.length : '—'} to pick for tomorrow
             {who}
@@ -547,17 +566,46 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
                 ))}
               </Select>
             )}
-            <Link href={daySheetHref} className="topbar-btn">
+            <Link href={daySheetHref} className="btn btn-secondary btn-sm">
               Day sheet
             </Link>
-            <button type="button" className="topbar-btn" onClick={() => window.print()}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => window.print()}
+            >
               Print
             </button>
           </>
         }
       />
 
-      <KpiStrip tiles={tiles} />
+      <div className="wh-figs" data-testid="wh-kpis">
+        {tiles.map((t) => (
+          <Link key={t.key} href={t.href} className="wh-fig" data-testid={t.testid}>
+            <div className="wh-fig-label">{t.label}</div>
+            <div className="wh-fig-row">
+              <span
+                className="wh-fig-value mono"
+                style={{ color: t.tone === 'danger' ? 'var(--status-risk-fg)' : undefined }}
+              >
+                {t.value}
+              </span>
+              {t.delta && (
+                <span
+                  className="wh-fig-delta mono"
+                  style={{
+                    color: t.deltaTone === 'down' ? 'var(--status-risk-fg)' : 'var(--muted)',
+                  }}
+                >
+                  {t.delta}
+                </span>
+              )}
+            </div>
+            <div className="wh-fig-sub">{t.sub}</div>
+          </Link>
+        ))}
+      </div>
 
       {/* ── Trucks: one card per route/driver from today's loadout ── */}
       <div data-testid="wh-loadout">
@@ -578,7 +626,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
             style={{
               display: 'grid',
               gridTemplateColumns: `repeat(${Math.min(3, trucks.length)}, minmax(0, 1fr))`,
-              gap: 18,
+              gap: 14,
             }}
           >
             {trucks.map((t) => (
@@ -588,81 +636,8 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
         )}
       </div>
 
-      {/* ── Pick queue (1.5fr) + Receiving (1fr) ── */}
-      <div
-        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 18 }}
-      >
-        <Panel
-          title="Pick queue"
-          sub={picklist ? `tomorrow, ${shortDay(picklist.date)} · by bin` : 'tomorrow'}
-          testid="wh-picklist"
-          actions={
-            picklist && picklist.rows.length > 0 ? (
-              <Link
-                href={`/print/deliveries?date=${picklist.date}`}
-                target="_blank"
-                rel="noopener"
-                className="topbar-btn"
-                style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }}
-                data-noprint="true"
-              >
-                Print tickets
-              </Link>
-            ) : undefined
-          }
-        >
-          <table className="dt dt-static">
-            <thead>
-              <tr>
-                <th className="first">Item</th>
-                <th className="num">Pull</th>
-                <th>Bin</th>
-                <th className="num">On hand</th>
-                <th className="last">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {picklist == null ? (
-                <ShimmerRows rows={5} colSpan={5} />
-              ) : picklist.rows.length === 0 ? (
-                <EmptyRow colSpan={5}>Nothing scheduled to pull for tomorrow yet.</EmptyRow>
-              ) : (
-                picklist.rows.map((r) => (
-                  <tr key={`${r.variantId}:${r.locationId}`}>
-                    <td className="first" style={{ whiteSpace: 'normal' }}>
-                      {r.productName}
-                      {r.variantName ? ` — ${r.variantName}` : ''}
-                      {r.sku && <div className="sub">{r.sku}</div>}
-                      <LocationSub show={allMode} name={r.locationName} />
-                    </td>
-                    <td className="num">
-                      <strong>{r.quantity}</strong>
-                    </td>
-                    <td className="mono" style={{ color: 'var(--muted)' }}>
-                      {r.bin ?? 'unbinned'}
-                    </td>
-                    <td
-                      className="num"
-                      style={{ color: r.short ? 'var(--danger)' : 'var(--muted)' }}
-                    >
-                      {r.onHand}
-                    </td>
-                    <td className="last">
-                      {r.short ? (
-                        <StatusPill tone="danger">Short · only {r.onHand} on hand</StatusPill>
-                      ) : r.serialShort ? (
-                        <StatusPill tone="danger">Serials unpicked</StatusPill>
-                      ) : (
-                        <StatusPill tone="muted">Queued</StatusPill>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </Panel>
-
+      {/* ── Receiving beside the Pick list (canvas 8e) ── */}
+      <div className="dh-grid">
         <Panel
           title="Receiving"
           sub={overdueCount > 0 ? `${overdueCount} overdue` : 'due and on the way'}
@@ -723,28 +698,104 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
             </div>
           )}
         </Panel>
+        <Panel
+          title="Pick list"
+          sub={picklist ? `tomorrow, ${shortDay(picklist.date)} · by bin` : 'tomorrow'}
+          testid="wh-picklist"
+          actions={
+            picklist && picklist.rows.length > 0 ? (
+              <Link
+                href={`/print/deliveries?date=${picklist.date}`}
+                target="_blank"
+                rel="noopener"
+                className="btn btn-secondary btn-sm"
+                style={{ marginLeft: 'auto' }}
+                data-noprint="true"
+                data-testid="wh-print-tickets"
+              >
+                Print tickets
+              </Link>
+            ) : undefined
+          }
+        >
+          <table className="dt dt-static">
+            <thead>
+              <tr>
+                <th className="first">Item</th>
+                <th className="num">Pull</th>
+                <th>Bin</th>
+                <th className="num">On hand</th>
+                <th className="last">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {picklist == null ? (
+                <ShimmerRows rows={5} colSpan={5} />
+              ) : picklist.rows.length === 0 ? (
+                <EmptyRow colSpan={5}>Nothing scheduled to pull for tomorrow yet.</EmptyRow>
+              ) : (
+                picklist.rows.map((r) => (
+                  <tr key={`${r.variantId}:${r.locationId}`}>
+                    <td className="first" style={{ whiteSpace: 'normal' }}>
+                      {r.productName}
+                      {r.variantName ? ` — ${r.variantName}` : ''}
+                      {r.sku && <div className="sub">{r.sku}</div>}
+                      <LocationSub show={allMode} name={r.locationName} />
+                    </td>
+                    <td className="num">
+                      <strong>{r.quantity}</strong>
+                    </td>
+                    <td className="mono" style={{ color: 'var(--muted)' }}>
+                      {r.bin ?? 'unbinned'}
+                    </td>
+                    <td
+                      className="num"
+                      style={{ color: r.short ? 'var(--danger)' : 'var(--muted)' }}
+                    >
+                      {r.onHand}
+                    </td>
+                    <td className="last">
+                      {r.short ? (
+                        <StatusPill tone="danger">Short · only {r.onHand} on hand</StatusPill>
+                      ) : r.serialShort ? (
+                        <StatusPill tone="danger">Serials unpicked</StatusPill>
+                      ) : (
+                        <StatusPill tone="muted">Queued</StatusPill>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </Panel>
       </div>
 
       {/* ── The rest of the building: every close-the-loop queue ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 18 }}>
-        {/* Arrived first when it has rows — the highest-value queue. */}
-        {summary.arrived.length > 0 && (
-          <Panel
-            title="Arrived — book the delivery or call the customer"
-            sub={plural(summary.arrived.length, 'special order')}
-            style={{ gridColumn: 'span 2' }}
-          >
-            <table className="dt dt-static" data-testid="wh-arrived">
-              <thead>
-                <tr>
-                  <th className="first">Order</th>
-                  <th>Customer</th>
-                  <th>Goods</th>
-                  <th className="num last">Arrived</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.arrived.map((r) => (
+      <div className="dh-grid">
+        {/* Arrived first — the highest-value queue, shown even when empty. */}
+        <Panel
+          title="Arrived — book the delivery or call the customer"
+          sub={plural(summary.arrived.length, 'special order')}
+          link={{ href: '/special-orders', label: 'Special orders' }}
+          style={{ gridColumn: 'span 2' }}
+        >
+          <table className="dt dt-static" data-testid="wh-arrived">
+            <thead>
+              <tr>
+                <th className="first">Order</th>
+                <th>Customer</th>
+                <th>Goods</th>
+                <th className="num last">Arrived</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.arrived.length === 0 ? (
+                <EmptyRow colSpan={4}>
+                  Nothing has arrived that still needs a delivery booked.
+                </EmptyRow>
+              ) : (
+                summary.arrived.map((r) => (
                   <tr key={`${r.orderId}-${r.description}`}>
                     <td className="first">
                       <Link href={`/orders/${r.orderId}`} className="mono">
@@ -757,14 +808,14 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
                       <span className="mono">{r.quantity}</span> × {r.description}
                     </td>
                     <td className="num last" style={{ color: 'var(--muted)' }}>
-                      arrived {ago(r.arrivedAt)} ago
+                      {ago(r.arrivedAt) === 'today' ? 'today' : `${ago(r.arrivedAt)} ago`}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </Panel>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </Panel>
 
         <Panel
           title="Dock in progress"
@@ -964,68 +1015,65 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
           link={{ href: '/products/counts', label: 'Counts' }}
           style={{ gridColumn: 'span 2' }}
         >
-          <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 24, fontSize: 12.5, flexWrap: 'wrap' }}>
-              <div>
-                <div className="eyebrow">Counts open</div>
-                <div style={{ marginTop: 4 }}>
-                  {summary.counts.open.length > 0 ? (
-                    <>
-                      <span className="mono" style={{ fontWeight: 600 }}>
-                        {summary.counts.open.length}
-                      </span>{' '}
-                      {summary.counts.open.length === 1 ? 'count' : 'counts'} open —{' '}
-                      <Link href="/products/counts">continue counting</Link>
-                    </>
-                  ) : (
-                    'No counts in progress.'
-                  )}
-                </div>
-              </div>
-              <div>
-                <div className="eyebrow">Last posted count</div>
-                <div className="mono" style={{ marginTop: 4 }}>
-                  {summary.counts.lastPostedDate
-                    ? new Date(summary.counts.lastPostedDate).toLocaleDateString()
-                    : 'never'}
-                </div>
-              </div>
-              <div>
-                <div className="eyebrow">Negative on-hand</div>
-                <div
-                  className="mono"
-                  style={{
-                    marginTop: 4,
-                    color: summary.counts.negative.length > 0 ? 'var(--danger)' : undefined,
-                  }}
-                >
-                  {summary.counts.negative.length}
-                </div>
-              </div>
-            </div>
-            {summary.counts.negative.length > 0 ? (
-              <Alert
-                tone="error"
-                title={`${summary.counts.negative.length} negative on-hand — count these first:`}
-                data-testid="wh-negative"
-              >
-                <ul className="list-disc pl-4">
-                  {summary.counts.negative.map((n) => (
-                    <li key={`${n.variantId}:${n.locationName ?? ''}`}>
-                      {n.productName}
-                      {n.sku ? ` (${n.sku})` : ''}: <span className="mono">{n.onHand}</span>
-                      {allMode && n.locationName ? ` — ${n.locationName}` : ''}
-                    </li>
-                  ))}
-                </ul>
-              </Alert>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
-                <StatusPill tone="ok">Clean</StatusPill>
-                <span style={{ color: 'var(--muted)' }}>No negative on-hand here.</span>
-              </div>
-            )}
-          </div>
+          <ul className="dh-list">
+            <li className={summary.counts.open.length > 0 ? 'is-warn' : 'is-ok'}>
+              <span className="dh-list-glyph" aria-hidden>
+                {summary.counts.open.length > 0 ? '◔' : '✓'}
+              </span>
+              <span>
+                {summary.counts.open.length > 0 ? (
+                  <>
+                    {plural(summary.counts.open.length, 'count')} open
+                    {summary.counts.open[0]?.locationName
+                      ? ` (${summary.counts.open
+                          .map((c) => c.locationName)
+                          .filter(Boolean)
+                          .join(', ')})`
+                      : ''}{' '}
+                    — <Link href="/products/counts">continue counting</Link>.
+                  </>
+                ) : (
+                  'No counts in progress.'
+                )}
+              </span>
+            </li>
+            <li
+              className={summary.counts.negative.length > 0 ? 'is-risk' : 'is-ok'}
+              data-testid="wh-negative"
+            >
+              <span className="dh-list-glyph" aria-hidden>
+                {summary.counts.negative.length > 0 ? '▲' : '✓'}
+              </span>
+              <span>
+                {summary.counts.negative.length > 0 ? (
+                  <>
+                    <strong>Negative on-hand:</strong>{' '}
+                    {summary.counts.negative.map((n, i) => (
+                      <span key={`${n.variantId}:${n.locationName ?? ''}`}>
+                        {i > 0 ? ' · ' : ''}
+                        {n.productName}
+                        {n.sku ? ` (${n.sku})` : ''} <span className="mono">{n.onHand}</span>
+                        {allMode && n.locationName ? ` — ${n.locationName}` : ''}
+                      </span>
+                    ))}{' '}
+                    — count these first.
+                  </>
+                ) : (
+                  'No negative on-hand here.'
+                )}
+              </span>
+            </li>
+            <li className="is-ok">
+              <span className="dh-list-glyph" aria-hidden>
+                ✓
+              </span>
+              <span>
+                {summary.counts.lastPostedDate
+                  ? `Last count posted ${calDay(summary.counts.lastPostedDate)}.`
+                  : 'No count has been posted yet.'}
+              </span>
+            </li>
+          </ul>
         </Panel>
       </div>
 
