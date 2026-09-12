@@ -5508,3 +5508,14 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
       and storefront typecheck/lint pass. See slice 4 development notes.
 - [ ] Ops: source reconciliation and isolated staging provisioning before rollout;
       responsive mobile checks, production build and scalable provider verification remain.
+
+### 2026-09-12 — Local workflow, callbacks and background push
+
+- [x] Claim/release/resolve/reopen/spam/snooze, optimistic conflicts, staff capacity,
+      expiring availability, public read/typing cues, drafts, queue filters and quick replies.
+- [x] Public transcript export; consented unverified callback request/completion; end-chat.
+- [x] Durable VAPID push delivery, retries, revocation checks, RLS, service-worker handler
+      and manager delivery controls. Generated migrations 0100–0103; drift check clean.
+- [x] 24 API/database + 5 web alert/worker + 5 adapter tests; type checks, API build and lint.
+- [ ] Actual browser-vendor delivery/hardware audio, mobile/full production build, provider
+      staging and the broader routing/settings/reporting/retention scope listed in the docs.

@@ -72,6 +72,17 @@ export const chatConversations = pgTable(
     status: text('status').notNull().default('queued'),
     lastSequence: integer('last_sequence').notNull().default(0),
     version: integer('version').notNull().default(1),
+    assignedMembershipId: uuid('assigned_membership_id'),
+    followupName: text('followup_name'),
+    followupMethod: text('followup_method'),
+    followupContact: text('followup_contact'),
+    followupRequestedAt: timestamp('followup_requested_at', { withTimezone: true }),
+    followupCompletedAt: timestamp('followup_completed_at', { withTimezone: true }),
+    visitorReadSequence: integer('visitor_read_sequence').notNull().default(0),
+    staffReadSequence: integer('staff_read_sequence').notNull().default(0),
+    visitorTypingUntil: timestamp('visitor_typing_until', { withTimezone: true }),
+    staffTypingUntil: timestamp('staff_typing_until', { withTimezone: true }),
+    snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -176,5 +187,72 @@ export const chatOutbox = pgTable(
       'chat_outbox_lease_check',
       sql`(${t.leaseToken} is null) = (${t.leaseExpiresAt} is null)`,
     ),
+  }),
+);
+
+export const chatPushSubscriptions = pgTable(
+  'chat_push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    userId: uuid('user_id').notNull(),
+    membershipId: uuid('membership_id').notNull(),
+    endpoint: text('endpoint').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    environment: text('environment').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    tenantId: uniqueIndex('chat_push_subscriptions_tenant_id').on(t.businessId, t.id),
+    endpointKey: uniqueIndex('chat_push_subscriptions_endpoint').on(t.businessId, t.endpoint),
+  }),
+);
+export const chatPushDeliveries = pgTable(
+  'chat_push_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    subscriptionId: uuid('subscription_id').notNull(),
+    conversationId: uuid('conversation_id').notNull(),
+    sequence: integer('sequence').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    eventKey: uniqueIndex('chat_push_deliveries_event').on(
+      t.subscriptionId,
+      t.conversationId,
+      t.sequence,
+    ),
+    due: index('chat_push_deliveries_due').on(t.businessId, t.availableAt),
+    subscriptionFk: foreignKey({
+      columns: [t.businessId, t.subscriptionId],
+      foreignColumns: [chatPushSubscriptions.businessId, chatPushSubscriptions.id],
+    }).onDelete('cascade'),
+    conversationFk: foreignKey({
+      columns: [t.businessId, t.conversationId],
+      foreignColumns: [chatConversations.businessId, chatConversations.id],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const chatAgents = pgTable(
+  'chat_agents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    membershipId: uuid('membership_id').notNull(),
+    available: boolean('available').notNull().default(false),
+    capacity: integer('capacity').notNull().default(5),
+    heartbeatUntil: timestamp('heartbeat_until', { withTimezone: true }),
+  },
+  (t) => ({
+    agentKey: uniqueIndex('chat_agents_member').on(t.businessId, t.membershipId),
+    capacityCheck: check('chat_agents_capacity_check', sql`${t.capacity} between 1 and 20`),
   }),
 );

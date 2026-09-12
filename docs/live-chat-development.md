@@ -190,3 +190,54 @@ Storefront changes are in the adjacent LA-Mattress-Headless isolated snapshot;
 its docs/live-chat-implementation.md records source provenance and remaining
 checks. No production changes or Ably provisioning occurred. This is a working
 local end-to-end slice, not a completed production rollout.
+
+## Local workflow and notifications — September 12, 2026
+
+This section supersedes the earlier slice-specific lists of missing features.
+
+Implemented locally: optimistic-version claim/release/resolve/reopen/spam/snooze,
+capacity limits, 45-second staff availability with heartbeats, six-second typing
+cues, explicit public read acknowledgements, saved staff drafts/retry keys, queue
+filters, editable quick replies, public-only audited exports, consented callback
+requests marked unverified, audited callback completion, and visitor end-chat.
+Callback requests are persisted for staff action; they do not send email or make calls.
+
+Background Web Push now has tenant-isolated subscriptions and durable delivery jobs,
+VAPID encryption through web-push, lease protection, exponential retries, expired
+subscription cleanup, permission rechecks and integration-disable checks. Notifications
+contain generic text and a fixed /chat destination. Existing POS service-worker caching
+is preserved; chat API responses are not cached. The manager delivery controls expose
+backlogs and retry failures. CHAT_PUSH_ENABLED and VAPID variables remain opt-in.
+The dedicated worker is `pnpm --filter @jetnine/api start:chat-push-worker` after build;
+configure DATABASE_URL, CHAT_ENABLED, CHAT_ENVIRONMENT, CHAT_BUSINESS_ID,
+CHAT_PUSH_ENABLED and CHAT_VAPID_PUBLIC_KEY/PRIVATE_KEY/SUBJECT. Never commit private keys.
+
+Generated migrations 0100–0103 are applied to the disposable local database. In 0101,
+the generated tenant/id unique index is ordered before the dependent composite FK,
+which PostgreSQL requires. Drizzle reports no remaining schema drift. The new agent,
+push-subscription and push-delivery tables are included in tenant RLS.
+
+Validation: 24 Postgres/API integration tests, 3 alert-state tests, 2 service-worker
+notification tests and 5 storefront adapter tests pass. Shared/database/API builds,
+both web type checks and changed-file lint pass. Browser checks cover claim, availability,
+visitor-to-staff and staff-to-visitor arrival, read cues, draft recovery after reload,
+saved callback requests, completion, end-chat, and blocked notification permission.
+Actual OS notification delivery and hardware audio output are not verified: the in-app
+browser denies notification permission. Responsive CSS is present; physical mobile and
+full production builds still require verification. No production database, real customer,
+Shopify mutation, deployment, or paid service was used.
+
+The workspace launcher starts or reuses Postgres 55439, API 4000, ERP 3000 and customer
+preview 3100, and supervises the push worker. It uses synthetic fixture credentials and
+local VAPID keys outside either repository. The local API harness substitutes an in-memory
+rate limiter; application code still requires shared Redis. The local transport is bounded
+SSE polling committed records, not an Ably-connected deployment. Ably outbox events remain
+pending until an Ably worker is configured; these do not prevent local SSE delivery.
+
+Remaining from the broader proposal: scoped location/team and assigned-only access,
+automatic routing/transfer and assignment deadlines, configured hours/holidays and response
+targets, a full customer/context panel with verified linking, reporting/satisfaction,
+retention/deletion policy and tooling, provider token/subscription integration and capacity
+proof, fresh upstream reconciliation, full build/mobile checks, and isolated staging rollout.
+Attachments were explicitly later-phase. These are not represented as completed by this local
+pilot. Seven-day guest expiry is not a transcript retention policy.

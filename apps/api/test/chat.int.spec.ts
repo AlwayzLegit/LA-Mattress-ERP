@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
+import { ChatPushWorker } from '../src/chat/chat-push-worker';
 import { ChatWorker, AblyChatPublisher } from '../src/chat/chat-worker';
 import request from 'supertest';
 import { Test } from '@nestjs/testing';
@@ -680,16 +681,268 @@ describe('live inbox snapshots', () => {
       (row) => row.id === start.conversationId,
     )!;
     expect(updated.visitorSequence).toBeGreaterThan(staffOnly.visitorSequence);
-    expect(Object.keys(updated).sort()).toEqual([
-      'id',
-      'lastSequence',
-      'status',
-      'updatedAt',
-      'visitorSequence',
-    ]);
+    expect(updated).not.toHaveProperty('body');
+    expect(updated).toHaveProperty('version');
     await expect(
       service.staffLiveSnapshot({ ...staff, businessId: otherBusinessId }),
     ).rejects.toThrow();
     await expect(service.staffLiveSnapshot({ ...staff, permissions: new Set() })).rejects.toThrow();
   });
+});
+
+describe('chat workflow, activity and push', () => {
+  it('serializes competing claims, requires permissions and rejects stale versions', async () => {
+    await db.insert(schema.rolePermissions).values(
+      ['chat.assign', 'chat.manage', 'chat.export'].map((permission) => ({
+        roleId: staff.roleId!,
+        permission,
+      })),
+    );
+    const start = await service.startConversation(auth, randomUUID(), input());
+    const row = (await service.staffLiveSnapshot(staff)).find(
+      (r) => r.id === start.conversationId,
+    )!;
+    const results = await Promise.allSettled([
+      service.workflow(staff, row.id, { action: 'claim', version: row.version }),
+      service.workflow(staff, row.id, { action: 'claim', version: row.version }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const updated = (await service.staffLiveSnapshot(staff)).find((r) => r.id === row.id)!;
+    expect(updated.assignedToMe).toBe(true);
+    await service.workflow(staff, row.id, { action: 'resolve', version: updated.version });
+    expect((await service.staffLiveSnapshot(staff)).find((r) => r.id === row.id)?.status).toBe(
+      'resolved',
+    );
+    await expect(
+      service.workflow({ ...staff, businessId: otherBusinessId }, row.id, {
+        action: 'claim',
+        version: 1,
+      }),
+    ).rejects.toThrow();
+  });
+  it('read cursors are monotonic and private notes do not enter visitor activity or export', async () => {
+    const start = await service.startConversation(auth, randomUUID(), input());
+    await service.sendStaffMessage(staff, start.conversationId, input('Public answer'));
+    await service.sendStaffMessage(staff, start.conversationId, input('Secret note'), 'note');
+    await service.activity(null, auth, start.conversationId, { typing: true, readSequence: 3 });
+    await service.activity(null, auth, start.conversationId, { readSequence: 0 });
+    const row = (await service.staffLiveSnapshot(staff)).find(
+      (r) => r.id === start.conversationId,
+    )!;
+    expect(row.visitorReadSequence).toBe(2);
+    expect(row.visitorTyping).toBe(true);
+    await service.activity(staff, null, start.conversationId, { typing: true, readSequence: 3 });
+    const history = await service.visitorHistory(auth, start.conversationId);
+    expect(history.activity).toMatchObject({ typing: true, staffReadSequence: 2 });
+    expect(
+      JSON.stringify(await service.exportTranscript(staff, start.conversationId)),
+    ).not.toContain('Secret note');
+    await expect(
+      service.activity(null, otherVisitor, start.conversationId, { typing: true }),
+    ).rejects.toThrow();
+  });
+  it('durably queues visitor-only push, retries outages, and removes expired subscriptions', async () => {
+    await expect(
+      service.subscribePush(staff, {
+        endpoint: 'https://127.0.0.1/internal',
+        keys: { p256dh: 'a'.repeat(87), auth: 'b'.repeat(22) },
+      }),
+    ).rejects.toThrow();
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/' + randomUUID();
+    await service.subscribePush(staff, {
+      endpoint,
+      keys: { p256dh: 'a'.repeat(87), auth: 'b'.repeat(22) },
+    });
+    const start = await service.startConversation(auth, randomUUID(), input());
+    await service.sendStaffMessage(staff, start.conversationId, input('Private push note'), 'note');
+    const queued = await db
+      .select()
+      .from(schema.chatPushDeliveries)
+      .where(eq(schema.chatPushDeliveries.conversationId, start.conversationId));
+    expect(queued).toHaveLength(1);
+    let now = new Date();
+    let fail = true;
+    const payloads: string[] = [];
+    const worker = new ChatPushWorker(
+      db,
+      async (_subscription, payload) => {
+        payloads.push(payload);
+        if (fail) throw Error('offline');
+      },
+      'staging',
+      () => now,
+    );
+    await worker.runOnce(businessId);
+    expect(payloads[0]).not.toContain('Private push note');
+    now = new Date(Date.now() + 60000);
+    fail = false;
+    await worker.runOnce(businessId);
+    expect(
+      (
+        await db
+          .select()
+          .from(schema.chatPushDeliveries)
+          .where(eq(schema.chatPushDeliveries.id, queued[0]!.id))
+      )[0]?.completedAt,
+    ).toBeTruthy();
+    await service.sendVisitorMessage(auth, start.conversationId, input('Another visitor message'));
+    const gone = new ChatPushWorker(
+      db,
+      async () => {
+        throw { statusCode: 410 };
+      },
+      'staging',
+      () => now,
+    );
+    await gone.runOnce(businessId);
+    expect(
+      await db
+        .select()
+        .from(schema.chatPushSubscriptions)
+        .where(eq(schema.chatPushSubscriptions.endpoint, endpoint)),
+    ).toHaveLength(0);
+  });
+});
+
+describe('chat capacity and operations', () => {
+  it('enforces a staff capacity limit and expires availability', async () => {
+    await service.availability(staff, { available: true, capacity: 1 });
+    const first = await service.startConversation(auth, randomUUID(), input());
+    const second = await service.startConversation(auth, randomUUID(), input());
+    const rows = await service.staffLiveSnapshot(staff);
+    await service.workflow(staff, first.conversationId, {
+      action: 'claim',
+      version: rows.find((r) => r.id === first.conversationId)!.version,
+    });
+    await expect(
+      service.workflow(staff, second.conversationId, {
+        action: 'claim',
+        version: rows.find((r) => r.id === second.conversationId)!.version,
+      }),
+    ).rejects.toThrow('capacity');
+    expect((await service.visitorHistory(auth, first.conversationId)).activity?.teamAvailable).toBe(
+      true,
+    );
+    await db
+      .update(schema.chatAgents)
+      .set({ heartbeatUntil: new Date(0) })
+      .where(eq(schema.chatAgents.businessId, businessId));
+    expect((await service.visitorHistory(auth, first.conversationId)).activity?.teamAvailable).toBe(
+      false,
+    );
+    const row = (await service.staffLiveSnapshot(staff)).find(
+      (r) => r.id === first.conversationId,
+    )!;
+    await service.workflow(staff, first.conversationId, {
+      action: 'release',
+      version: row.version,
+    });
+    await service.workflow(staff, second.conversationId, {
+      action: 'claim',
+      version: rows.find((r) => r.id === second.conversationId)!.version,
+    });
+  });
+  it('shows delivery backlog and only retries failed jobs', async () => {
+    const before = await service.operations(staff);
+    expect(before.transport!.pending).toBeGreaterThan(0);
+    const result = await service.retryFailed(staff);
+    expect(result.retried).toBeGreaterThanOrEqual(0);
+    await expect(service.operations({ ...staff, businessId: otherBusinessId })).rejects.toThrow();
+  });
+});
+
+describe('push authorization at delivery', () => {
+  it('drops queued notifications after the integration is disabled', async () => {
+    await service.subscribePush(staff, {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/' + randomUUID(),
+      keys: { p256dh: 'a'.repeat(87), auth: 'b'.repeat(22) },
+    });
+    const started = await service.startConversation(
+      auth,
+      randomUUID(),
+      input('Must not notify after disable'),
+    );
+    await db
+      .update(schema.chatIntegrations)
+      .set({ enabled: false })
+      .where(eq(schema.chatIntegrations.id, auth.integrationId));
+    let sent = 0;
+    const worker = new ChatPushWorker(
+      db,
+      async () => {
+        sent++;
+      },
+      'staging',
+    );
+    try {
+      await worker.runOnce(businessId);
+      expect(sent).toBe(0);
+      const [job] = await db
+        .select()
+        .from(schema.chatPushDeliveries)
+        .where(eq(schema.chatPushDeliveries.conversationId, started.conversationId));
+      expect(job?.completedAt).toBeTruthy();
+    } finally {
+      await db
+        .update(schema.chatIntegrations)
+        .set({ enabled: true })
+        .where(eq(schema.chatIntegrations.id, auth.integrationId));
+    }
+  });
+});
+
+describe('visitor follow-up and ending a chat', () => {
+  it('saves consented contact claims privately, tracks completion and ends only the visitor own chat', async () => {
+    const start = await service.startConversation(auth, randomUUID(), input('Please help later'));
+    const contact = {
+      name: 'Synthetic Visitor',
+      method: 'email',
+      contact: 'visitor@example.test',
+      consent: true,
+    };
+    await expect(
+      service.visitorFollowup(auth, start.conversationId, { ...contact, consent: false }),
+    ).rejects.toThrow();
+    await expect(
+      service.visitorFollowup(otherVisitor, start.conversationId, contact),
+    ).rejects.toThrow();
+    await service.visitorFollowup(auth, start.conversationId, contact);
+    const rows = await service.staffLiveSnapshot(staff);
+    expect(rows.find((r) => r.id === start.conversationId)?.followupPending).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain('visitor@example.test');
+    expect(await service.followup(staff, start.conversationId)).toMatchObject({
+      contact: 'visitor@example.test',
+      verified: false,
+    });
+    expect(JSON.stringify(await service.visitorHistory(auth, start.conversationId))).not.toContain(
+      'visitor@example.test',
+    );
+    await service.followup(staff, start.conversationId, true);
+    expect(
+      (await service.staffLiveSnapshot(staff)).find((r) => r.id === start.conversationId)
+        ?.followupPending,
+    ).toBe(false);
+    await expect(service.endVisitorChat(otherVisitor, start.conversationId)).rejects.toThrow();
+    await service.endVisitorChat(auth, start.conversationId);
+    expect((await service.visitorHistory(auth, start.conversationId)).activity?.status).toBe(
+      'resolved',
+    );
+  });
+});
+
+it('enforces tenant RLS on presence, subscriptions and queued push jobs', async () => {
+  const own = await withDrizzleTenantContext(db, { businessId }, async (tx) => ({
+    subscriptions: await tx.select().from(schema.chatPushSubscriptions),
+    agents: await tx.select().from(schema.chatAgents),
+    deliveries: await tx.select().from(schema.chatPushDeliveries),
+  }));
+  expect(own.subscriptions.length).toBeGreaterThan(0);
+  expect(own.agents.length).toBeGreaterThan(0);
+  expect(own.deliveries.length).toBeGreaterThan(0);
+  const other = await withDrizzleTenantContext(db, { businessId: otherBusinessId }, async (tx) => ({
+    subscriptions: await tx.select().from(schema.chatPushSubscriptions),
+    agents: await tx.select().from(schema.chatAgents),
+    deliveries: await tx.select().from(schema.chatPushDeliveries),
+  }));
+  expect(other).toEqual({ subscriptions: [], agents: [], deliveries: [] });
 });

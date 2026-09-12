@@ -51,6 +51,26 @@ export class ChatVisitorController {
   session(@Headers() headers: Record<string, string | undefined>) {
     return this.chat.createSession(credentials(headers));
   }
+  @Post('conversations/:id/followup')
+  followup(
+    @Headers() headers: Record<string, string | undefined>,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.visitorFollowup(credentials(headers), id, body);
+  }
+  @Post('conversations/:id/end')
+  end(@Headers() headers: Record<string, string | undefined>, @Param('id') id: string) {
+    return this.chat.endVisitorChat(credentials(headers), id);
+  }
+  @Post('conversations/:id/activity')
+  activity(
+    @Headers() headers: Record<string, string | undefined>,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.activity(null, credentials(headers), id, body);
+  }
   @Post('conversations')
   @Header('Cache-Control', 'no-store')
   start(@Headers() headers: Record<string, string | undefined>, @Body() body: unknown) {
@@ -146,6 +166,17 @@ export class ChatStaffController {
   list(@CurrentTenant() tenant: RequestTenantContext, @Query() query: unknown) {
     return this.chat.staffConversations(tenant, query);
   }
+  @Get(':id/followup')
+  @RequirePermission('chat.view_team')
+  @Header('Cache-Control', 'no-store')
+  followup(@CurrentTenant() tenant: RequestTenantContext, @Param('id') id: string) {
+    return this.chat.followup(tenant, id);
+  }
+  @Post(':id/followup-complete')
+  @RequirePermission('chat.view_team', 'chat.reply')
+  completeFollowup(@CurrentTenant() tenant: RequestTenantContext, @Param('id') id: string) {
+    return this.chat.followup(tenant, id, true);
+  }
   @Get(':id/history')
   @RequirePermission('chat.view_team')
   @Header('Cache-Control', 'no-store')
@@ -155,6 +186,68 @@ export class ChatStaffController {
     @Query() query: unknown,
   ) {
     return this.chat.staffHistory(tenant, id, query);
+  }
+  @Get('availability')
+  @RequirePermission('chat.view_team', 'chat.reply')
+  availability(@CurrentTenant() tenant: RequestTenantContext) {
+    return this.chat.availability(tenant);
+  }
+  @Post('availability')
+  @RequirePermission('chat.view_team', 'chat.reply')
+  setAvailability(@CurrentTenant() tenant: RequestTenantContext, @Body() body: unknown) {
+    return this.chat.availability(tenant, body);
+  }
+  @Get('operations')
+  @RequirePermission('chat.view_team', 'chat.manage')
+  operations(@CurrentTenant() tenant: RequestTenantContext) {
+    return this.chat.operations(tenant);
+  }
+  @Post('retry-failed')
+  @RequirePermission('chat.view_team', 'chat.manage')
+  retry(@CurrentTenant() tenant: RequestTenantContext) {
+    return this.chat.retryFailed(tenant);
+  }
+  @Get('push-key')
+  @RequirePermission('chat.view_team')
+  pushKey() {
+    const publicKey = this.config.get<string>('CHAT_VAPID_PUBLIC_KEY');
+    if (!publicKey || this.config.get('CHAT_PUSH_ENABLED') !== 'true')
+      throw new ServiceUnavailableException('Background push is not configured');
+    return { publicKey };
+  }
+  @Post('push-subscribe')
+  @RequirePermission('chat.view_team')
+  subscribe(@CurrentTenant() tenant: RequestTenantContext, @Body() body: unknown) {
+    this.pushKey();
+    return this.chat.subscribePush(tenant, body);
+  }
+  @Post('push-unsubscribe')
+  @RequirePermission('chat.view_team')
+  unsubscribe(@CurrentTenant() tenant: RequestTenantContext, @Body() body: unknown) {
+    return this.chat.unsubscribePush(tenant, body);
+  }
+  @Post(':id/activity')
+  @RequirePermission('chat.view_team', 'chat.reply')
+  activity(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.activity(tenant, null, id, body);
+  }
+  @Post(':id/workflow')
+  @RequirePermission('chat.view_team', 'chat.assign')
+  workflow(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.workflow(tenant, id, body);
+  }
+  @Post(':id/export')
+  @RequirePermission('chat.view_team', 'chat.export')
+  export(@CurrentTenant() tenant: RequestTenantContext, @Param('id') id: string) {
+    return this.chat.exportTranscript(tenant, id);
   }
   @Post(':id/messages')
   @RequirePermission('chat.view_team', 'chat.reply')

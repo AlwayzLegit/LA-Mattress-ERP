@@ -124,3 +124,37 @@ const OFFLINE_FALLBACK_HTML = `<!doctype html>
 <p>The register hasn't loaded this page yet, so there's nothing to show.
 Reconnect once and the page will be cached for next time.</p>
 </body></html>`;
+
+// Chat push contains no transcript, customer details or cross-origin destinations.
+self.addEventListener('push', (event) => {
+  let data;
+  try {
+    data = event.data?.json();
+  } catch {
+    return;
+  }
+  if (data?.type !== 'chat') return;
+  event.waitUntil(
+    self.registration.showNotification('LA Mattress · New chat', {
+      body: 'A website visitor is waiting. Open the inbox to reply.',
+      tag: typeof data.tag === 'string' ? data.tag : 'la-chat',
+      data: { url: '/chat' },
+    }),
+  );
+});
+self.addEventListener('notificationclick', (event) => {
+  if (event.notification.data?.url !== '/chat') return;
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const existing = windows.find(
+        (client) =>
+          new URL(client.url).origin === self.location.origin &&
+          new URL(client.url).pathname === '/chat',
+      );
+      if (existing) return existing.focus();
+      return self.clients.openWindow('/chat');
+    })(),
+  );
+});

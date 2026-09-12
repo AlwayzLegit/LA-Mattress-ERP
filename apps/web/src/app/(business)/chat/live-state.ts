@@ -1,5 +1,12 @@
 export type LiveConversation = {
   id: string;
+  version?: number;
+  followupPending?: boolean;
+  assignedMembershipId?: string | null;
+  assignedToMe?: boolean;
+  visitorReadSequence?: number;
+  staffReadSequence?: number;
+  visitorTyping?: boolean;
   status: string;
   updatedAt: string;
   lastSequence: number;

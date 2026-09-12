@@ -10,6 +10,11 @@ import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext, type DrizzleTransaction } from '@jetnine/db';
 import {
+  chatPushSubscriptionSchema,
+  chatFollowupSchema,
+  chatAvailabilitySchema,
+  chatActivitySchema,
+  chatWorkflowSchema,
   chatHistoryQuerySchema,
   chatMessageInputSchema,
   type ChatHistoryPage,
@@ -215,6 +220,84 @@ export class ChatService {
     });
   }
 
+  async visitorFollowup(auth: ChatVisitorAuth, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatFollowupSchema.safeParse(body);
+    if (!parsed.success)
+      throw new BadRequestException(
+        'Enter your name and a valid contact method, then consent to a reply.',
+      );
+    return this.visitor(auth, async (tx, session) => {
+      const row = await this.conversation(tx, session.businessId, id, session.id);
+      if (row.status === 'spam') throw new ForbiddenException('Conversation unavailable');
+      await tx
+        .update(conversations)
+        .set({
+          followupName: parsed.data.name,
+          followupMethod: parsed.data.method,
+          followupContact: parsed.data.contact,
+          followupRequestedAt: new Date(),
+          followupCompletedAt: null,
+          status: 'queued',
+          version: row.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(conversations.businessId, session.businessId), eq(conversations.id, id)));
+      return { saved: true };
+    });
+  }
+  async endVisitorChat(auth: ChatVisitorAuth, id: string) {
+    this.uuid(id);
+    return this.visitor(auth, async (tx, session) => {
+      const row = await this.conversation(tx, session.businessId, id, session.id);
+      if (row.status !== 'spam')
+        await tx
+          .update(conversations)
+          .set({
+            status: 'resolved',
+            visitorTypingUntil: null,
+            version: row.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(conversations.businessId, session.businessId), eq(conversations.id, id)));
+      return { ended: true };
+    });
+  }
+  async followup(tenant: RequestTenantContext, id: string, complete = false) {
+    this.uuid(id);
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, complete);
+        const row = await this.conversation(tx, tenant.businessId!, id);
+        if (complete && row.followupRequestedAt) {
+          await tx
+            .update(conversations)
+            .set({ followupCompletedAt: new Date(), version: row.version + 1 })
+            .where(and(eq(conversations.businessId, tenant.businessId!), eq(conversations.id, id)));
+          await tx.insert(schema.auditLogs).values({
+            businessId: tenant.businessId!,
+            actorUserId: tenant.userId!,
+            actorType: 'user',
+            action: 'chat.followup_completed',
+            targetType: 'chat_conversation',
+            targetId: id,
+            changesJson: {},
+          });
+        }
+        return {
+          name: row.followupName,
+          method: row.followupMethod,
+          contact: row.followupContact,
+          requestedAt: row.followupRequestedAt,
+          completedAt: complete ? new Date() : row.followupCompletedAt,
+          verified: false,
+        };
+      },
+    );
+  }
+
   async visitorHistory(
     auth: ChatVisitorAuth,
     conversationId: string,
@@ -225,7 +308,12 @@ export class ChatService {
     if (!parsed.success) throw new BadRequestException('Invalid history cursor');
     const { afterSequence, limit } = parsed.data;
     return this.visitor(auth, async (tx, session) => {
-      await this.conversation(tx, session.businessId, conversationId, session.id);
+      const conversation = await this.conversation(
+        tx,
+        session.businessId,
+        conversationId,
+        session.id,
+      );
       const rows = await tx
         .select()
         .from(messages)
@@ -239,9 +327,36 @@ export class ChatService {
         )
         .orderBy(asc(messages.sequence))
         .limit(limit + 1);
+      const [available] = await tx
+        .select({ id: schema.chatAgents.id })
+        .from(schema.chatAgents)
+        .innerJoin(
+          schema.memberships,
+          and(
+            eq(schema.memberships.id, schema.chatAgents.membershipId),
+            eq(schema.memberships.businessId, session.businessId),
+            eq(schema.memberships.status, 'active'),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.chatAgents.businessId, session.businessId),
+            eq(schema.chatAgents.available, true),
+            sql`${schema.chatAgents.heartbeatUntil} > now()`,
+          ),
+        )
+        .limit(1);
       const visible = rows.slice(0, limit);
       return {
         data: visible.map((row) => this.publicMessage(row)),
+        activity: {
+          teamAvailable: Boolean(available),
+          staffReadSequence: conversation.staffReadSequence,
+          typing: Boolean(
+            conversation.staffTypingUntil && conversation.staffTypingUntil > new Date(),
+          ),
+          status: conversation.status,
+        },
         nextSequence: visible.at(-1)?.sequence ?? afterSequence,
         hasMore: rows.length > limit,
       };
@@ -312,7 +427,11 @@ export class ChatService {
     return this.startConversation(auth, clientConversationId, message);
   }
 
-  private async requireStaff(tx: DrizzleTransaction, tenant: RequestTenantContext, reply = false) {
+  private async requireStaff(
+    tx: DrizzleTransaction,
+    tenant: RequestTenantContext,
+    reply: boolean | 'chat.assign' | 'chat.manage' | 'chat.export' = false,
+  ) {
     if (
       !tenant.businessId ||
       !tenant.userId ||
@@ -354,7 +473,10 @@ export class ChatService {
       if (override.allowed) effective.add(override.permission);
       else effective.delete(override.permission);
     }
-    if (!effective.has('chat.view_team') || (reply && !effective.has('chat.reply')))
+    if (
+      !effective.has('chat.view_team') ||
+      (reply && !effective.has(reply === true ? 'chat.reply' : reply))
+    )
       throw new ForbiddenException('Chat team reply permission required');
 
     return member;
@@ -367,9 +489,26 @@ export class ChatService {
       { businessId: tenant.businessId, userId: tenant.userId },
       async (tx) => {
         await this.requireStaff(tx, tenant);
+        await tx
+          .update(conversations)
+          .set({ status: 'open', snoozedUntil: null, version: sql`${conversations.version} + 1` })
+          .where(
+            and(
+              eq(conversations.businessId, tenant.businessId!),
+              eq(conversations.status, 'snoozed'),
+              sql`${conversations.snoozedUntil} <= now()`,
+            ),
+          );
         return tx
           .select({
             id: conversations.id,
+            version: conversations.version,
+            followupPending: sql<boolean>`${conversations.followupRequestedAt} is not null and ${conversations.followupCompletedAt} is null`,
+            assignedMembershipId: conversations.assignedMembershipId,
+            assignedToMe: sql<boolean>`${conversations.assignedMembershipId} = ${tenant.membershipId}`,
+            visitorReadSequence: conversations.visitorReadSequence,
+            staffReadSequence: conversations.staffReadSequence,
+            visitorTyping: sql<boolean>`coalesce(${conversations.visitorTypingUntil} > now(), false)`,
             status: conversations.status,
             updatedAt: conversations.updatedAt,
             lastSequence: conversations.lastSequence,
@@ -420,6 +559,376 @@ export class ChatService {
           hasMore: rows.length > parsed.data.limit,
           nextCursor: data.at(-1)?.id ?? null,
         };
+      },
+    );
+  }
+
+  async availability(tenant: RequestTenantContext, body?: unknown) {
+    const parsed = body === undefined ? null : chatAvailabilitySchema.safeParse(body);
+    if (parsed && !parsed.success) throw new BadRequestException('Invalid availability');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, true);
+        if (parsed?.success)
+          await tx
+            .insert(schema.chatAgents)
+            .values({
+              businessId: tenant.businessId!,
+              membershipId: tenant.membershipId!,
+              ...parsed.data,
+              heartbeatUntil: parsed.data.available ? new Date(Date.now() + 45000) : null,
+            })
+            .onConflictDoUpdate({
+              target: [schema.chatAgents.businessId, schema.chatAgents.membershipId],
+              set: {
+                ...parsed.data,
+                heartbeatUntil: parsed.data.available ? new Date(Date.now() + 45000) : null,
+              },
+            });
+        const [agent] = await tx
+          .select()
+          .from(schema.chatAgents)
+          .where(
+            and(
+              eq(schema.chatAgents.businessId, tenant.businessId!),
+              eq(schema.chatAgents.membershipId, tenant.membershipId!),
+            ),
+          );
+        return { available: agent?.available ?? false, capacity: agent?.capacity ?? 5 };
+      },
+    );
+  }
+  async operations(tenant: RequestTenantContext) {
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, 'chat.manage');
+        const [delivery] = await tx
+          .select({
+            pending:
+              sql<number>`count(*) filter (where completed_at is null and failed_at is null)`.mapWith(
+                Number,
+              ),
+            failed: sql<number>`count(*) filter (where failed_at is not null)`.mapWith(Number),
+          })
+          .from(outbox)
+          .where(eq(outbox.businessId, tenant.businessId!));
+        const [push] = await tx
+          .select({
+            pending:
+              sql<number>`count(*) filter (where completed_at is null and failed_at is null)`.mapWith(
+                Number,
+              ),
+            failed: sql<number>`count(*) filter (where failed_at is not null)`.mapWith(Number),
+          })
+          .from(schema.chatPushDeliveries)
+          .where(eq(schema.chatPushDeliveries.businessId, tenant.businessId!));
+        return { transport: delivery, push };
+      },
+    );
+  }
+  async retryFailed(tenant: RequestTenantContext) {
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, 'chat.manage');
+        const result = await tx
+          .update(outbox)
+          .set({
+            failedAt: null,
+            attempts: 0,
+            availableAt: new Date(),
+            leaseToken: null,
+            leaseExpiresAt: null,
+          })
+          .where(
+            and(eq(outbox.businessId, tenant.businessId!), sql`${outbox.failedAt} is not null`),
+          )
+          .returning({ id: outbox.id });
+        const push = await tx
+          .update(schema.chatPushDeliveries)
+          .set({
+            failedAt: null,
+            attempts: 0,
+            availableAt: new Date(),
+            leaseToken: null,
+            leaseExpiresAt: null,
+          })
+          .where(
+            and(
+              eq(schema.chatPushDeliveries.businessId, tenant.businessId!),
+              sql`${schema.chatPushDeliveries.failedAt} is not null`,
+            ),
+          )
+          .returning({ id: schema.chatPushDeliveries.id });
+        await tx.insert(schema.auditLogs).values({
+          businessId: tenant.businessId!,
+          actorUserId: tenant.userId!,
+          actorType: 'user',
+          action: 'chat.delivery.retry',
+          targetType: 'chat_delivery',
+          changesJson: { count: result.length + push.length },
+        });
+        return { retried: result.length + push.length };
+      },
+    );
+  }
+
+  async subscribePush(tenant: RequestTenantContext, body: unknown) {
+    const parsed = chatPushSubscriptionSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid push subscription');
+    const url = new URL(parsed.data.endpoint);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.port ||
+      ![
+        'fcm.googleapis.com',
+        'updates.push.services.mozilla.com',
+        'web.push.apple.com',
+        'wns2.notify.windows.com',
+      ].some((host) => url.hostname === host || url.hostname.endsWith('.' + host))
+    )
+      throw new BadRequestException('Unsupported browser push service');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant);
+        await tx
+          .insert(schema.chatPushSubscriptions)
+          .values({
+            businessId: tenant.businessId!,
+            userId: tenant.userId!,
+            membershipId: tenant.membershipId!,
+            environment: this.environment,
+            endpoint: parsed.data.endpoint,
+            ...parsed.data.keys,
+          })
+          .onConflictDoUpdate({
+            target: [
+              schema.chatPushSubscriptions.businessId,
+              schema.chatPushSubscriptions.endpoint,
+            ],
+            set: {
+              userId: tenant.userId!,
+              membershipId: tenant.membershipId!,
+              ...parsed.data.keys,
+            },
+          });
+        return { subscribed: true };
+      },
+    );
+  }
+  async unsubscribePush(tenant: RequestTenantContext, body: unknown) {
+    const parsed = z
+      .object({ endpoint: z.string().max(2048) })
+      .strict()
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid subscription');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant);
+        await tx
+          .delete(schema.chatPushSubscriptions)
+          .where(
+            and(
+              eq(schema.chatPushSubscriptions.businessId, tenant.businessId!),
+              eq(schema.chatPushSubscriptions.userId, tenant.userId!),
+              eq(schema.chatPushSubscriptions.endpoint, parsed.data.endpoint),
+            ),
+          );
+        return { subscribed: false };
+      },
+    );
+  }
+
+  async activity(
+    tenant: RequestTenantContext | null,
+    auth: ChatVisitorAuth | null,
+    id: string,
+    body: unknown,
+  ) {
+    this.uuid(id);
+    const parsed = chatActivitySchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid activity');
+    const update = async (tx: DrizzleTransaction, row: ConversationRow, staff: boolean) => {
+      const current = staff ? row.staffReadSequence : row.visitorReadSequence;
+      // Acknowledge only persisted public messages, never internal-note sequences.
+      const [last] = await tx
+        .select({ sequence: messages.sequence })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.businessId, row.businessId),
+            eq(messages.conversationId, id),
+            eq(messages.audience, 'public'),
+            sql`${messages.sequence} <= ${Math.min(row.lastSequence, parsed.data.readSequence ?? current)}`,
+          ),
+        )
+        .orderBy(sql`${messages.sequence} desc`)
+        .limit(1);
+      await tx
+        .update(conversations)
+        .set({
+          ...(parsed.data.readSequence !== undefined
+            ? staff
+              ? { staffReadSequence: Math.max(current, last?.sequence ?? 0) }
+              : { visitorReadSequence: Math.max(current, last?.sequence ?? 0) }
+            : {}),
+          ...(parsed.data.typing !== undefined
+            ? staff
+              ? { staffTypingUntil: parsed.data.typing ? new Date(Date.now() + 6000) : null }
+              : { visitorTypingUntil: parsed.data.typing ? new Date(Date.now() + 6000) : null }
+            : {}),
+        })
+        .where(and(eq(conversations.businessId, row.businessId), eq(conversations.id, id)));
+      return { saved: true };
+    };
+    if (auth)
+      return this.visitor(auth, async (tx, session) =>
+        update(tx, await this.conversation(tx, session.businessId, id, session.id), false),
+      );
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant!.businessId, userId: tenant!.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant!, true);
+        return update(tx, await this.conversation(tx, tenant!.businessId!, id), true);
+      },
+    );
+  }
+
+  async workflow(tenant: RequestTenantContext, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatWorkflowSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid workflow action');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, 'chat.assign');
+        const row = await this.conversation(tx, tenant.businessId!, id);
+        if (row.version !== parsed.data.version)
+          throw new ConflictException('Conversation changed. Review its latest state and retry.');
+        const action = parsed.data.action;
+        if (action === 'claim' && row.assignedMembershipId !== tenant.membershipId) {
+          const [agent] = await tx
+            .select()
+            .from(schema.chatAgents)
+            .where(
+              and(
+                eq(schema.chatAgents.businessId, tenant.businessId!),
+                eq(schema.chatAgents.membershipId, tenant.membershipId!),
+              ),
+            )
+            .for('update');
+          if (agent) {
+            const [count] = await tx
+              .select({ value: sql<number>`count(*)`.mapWith(Number) })
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.businessId, tenant.businessId!),
+                  eq(conversations.assignedMembershipId, tenant.membershipId!),
+                  sql`${conversations.status} in ('open', 'waiting_customer', 'queued')`,
+                ),
+              );
+            if (count!.value >= agent.capacity)
+              throw new ConflictException(
+                'Your chat capacity is full. Resolve or release a conversation first.',
+              );
+          }
+        }
+
+        if (
+          action === 'claim' &&
+          row.assignedMembershipId &&
+          row.assignedMembershipId !== tenant.membershipId
+        )
+          throw new ConflictException('Another teammate already owns this chat.');
+        if (row.assignedMembershipId && row.assignedMembershipId !== tenant.membershipId)
+          await this.requireStaff(tx, tenant, 'chat.manage');
+        const until = parsed.data.snoozedUntil ? new Date(parsed.data.snoozedUntil) : null;
+        if (
+          action === 'snooze' &&
+          (!until || until.getTime() <= Date.now() || until.getTime() > Date.now() + 7 * 86400000)
+        )
+          throw new BadRequestException('Choose a snooze time within seven days');
+        const [updated] = await tx
+          .update(conversations)
+          .set({
+            version: row.version + 1,
+            updatedAt: new Date(),
+            ...(action === 'claim'
+              ? { assignedMembershipId: tenant.membershipId, status: 'open' }
+              : {}),
+            ...(action === 'release' ? { assignedMembershipId: null, status: 'queued' } : {}),
+            ...(action === 'resolve' ? { status: 'resolved' } : {}),
+            ...(action === 'spam' ? { status: 'spam' } : {}),
+            ...(action === 'reopen'
+              ? { status: row.assignedMembershipId ? 'open' : 'queued' }
+              : {}),
+            snoozedUntil: action === 'snooze' ? until : null,
+            ...(action === 'snooze' ? { status: 'snoozed' } : {}),
+          })
+          .where(and(eq(conversations.businessId, tenant.businessId!), eq(conversations.id, id)))
+          .returning();
+        await tx.insert(schema.auditLogs).values({
+          businessId: tenant.businessId!,
+          actorUserId: tenant.userId!,
+          actorType: 'user',
+          action: `chat.${action}`,
+          targetType: 'chat_conversation',
+          targetId: id,
+          changesJson: { version: updated!.version },
+        });
+        return { saved: true, version: updated!.version };
+      },
+    );
+  }
+
+  async exportTranscript(tenant: RequestTenantContext, id: string) {
+    this.uuid(id);
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, 'chat.export');
+        await this.conversation(tx, tenant.businessId!, id);
+        const rows = await tx
+          .select({
+            sender: messages.senderType,
+            body: messages.body,
+            createdAt: messages.createdAt,
+            sequence: messages.sequence,
+          })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.businessId, tenant.businessId!),
+              eq(messages.conversationId, id),
+              eq(messages.audience, 'public'),
+            ),
+          )
+          .orderBy(asc(messages.sequence));
+        await tx.insert(schema.auditLogs).values({
+          businessId: tenant.businessId!,
+          actorUserId: tenant.userId!,
+          actorType: 'user',
+          action: 'chat.export',
+          targetType: 'chat_conversation',
+          targetId: id,
+          changesJson: { messageCount: rows.length },
+        });
+        return { conversationId: id, messages: rows };
       },
     );
   }
@@ -555,6 +1064,26 @@ export class ChatService {
         audience,
       })),
     );
+    if (actor.type === 'visitor') {
+      const subscriptions = await tx
+        .select()
+        .from(schema.chatPushSubscriptions)
+        .where(
+          and(
+            eq(schema.chatPushSubscriptions.businessId, conversation.businessId),
+            eq(schema.chatPushSubscriptions.environment, this.environment),
+          ),
+        );
+      if (subscriptions.length)
+        await tx.insert(schema.chatPushDeliveries).values(
+          subscriptions.map((subscription) => ({
+            businessId: conversation.businessId,
+            subscriptionId: subscription.id,
+            conversationId: conversation.id,
+            sequence,
+          })),
+        );
+    }
     return saved!;
   }
 

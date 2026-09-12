@@ -701,6 +701,34 @@
       "when": 1789157190343,
       "tag": "0099_live_chat_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1789226701023,
+      "tag": "0100_faulty_texas_twister",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1789226866369,
+      "tag": "0101_strange_paper_doll",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1789227079632,
+      "tag": "0102_busy_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1789227640978,
+      "tag": "0103_perfect_skreet",
+      "breakpoints": true
     }
   ]
 }

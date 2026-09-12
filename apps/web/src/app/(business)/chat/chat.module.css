@@ -226,3 +226,33 @@
     animation: none;
   }
 }
+
+.workflow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #dce0df;
+}
+
+.preferences {
+  font-size: 13px;
+  padding: 10px 14px;
+  border: 1px solid #dce0df;
+  border-radius: 8px;
+}
+.preferences summary {
+  cursor: pointer;
+}
+.preferences[open] summary {
+  margin-bottom: 10px;
+}
+.quickReply {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.queue {
+  overflow-y: auto;
+}

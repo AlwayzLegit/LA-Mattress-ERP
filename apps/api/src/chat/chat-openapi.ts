@@ -1,6 +1,14 @@
 import { Controller, Get } from '@nestjs/common';
 import { z } from 'zod';
-import { CHAT_CONTRACT_VERSION, chatMessageInputSchema } from '@jetnine/shared';
+import {
+  CHAT_CONTRACT_VERSION,
+  chatMessageInputSchema,
+  chatActivitySchema,
+  chatFollowupSchema,
+  chatWorkflowSchema,
+  chatAvailabilitySchema,
+  chatPushSubscriptionSchema,
+} from '@jetnine/shared';
 import { Public } from '../tenancy/decorators';
 
 const json = (schema: unknown) => ({ 'application/json': { schema } });
@@ -35,6 +43,16 @@ const send = (security: unknown, schema: unknown) => ({
     ...errorResponses,
   },
 });
+const mutation = (security: unknown, description: string, schema?: unknown) => ({
+  security,
+  description,
+  ...(schema ? { requestBody: { required: true, content: json(schema) } } : {}),
+  responses: { '201': { description }, ...errorResponses },
+});
+const read = (description: string) => ({
+  security: staffSecurity,
+  responses: { '200': { description }, ...errorResponses },
+});
 export const chatOpenApi = {
   openapi: '3.1.0',
   info: {
@@ -52,6 +70,113 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/visitor/conversations/{id}/followup': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        visitorSecurity,
+        'Stores a consented unverified contact claim for staff follow-up. Never links customer records or unlocks prior history.',
+        z.toJSONSchema(chatFollowupSchema),
+      ),
+    },
+    '/v1/chat/visitor/conversations/{id}/end': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        visitorSecurity,
+        'Resolves the visitor own conversation; transcript is retained in the ERP.',
+      ),
+    },
+    '/v1/chat/conversations/{id}/followup': {
+      parameters: historyParameters.slice(0, 1),
+      get: read('Visitor-provided unverified contact details and follow-up completion state.'),
+    },
+    '/v1/chat/conversations/{id}/followup-complete': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.reply. Audits follow-up completion without logging contact details.',
+      ),
+    },
+    '/v1/chat/visitor/conversations/{id}/live': {
+      parameters: historyParameters.slice(0, 1),
+      get: {
+        security: visitorSecurity,
+        description:
+          'Public message SSE with typing, staff read cursor, availability and lifecycle status. No private notes. Reconnect after the bounded connection expires.',
+        responses: {
+          '200': {
+            description: 'Public messages and activity',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          ...errorResponses,
+        },
+      },
+    },
+    '/v1/chat/visitor/conversations/{id}/activity': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        visitorSecurity,
+        'Monotonic public read cursor and six-second typing presence.',
+        z.toJSONSchema(chatActivitySchema),
+      ),
+    },
+    '/v1/chat/conversations/{id}/activity': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.reply. Read acknowledgement must come from a visible, focused transcript.',
+        z.toJSONSchema(chatActivitySchema),
+      ),
+    },
+    '/v1/chat/conversations/{id}/workflow': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.assign; changing another owner requires chat.manage. Version conflicts return 409. Claims enforce configured capacity. Snoozes must be within seven days.',
+        z.toJSONSchema(chatWorkflowSchema),
+      ),
+    },
+    '/v1/chat/conversations/{id}/export': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.export. Audited public transcript; private notes excluded.',
+      ),
+    },
+    '/v1/chat/conversations/availability': {
+      get: read('Current staff availability and capacity.'),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.reply. Availability expires 45 seconds after last heartbeat.',
+        z.toJSONSchema(chatAvailabilitySchema),
+      ),
+    },
+    '/v1/chat/conversations/operations': {
+      get: read('Requires chat.manage. Pending and failed delivery counts for this tenant.'),
+    },
+    '/v1/chat/conversations/retry-failed': {
+      post: mutation(
+        staffSecurity,
+        'Requires chat.manage. Audited retry of failed transport and browser push deliveries.',
+      ),
+    },
+    '/v1/chat/conversations/push-key': {
+      get: read('Public VAPID key. Returns 503 unless background push is configured.'),
+    },
+    '/v1/chat/conversations/push-subscribe': {
+      post: mutation(
+        staffSecurity,
+        'Registers this browser subscription for the authenticated staff member. Only supported HTTPS browser push services are allowed.',
+        z.toJSONSchema(chatPushSubscriptionSchema),
+      ),
+    },
+    '/v1/chat/conversations/push-unsubscribe': {
+      post: mutation(staffSecurity, 'Removes only the current staff user subscription.', {
+        type: 'object',
+        properties: { endpoint: { type: 'string' } },
+        required: ['endpoint'],
+        additionalProperties: false,
+      }),
+    },
     '/v1/chat/conversations/live': {
       get: {
         security: staffSecurity,
