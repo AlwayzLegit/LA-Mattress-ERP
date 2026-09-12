@@ -245,3 +245,79 @@ API endpoint. No schema change.
 - The register publishes its draft summary to `setDraftSummary` in Phase 4 so the error
   names "SO-10441 (2 lines, $2,598.00)".
 - Fold the business switcher into the account menu.
+
+---
+
+## Phase 4 — New Sale: layout, lines, sourcing (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** the register (`components/new-sale.tsx`,
+rewritten), a pure sourcing module, one ops setting, and server-side source resolution on
+order create. No schema migration: the durable location designation the handoff asked for
+already exists as `locations.location_type` (`store` | `warehouse`), and the business default
+lives in the ops settings registry like every other operational knob.
+
+### What changed
+
+- **Layout** (README §3.1, canvas 4a–4f) — content grid `minmax(0,1fr) 316px`, register
+  density on the root. Header: eyebrow "Sell · {Store}", title, order number once a draft
+  exists, computed status chip (Draft · Waiting on stock · Scheduled), save note, "Resume a
+  draft (N)" toggling a store-wide list. Items section spans the content width with a
+  `table-layout: fixed` table and the spec widths (Item auto · Qty 62 · Price 100 · Disc 80 ·
+  Fulfillment 148 · Inventory from 172 · Amount 104). Rail: Customer · Order details (Store,
+  Fulfillment, Promised, Salesperson in a 2×2 grid; type, second salesperson, fees, discount,
+  instructions and notes behind "More") · Totals (Merchandise, Discounts, Delivery, Tax,
+  **Total** in Archivo 26px, payments as negative lines, Due band that turns green when paid)
+  · one action block.
+- **Line row (44px)** — name + SKU/size/remove link; add-on chips **Removal $0 · Recycling
+  · Declined foundation $0** on mattress and base lines (Recycling flows into the line amount
+  and totals; on submit the toggles become the custom fee lines the invoice already prints);
+  qty/price/disc as mono, right-aligned inputs; `$0` price → amber border + row tint;
+  Fulfillment select with "Same as order · {order fulfillment}" first; Inventory from select
+  with the **auto** badge while derived; availability note under it; one inline warning per
+  line.
+- **Sourcing** (`lib/pos-sourcing.ts`, 11 unit tests covering the handoff's matrix rows 1–9)
+  — Add Product's From and untouched lines default to the business default source, else the
+  single warehouse, else the store; a line whose effective fulfillment is take-with follows
+  the order's Store; untouched lines recompute on line fulfillment, order fulfillment, order
+  Store and product added; a touched line is never moved (inline note instead); take-with
+  with too little stock shows "Take-with: N available at {Store}. Change the source location
+  or the fulfillment type." Availability is fetched per (source, variant) pair and cached, so
+  moving a line re-checks stock at the new source.
+- **Server side** — `ops.defaultSourceLocationId` (registry entry, validated against the
+  business's locations, visible to the register through `/settings/pos`, editable under
+  Settings → Store operations as "Default stock source for new sale lines"). Order create
+  applies the same resolution order to lines that name no source, and the `order.create`
+  audit row carries `takeWithOffStore` when a take-with line is sourced from another store
+  (allowed, on the record). Reservations already use `line.source_location_id`.
+- **Guards and states** — `$0.00 is intentional` checkbox blocks Record and Complete until
+  ticked; Complete says "Complete sale" / "Complete with balance" with the hint naming what
+  is collected at the door; completion locks every control, flips the chip to Scheduled,
+  states in one sentence what was reserved where and what is due, and offers Print receipt
+  (P), Open order, New sale (N). Loading uses skeleton rows; the load error names what
+  failed with a Retry.
+- **Keys** — F2 Add product, F8 focuses the payment amount, Esc closes the picker (Dialog),
+  P prints and N clears once complete. The register publishes its draft summary to the
+  shell's outage banner (`setDraftSummary`).
+- **Store context** — the order's Store defaults to the topbar's "Acting for" store and
+  follows a switch while the ticket is empty.
+- **`/dev/register`** — the register on the prototype's fixtures behind a fetch stub, for
+  checking the screen without a session.
+- Salesperson pickers now drop members without a display name (handoff §6).
+
+### Assumptions
+
+- Recycling add-on price = the business `recyclingFeeCents` setting (the canvas shows $18;
+  the tenant default is $10.50). The chip label prints the live amount.
+- Add-on chips show on lines whose description reads as a mattress or base (keyword match);
+  the catalog has no explicit "needs recycling" flag.
+- "Inventory from" lists every location; take-with follows the order's Store per the
+  product-owner decision in the handoff.
+- Payments stay a compact rail block (Method, Amount, reference, Pay in full / 50% deposit,
+  Record); the F8 slide-in panel and the rebuilt Add Product dialog are Phase 5.
+
+### Later
+
+- Remember an explicit picker "From" for the rest of the draft (done: `pickerFrom` persists
+  until the order fulfillment changes) — call out in the PR per the handoff.
+- Mattress/base detection from the product's category instead of the name once the picker
+  returns it (Phase 5).
