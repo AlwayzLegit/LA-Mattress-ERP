@@ -635,9 +635,14 @@ describe('Documents + A1 print lock (PLAN-POS-OPERATIONS P4)', () => {
       .set('Cookie', cashierCookie)
       .set('X-Business-Id', businessId);
     expect(res.status).toBe(200);
-    const printed = res.body.order.payments.find((p: { id: string }) => p.id === pay.body.id);
+    // The payments endpoint answers with the order detail, so match the row
+    // by what we sent rather than by id.
+    const printed = res.body.order.payments.find(
+      (p: { method: string; amountCents: number }) => p.method === 'card' && p.amountCents === 1000,
+    );
     expect(printed).toBeTruthy();
     expect(printed.processorRef).toBe('4242');
+    expect(printed.status).toBe('succeeded');
   });
 
   it('Document payload carries the branding accent for the invoice (null until set)', async () => {
