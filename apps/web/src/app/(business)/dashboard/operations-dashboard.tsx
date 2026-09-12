@@ -14,7 +14,8 @@ import { StoresSection } from './shared/stores-section';
 import { TimeClockStrip } from './shared/time-clock-strip';
 
 /**
- * The Operations home (owner 2026-08-31; Claude Design hand-off 2026-09-04).
+ * The Operations home (owner 2026-08-31; Claude Design hand-off 2026-09-04;
+ * redesign Phase 10, README §3.5 / canvas 8d2).
  *
  * Exception-first, not selling-first: the page opens on what needs a
  * person today, and the numbers sit underneath. Every store, always —
@@ -22,13 +23,14 @@ import { TimeClockStrip } from './shared/time-clock-strip';
  * watching all of them at once. No goal or commission tiles: this
  * member sells occasionally and carries neither.
  *
- * Layout (reworked 2026-09-10): one card per store — salespeople, money
- * received by tender, cash awaiting pickup with the tick that says the
- * cash was handed over — then the feed panel (its border turns danger
- * while a critical row is on it). The tender split, the 14-day chart,
- * the salesperson table, the by-person digest and the store activity
- * log sit below as panels. Discount rows stay off this feed (owner
- * 2026-09-10); the threshold still lives under Settings → Operations.
+ * Layout (Phase 10): the time-clock strip, the cash pickups queue
+ * (Operations runs the pickups, so it leads), one card per store with
+ * the cash-on-hand column, then Flagged activity (its border turns
+ * danger while a critical row is on it), Money in by tender beside the
+ * 14-day Written business, By salesperson, Flagged activity by person
+ * beside Store activity, and the editable schedule with Publish.
+ * Discount rows stay off the feed (owner 2026-09-10); the threshold
+ * still lives under Settings → Operations.
  *
  * Each card fetches on its own and hides itself on a 403, so a member
  * with a narrower grant sees a smaller page rather than an error.
@@ -156,6 +158,15 @@ function windowLabel(range: DateRange): string {
   if (range.preset === 'today') return 'today';
   const label = presetLabel(range.preset);
   return label === 'Custom' ? formatRange(range) : label.toLowerCase();
+}
+
+function longDate(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 function ago(iso: string): string {
@@ -302,7 +313,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
       ? 'Nothing needs you today'
       : `${feedTotal} thing${feedTotal === 1 ? '' : 's'} need${feedTotal === 1 ? 's' : ''} you today`;
 
-  const pageSub = `${summary?.date ?? '—'} · every store · exception-first`;
+  const pageSub = `${summary ? longDate(summary.date) : '—'} · every store · exception-first`;
 
   const header = (
     <div
@@ -323,7 +334,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} data-noprint="true">
         <DateRangePicker value={range} onChange={setRange} align="right" testid="ops-range" />
-        <LinkButton variant="primary" href="/orders/new">
+        <LinkButton variant="primary" size="sm" href="/orders/new">
           New Sale
         </LinkButton>
       </div>
@@ -341,28 +352,25 @@ export default function OperationsDashboardView({ userName }: { userName: string
   }
 
   return (
-    <div
-      style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
-      data-testid="operations-dashboard"
-    >
+    <div className="dh" data-testid="operations-dashboard">
       <TimeClockStrip />
       {header}
 
-      {/* ---- Store cards (hand-off 2026-09-10): every store, month to date or today ---- */}
-      <StoresSection locationIds={null} />
+      {/* ---- Cash pickups queue, then every store (Phase 10, canvas 8d2) ---- */}
+      <StoresSection locationIds={null} showQueue actorName={userName} />
 
-      {/* ---- The feed. Everything else on this page is context for it. ---- */}
+      {/* ---- Flagged activity. Everything else on this page is context for it. ---- */}
       <Panel
-        title={feedTitle}
-        sub={`refunds, overrides, adjustments and drawer counts in the last ${thresholds?.lookbackDays ?? 7} days`}
-        style={hasCritical ? { borderColor: 'var(--danger)' } : undefined}
+        title="Flagged activity"
+        sub={`exception-first · every store · ${feedTitle.toLowerCase()} · last ${thresholds?.lookbackDays ?? 7} days`}
+        link={{ href: '/exceptions', label: 'Exceptions' }}
+        style={hasCritical ? { borderColor: 'var(--status-risk-border)' } : undefined}
         testid="ops-feed"
         actions={
           feed && feed.length > 0 ? (
             <>
               <label
                 style={{
-                  marginLeft: 'auto',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
@@ -507,11 +515,12 @@ export default function OperationsDashboardView({ userName }: { userName: string
       </Panel>
 
       {/* ---- Tender split beside the 14-day written chart ---- */}
-      <div
-        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 18 }}
-        className="ops-grid"
-      >
-        <Panel title="Money in by tender" sub={`${windowLabel(range)} · every store`}>
+      <div className="dh-grid">
+        <Panel
+          title="Money in by tender"
+          sub={`${windowLabel(range)} · every store`}
+          link={{ href: '/reports', label: 'Receipts report' }}
+        >
           {loading ? (
             <ShimmerRows rows={3} />
           ) : money && money.byTender.length === 0 ? (
@@ -545,7 +554,12 @@ export default function OperationsDashboardView({ userName }: { userName: string
             </table>
           )}
         </Panel>
-        <Panel title="Written business" sub="14 days · every store" clip={false}>
+        <Panel
+          title="Written business"
+          sub="14 days · every store"
+          clip={false}
+          link={{ href: '/reports', label: 'Reports' }}
+        >
           <div className="panel-body">
             {loading ? (
               <div className="shimmer" style={{ height: 110 }} />
@@ -559,9 +573,10 @@ export default function OperationsDashboardView({ userName }: { userName: string
       {/* ---- Every salesperson ---- */}
       <Panel
         title="By salesperson"
-        sub={windowLabel(spRange)}
+        sub={`${windowLabel(spRange)} · every store`}
+        link={{ href: '/salespeople', label: 'Salespeople' }}
         actions={
-          <div style={{ marginLeft: 'auto' }} data-noprint="true">
+          <div data-noprint="true">
             <DateRangePicker
               compact
               align="right"
@@ -595,10 +610,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
       </Panel>
 
       {/* ---- Who is generating the exceptions, and what changed on orders ---- */}
-      <div
-        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 18 }}
-        className="ops-grid"
-      >
+      <div className="dh-grid">
         <Panel
           title="Flagged activity by person"
           sub={`last ${thresholds?.lookbackDays ?? 7} days`}
@@ -640,7 +652,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
 
         <Panel
           title="Store activity"
-          sub="grouped by order"
+          sub="grouped by order · every store"
           link={{ href: '/audit', label: 'Audit log' }}
         >
           {activity == null ? (
@@ -699,8 +711,6 @@ export default function OperationsDashboardView({ userName }: { userName: string
           </p>
         </ConfirmDialog>
       )}
-
-      <style>{`@media (max-width: 1000px) { .ops-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
     </div>
   );
 }
@@ -753,30 +763,53 @@ function ScrollTable({
 
 function SalesByDayChart({ points }: { points: { day: string; writtenCents: number }[] }) {
   const max = Math.max(1, ...points.map((p) => p.writtenCents));
+  const label = (d?: { day: string }) =>
+    d
+      ? new Date(`${d.day}T12:00:00`).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })
+      : '';
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 110 }}>
-      {points.map((p) => (
-        <div
-          key={p.day}
-          title={`${p.day}: ${usd(p.writtenCents)}`}
-          style={{
-            display: 'flex',
-            flex: 1,
-            flexDirection: 'column',
-            justifyContent: 'flex-end',
-            height: '100%',
-          }}
-        >
+    <>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 110 }}>
+        {points.map((p, i) => (
           <div
+            key={p.day}
+            title={`${p.day}: ${usd(p.writtenCents)}`}
             style={{
-              height: `${Math.round((p.writtenCents / max) * 100)}%`,
-              minHeight: p.writtenCents > 0 ? 2 : 0,
-              background: 'var(--accent)',
-              borderRadius: '3px 3px 0 0',
+              display: 'flex',
+              flex: 1,
+              flexDirection: 'column',
+              justifyContent: 'flex-end',
+              height: '100%',
             }}
-          />
-        </div>
-      ))}
-    </div>
+          >
+            <div
+              style={{
+                height: `${Math.round((p.writtenCents / max) * 100)}%`,
+                minHeight: p.writtenCents > 0 ? 2 : 0,
+                background: i === points.length - 1 ? 'var(--accent)' : 'var(--border2)',
+                borderRadius: '2px 2px 0 0',
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div
+        className="mono"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 11,
+          color: 'var(--muted)',
+          marginTop: 6,
+        }}
+      >
+        <span>{label(points[0])}</span>
+        <span>{label(points[Math.floor(points.length / 2)])}</span>
+        <span>{label(points[points.length - 1])}</span>
+      </div>
+    </>
   );
 }

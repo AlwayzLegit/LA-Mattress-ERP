@@ -62,6 +62,8 @@ const operationsPermissions: Permission[] = [
   'pos.cash.pickup_confirm',
   // Redesign Phase 9: counts the drawer, writes the slip, posts the pickup.
   'pos.cash.pickup_record',
+  // Redesign Phase 10: signs the Z-report; asks for a recount / records a reason.
+  'reports.closeout.sign_off',
   // Step 2 (2026-09-10): sets and publishes the staff schedule; punches
   // their own clock like everyone else.
   'schedule.view',
