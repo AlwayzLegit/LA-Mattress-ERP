@@ -186,7 +186,7 @@ export function GlobalSearch() {
         >
           {hits.length === 0 ? (
             <div className="px-3 py-2.5 text-[13px] text-secondary">
-              Nothing matches — check the spelling, or try the phone number digits only.
+              No matches. Try an order number, a phone, or a page name.
             </div>
           ) : (
             hits.map((hit, i) => {

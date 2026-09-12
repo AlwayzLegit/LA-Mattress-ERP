@@ -88,7 +88,7 @@ export function SerialsPanel({
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={9}>No pieces on hand at this location.</TableEmpty>
+                  <TableEmpty colSpan={9}>No serials recorded for this product.</TableEmpty>
                 )}
                 {data?.rows.map((r) => (
                   <tr key={r.id} data-testid="activity-serial-row">

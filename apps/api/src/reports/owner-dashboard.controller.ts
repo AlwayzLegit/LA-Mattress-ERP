@@ -71,6 +71,8 @@ export interface OwnerDashboard {
     avgTicketCents: number;
     lastWeek: { date: string; writtenCents: number };
     lastMonth: { date: string; writtenCents: number };
+    /** Yesterday's written total — the day-one empty copy names it. */
+    yesterdayWrittenCents: number;
     collectedCents: number;
     collectedLastWeekCents: number;
     balanceDueCents: number;
@@ -232,7 +234,7 @@ export class OwnerDashboardController {
     @Query('locationIds') locationIdsQ?: string,
   ): Promise<OwnerDashboard> {
     const businessId = tenant.businessId!;
-    const { tz, today } = await this.clock(businessId);
+    const { tz, today, yesterday } = await this.clock(businessId);
     const range = parseDayRange(startQ, endQ) ?? { start: shiftDays(today, -29), end: today };
     const compare: CompareMode = compareQ === 'none' || compareQ === 'year' ? compareQ : 'prior';
     const compareRange = compareRangeFor(range, compare);
@@ -501,6 +503,7 @@ export class OwnerDashboardController {
       todayCounts,
       lastWeekWritten,
       lastMonthWritten,
+      yesterdayWritten,
       mtdWritten,
       priorMtdWritten,
       collectedToday,
@@ -518,6 +521,7 @@ export class OwnerDashboardController {
       countFor(dayRange(today)),
       writtenFor(dayRange(lastWeekDay)),
       writtenFor(dayRange(lastMonthDay)),
+      writtenFor(dayRange(yesterday)),
       writtenFor(mtd),
       writtenFor(priorMtd),
       paymentsFor(dayRange(today), 'in'),
@@ -565,6 +569,7 @@ export class OwnerDashboardController {
         storeCount: storeRows[0]?.n ?? 0,
         avgTicketCents: todayTickets > 0 ? Math.round(todayWritten / todayTickets) : 0,
         lastWeek: { date: lastWeekDay, writtenCents: lastWeekWritten },
+        yesterdayWrittenCents: yesterdayWritten,
         lastMonth: { date: lastMonthDay, writtenCents: lastMonthWritten },
         collectedCents: collectedToday.cents,
         collectedLastWeekCents: collectedLastWeek.cents,

@@ -405,7 +405,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
                   .join(' · ')}
               </strong>
             ) : (
-              <span className="dh-base">every promise is on track</span>
+              <span className="dh-base">Nothing to call about today.</span>
             )}
           </div>
           <span className="dh-side-link">Open the queue →</span>

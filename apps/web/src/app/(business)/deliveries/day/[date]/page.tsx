@@ -352,7 +352,7 @@ export default function DaySheetPage() {
         })}
         {rows && stops.length === 0 && (
           <div className="ds-empty" data-testid="ds-empty">
-            No stops on this day.
+            No stops scheduled for this day — nothing to print.
           </div>
         )}
         <footer className="ds-foot">

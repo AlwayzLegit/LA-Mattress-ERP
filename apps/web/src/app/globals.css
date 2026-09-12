@@ -6152,6 +6152,11 @@ select.picker-from {
   .db-bar-fill {
     transition: none;
   }
+  /* Motion spec (9c): the drag lift becomes a border change only. */
+  .db-card.is-lifted {
+    transform: none;
+    box-shadow: none;
+  }
 }
 
 /* ------------------------------------------------------------------

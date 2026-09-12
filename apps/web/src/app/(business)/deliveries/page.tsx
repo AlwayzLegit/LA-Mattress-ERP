@@ -417,7 +417,7 @@ function DeliveriesBoard() {
                   {mode === 'week' ? fmtShort(d) : fmtShort(d)}
                 </Link>
                 <span className={`db-cap is-${tone}`} data-testid="db-cap">
-                  {booked === 0 && mode === 'month' ? '—' : `${booked} / ${cap}`}
+                  {booked === 0 && mode === 'month' ? 'No truck' : `${booked} / ${cap}`}
                 </span>
               </div>
               <div className="db-bar" aria-hidden>
