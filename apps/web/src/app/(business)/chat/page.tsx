@@ -21,11 +21,20 @@ type Message = {
   sequence: number;
   createdAt: string;
 };
+const statusLabels: Record<string, string> = {
+  queued: 'Waiting for a teammate',
+  open: 'In progress',
+  waiting_customer: 'Waiting for visitor',
+  snoozed: 'Remind me later',
+  resolved: 'Closed',
+  spam: 'Spam',
+};
 const formSchema = z.object({
   body: z.string().trim().min(1, 'Write a message.').max(4000, 'Use 4,000 characters or fewer.'),
 });
 export default function ChatPage() {
   const [queue, setQueue] = useState('active');
+  const [search, setSearch] = useState('');
   const {
     conversations,
     connection,
@@ -40,6 +49,7 @@ export default function ChatPage() {
     latest,
   } = useLiveChat();
   const visible = conversations.filter((row) => {
+    if (search && !row.id.toLowerCase().includes(search.trim().toLowerCase())) return false;
     if (queue === 'overdue') return row.overdue;
     if (queue === 'followup') return row.followupPending;
     if (queue === 'all') return true;
@@ -57,62 +67,70 @@ export default function ChatPage() {
         title="Live chat"
         sub="Talk with website visitors and keep the conversation together."
       />
-      <div className={styles.livebar}>
+      <div className={styles.inboxBar}>
+        <TeamControls />
         <div className={styles.connection} data-state={connection} role="status">
           <span className={styles.dot} />
           <strong>
             {connection === 'live'
               ? 'Live'
-              : connection === 'connecting'
-                ? 'Connecting...'
-                : connection === 'denied'
-                  ? 'Access required'
-                  : 'Reconnecting...'}
+              : connection === 'denied'
+                ? 'Access required'
+                : 'Connecting…'}
           </strong>
-          <span>
-            {connection === 'live'
-              ? 'Messages update automatically'
-              : 'Waiting for a secure connection'}
-          </span>
         </div>
-        <div className={styles.modes}>
-          <Button aria-pressed={sound} onClick={() => void toggleSound()}>
-            {sound ? 'Sound on' : 'Enable sound'}
-          </Button>
-          <Button aria-pressed={notifications} onClick={() => void toggleNotifications()}>
-            {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
-          </Button>
-        </div>
+        <Button aria-pressed={sound} onClick={() => void toggleSound()}>
+          {sound ? 'Sound on' : 'Enable sound'}
+        </Button>
+        <details className={styles.settingsMenu}>
+          <summary>Inbox settings</summary>
+          <div className={styles.settingsContent}>
+            <h2>Notifications & settings</h2>
+            <Button aria-pressed={notifications} onClick={() => void toggleNotifications()}>
+              {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
+            </Button>
+            <p>Get an alert when a visitor sends a message.</p>
+            <PushControls />
+            <AdminControls />
+          </div>
+        </details>
       </div>
-      <div className={styles.toolbar}>
-        <span role="status">{notice}</span>
-        <strong>
-          {unread.length
-            ? `${unread.length} unread conversation${unread.length === 1 ? '' : 's'}`
-            : connection === 'live'
-              ? 'Inbox up to date'
-              : 'Connecting to inbox'}
-        </strong>
+      <div className={styles.inboxStatus}>
+        <strong>{unread.length ? `${unread.length} unread` : 'You’re all caught up'}</strong>
+        <span role="status">{notice || latest || 'New chats appear here automatically.'}</span>
       </div>
       {connection === 'reconnecting' && (
         <p role="alert" className={styles.error}>
-          Connection interrupted. Reconnecting automatically; messages will catch up when the
-          connection returns.
+          Connection interrupted. Reconnecting automatically. Your messages will catch up.
         </p>
       )}
-      <p className={styles.arrival} role="status">
-        {latest || 'Ready to help your next visitor.'}
-      </p>
-      <TeamControls />
-      <AdminControls />
-      <details className={styles.preferences}>
-        <summary>Background notifications</summary>
-        <PushControls />
-      </details>
       <div className={styles.layout}>
         <aside className={styles.queue} aria-label="Conversation queue">
-          <h2>Team conversations</h2>
-          <label htmlFor="chat-queue">Show queue</label>
+          <div className={styles.queueHeading}>
+            <h2>Inbox</h2>
+            <span>{visible.length}</span>
+          </div>
+          <div className={styles.queueTabs} aria-label="Quick filters">
+            {(
+              [
+                ['active', 'All active'],
+                ['mine', 'My chats'],
+                ['unassigned', 'Unassigned'],
+              ] as const
+            ).map(([value, label]) => (
+              <button key={value} aria-pressed={queue === value} onClick={() => setQueue(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <input
+            className={`input ${styles.search}`}
+            aria-label="Find conversation by reference"
+            placeholder="Find by conversation reference…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <label htmlFor="chat-queue">Filter conversations</label>
           <select
             id="chat-queue"
             className="input"
@@ -122,13 +140,13 @@ export default function ChatPage() {
             <option value="active">Active</option>
             <option value="overdue">Overdue</option>
             <option value="followup">Follow-up requested</option>
-            <option value="mine">Mine</option>
+            <option value="mine">Assigned to me</option>
             <option value="unassigned">Unassigned</option>
             <option value="unread">Unread</option>
             <option value="waiting_team">Waiting on team</option>
             <option value="waiting_customer">Waiting on customer</option>
             <option value="snoozed">Snoozed</option>
-            <option value="resolved">Resolved</option>
+            <option value="resolved">Closed</option>
             <option value="spam">Spam</option>
             <option value="all">All conversations</option>
           </select>
@@ -145,7 +163,15 @@ export default function ChatPage() {
               onClick={() => select(conversation.id)}
               data-unread={unread.includes(conversation.id)}
             >
-              <strong>Visitor · {conversation.id.slice(0, 8)}</strong>
+              <div className={styles.itemTop}>
+                <strong>Website visitor</strong>
+                <time>
+                  {new Date(conversation.updatedAt).toLocaleTimeString([], {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                </time>
+              </div>
               {unread.includes(conversation.id) && (
                 <span className={styles.badge}>New message</span>
               )}
@@ -160,8 +186,11 @@ export default function ChatPage() {
               {conversation.followupPending && (
                 <span className={styles.badge}>Follow-up requested</span>
               )}
-              <span>{conversation.status.replaceAll('_', ' ')}</span>
-              <small>{new Date(conversation.updatedAt).toLocaleString()}</small>
+              <span>{statusLabels[conversation.status] ?? conversation.status}</span>
+              <small>
+                #{conversation.id.slice(0, 8)} ·{' '}
+                {new Date(conversation.updatedAt).toLocaleDateString()}
+              </small>
             </button>
           ))}
         </aside>
@@ -193,6 +222,7 @@ function ConversationPanel({
   conversation?: LiveConversation;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [showDetails, setShowDetails] = useState(false);
   const [note, setNote] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -338,14 +368,22 @@ function ConversationPanel({
     else setBelow(true);
   }, [messages]);
   return (
-    <div className={styles.conversationWithContext}>
+    <div className={styles.conversationWithContext} data-details={showDetails}>
       <section className={styles.conversation} aria-label="Selected conversation">
         <header className={styles.heading}>
           <div>
-            <h2>Visitor conversation</h2>
-            <small>{id.slice(0, 8)}</small>
+            <h2>Website visitor</h2>
+            <small>
+              {statusLabels[conversation?.status ?? 'open']} · #{id.slice(0, 8)}
+            </small>
           </div>
-          <Button onClick={() => void refresh.current()}>Refresh messages</Button>
+          <Button
+            aria-expanded={showDetails}
+            aria-controls="visitor-details"
+            onClick={() => setShowDetails(!showDetails)}
+          >
+            {showDetails ? 'Hide details' : 'Visitor details'}
+          </Button>
         </header>
         <div className={styles.workflow}>
           {conversation?.assignedToMe && !conversation.acceptedAt && (
@@ -364,15 +402,9 @@ function ConversationPanel({
                 }
               }}
             >
-              Accept assignment
+              Start conversation
             </Button>
           )}
-          <Button
-            disabled={workflowBusy}
-            onClick={() => void workflow(conversation?.assignedToMe ? 'release' : 'claim')}
-          >
-            {conversation?.assignedToMe ? 'Release chat' : 'Claim chat'}
-          </Button>
           <Button
             disabled={workflowBusy}
             onClick={() =>
@@ -384,38 +416,50 @@ function ConversationPanel({
             }
           >
             {conversation?.status === 'resolved' || conversation?.status === 'spam'
-              ? 'Reopen'
-              : 'Resolve'}
+              ? 'Reopen chat'
+              : 'Mark as done'}
           </Button>
-          <Button disabled={workflowBusy} onClick={() => void workflow('snooze')}>
-            Snooze 30 min
-          </Button>
-          <Button disabled={workflowBusy} onClick={() => void workflow('spam')}>
-            Mark spam
-          </Button>
-          <Button
-            onClick={async () => {
-              try {
-                const data = await api(`/v1/chat/conversations/${id}/export`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'x-chat-request': '1' },
-                  body: '{}',
-                });
-                const url = URL.createObjectURL(
-                  new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
-                );
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `chat-${id}.json`;
-                link.click();
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : 'Export unavailable');
-              }
-            }}
-          >
-            Export public transcript
-          </Button>
+          <details className={styles.actionsMenu}>
+            <summary>More actions</summary>
+            <div>
+              <Button
+                disabled={workflowBusy}
+                onClick={() => void workflow(conversation?.assignedToMe ? 'release' : 'claim')}
+              >
+                {conversation?.assignedToMe ? 'Return to unassigned' : 'Assign to me'}
+              </Button>
+              <Button disabled={workflowBusy} onClick={() => void workflow('snooze')}>
+                Snooze 30 min
+              </Button>
+              <Button disabled={workflowBusy} onClick={() => void workflow('spam')}>
+                Mark spam
+              </Button>
+              <Button
+                onClick={async () => {
+                  try {
+                    const data = await api(`/v1/chat/conversations/${id}/export`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'x-chat-request': '1' },
+                      body: '{}',
+                    });
+                    const url = URL.createObjectURL(
+                      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+                    );
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `chat-${id}.json`;
+                    link.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : 'Export unavailable');
+                  }
+                }}
+              >
+                Export public transcript
+              </Button>
+              <Button onClick={() => void refresh.current()}>Refresh messages</Button>
+            </div>
+          </details>
         </div>
         {conversation?.visitorTyping && (
           <p role="status" className={styles.arrival}>
@@ -467,7 +511,7 @@ function ConversationPanel({
                 <small className={styles.saved}>
                   {(conversation?.visitorReadSequence ?? 0) >= message.sequence
                     ? 'Seen by visitor'
-                    : 'Saved'}
+                    : 'Sent'}
                 </small>
               )}
             </article>
@@ -485,14 +529,14 @@ function ConversationPanel({
           </Button>
         )}
         <FollowupPanel id={id} version={conversation?.version} />
-        <div className={styles.composer}>
+        <div className={styles.composer} data-note={note}>
           <div className={styles.modes}>
             <Button
               aria-pressed={!note}
               onClick={() => setNote(false)}
               disabled={form.formState.isSubmitting}
             >
-              Public reply
+              Reply to visitor
             </Button>
             <Button
               aria-pressed={note}
@@ -504,7 +548,7 @@ function ConversationPanel({
           </div>
           {!note && (
             <label className={styles.quickReply}>
-              Quick reply
+              Saved reply
               <select
                 className="input"
                 value=""
@@ -566,7 +610,8 @@ function ConversationPanel({
             <textarea
               id="chat-message"
               className="input"
-              rows={3}
+              rows={2}
+              placeholder={note ? 'Add a note for your team…' : 'Write a helpful reply…'}
               maxLength={4000}
               {...form.register('body', {
                 onChange: () => {
@@ -598,14 +643,18 @@ function ConversationPanel({
           </Form>
         </div>
       </section>
-      <ContextPanel
-        id={id}
-        version={conversation?.version}
-        onTemplate={(body) => {
-          setNote(false);
-          form.setValue('body', body, { shouldDirty: true });
-        }}
-      />
+      {showDetails && (
+        <div id="visitor-details" className={styles.detailsWrap}>
+          <ContextPanel
+            id={id}
+            version={conversation?.version}
+            onTemplate={(body) => {
+              setNote(false);
+              form.setValue('body', body, { shouldDirty: true });
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

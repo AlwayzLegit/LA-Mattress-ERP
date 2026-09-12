@@ -5523,3 +5523,7 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 ## Local human chat completion — 2026-09-12
 
 - [x] **Build:** Routing, acceptance/transfer, scoped access, hours/settings, context/customer linking, reporting/ratings and explicit retention controls. Generated migrations 0104–0105, 43 focused tests and both web production builds pass. See docs/live-chat-development.md for local architecture and external release validation.
+
+## Chat inbox usability — 2026-09-12
+
+- [x] Conversation-first layout, quick queue filters, reference search, clearer status labels, compact availability/notification settings, optional visitor details and secondary-action menu. Browser inspected with a live conversation; TypeScript and changed-file lint pass.

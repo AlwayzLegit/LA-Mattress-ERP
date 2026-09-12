@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui';
+import styles from './chat.module.css';
 export function TeamControls() {
   const [available, setAvailable] = useState(false);
   const [capacity, setCapacity] = useState(5);
@@ -22,7 +23,7 @@ export function TeamControls() {
     return () => clearInterval(timer);
   }, [available, capacity]);
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+    <div className={styles.teamControls}>
       <Button
         disabled={busy}
         aria-pressed={available}
@@ -47,52 +48,64 @@ export function TeamControls() {
           }
         }}
       >
-        {available ? 'Available · go away' : 'Away · go available'}
+        {available ? '● Available for chats' : '○ Away · start taking chats'}
       </Button>
-      <label>
-        My capacity{' '}
-        <select value={capacity} onChange={(e) => setCapacity(Number(e.target.value))}>
-          {[1, 2, 3, 5, 10, 20].map((value) => (
-            <option key={value} value={value}>
-              {value} chats
-            </option>
-          ))}
-        </select>
-      </label>
-      <Button
-        onClick={async () => {
-          try {
-            const result = await api<{
-              transport: { pending: number; failed: number };
-              push: { pending: number; failed: number };
-            }>('/v1/chat/conversations/operations');
-            setStatus(
-              `Transport: ${result.transport.pending} pending / ${result.transport.failed} failed. Push: ${result.push.pending} pending / ${result.push.failed} failed.`,
-            );
-          } catch (e) {
-            setStatus(e instanceof Error ? e.message : 'Operations unavailable');
-          }
-        }}
-      >
-        Delivery status
-      </Button>
-      <Button
-        onClick={async () => {
-          try {
-            const result = await api<{ retried: number }>('/v1/chat/conversations/retry-failed', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-chat-request': '1' },
-              body: '{}',
-            });
-            setStatus(`${result.retried} failed deliveries queued for retry.`);
-          } catch (e) {
-            setStatus(e instanceof Error ? e.message : 'Retry unavailable');
-          }
-        }}
-      >
-        Retry failed deliveries
-      </Button>
-      <span role="status">{status}</span>
+      <details className={styles.settingsMenu}>
+        <summary>Availability options</summary>
+        <div className={styles.settingsContent}>
+          <label>
+            Maximum active chats{' '}
+            <select value={capacity} onChange={(e) => setCapacity(Number(e.target.value))}>
+              {[1, 2, 3, 5, 10, 20].map((value) => (
+                <option key={value} value={value}>
+                  {value} chats
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            onClick={async () => {
+              try {
+                const result = await api<{
+                  transport: { pending: number; failed: number };
+                  push: { pending: number; failed: number };
+                }>('/v1/chat/conversations/operations');
+                setStatus(
+                  `Transport: ${result.transport.pending} pending / ${result.transport.failed} failed. Push: ${result.push.pending} pending / ${result.push.failed} failed.`,
+                );
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : 'Operations unavailable');
+              }
+            }}
+          >
+            Delivery status
+          </Button>
+          <Button
+            onClick={async () => {
+              try {
+                const result = await api<{ retried: number }>(
+                  '/v1/chat/conversations/retry-failed',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-chat-request': '1' },
+                    body: '{}',
+                  },
+                );
+                setStatus(`${result.retried} failed deliveries queued for retry.`);
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : 'Retry unavailable');
+              }
+            }}
+          >
+            Retry failed deliveries
+          </Button>
+        </div>
+      </details>
+      {status && (
+        <span className={styles.teamStatus} role="status">
+          {status}
+        </span>
+      )}
     </div>
   );
 }

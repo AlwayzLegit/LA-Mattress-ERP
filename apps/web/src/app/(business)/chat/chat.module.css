@@ -257,16 +257,404 @@
   overflow-y: auto;
 }
 
-.settings { display: grid; gap: 12px; max-width: 720px; }
-.settings label { display: block; }
-.settings input:not([type='checkbox']), .settings textarea, .context input:not([type='checkbox']), .context select { display:block; width:100%; border:1px solid #bcc8c0; border-radius:5px; padding:8px; margin:5px 0; }
-.settings fieldset { border:1px solid #dce0df; padding:12px; }
-.hoursRow { display:flex; align-items:center; gap:12px; }
-.hoursRow label { min-width:100px; }
-.hoursRow input { max-width:130px; }
-.report { display:flex; flex-wrap:wrap; gap:18px; }
-.conversationWithContext { display:grid; min-width:0; min-height:0; grid-template-columns:minmax(0,1fr) 240px; }
-.context { padding:16px; overflow:auto; border-left:1px solid #dce0df; background:#fafbf9; font-size:12px; overflow-wrap:anywhere; }
-.context h2 { font-size:16px; }.context h3 { font-size:13px; margin-top:20px; }
-@media(max-width:1200px) { .conversationWithContext { display:flex; flex-direction:column; overflow:auto; } .conversationWithContext .conversation { min-height:550px; } .context { flex-shrink:0; max-height:360px; } }
-@media(max-width:760px) { .hoursRow { flex-wrap:wrap; } }
+.settings {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+}
+.settings label {
+  display: block;
+}
+.settings input:not([type='checkbox']),
+.settings textarea,
+.context input:not([type='checkbox']),
+.context select {
+  display: block;
+  width: 100%;
+  border: 1px solid #bcc8c0;
+  border-radius: 5px;
+  padding: 8px;
+  margin: 5px 0;
+}
+.settings fieldset {
+  border: 1px solid #dce0df;
+  padding: 12px;
+}
+.hoursRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hoursRow label {
+  min-width: 100px;
+}
+.hoursRow input {
+  max-width: 130px;
+}
+.report {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.conversationWithContext {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 240px;
+}
+.context {
+  padding: 16px;
+  overflow: auto;
+  border-left: 1px solid #dce0df;
+  background: #fafbf9;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.context h2 {
+  font-size: 16px;
+}
+.context h3 {
+  font-size: 13px;
+  margin-top: 20px;
+}
+@media (max-width: 1200px) {
+  .conversationWithContext {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .conversationWithContext .conversation {
+    min-height: 550px;
+  }
+  .context {
+    flex-shrink: 0;
+    max-height: 360px;
+  }
+}
+@media (max-width: 760px) {
+  .hoursRow {
+    flex-wrap: wrap;
+  }
+}
+
+/* Conversation-first inbox */
+.root {
+  gap: 10px;
+}
+.inboxBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  border: 1px solid #dce0df;
+  border-radius: 12px;
+}
+.teamControls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-right: auto;
+}
+.teamControls > button[aria-pressed='true'] {
+  background: #e5f2ec;
+  color: #176941;
+  border-color: #80ad98;
+}
+.teamStatus {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #52605a;
+}
+.inboxStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  min-height: 24px;
+  font-size: 12px;
+  color: #52605a;
+}
+.inboxStatus strong {
+  color: #243b30;
+}
+.settingsMenu,
+.actionsMenu {
+  position: relative;
+  font-size: 13px;
+}
+.settingsMenu summary,
+.actionsMenu summary {
+  cursor: pointer;
+  padding: 9px 12px;
+  border: 1px solid #dce0df;
+  border-radius: 7px;
+  background: white;
+}
+.settingsContent,
+.actionsMenu > div {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(380px, calc(100vw - 64px));
+  padding: 20px;
+  border: 1px solid #dce0df;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 12px 36px #162c2326;
+  max-height: 65dvh;
+  overflow: auto;
+}
+.settingsContent > * + * {
+  margin-top: 12px;
+}
+.settingsContent h2 {
+  font-size: 16px;
+  margin-top: 0;
+}
+.teamControls .settingsContent {
+  left: 0;
+  right: auto;
+}
+.actionsMenu > div {
+  display: grid;
+  gap: 8px;
+  width: 240px;
+}
+.actionsMenu {
+  margin-left: auto;
+}
+.layout {
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: calc(100dvh - 240px);
+  min-height: 540px;
+  background: white;
+  box-shadow: 0 3px 12px #17211c05;
+}
+.queue {
+  padding: 16px 12px;
+  background: #f8faf9;
+}
+.queueHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  margin-bottom: 12px;
+}
+.queueHeading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.queueHeading > span {
+  background: #e8eee9;
+  border-radius: 20px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.queueTabs {
+  display: flex;
+  gap: 3px;
+  background: #eaf0ec;
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 12px;
+}
+.queueTabs button {
+  flex: 1;
+  padding: 8px 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queueTabs button[aria-pressed='true'] {
+  background: white;
+  color: #176941;
+  font-weight: 600;
+  box-shadow: 0 1px 4px #17211c12;
+}
+.search {
+  margin-bottom: 12px;
+  width: 100%;
+  font-size: 12px;
+}
+.queue > label {
+  display: block;
+  margin: 0 0 5px;
+  font-size: 12px;
+  color: #52605a;
+}
+.queue > select {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.item {
+  background: white;
+  border-color: #e5eae7;
+  padding: 14px 12px;
+  gap: 7px;
+}
+.item:hover {
+  border-color: #80ad98;
+}
+.itemTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.itemTop strong {
+  font-size: 13px;
+}
+.itemTop time {
+  font-size: 11px;
+  color: #52605a;
+  white-space: nowrap;
+}
+.item > span:not(.badge) {
+  font-size: 12px;
+  color: #52605a;
+}
+.item small {
+  font-size: 11px;
+}
+.conversationWithContext {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+.conversationWithContext[data-details='true'] {
+  grid-template-columns: minmax(0, 1fr) 270px;
+}
+.conversationWithContext .conversation {
+  min-height: 0;
+}
+.detailsWrap {
+  min-height: 0;
+  overflow: auto;
+}
+.context {
+  min-height: 100%;
+  overflow: visible;
+  padding: 18px;
+}
+.heading {
+  padding: 16px 20px;
+}
+.heading h2 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+.workflow {
+  padding: 8px 20px;
+  align-items: center;
+}
+.history {
+  min-height: 100px;
+  padding: 24px;
+  background: #fbfcfb;
+}
+.composer {
+  padding: 12px 20px;
+}
+.composer[data-note='true'] {
+  background: #fff9eb;
+}
+.composer .modes {
+  margin-bottom: 8px;
+}
+.quickReply {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.quickReply select {
+  max-width: 240px;
+}
+.composer form > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.composer textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  max-height: 180px;
+}
+.composer .toolbar {
+  margin-top: 8px;
+  min-height: 34px;
+}
+.root button:focus-visible,
+.root summary:focus-visible,
+.root input:focus-visible,
+.root select:focus-visible,
+.root textarea:focus-visible {
+  outline: 2px solid #26734e;
+  outline-offset: 3px;
+}
+@media (max-width: 1100px) {
+  .conversationWithContext[data-details='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+  .conversationWithContext[data-details='true'] .conversation {
+    min-height: 540px;
+  }
+  .detailsWrap {
+    overflow: visible;
+  }
+  .context {
+    max-height: none;
+    border-top: 1px solid #dce0df;
+  }
+}
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+  .queue {
+    max-height: 310px;
+  }
+  .conversation {
+    height: 650px;
+  }
+  .inboxBar {
+    gap: 8px;
+  }
+  .teamControls {
+    width: 100%;
+  }
+  .heading,
+  .composer {
+    padding: 12px;
+  }
+  .workflow {
+    padding: 8px 12px;
+  }
+  .history {
+    padding: 16px;
+  }
+  .quickReply {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .settingsContent {
+    position: fixed;
+    left: 24px;
+    right: 24px;
+    top: 140px;
+    width: auto;
+  }
+}
