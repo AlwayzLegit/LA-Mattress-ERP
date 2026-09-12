@@ -1,6 +1,11 @@
 export type LiveConversation = {
   id: string;
   version?: number;
+  overdue?: boolean;
+  acceptedAt?: string | null;
+  assignedAt?: string | null;
+  awaitingSince?: string | null;
+  locationId?: string | null;
   followupPending?: boolean;
   assignedMembershipId?: string | null;
   assignedToMe?: boolean;

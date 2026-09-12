@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
+import { withinChatHours } from '../src/chat/chat-policy';
+import { chatSettingsSchema } from '@jetnine/shared';
 import { ChatPushWorker } from '../src/chat/chat-push-worker';
 import { ChatWorker, AblyChatPublisher } from '../src/chat/chat-worker';
 import request from 'supertest';
@@ -945,4 +947,345 @@ it('enforces tenant RLS on presence, subscriptions and queued push jobs', async 
     deliveries: await tx.select().from(schema.chatPushDeliveries),
   }));
   expect(other).toEqual({ subscriptions: [], agents: [], deliveries: [] });
+});
+
+describe('scoped staff access', () => {
+  it('restricts assigned-only staff and store scopes on reads, writes, exports and live snapshots', async () => {
+    const mine = await service.startConversation(auth, randomUUID(), input('Scoped visitor'));
+    const other = await service.startConversation(auth, randomUUID(), input('Not assigned'));
+    await db
+      .update(schema.chatConversations)
+      .set({ assignedMembershipId: staff.membershipId })
+      .where(eq(schema.chatConversations.id, mine.conversationId));
+    await db.insert(schema.membershipPermissionOverrides).values([
+      {
+        businessId,
+        membershipId: staff.membershipId!,
+        permission: 'chat.view_team',
+        allowed: false,
+      },
+      {
+        businessId,
+        membershipId: staff.membershipId!,
+        permission: 'chat.view_assigned',
+        allowed: true,
+      },
+    ]);
+    const assigned = { ...staff, permissions: new Set(['chat.view_assigned', 'chat.reply']) };
+    try {
+      expect(
+        (await service.staffLiveSnapshot(assigned)).some((row) => row.id === other.conversationId),
+      ).toBe(false);
+      expect((await service.staffHistory(assigned, mine.conversationId)).data).toHaveLength(1);
+      await expect(service.staffHistory(assigned, other.conversationId)).rejects.toThrow(
+        'not found',
+      );
+      await expect(
+        service.sendStaffMessage(assigned, other.conversationId, input()),
+      ).rejects.toThrow('not found');
+      await expect(service.exportTranscript(assigned, other.conversationId)).rejects.toThrow(
+        'not found',
+      );
+      const [location] = await db
+        .insert(schema.locations)
+        .values({ businessId, name: 'Scoped showroom', timezone: 'America/Los_Angeles' })
+        .returning();
+      await db
+        .update(schema.memberships)
+        .set({ dataScope: 'store' })
+        .where(eq(schema.memberships.id, staff.membershipId!));
+      const scoped = { ...assigned, dataScope: 'store' as const };
+      expect(await service.staffLiveSnapshot(scoped)).toEqual([]);
+      await db
+        .insert(schema.membershipLocationScopes)
+        .values({ businessId, membershipId: staff.membershipId!, locationId: location!.id });
+      await db
+        .update(schema.chatConversations)
+        .set({ locationId: location!.id })
+        .where(eq(schema.chatConversations.id, mine.conversationId));
+      expect((await service.staffLiveSnapshot(scoped)).map((row) => row.id)).toEqual([
+        mine.conversationId,
+      ]);
+      await service.sendStaffMessage(scoped, mine.conversationId, input('Scoped reply'));
+      await db
+        .delete(schema.membershipLocationScopes)
+        .where(eq(schema.membershipLocationScopes.membershipId, staff.membershipId!));
+      await expect(service.staffHistory(scoped, mine.conversationId)).rejects.toThrow('not found');
+    } finally {
+      await db
+        .delete(schema.membershipPermissionOverrides)
+        .where(eq(schema.membershipPermissionOverrides.membershipId, staff.membershipId!));
+      await db
+        .update(schema.memberships)
+        .set({ dataScope: 'all' })
+        .where(eq(schema.memberships.id, staff.membershipId!));
+    }
+  });
+});
+describe('chat administration and routing', () => {
+  it('uses Los Angeles opening times, holidays and versioned manager settings', async () => {
+    const config = chatSettingsSchema.parse({
+      hoursEnabled: true,
+      hours: [{ day: 1, open: '10:00', close: '18:00' }],
+    });
+    expect(withinChatHours(config, new Date('2026-09-14T16:59:00Z'))).toBe(false);
+    expect(withinChatHours(config, new Date('2026-09-14T17:00:00Z'))).toBe(true);
+    expect(withinChatHours(config, new Date('2026-09-15T01:00:00Z'))).toBe(false);
+    expect(
+      withinChatHours({ ...config, holidays: ['2026-09-14'] }, new Date('2026-09-14T17:00:00Z')),
+    ).toBe(false);
+    // PST in winter: the same 10:00 opening corresponds to 18:00 UTC.
+    expect(withinChatHours(config, new Date('2026-12-14T17:30:00Z'))).toBe(false);
+    expect(withinChatHours(config, new Date('2026-12-14T18:00:00Z'))).toBe(true);
+    const current = await service.settings(staff);
+    const saved = await service.settings(staff, { version: current.version, config });
+    await expect(service.settings(staff, { version: current.version, config })).rejects.toThrow(
+      'changed',
+    );
+    await expect(service.settings({ ...staff, businessId: otherBusinessId })).rejects.toThrow();
+    await service.settings(staff, {
+      version: saved.version,
+      config: { ...config, hoursEnabled: false },
+    });
+  });
+  it('serializes automatic assignment against capacity and accepts or expires ownership', async () => {
+    await db
+      .update(schema.chatConversations)
+      .set({ status: 'resolved' })
+      .where(eq(schema.chatConversations.businessId, businessId));
+    await service.availability(staff, { available: true, capacity: 1 });
+    const settings = await service.settings(staff);
+    await service.settings(staff, {
+      version: settings.version,
+      config: { ...settings.config, autoAssign: true, hoursEnabled: false, acceptanceMinutes: 1 },
+    });
+    const first = await service.startConversation(auth, randomUUID(), input('First queued'));
+    const second = await service.startConversation(auth, randomUUID(), input('Second queued'));
+    await Promise.all([service.maintenance(businessId), service.maintenance(businessId)]);
+    let rows = await service.staffLiveSnapshot(staff);
+    expect(
+      rows.filter(
+        (row) =>
+          [first.conversationId, second.conversationId].includes(row.id) &&
+          row.assignedMembershipId,
+      ),
+    ).toHaveLength(1);
+    const owned = rows.find((row) => row.id === first.conversationId)!;
+    await service.acceptAssignment(staff, owned.id);
+    await db
+      .update(schema.chatConversations)
+      .set({ assignedAt: new Date(Date.now() - 120000) })
+      .where(eq(schema.chatConversations.id, owned.id));
+    await service.maintenance(businessId);
+    expect(
+      (await service.staffLiveSnapshot(staff)).find((row) => row.id === owned.id)?.assignedToMe,
+    ).toBe(true);
+    await db
+      .update(schema.chatConversations)
+      .set({ acceptedAt: null })
+      .where(eq(schema.chatConversations.id, owned.id));
+    const result = await service.maintenance(businessId);
+    expect(result.expired).toBe(1);
+    rows = await service.staffLiveSnapshot(staff);
+    expect(
+      rows.filter(
+        (row) =>
+          ['open', 'queued', 'waiting_customer'].includes(row.status) && row.assignedMembershipId,
+      ),
+    ).toHaveLength(1);
+    const current = await service.settings(staff);
+    await service.settings(staff, {
+      version: current.version,
+      config: { ...current.config, autoAssign: false },
+    });
+  });
+  it('guards context, customer linking and settings kill switch without exposing private data', async () => {
+    const start = await service.startConversation(auth, randomUUID(), input('Product question'), {
+      topic: 'mattress',
+      locationId: null,
+      pagePath: '/products/test-mattress',
+    });
+    expect((await service.context(staff, start.conversationId)).context).toMatchObject({
+      topic: 'mattress',
+      pagePath: '/products/test-mattress',
+    });
+    await expect(
+      service.visitorContext(auth, start.conversationId, {
+        topic: 'order',
+        locationId: randomUUID(),
+        pagePath: '/',
+      }),
+    ).rejects.toThrow('showroom');
+    await db
+      .insert(schema.rolePermissions)
+      .values({ roleId: staff.roleId!, permission: 'customers.view' });
+    const customerStaff = {
+      ...staff,
+      permissions: new Set([...staff.permissions, 'customers.view']),
+    };
+    const [customer] = await db
+      .insert(schema.customers)
+      .values({ businessId, firstName: 'Synthetic', lastName: 'Chat' })
+      .returning();
+    const context = await service.context(staff, start.conversationId);
+    await expect(
+      service.linkCustomer(customerStaff, start.conversationId, {
+        customerId: customer!.id,
+        version: context.version,
+        verificationConfirmed: false,
+      }),
+    ).rejects.toThrow();
+    await service.linkCustomer(customerStaff, start.conversationId, {
+      customerId: customer!.id,
+      version: context.version,
+      verificationConfirmed: true,
+    });
+    expect((await service.context(staff, start.conversationId)).customerId).toBe(customer!.id);
+    expect(JSON.stringify(await service.visitorHistory(auth, start.conversationId))).not.toContain(
+      customer!.id,
+    );
+    await service.sendStaffMessage(staff, start.conversationId, input('First human answer'));
+    await service.endVisitorChat(auth, start.conversationId);
+    await service.rating(auth, start.conversationId, { rating: 5 });
+    expect(Number((await service.report(staff)).satisfaction)).toBe(5);
+    const current = await service.settings(staff);
+    const disabled = await service.settings(staff, {
+      version: current.version,
+      config: { ...current.config, enabled: false },
+    });
+    await expect(service.sendVisitorMessage(auth, start.conversationId, input())).rejects.toThrow(
+      'disabled',
+    );
+    await service.settings(staff, {
+      version: disabled.version,
+      config: { ...disabled.config, enabled: true },
+    });
+  });
+  it('previews and deletes only eligible archived chats within the current business', async () => {
+    const archived = await service.startConversation(auth, randomUUID(), input('Old archived'));
+    const active = await service.startConversation(auth, randomUUID(), input('Keep active'));
+    const old = new Date(Date.now() - 90 * 86400000);
+    await db
+      .update(schema.chatConversations)
+      .set({ status: 'resolved', updatedAt: old })
+      .where(eq(schema.chatConversations.id, archived.conversationId));
+    await db
+      .update(schema.chatConversations)
+      .set({ updatedAt: old })
+      .where(eq(schema.chatConversations.id, active.conversationId));
+    const current = await service.settings(staff);
+    await service.settings(staff, {
+      version: current.version,
+      config: { ...current.config, retentionDays: 30 },
+    });
+    const preview = await service.retention(staff);
+    expect(preview.eligible).toBe(1);
+    await expect(
+      service.retention(staff, { confirmation: 'wrong', version: preview.version }),
+    ).rejects.toThrow();
+    expect(
+      (
+        await service.retention(staff, {
+          confirmation: 'DELETE ELIGIBLE CHATS',
+          version: preview.version,
+        })
+      ).deleted,
+    ).toBe(1);
+    expect(
+      await db
+        .select()
+        .from(schema.chatMessages)
+        .where(eq(schema.chatMessages.conversationId, archived.conversationId)),
+    ).toEqual([]);
+    expect((await service.staffHistory(staff, active.conversationId)).data).toHaveLength(1);
+    expect(
+      await withDrizzleTenantContext(db, { businessId: otherBusinessId }, (tx) =>
+        tx.select().from(schema.chatSettings),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('transfer and response targets', () => {
+  it('transfers only to eligible staff within capacity and requires the actual owner to accept', async () => {
+    const [user] = await db
+      .insert(schema.users)
+      .values({
+        name: 'Transfer Test',
+        email: `transfer-${randomUUID()}@example.test`,
+        emailVerified: true,
+      })
+      .returning();
+    const [membership] = await db
+      .insert(schema.memberships)
+      .values({ businessId, userId: user!.id, roleId: staff.roleId!, status: 'active' })
+      .returning();
+    const target = { ...staff, userId: user!.id, membershipId: membership!.id };
+    try {
+      await service.availability(target, { available: true, capacity: 1 });
+      const first = await service.startConversation(auth, randomUUID(), input('Transfer one'));
+      const second = await service.startConversation(auth, randomUUID(), input('Transfer two'));
+      const context = await service.context(staff, first.conversationId);
+      await service.transfer(staff, first.conversationId, {
+        membershipId: membership!.id,
+        version: context.version,
+      });
+      await expect(service.acceptAssignment(staff, first.conversationId)).rejects.toThrow(
+        'assigned teammate',
+      );
+      await service.acceptAssignment(target, first.conversationId);
+      const other = await service.context(staff, second.conversationId);
+      await expect(
+        service.transfer(staff, second.conversationId, {
+          membershipId: membership!.id,
+          version: other.version,
+        }),
+      ).rejects.toThrow('capacity');
+      await expect(
+        service.transfer(staff, first.conversationId, {
+          membershipId: membership!.id,
+          version: context.version,
+        }),
+      ).rejects.toThrow('changed');
+      await db
+        .insert(schema.membershipPermissionOverrides)
+        .values({
+          businessId,
+          membershipId: membership!.id,
+          permission: 'chat.reply',
+          allowed: false,
+        });
+      expect(
+        (await service.context(staff, second.conversationId)).agents.some(
+          (agent) => agent.id === membership!.id,
+        ),
+      ).toBe(false);
+    } finally {
+      await db.delete(schema.chatAgents).where(eq(schema.chatAgents.membershipId, membership!.id));
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
+  });
+  it('marks unanswered chats overdue, clears the target after a human reply, and bounds customer search', async () => {
+    const first = await service.startConversation(auth, randomUUID(), input('Waiting too long'));
+    await db
+      .update(schema.chatConversations)
+      .set({ awaitingSince: new Date(Date.now() - 25 * 60 * 1000) })
+      .where(eq(schema.chatConversations.id, first.conversationId));
+    expect(
+      (await service.staffLiveSnapshot(staff)).find((row) => row.id === first.conversationId)
+        ?.overdue,
+    ).toBe(true);
+    await service.sendStaffMessage(staff, first.conversationId, input('Human response'));
+    expect(
+      (await service.staffLiveSnapshot(staff)).find((row) => row.id === first.conversationId)
+        ?.overdue,
+    ).toBe(false);
+    const results = await service.customerCandidates(staff, { q: 'Synthetic' });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThanOrEqual(10);
+    expect(await service.customerCandidates(staff, { q: '%%%' })).toEqual([]);
+    await expect(
+      service.customerCandidates({ ...staff, businessId: otherBusinessId }, { q: 'Synthetic' }),
+    ).rejects.toThrow();
+  });
 });

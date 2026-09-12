@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -73,6 +74,16 @@ export const chatConversations = pgTable(
     lastSequence: integer('last_sequence').notNull().default(0),
     version: integer('version').notNull().default(1),
     assignedMembershipId: uuid('assigned_membership_id'),
+    locationId: uuid('location_id'),
+    contextJson: jsonb('context_json'),
+    customerId: uuid('customer_id'),
+    customerVerifiedAt: timestamp('customer_verified_at', { withTimezone: true }),
+    firstResponseAt: timestamp('first_response_at', { withTimezone: true }),
+    awaitingSince: timestamp('awaiting_since', { withTimezone: true }),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    rating: integer('rating'),
     followupName: text('followup_name'),
     followupMethod: text('followup_method'),
     followupContact: text('followup_contact'),
@@ -250,9 +261,17 @@ export const chatAgents = pgTable(
     available: boolean('available').notNull().default(false),
     capacity: integer('capacity').notNull().default(5),
     heartbeatUntil: timestamp('heartbeat_until', { withTimezone: true }),
+    lastAssignedAt: timestamp('last_assigned_at', { withTimezone: true }),
   },
   (t) => ({
     agentKey: uniqueIndex('chat_agents_member').on(t.businessId, t.membershipId),
     capacityCheck: check('chat_agents_capacity_check', sql`${t.capacity} between 1 and 20`),
   }),
 );
+
+export const chatSettings = pgTable('chat_settings', {
+  businessId: businessId().primaryKey(),
+  configJson: jsonb('config_json').notNull().default({}),
+  version: integer('version').notNull().default(1),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

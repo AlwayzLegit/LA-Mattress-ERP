@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "start:chat-push-worker": "node dist/chat/push-worker-main.js"
+    "start:chat-push-worker": "node dist/chat/push-worker-main.js",
+    "start:chat-maintenance": "node dist/chat/maintenance-worker-main.js"
   },
   "dependencies": {
     "@jetnine/db": "workspace:*",

@@ -8,13 +8,20 @@ import {
   chatWorkflowSchema,
   chatAvailabilitySchema,
   chatPushSubscriptionSchema,
+  chatSettingsSchema,
+  chatContextSchema,
+  chatTransferSchema,
+  chatLinkSchema,
 } from '@jetnine/shared';
 import { Public } from '../tenancy/decorators';
 
 const json = (schema: unknown) => ({ 'application/json': { schema } });
 const input = z.toJSONSchema(chatMessageInputSchema);
 const createInput = z.toJSONSchema(
-  chatMessageInputSchema.extend({ clientConversationId: z.string().uuid() }),
+  chatMessageInputSchema.extend({
+    clientConversationId: z.string().uuid(),
+    context: chatContextSchema.optional(),
+  }),
 );
 const historyParameters = [
   { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -59,7 +66,7 @@ export const chatOpenApi = {
     title: 'LA Mattress human chat API',
     version: CHAT_CONTRACT_VERSION,
     description:
-      'Visitor operations are server-to-server from the storefront adapter. Integration and guest credentials must never be exposed to browser JavaScript. Staff mutations require an allowed Origin and X-Chat-Request: 1.',
+      'Visitor operations are server-to-server from the storefront adapter. Integration and guest credentials must never be exposed to browser JavaScript. Staff access requires fresh chat.view_team or chat.view_assigned plus location scope. Staff mutations require an allowed Origin and X-Chat-Request: 1.',
   },
   components: {
     securitySchemes: {
@@ -70,6 +77,99 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/visitor/options': {
+      get: {
+        ...read('Public availability and showroom choices; no guest session required.'),
+        security: [{ IntegrationBearer: [], IntegrationId: [] }],
+      },
+    },
+    '/v1/chat/visitor/conversations/{id}/context': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        visitorSecurity,
+        'Sets validated context before assignment.',
+        z.toJSONSchema(chatContextSchema),
+      ),
+    },
+    '/v1/chat/visitor/conversations/{id}/rating': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        visitorSecurity,
+        'Rates the visitor own resolved conversation.',
+        z.toJSONSchema(z.object({ rating: z.number().int().min(1).max(5) }).strict()),
+      ),
+    },
+    '/v1/chat/conversations/settings': {
+      get: read('Business-wide chat manager settings and optimistic version.'),
+      post: mutation(
+        staffSecurity,
+        'Requires business-wide chat.manage. Audited versioned settings.',
+        z.toJSONSchema(
+          z.object({ config: chatSettingsSchema, version: z.number().int().min(0) }).strict(),
+        ),
+      ),
+    },
+    '/v1/chat/conversations/report': {
+      get: read(
+        'Scoped totals, response and resolution durations, overdue counts and satisfaction. Requires chat.manage.',
+      ),
+    },
+    '/v1/chat/conversations/retention': {
+      get: read(
+        'Business-wide manager preview of eligible closed conversations; pending callbacks are excluded.',
+      ),
+      post: mutation(
+        staffSecurity,
+        'Audited deletion under the saved retention policy.',
+        z.toJSONSchema(
+          z
+            .object({
+              confirmation: z.literal('DELETE ELIGIBLE CHATS'),
+              version: z.number().int().positive(),
+            })
+            .strict(),
+        ),
+      ),
+    },
+    '/v1/chat/conversations/customer-candidates': {
+      get: {
+        ...read(
+          'Requires business-wide chat.manage and customers.view. At most ten matching customer identities.',
+        ),
+        parameters: [
+          {
+            name: 'q',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', minLength: 3, maxLength: 100 },
+          },
+        ],
+      },
+    },
+    '/v1/chat/conversations/{id}/context': {
+      parameters: historyParameters.slice(0, 1),
+      get: read('Scoped visitor context, eligible agents, templates and assignment audit history.'),
+    },
+    '/v1/chat/conversations/{id}/transfer': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires chat.assign and current version; validates target scope, presence and capacity.',
+        z.toJSONSchema(chatTransferSchema),
+      ),
+    },
+    '/v1/chat/conversations/{id}/accept': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(staffSecurity, 'Only the assigned owner with chat.reply may accept.'),
+    },
+    '/v1/chat/conversations/{id}/customer': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Requires business-wide chat.manage and customers.view, explicit verification and current version. Never unlocks visitor history.',
+        z.toJSONSchema(chatLinkSchema),
+      ),
+    },
     '/v1/chat/visitor/conversations/{id}/followup': {
       parameters: historyParameters.slice(0, 1),
       post: mutation(

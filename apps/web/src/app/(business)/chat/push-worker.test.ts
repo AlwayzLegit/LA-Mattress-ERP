@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 
-function worker() {
+function worker(hostname = 'erp.test') {
   const handlers: Record<string, (event: any) => void> = {};
   const shown: unknown[] = [];
   const opened: string[] = [];
@@ -13,7 +13,7 @@ function worker() {
       addEventListener: (name: string, fn: (event: any) => void) => {
         handlers[name] = fn;
       },
-      location: { origin: 'https://erp.test' },
+      location: { origin: 'https://erp.test', hostname },
       registration: {
         showNotification: async (...args: unknown[]) => {
           shown.push(args);
@@ -79,5 +79,15 @@ describe('chat service worker notifications', () => {
       },
     });
     expect(w.shown).toEqual([]);
+  });
+});
+
+it('does not cache development chunks with stable filenames on localhost', () => {
+  const w = worker('localhost');
+  w.handlers.fetch!({
+    request: { method: 'GET', url: 'https://erp.test/_next/static/chunks/app/page.js' },
+    respondWith: () => {
+      throw Error('Development chunks must use the network');
+    },
   });
 });

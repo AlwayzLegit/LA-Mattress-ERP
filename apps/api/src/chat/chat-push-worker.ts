@@ -63,20 +63,15 @@ export class ChatPushWorker {
             eq(schema.memberships.id, subscription.membershipId),
             eq(schema.memberships.userId, subscription.userId),
             eq(schema.memberships.status, 'active'),
-            eq(schema.memberships.dataScope, 'all'),
           ),
         );
       let authorized = false;
+      let canViewTeam = false;
       if (member) {
         const roles = await tx
           .select()
           .from(schema.rolePermissions)
-          .where(
-            and(
-              eq(schema.rolePermissions.roleId, member.roleId),
-              eq(schema.rolePermissions.permission, 'chat.view_team'),
-            ),
-          );
+          .where(and(eq(schema.rolePermissions.roleId, member.roleId)));
         const overrides = await tx
           .select()
           .from(schema.membershipPermissionOverrides)
@@ -84,10 +79,15 @@ export class ChatPushWorker {
             and(
               eq(schema.membershipPermissionOverrides.businessId, businessId),
               eq(schema.membershipPermissionOverrides.membershipId, member.id),
-              eq(schema.membershipPermissionOverrides.permission, 'chat.view_team'),
             ),
           );
-        authorized = overrides[0]?.allowed ?? roles.length > 0;
+        const effective = new Set(roles.map((row) => row.permission));
+        for (const entry of overrides) {
+          if (entry.allowed) effective.add(entry.permission);
+          else effective.delete(entry.permission);
+        }
+        canViewTeam = effective.has('chat.view_team');
+        authorized = canViewTeam || effective.has('chat.view_assigned');
       }
       if (!authorized) {
         await tx.delete(subscriptions).where(eq(subscriptions.id, subscription.id));
@@ -102,6 +102,32 @@ export class ChatPushWorker {
             eq(schema.chatConversations.id, job.conversationId),
           ),
         );
+      const scopes =
+        member?.dataScope === 'store'
+          ? await tx
+              .select()
+              .from(schema.membershipLocationScopes)
+              .where(
+                and(
+                  eq(schema.membershipLocationScopes.businessId, businessId),
+                  eq(schema.membershipLocationScopes.membershipId, member.id),
+                ),
+              )
+          : [];
+      const [settings] = await tx
+        .select()
+        .from(schema.chatSettings)
+        .where(eq(schema.chatSettings.businessId, businessId));
+      const chatEnabled =
+        (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false;
+      const scoped = Boolean(
+        member &&
+        conversation &&
+        (canViewTeam || conversation.assignedMembershipId === member.id) &&
+        (member.dataScope === 'all' ||
+          (member.dataScope === 'store' &&
+            scopes.some((row) => row.locationId === conversation.locationId))),
+      );
       const [source] = conversation
         ? await tx
             .select({
@@ -125,6 +151,8 @@ export class ChatPushWorker {
             )
         : [];
       if (
+        !chatEnabled ||
+        !scoped ||
         !source?.enabled ||
         source.revokedAt ||
         source.environment !== this.environment ||

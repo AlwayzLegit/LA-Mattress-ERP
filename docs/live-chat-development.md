@@ -241,3 +241,43 @@ retention/deletion policy and tooling, provider token/subscription integration a
 proof, fresh upstream reconciliation, full build/mobile checks, and isolated staging rollout.
 Attachments were explicitly later-phase. These are not represented as completed by this local
 pilot. Seven-day guest expiry is not a transcript retention policy.
+
+## Local completion — September 12, 2026
+
+This section supersedes the earlier local feature and build gap lists.
+
+Implemented automatic capacity-aware assignment, acceptance deadlines, explicit transfer,
+assigned-only and location-scoped access with fresh permission checks, business settings,
+Los Angeles opening hours/holidays, overdue response cues, saved replies, visitor topic
+and showroom context, verified customer linking, response/resolution and satisfaction
+reports, and explicit previewed retention deletion. Pending callbacks and active chats
+are excluded from retention deletion. Customer links never grant visitor access to ERP
+records. Migrations 0104–0105 and tenant RLS are applied locally.
+
+The dedicated maintenance worker runs assignment expiry, snooze recovery and automatic
+routing every three seconds. Start with `pnpm --filter @jetnine/api start:chat-maintenance`
+after building; it uses DATABASE_URL, CHAT_ENABLED, CHAT_ENVIRONMENT and CHAT_BUSINESS_ID.
+The prepared workspace launcher supervises both maintenance and push workers.
+
+Validation: 31 Postgres/API integration tests, 3 alert-state tests, 3 service-worker tests
+and 6 storefront adapter tests pass (43 focused tests). API build, both web TypeScript
+checks and changed-file lint pass. Full production builds of both web applications pass
+in isolated local copies with fixture-backed storefront data. Existing Sentry bundler
+and storefront fixture warnings remain. Browser checks additionally confirmed settings
+save, automatic assignment, owner acceptance, customer search, reply, end-chat and a
+persisted satisfaction rating. Local development bypasses POS static caching to prevent
+stale development chunks; production POS caching remains intact.
+
+Local transport decision: bounded SSE refreshes committed Postgres records approximately
+once per second and reconnects with sequence catch-up. Local use needs no Ably account.
+The optional Ably publisher remains an external rollout option, not an activated managed
+realtime client. Its outbox backlog does not block SSE. The local harness uses a test
+in-memory rate limiter; deployment requires shared Redis and isolated credentials.
+
+External verification limits: the embedded browser denies notification permission, so
+actual OS push delivery and hardware audio output are unverified. Physical mobile device
+and production traffic/load checks remain release validation. No staging or production
+services were provisioned. Reconcile the storefront feature patches with actual upstream
+history before rollout; never push its snapshot baseline. Attachments remain the
+proposal's explicitly later phase. These limits do not prevent the local application
+from running and being tested now.

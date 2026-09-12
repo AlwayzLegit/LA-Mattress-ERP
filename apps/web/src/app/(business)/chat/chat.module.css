@@ -256,3 +256,17 @@
 .queue {
   overflow-y: auto;
 }
+
+.settings { display: grid; gap: 12px; max-width: 720px; }
+.settings label { display: block; }
+.settings input:not([type='checkbox']), .settings textarea, .context input:not([type='checkbox']), .context select { display:block; width:100%; border:1px solid #bcc8c0; border-radius:5px; padding:8px; margin:5px 0; }
+.settings fieldset { border:1px solid #dce0df; padding:12px; }
+.hoursRow { display:flex; align-items:center; gap:12px; }
+.hoursRow label { min-width:100px; }
+.hoursRow input { max-width:130px; }
+.report { display:flex; flex-wrap:wrap; gap:18px; }
+.conversationWithContext { display:grid; min-width:0; min-height:0; grid-template-columns:minmax(0,1fr) 240px; }
+.context { padding:16px; overflow:auto; border-left:1px solid #dce0df; background:#fafbf9; font-size:12px; overflow-wrap:anywhere; }
+.context h2 { font-size:16px; }.context h3 { font-size:13px; margin-top:20px; }
+@media(max-width:1200px) { .conversationWithContext { display:flex; flex-direction:column; overflow:auto; } .conversationWithContext .conversation { min-height:550px; } .context { flex-shrink:0; max-height:360px; } }
+@media(max-width:760px) { .hoursRow { flex-wrap:wrap; } }

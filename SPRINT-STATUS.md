@@ -5519,3 +5519,7 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] 24 API/database + 5 web alert/worker + 5 adapter tests; type checks, API build and lint.
 - [ ] Actual browser-vendor delivery/hardware audio, mobile/full production build, provider
       staging and the broader routing/settings/reporting/retention scope listed in the docs.
+
+## Local human chat completion — 2026-09-12
+
+- [x] **Build:** Routing, acceptance/transfer, scoped access, hours/settings, context/customer linking, reporting/ratings and explicit retention controls. Generated migrations 0104–0105, 43 focused tests and both web production builds pass. See docs/live-chat-development.md for local architecture and external release validation.

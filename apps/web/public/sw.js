@@ -43,6 +43,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Development chunk names are stable, so caching them serves stale application code.
+  if (['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname)) return;
   const req = event.request;
   if (req.method !== 'GET') return;
 

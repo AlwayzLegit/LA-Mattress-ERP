@@ -37,6 +37,7 @@ export interface VisitorChatMessage {
 export interface ChatHistoryPage {
   activity?: {
     teamAvailable?: boolean;
+    availability?: 'available' | 'busy' | 'outside_hours';
     staffReadSequence: number;
     typing: boolean;
     status: string;
@@ -97,3 +98,65 @@ export const chatFollowupSchema = z
         message: 'Enter a valid email address or phone number.',
       });
   });
+
+const chatTime = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/);
+export const chatSettingsSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    autoAssign: z.boolean().default(false),
+    hoursEnabled: z.boolean().default(false),
+    hours: z
+      .array(
+        z
+          .object({ day: z.number().int().min(0).max(6), open: chatTime, close: chatTime })
+          .strict()
+          .refine((row) => row.close > row.open, 'Closing time must follow opening time'),
+      )
+      .max(7)
+      .default([]),
+    holidays: z
+      .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))
+      .max(100)
+      .default([]),
+    responseMinutes: z.number().int().min(1).max(1440).default(10),
+    acceptanceMinutes: z.number().int().min(1).max(60).default(2),
+    retentionDays: z.number().int().min(30).max(3650).nullable().default(null),
+    templates: z
+      .array(
+        z
+          .object({
+            title: z.string().trim().min(1).max(80),
+            body: z.string().trim().min(1).max(4000),
+          })
+          .strict(),
+      )
+      .max(50)
+      .default([]),
+  })
+  .strict()
+  .refine(
+    (value) => new Set(value.hours.map((row) => row.day)).size === value.hours.length,
+    'Only one schedule per day',
+  );
+export type ChatSettings = z.infer<typeof chatSettingsSchema>;
+export const chatContextSchema = z
+  .object({
+    topic: z.enum(['mattress', 'showroom', 'delivery', 'order', 'other']).default('other'),
+    locationId: z.string().uuid().nullable().default(null),
+    pagePath: z
+      .string()
+      .max(500)
+      .regex(/^\/(?!\/)[^?#]*$/)
+      .default('/'),
+  })
+  .strict();
+export const chatTransferSchema = z
+  .object({ membershipId: z.string().uuid(), version: z.number().int().positive() })
+  .strict();
+export const chatLinkSchema = z
+  .object({
+    customerId: z.string().uuid().nullable(),
+    verificationConfirmed: z.literal(true),
+    version: z.number().int().positive(),
+  })
+  .strict();
