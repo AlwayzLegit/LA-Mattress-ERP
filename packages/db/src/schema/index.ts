@@ -35,6 +35,7 @@ export * from './reporting';
 export * from './collaboration';
 export * from './store-dashboard';
 export * from './schedule';
+export * from './competitions';
 
 // List of tables that carry a `business_id` and need RLS. Kept in sync with
 // the migration script in src/migrations/rls.sql — when you add a new
@@ -45,6 +46,9 @@ export const TENANT_SCOPED_TABLES = [
   'cash_pickups',
   'cash_pickup_items',
   'close_out_signoffs',
+  'sales_leads',
+  'competition_ranks',
+  'competition_results',
   'order_change_acks',
   'staff_shifts',
   'time_punches',

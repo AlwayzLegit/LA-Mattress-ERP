@@ -49,6 +49,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
 import { GeoModule } from './geo/geo.module';
 import { CashierModule } from './cashier/cashier.module';
 import { CloseoutModule } from './closeout/closeout.module';
+import { CompetitionsModule } from './competitions/competitions.module';
 import { JobsModule } from './jobs/jobs.module';
 import { GlModule } from './gl/gl.module';
 import { TransfersModule } from './transfers/transfers.module';
@@ -111,6 +112,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     GeoModule,
     CashierModule,
     CloseoutModule,
+    CompetitionsModule,
     JobsModule,
     SalesModule,
     OrdersModule,

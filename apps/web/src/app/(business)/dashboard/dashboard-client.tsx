@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { useSession } from '@/lib/auth-client';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
 import { DashboardControls } from '@/components/shell/dashboard-controls';
+import { CompetitionStrip } from '@/components/competition/competition-strip';
 import ManagerDashboardView from './manager-dashboard';
 import OperationsDashboardView from './operations-dashboard';
 import WarehouseDashboardView from './warehouse-dashboard';
@@ -156,6 +157,8 @@ export default function DashboardClient() {
   return (
     <>
       {view !== 'cashier' && <DashboardControls />}
+      {/* Redesign Phase 11: the competition strip sits above every role home. */}
+      <CompetitionStrip showLeads={view === 'cashier' || view === 'manager'} actorName={userName} />
       {home}
     </>
   );

@@ -127,6 +127,10 @@ export const PERMISSIONS = {
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',
+  'competitions.view':
+    'See the sales competition strip, the leaderboards and the winners (every role; the owner chooses who by setting)',
+  'competitions.leads.log':
+    'Log a lead, follow it up, attach the order by hand or mark it lost — under your own name (salespeople, managers, the owner)',
   'reports.closeout.sign_off':
     'Sign off the daily close-out sheet and act on a short drawer — request a recount or record the variance with a reason (Owner, Operations, Manager)',
   'reports.inventory.view': 'View inventory reports',
@@ -219,6 +223,7 @@ const GROUP_DEFS: { key: string; label: string; prefixes: string[] }[] = [
   { key: 'pricing', label: 'Discounts & gift cards', prefixes: ['discounts', 'gift_cards'] },
   { key: 'plans', label: 'Payment plans', prefixes: ['payment_plans'] },
   { key: 'commissions', label: 'Commissions', prefixes: ['commissions'] },
+  { key: 'competitions', label: 'Sales competitions', prefixes: ['competitions'] },
   { key: 'service', label: 'Service', prefixes: ['service_orders'] },
   { key: 'reports', label: 'Reports', prefixes: ['reports'] },
   { key: 'gl', label: 'General ledger', prefixes: ['gl'] },
