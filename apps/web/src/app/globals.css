@@ -3397,33 +3397,14 @@ kbd.key {
 .nav-group {
   margin-top: 6px;
 }
-.nav-group-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  background: transparent;
-  border-radius: var(--radius-control);
+.nav-group-head {
+  padding: 5px 8px 3px;
   font-family: var(--font-text);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
-  cursor: pointer;
-  text-align: left;
-}
-.nav-group-btn:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.nav-chev {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  width: 10px;
-  color: var(--faint);
 }
 .nav-group-items {
   display: flex;

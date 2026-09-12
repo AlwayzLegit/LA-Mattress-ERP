@@ -5545,3 +5545,10 @@ permission instead of guessing from whether any row carried a cost. Tests:
 `business.int.spec.ts` (owner true) and `cashier.int.spec.ts` (cashier false).
 Also this session: HANDOFF §4a marked closed (email went live 2026-08-27 — the brief
 predated it) and a dated update block added at its top; PR #154's box ticked.
+
+### Checkpoint — 2026-09-12 (Sidebar: all groups open)
+
+Owner ask: "make the sidebar all open not collapsible." README §2 line amended
+(struck + dated), `PHASE_NOTES.md` amendment logged. Sidebar groups are static
+headings with every link visible; no toggle, no remembered open group, no `userKey`
+prop. CSS: `.nav-group-btn` / `.nav-chev` replaced by `.nav-group-head`.

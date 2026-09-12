@@ -926,3 +926,13 @@ printable sheet, overtaken notices, TV mode and the owner's settings. Migration
 - Store-manager notices for the Stores race; a "who won" push at month end.
 - The leads list for managers across their store (the API supports `?all=1`; the panel shows
   the viewer's own).
+
+## Amendment — 2026-09-12 (Phase 3 sidebar: groups always open)
+
+Owner: "make the sidebar all open not collapsible." README §2 amended in the same
+change. `components/shell/sidebar.tsx` renders the five groups as static uppercase
+headings (`.nav-group-head`, `role="group"` + `aria-labelledby`) with every item
+showing; the toggle button, chevron, `aria-expanded`, the `jetnine.nav.open`
+localStorage key and the `userKey` prop are gone (`app-shell.tsx`, `/dev/shell`).
+`groupForPath` in `nav.ts` had no other caller and is removed. The `.app-sidebar` column already
+scrolls (`overflow-y: auto`), so the owner's 26 links fit at 1440 and scroll below.
