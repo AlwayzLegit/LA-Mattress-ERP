@@ -166,3 +166,82 @@ single `ui.tsx` is now a `components/ui/` directory.
   `Dialog` / `SlideOver` with their screens (Phases 3, 5, 6, 9).
 - `SortHeader` replaces the local `SortTh` in Orders and the header buttons in Products in
   Phases 6 and 7.
+
+---
+
+## Phase 3 — Shell, navigation, store context, palette, global states (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** `apps/web` shell plus one small audited
+API endpoint. No schema change.
+
+### What changed
+
+- **Sidebar** (`components/shell/sidebar.tsx`, `nav.ts`) — brand block, Dashboard, then the
+  five collapsible groups from README §2 with the exact items: Sell (New sale, Orders,
+  Customers, Deliveries, At risk, My day) · After sale (Returns, Exchanges, Service, Special
+  orders) · Stock (Products, Purchasing, Transfers, As-Is review, Gift cards) · Money (Sales,
+  Shifts, Reports, Commissions, General ledger) · People & setup (Salespeople, Team tasks,
+  Members & roles, Time clock, Settings). Only the current group is open; the group holding
+  the current page opens on navigation and a manual choice is remembered per user in
+  localStorage. Cashiers get the eight-link default (Sell / Stock / Money with "My drawer" /
+  Me) and the owner's per-member `hiddenNav` still applies on top. Counts for Orders,
+  Deliveries, At risk (nav-counts) and Team tasks (unread inbox) sit at the right in mono
+  11px. 220px, 200px at ≤1280 via a media query on `--sidebar-width`. Footer: sync status
+  (green "Synced · 9:41 AM", amber "Connecting…", red "Offline · retrying") and the
+  shortcuts link with a `?` chip. The 15 pages that left the sidebar (Categories, Vendors,
+  Roles, Locations, Audit log, …) remain in the palette's Go to list (`MORE_PAGES`).
+- **Topbar** — order per README §2: **Acting for {Store}** chip (accent-soft, first control)
+  → role switcher (owner only; a preview tool that lands on `/dashboard`) → search trigger
+  with platform `Kbd` (⌘K / Ctrl K) → inbox with badge → New sale (primary, `N` chip) →
+  account. The period picker, compare-to segment and store-scope dropdown left the shell:
+  `DashboardControls` renders them at the top of every role home except My Day.
+- **Store context** (`lib/acting-store.tsx`) — one provider for the store every sale, drawer
+  and report belongs to. Selling-restricted members choose among their approved stores (a
+  first-login picker when there is more than one, on `Dialog`); everyone else can switch
+  among all locations, stores first. The choice persists under the existing
+  `jetnine.sellingStore` session key so the register, the Orders list and the manager home
+  follow it unchanged, and a `erp:acting-store` window event fires for screens that want to
+  react live. Every switch calls `POST /v1/business/members/me/acting-store`, which validates
+  the location (and the selling scope) and writes `membership.acting_store` to the audit log.
+- **Command palette** — one input, groups Orders (orders + receipts) / Customers / Go to;
+  first column is the mono identifier (order number, phone, chord); the search API already
+  matches phone digits; footer `↑↓ ↵ esc` plus the `g o / g d / g p` chords. Built on the
+  shared focus trap (`role=dialog`, Esc, focus return). `g p` now goes to Products; the older
+  `g c / g r / g h / g i` chords still work and the shortcuts dialog lists them.
+- **Global error** (`lib/api-status.ts`, `shell/shell-error.tsx`) — `api()` reports every
+  network failure and 502/503/504; the shell then turns the sync dot red and renders the
+  canvas-3d error above the page: names the draft (`setDraftSummary`, for the register in
+  Phase 4) or the number of queued offline sales, says nothing is lost, auto-retries `/ready`
+  with backoff (2s → 30s) and a visible "retrying in Ns · attempt N", and offers Retry now /
+  Keep writing offline. Any successful call clears it.
+- **Global loading** — the auth gate already renders a shell-shaped skeleton (Phase 2);
+  `SyncStatus` shows "Connecting…" until the membership answers, and `/dev/shell` shows the
+  canvas-3e layout (skeleton rows in final positions, elapsed seconds in the header).
+- **Inbox drawers** (`personal-inbox.tsx`, `notifications-drawer.tsx`) moved onto `SlideOver`
+  (focus trap, Esc, focus return) and the inbox's bare "Loading your inbox…" became skeleton
+  rows with Retry. The legacy `.drawer` class is deleted.
+- **`/dev/shell`** renders the frame with the real sidebar, topbar classes and error
+  component on mock data, with Owner / Cashier and normal / loading / error toggles, so the
+  chrome can be checked at 1440 and 1280 without a session.
+- The theme-toggle shortcut row and the topbar business badge stayed where Phase 1 left them
+  (the badge is the multi-business switcher; it now sits last, after the account).
+
+### Assumptions
+
+- "Team tasks" count = unread items in the member's inbox (tasks and notes for them); the
+  nav-counts endpoint has no tasks figure and I did not widen it.
+- Non-restricted members default to the first store alphabetically (warehouse last) when
+  nothing is saved for the session; a manager writing for another store switches the chip.
+- The dashboard keeps its own store-scope dropdown (now in the page, not the shell) until
+  Phase 9 decides how the owner home relates to "Acting for". Removing it would leave the
+  owner home unable to show the company.
+- `/dev/shell` is a static preview; the live shell cannot render without a session in this
+  environment, so 1440 / 1280 verification was done against the preview.
+
+### Later
+
+- Below 1280 the sidebar would collapse to icons (canvas 3b note); no register runs that
+  narrow, so the existing mobile slide-over stays.
+- The register publishes its draft summary to `setDraftSummary` in Phase 4 so the error
+  names "SO-10441 (2 lines, $2,598.00)".
+- Fold the business switcher into the account menu.

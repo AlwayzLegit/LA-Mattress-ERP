@@ -10,8 +10,9 @@
 > **Redesign programme (2026-09-12):** the dashboard & register redesign runs alongside
 > this tracker as 12 phases — spec in `design_handoff_redesign_12_phases/README.md`, plan in
 > `CLAUDE_CODE_PROMPT.md` beside it, per-phase log in `PHASE_NOTES.md`. Phase 1 (tokens and
-> fonts) merged 2026-09-12 (PR #162); Phase 2 (component kit) is on
-> `claude/new-session-q4kc7l`; Phase 3 (shell) starts once Phase 2 is merged or approved.
+> fonts) merged 2026-09-12 (PR #162); Phase 2 (component kit) merged
+> 2026-09-12 (PR #163); Phase 3 (shell, store context, palette, global states) is on
+> `claude/new-session-q4kc7l`; Phase 4 (New Sale) starts once Phase 3 is merged or approved.
 
 ---
 
