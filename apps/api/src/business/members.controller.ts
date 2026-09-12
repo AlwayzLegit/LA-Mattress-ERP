@@ -317,6 +317,50 @@ export class MembersController {
     };
   }
 
+  /**
+   * Redesign Phase 3 (README §2): the "Acting for {Store}" chip. The choice
+   * itself lives in the browser session; this records the switch in the
+   * audit log so a drawer or report attributed to a store can be traced
+   * to the person who pointed their register at it.
+   */
+  @Post('me/acting-store')
+  async actingStore(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Body() body: { locationId?: string; previousLocationId?: string | null },
+  ): Promise<{ ok: true }> {
+    const locationId = typeof body?.locationId === 'string' ? body.locationId : '';
+    if (!locationId) throw new BadRequestException('locationId is required');
+    const [loc] = await this.db
+      .select({ id: schema.locations.id, name: schema.locations.name })
+      .from(schema.locations)
+      .where(
+        and(
+          eq(schema.locations.id, locationId),
+          eq(schema.locations.businessId, tenant.businessId!),
+        ),
+      )
+      .limit(1);
+    if (!loc) throw new NotFoundException('Location not found');
+    if (
+      tenant.sellingScope === 'approved' &&
+      !(tenant.scopeLocationIds ?? []).includes(locationId)
+    ) {
+      throw new ForbiddenException('You are not approved to sell at that store');
+    }
+    await this.audit.log({
+      action: 'membership.acting_store',
+      targetType: 'membership',
+      targetId: tenant.membershipId ?? undefined,
+      metadata: {
+        locationId: loc.id,
+        locationName: loc.name,
+        previousLocationId:
+          typeof body.previousLocationId === 'string' ? body.previousLocationId : null,
+      },
+    });
+    return { ok: true };
+  }
+
   @Patch(':id')
   @RequirePermission('users.update')
   async update(

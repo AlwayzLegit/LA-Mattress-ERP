@@ -3,11 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, CheckCheck, ClipboardList, RefreshCw, X } from 'lucide-react';
+import { CheckCheck, ClipboardList, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { InboxPage } from '@jetnine/shared';
 import { api, ApiError } from '@/lib/api';
-import { Button } from '@/components/ui';
+import { Button, LoadingRows, SlideOver } from '@/components/ui';
 import { ago, NotificationsDrawer, type NotificationRow } from './notifications-drawer';
 
 export function useTeamInbox(userId: string | undefined) {
@@ -98,96 +98,23 @@ export function PersonalInbox({
     );
   const unreadIds = inbox.data?.data.filter((n) => !n.readAt).map((n) => n.id) ?? [];
   return (
-    <div className="overlay" onClick={onClose}>
-      <aside
-        className="drawer"
-        role="dialog"
-        aria-modal
-        aria-label="My inbox"
-        data-testid="personal-inbox"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-          <Bell size={18} />
-          <div className="flex-1">
-            <h2 className="font-semibold">My inbox</h2>
-            <p className="muted text-xs">
-              Tasks and order updates for you{inbox.data ? ` · ${inbox.unread} unread` : ''}
-            </p>
-          </div>
-          <Button size="sm" aria-label="Refresh inbox" onClick={inbox.refresh}>
+    <SlideOver
+      title="My inbox"
+      width={440}
+      testId="personal-inbox"
+      onClose={onClose}
+      meta={
+        <>
+          <span>
+            Tasks and order updates for you{inbox.data ? ` · ${inbox.unread} unread` : ''}
+          </span>
+          <Button size="sm" variant="ghost" aria-label="Refresh inbox" onClick={inbox.refresh}>
             <RefreshCw size={14} />
           </Button>
-          <Button size="sm" aria-label="Close inbox" onClick={onClose}>
-            <X size={16} />
-          </Button>
-        </div>
-        <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3 text-xs">
-          <Link href="/tasks" onClick={onClose} className="flex items-center gap-1">
-            <ClipboardList size={14} />
-            Team Tasks
-          </Link>
-          {ownerRows && (
-            <button
-              type="button"
-              className="text-secondary underline"
-              onClick={() => setOwnerFeed(true)}
-            >
-              Owner order changes ({ownerRows.length})
-            </button>
-          )}
-        </div>
-        <div className="flex-1 overflow-auto">
-          {inbox.error ? (
-            <p role="alert" className="p-5 text-sm text-danger">
-              {inbox.error}
-            </p>
-          ) : !inbox.data ? (
-            <p className="muted p-5 text-sm">Loading your inbox…</p>
-          ) : inbox.data.data.length === 0 ? (
-            <div className="p-8 text-center">
-              <CheckCheck size={28} className="mx-auto mb-3 text-secondary" />
-              <h3 className="font-semibold">You’re caught up</h3>
-              <p className="muted mt-2 text-sm">
-                New assignments, notes and related order updates will appear here. Add a task or
-                notify a teammate from an order to get started.
-              </p>
-            </div>
-          ) : (
-            <ul>
-              {inbox.data.data.map((n) => (
-                <li
-                  key={n.id}
-                  className={`border-b border-border ${n.readAt ? '' : 'bg-surface-2'}`}
-                  data-testid="inbox-update"
-                >
-                  <Link
-                    href={`/orders/${n.orderId}${n.taskId ? '#team-tasks' : n.noteId ? '#order-notes' : ''}`}
-                    className="block px-5 py-4 hover:bg-surface-2"
-                    onClick={() => {
-                      if (!n.readAt) void inbox.markRead([n.id]);
-                      onClose();
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${n.readAt ? 'bg-transparent' : 'bg-accent'}`}
-                        aria-label={n.readAt ? 'Read' : 'Unread'}
-                      />
-                      <strong className="flex-1 text-sm">{n.title}</strong>
-                      <time className="muted text-xs" dateTime={n.createdAt}>
-                        {ago(n.createdAt)}
-                      </time>
-                    </div>
-                    <div className="ml-4 mt-1 text-sm">{n.message}</div>
-                    <p className="muted ml-4 mt-2 text-xs">{n.orderNumber} · Open order →</p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
+        </>
+      }
+      foot={
+        <>
           <Button
             size="sm"
             disabled={!unreadIds.length || inbox.reading}
@@ -196,9 +123,79 @@ export function PersonalInbox({
             <CheckCheck size={14} />
             {inbox.reading ? 'Saving…' : 'Mark shown updates read'}
           </Button>
-          <span className="muted text-xs">Saved across devices</span>
-        </div>
-      </aside>
-    </div>
+          <span className="muted text-xs" style={{ marginLeft: 'auto' }}>
+            Saved across devices
+          </span>
+        </>
+      }
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3 text-xs">
+        <Link href="/tasks" onClick={onClose} className="flex items-center gap-1">
+          <ClipboardList size={14} />
+          Team Tasks
+        </Link>
+        {ownerRows && (
+          <button
+            type="button"
+            className="text-secondary underline"
+            onClick={() => setOwnerFeed(true)}
+          >
+            Owner order changes ({ownerRows.length})
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-auto">
+        {inbox.error ? (
+          <p role="alert" className="p-5 text-sm text-danger">
+            {inbox.error}
+          </p>
+        ) : !inbox.data ? (
+          <div className="p-5">
+            <LoadingRows rows={4} what="Your inbox" onRetry={inbox.refresh} />
+          </div>
+        ) : inbox.data.data.length === 0 ? (
+          <div className="p-8 text-center">
+            <CheckCheck size={28} className="mx-auto mb-3 text-secondary" />
+            <h3 className="font-semibold">You’re caught up</h3>
+            <p className="muted mt-2 text-sm">
+              New assignments, notes and related order updates will appear here. Add a task or
+              notify a teammate from an order to get started.
+            </p>
+          </div>
+        ) : (
+          <ul>
+            {inbox.data.data.map((n) => (
+              <li
+                key={n.id}
+                className={`border-b border-border ${n.readAt ? '' : 'bg-surface-2'}`}
+                data-testid="inbox-update"
+              >
+                <Link
+                  href={`/orders/${n.orderId}${n.taskId ? '#team-tasks' : n.noteId ? '#order-notes' : ''}`}
+                  className="block px-5 py-4 hover:bg-surface-2"
+                  onClick={() => {
+                    if (!n.readAt) void inbox.markRead([n.id]);
+                    onClose();
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full ${n.readAt ? 'bg-transparent' : 'bg-accent'}`}
+                      aria-label={n.readAt ? 'Read' : 'Unread'}
+                    />
+                    <strong className="flex-1 text-sm">{n.title}</strong>
+                    <time className="muted text-xs" dateTime={n.createdAt}>
+                      {ago(n.createdAt)}
+                    </time>
+                  </div>
+                  <div className="ml-4 mt-1 text-sm">{n.message}</div>
+                  <p className="muted ml-4 mt-2 text-xs">{n.orderNumber} · Open order →</p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </SlideOver>
   );
 }

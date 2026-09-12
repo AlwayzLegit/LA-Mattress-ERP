@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { DateRangePicker } from '@/components/date-range-picker';
 import { formatRange } from '@/lib/date-range';
@@ -11,9 +12,19 @@ import {
 } from '@/lib/dashboard-filters';
 
 /**
- * The topbar controls that only the dashboard needs: the role-home
- * switch (owners only), the store scope and the period + compare-to.
+ * The owner's role-home switch (topbar, owners only — a preview tool) and
+ * the store-scope + period controls, which live on the dashboard itself
+ * since redesign Phase 3 (README §2: period controls are not the shell's).
  */
+
+export function DashboardControls() {
+  return (
+    <div className="dash-controls" data-testid="dashboard-controls">
+      <StoreScope />
+      <PeriodControls />
+    </div>
+  );
+}
 
 const ROLE_OPTIONS: { key: RoleView; label: string }[] = [
   { key: 'owner', label: 'Owner' },
@@ -24,6 +35,8 @@ const ROLE_OPTIONS: { key: RoleView; label: string }[] = [
 
 export function RoleSwitcher() {
   const f = useDashboardFilters();
+  const router = useRouter();
+  const pathname = usePathname();
   const active = f.roleView ?? 'owner';
   return (
     <div
@@ -39,7 +52,10 @@ export function RoleSwitcher() {
           role="tab"
           aria-selected={active === r.key}
           className={`seg-btn${active === r.key ? ' is-active' : ''}`}
-          onClick={() => f.setRoleView(r.key === 'owner' ? null : r.key)}
+          onClick={() => {
+            f.setRoleView(r.key === 'owner' ? null : r.key);
+            if (pathname !== '/dashboard') router.push('/dashboard');
+          }}
         >
           {r.label}
         </button>

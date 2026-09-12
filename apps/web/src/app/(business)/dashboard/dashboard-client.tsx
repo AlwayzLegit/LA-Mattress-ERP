@@ -6,6 +6,7 @@ import { Alert, LinkButton, PageHeader, Skeleton, Stack } from '@/components/ui'
 import { api } from '@/lib/api';
 import { useSession } from '@/lib/auth-client';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
+import { DashboardControls } from '@/components/shell/dashboard-controls';
 import ManagerDashboardView from './manager-dashboard';
 import OperationsDashboardView from './operations-dashboard';
 import WarehouseDashboardView from './warehouse-dashboard';
@@ -140,9 +141,22 @@ export default function DashboardClient() {
           : 'owner';
   const view = me.roleName === 'Owner' ? (filters.roleView ?? 'owner') : fixed;
 
-  if (view === 'ops') return <OperationsDashboardView userName={userName} />;
-  if (view === 'warehouse') return <WarehouseDashboardView userName={userName} />;
-  if (view === 'cashier') return <MyDayDashboardView userName={userName} />;
-  if (view === 'manager') return <ManagerDashboardView userName={userName} />;
-  return <OwnerHome userName={userName} email={session.data.user.email} />;
+  const home =
+    view === 'ops' ? (
+      <OperationsDashboardView userName={userName} />
+    ) : view === 'warehouse' ? (
+      <WarehouseDashboardView userName={userName} />
+    ) : view === 'cashier' ? (
+      <MyDayDashboardView userName={userName} />
+    ) : view === 'manager' ? (
+      <ManagerDashboardView userName={userName} />
+    ) : (
+      <OwnerHome userName={userName} email={session.data.user.email} />
+    );
+  return (
+    <>
+      {view !== 'cashier' && <DashboardControls />}
+      {home}
+    </>
+  );
 }
