@@ -14,6 +14,7 @@ import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { FIRMNESS_LEVELS, MATTRESS_SIZES, normalizeFirmness, normalizeSize } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
@@ -176,29 +177,19 @@ interface SaleDetail extends Omit<SaleListRow, 'customerName'> {
 }
 
 /**
- * Mattress size and firmness, read off the catalog (owner ask
- * 2026-09-01: filter the Add Product popup by size and firmness). Most
- * of the catalog came from Shopify with the size and firmness inside the
- * product name, so the classifier looks at the variant's attributes
- * first and the product + variant names second. Order matters: "Twin XL"
- * before "Twin", "Cal King" before "King", "Medium Firm" before both
- * "Medium" and "Firm".
+ * Mattress size and firmness (owner ask 2026-09-01, A22.2): the popup
+ * filters on the variant's own `size` / `firmness` columns — set by the
+ * import from the STORIS group code and by the product page — and only
+ * falls back to reading the names for a variant that has neither (a
+ * hand-built product nobody has filed yet). Order in the fallback
+ * matters: "Twin XL" before "Twin", "Cal King" before "King", "Medium
+ * Firm" before both "Medium" and "Firm".
  */
-export const MATTRESS_SIZES = [
-  'Twin',
-  'Twin XL',
-  'Full',
-  'Queen',
-  'King',
-  'Cal King',
-  'Split King',
-  'Split Cal King',
-] as const;
-export const FIRMNESS_LEVELS = ['Plush', 'Medium', 'Medium Firm', 'Firm', 'Extra Firm'] as const;
+export { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 
 const NAME_HAY = sql`(coalesce(${schema.productVariants.attributesJson}->>'size', '') || ' ' || coalesce(${schema.productVariants.attributesJson}->>'firmness', '') || ' ' || coalesce(${schema.products.name}, '') || ' ' || coalesce(${schema.productVariants.name}, ''))`;
 
-const SIZE_EXPR = sql`CASE
+const SIZE_FROM_NAME = sql`CASE
   WHEN ${NAME_HAY} ~* '\\m(split\\s+cal(ifornia)?\\.?\\s+king)\\M' THEN 'Split Cal King'
   WHEN ${NAME_HAY} ~* '\\m(split\\s+king)\\M' THEN 'Split King'
   WHEN ${NAME_HAY} ~* '\\m(cal(ifornia)?\\.?\\s+king)\\M' THEN 'Cal King'
@@ -209,13 +200,16 @@ const SIZE_EXPR = sql`CASE
   WHEN ${NAME_HAY} ~* '\\mtwin\\M' THEN 'Twin'
   ELSE NULL END`;
 
-const FIRMNESS_EXPR = sql`CASE
+const FIRMNESS_FROM_NAME = sql`CASE
   WHEN ${NAME_HAY} ~* '\\m(extra\\s+firm|x-?firm|ultra\\s+firm)\\M' THEN 'Extra Firm'
   WHEN ${NAME_HAY} ~* '\\m(medium\\s+firm|med\\.?\\s+firm|luxury\\s+firm|cushion\\s+firm|plush\\s+firm)\\M' THEN 'Medium Firm'
   WHEN ${NAME_HAY} ~* '\\mfirm\\M' THEN 'Firm'
   WHEN ${NAME_HAY} ~* '\\m(medium|med\\.?)\\M' THEN 'Medium'
   WHEN ${NAME_HAY} ~* '\\m(plush|soft|ultra\\s+plush)\\M' THEN 'Plush'
   ELSE NULL END`;
+
+const SIZE_EXPR = sql`coalesce(${schema.productVariants.size}, ${SIZE_FROM_NAME})`;
+const FIRMNESS_EXPR = sql`coalesce(${schema.productVariants.firmness}, ${FIRMNESS_FROM_NAME})`;
 
 @TenantScoped()
 @Controller('v1')
@@ -285,9 +279,18 @@ export class SalesController {
     const limit = clampLimit(limitStr, 30);
     const filters = [eq(schema.productVariants.isActive, true), eq(schema.products.isActive, true)];
     if (query) {
-      filters.push(
-        sql`(${schema.products.name} ILIKE ${'%' + query + '%'} OR ${schema.productVariants.name} ILIKE ${'%' + query + '%'} OR ${schema.productVariants.sku} ILIKE ${'%' + query + '%'})`,
-      );
+      // A22.2: every word must appear somewhere on the row — product
+      // name, variant name, SKU, size, firmness or brand — in any order,
+      // so "queen bamboo sheets" and "micah firm king" both land.
+      const hay = sql`(coalesce(${schema.products.name}, '') || ' ' || coalesce(${schema.productVariants.name}, '') || ' ' || coalesce(${schema.productVariants.sku}, '') || ' ' || coalesce(${schema.productVariants.size}, '') || ' ' || coalesce(${schema.productVariants.firmness}, '') || ' ' || coalesce(${schema.brands.name}, ''))`;
+      for (const word of query.split(/\s+/).filter(Boolean)) {
+        const canonical = normalizeSize(word);
+        filters.push(
+          canonical
+            ? sql`(${hay} ILIKE ${'%' + word + '%'} OR ${SIZE_EXPR} = ${canonical})`
+            : sql`${hay} ILIKE ${'%' + word + '%'}`,
+        );
+      }
     }
     // Vendor (owner ask 2026-09-01): imported catalogs rarely carry a
     // preferred vendor on the variant, so the filter also accepts the
@@ -299,15 +302,13 @@ export class SalesController {
     // names — so Shopify-shaped "Queen Helix Dusk 12\" Medium Firm …"
     // products filter as well as hand-built ones.
     if (size) {
-      const canonical = MATTRESS_SIZES.find((x) => x.toLowerCase() === size.trim().toLowerCase());
+      const canonical = normalizeSize(size);
       if (!canonical)
         throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
       filters.push(sql`${SIZE_EXPR} = ${canonical}`);
     }
     if (firmness) {
-      const canonical = FIRMNESS_LEVELS.find(
-        (x) => x.toLowerCase() === firmness.trim().toLowerCase(),
-      );
+      const canonical = normalizeFirmness(firmness);
       if (!canonical) {
         throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
       }

@@ -11,17 +11,17 @@
  * case-insensitive SKU equality is a certain match.
  */
 
-export type MattressSize =
-  | 'Twin'
-  | 'Twin XL'
-  | 'Full'
-  | 'Queen'
-  | 'King'
-  | 'Cal King'
-  | 'Split King'
-  | 'Split Cal King';
+import {
+  SIZE_ALIAS_KEYS,
+  firmnessFromText,
+  normalizeSize,
+  sizeFromGroupCode,
+  sizeFromText as sharedSizeFromText,
+  type Firmness,
+  type MattressSize,
+} from '@jetnine/shared';
 
-export type Firmness = 'Plush' | 'Medium' | 'Medium Firm' | 'Firm' | 'Extra Firm';
+export type { Firmness, MattressSize };
 
 export interface ParsedListing {
   size: MattressSize | null;
@@ -33,59 +33,6 @@ export interface ParsedListing {
   /** Brand words — evidence of the maker, never of the model. */
   brandTokens: Set<string>;
 }
-
-/** STORIS "Group" codes and the abbreviations that show up inside SKUs / names. */
-const GROUP_CODES: Record<string, MattressSize> = {
-  TWIN: 'Twin',
-  TW: 'Twin',
-  TN: 'Twin',
-  TXL: 'Twin XL',
-  TWXL: 'Twin XL',
-  TWINXL: 'Twin XL',
-  TWLXL: 'Twin XL',
-  XL: 'Twin XL',
-  FULL: 'Full',
-  FL: 'Full',
-  DBL: 'Full',
-  DOUBLE: 'Full',
-  QUEEN: 'Queen',
-  QU: 'Queen',
-  QN: 'Queen',
-  KING: 'King',
-  EK: 'King',
-  EKING: 'King',
-  CAKING: 'Cal King',
-  CALKING: 'Cal King',
-  CKING: 'Cal King',
-  CK: 'Cal King',
-  CALK: 'Cal King',
-  SPKING: 'Split King',
-  SPLITKING: 'Split King',
-  SPK: 'Split King',
-  SPCK: 'Split Cal King',
-  SPCAKING: 'Split Cal King',
-  SPLITCALKING: 'Split Cal King',
-};
-
-/** Ordered: the more specific phrase first. Case-insensitive, whole words. */
-const SIZE_PATTERNS: [RegExp, MattressSize][] = [
-  [/\bsplit\s+cal(ifornia)?\.?\s*king\b/i, 'Split Cal King'],
-  [/\bsplit\s+king\b/i, 'Split King'],
-  [/\bcal(ifornia)?\.?\s*king\b/i, 'Cal King'],
-  [/\bking\b/i, 'King'],
-  [/\bqueen\b/i, 'Queen'],
-  [/\b(full|double)\b/i, 'Full'],
-  [/\b(twin\s*x-?l|txl)\b/i, 'Twin XL'],
-  [/\btwin\b/i, 'Twin'],
-];
-
-const FIRMNESS_PATTERNS: [RegExp, Firmness][] = [
-  [/\b(extra\s+firm|x-?firm|ultra\s+firm)\b/i, 'Extra Firm'],
-  [/\b(medium\s+firm|med\.?\s+firm|luxury\s+firm|cushion\s+firm|plush\s+firm)\b/i, 'Medium Firm'],
-  [/\bfirm\b/i, 'Firm'],
-  [/\b(medium|med\.?)\b/i, 'Medium'],
-  [/\b(plush|soft|ultra\s+plush)\b/i, 'Plush'],
-];
 
 /** Words that say nothing about which model it is. */
 const FILLER = new Set([
@@ -129,32 +76,19 @@ const FILLER = new Set([
   'X',
   'FP',
   'AS',
-  ...Object.keys(GROUP_CODES),
+  ...SIZE_ALIAS_KEYS,
 ]);
 
 function sizeFromGroup(group: string | null | undefined): MattressSize | null {
-  if (!group) return null;
-  const key = group
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z]/g, '');
-  return GROUP_CODES[key] ?? null;
+  return sizeFromGroupCode(group);
 }
 
 function sizeFromText(text: string): MattressSize | null {
-  for (const [re, size] of SIZE_PATTERNS) if (re.test(text)) return size;
+  const hit = sharedSizeFromText(text);
+  if (hit) return hit;
   // STORIS names lead with the group code: "CAKING TWILIGHT-ELITE FIRM".
-  const lead =
-    text
-      .trim()
-      .split(/[\s/-]+/)[0]
-      ?.toUpperCase() ?? '';
-  return GROUP_CODES[lead] ?? null;
-}
-
-function firmnessFromText(text: string): Firmness | null {
-  for (const [re, f] of FIRMNESS_PATTERNS) if (re.test(text)) return f;
-  return null;
+  const lead = text.trim().split(/[\s/-]+/)[0] ?? '';
+  return normalizeSize(lead);
 }
 
 export function tokenize(text: string): Set<string> {

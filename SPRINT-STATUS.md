@@ -5482,3 +5482,16 @@ sends the return salesperson the API already accepts (slice 6).
   **Ops:** after deploy run the workflow with mode `validate`, read the plan,
   then `commit` (file `docs/imports/2026-09-11/product-categories.csv`,
   expect_rows 1948).
+- 2026-09-12 (A22.2, owner ask "proper size wiring"): size and firmness are
+  variant columns (`product_variants.size/firmness`, migration `0099` with a
+  backfill from attributes → STORIS group code → name, search vector
+  regenerated). Shared vocabulary + parsers in `@jetnine/shared`
+  (`MATTRESS_SIZES`, `FIRMNESS_LEVELS`, `normalizeSize`,
+  `sizeFromGroupCode`, `sizeFromText`, `firmnessFromText`). Import, product
+  create, variant PATCH set them; register popup filters on the columns and
+  matches search words in any order; browser has Size / Firmness criteria +
+  columns and `GET /v1/products/facets` for the pickers (PLAN §12.20
+  D47–D49). Tests: shared `catalog.test.ts`, `product-filters` (13),
+  `catalog` (+3), `categorize-products` (+2: every sized group code filed,
+  SQL backfill == importer on all 1,948 rows). Migration `0099` runs on
+  deploy — no ops step.

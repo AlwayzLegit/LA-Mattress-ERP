@@ -12,10 +12,19 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
-import { PRODUCT_PURCHASE_STATUSES, type ProductPurchaseStatus } from '@jetnine/shared';
+import {
+  FIRMNESS_LEVELS,
+  firmnessFromText,
+  MATTRESS_SIZES,
+  normalizeFirmness,
+  normalizeSize,
+  PRODUCT_PURCHASE_STATUSES,
+  sizeFromText,
+  type ProductPurchaseStatus,
+} from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import {
@@ -51,6 +60,46 @@ interface VariantInput {
   costCents?: number | null;
   barcode?: string | null;
   attributesJson?: Record<string, unknown> | null;
+  /** A22.2: canonical size / firmness; absent → read off the attributes and names. */
+  size?: string | null;
+  firmness?: string | null;
+}
+
+/**
+ * A22.2: the size and firmness a new variant carries — what the caller
+ * says (validated), else what its attributes and names state.
+ */
+export function deriveVariantSizing(
+  v: {
+    size?: string | null;
+    firmness?: string | null;
+    attributesJson?: Record<string, unknown> | null;
+    name?: string | null;
+  },
+  productName: string,
+): { size: string | null; firmness: string | null } {
+  const attrs = v.attributesJson ?? {};
+  const attrSize = typeof attrs.size === 'string' ? attrs.size : null;
+  const attrFirmness = typeof attrs.firmness === 'string' ? attrs.firmness : null;
+  const hay = `${productName} ${v.name ?? ''}`;
+  if (v.size && !normalizeSize(v.size)) {
+    throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
+  }
+  if (v.firmness && !normalizeFirmness(v.firmness)) {
+    throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
+  }
+  return {
+    size:
+      v.size === null
+        ? null
+        : (normalizeSize(v.size) ?? normalizeSize(attrSize) ?? sizeFromText(hay)),
+    firmness:
+      v.firmness === null
+        ? null
+        : (normalizeFirmness(v.firmness) ??
+          normalizeFirmness(attrFirmness) ??
+          firmnessFromText(hay)),
+  };
 }
 
 interface CreateProductBody {
@@ -100,6 +149,9 @@ interface ProductListRow {
   /** A22.1: the full nested name, "Mattresses › Hybrid". */
   categoryPath: string | null;
   collectionName: string | null;
+  /** A22.2: the primary variant's canonical size and firmness. */
+  size: string | null;
+  firmness: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -122,6 +174,8 @@ interface VariantOut {
   priceCents: number;
   costCents: number | null;
   attributesJson: unknown;
+  size: string | null;
+  firmness: string | null;
   isActive: boolean;
   reorderPoint: number | null;
   reorderQty: number | null;
@@ -160,6 +214,9 @@ interface ProductOut {
   /** A22.1: the full nested name, "Mattresses › Hybrid". */
   categoryPath: string | null;
   collectionName: string | null;
+  /** A22.2: the primary variant's canonical size and firmness. */
+  size: string | null;
+  firmness: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -182,6 +239,8 @@ export const PRODUCT_SORT_KEYS = [
   'purchaseStatus',
   'asIsNonSellable',
   'group',
+  'size',
+  'firmness',
   'brandName',
   'categoryName',
   'collectionName',
@@ -276,6 +335,8 @@ export class CatalogProductsController {
     @Query('vendorModel') vendorModelQ?: string,
     @Query('collectionId') collectionId?: string,
     @Query('group') groupQ?: string,
+    @Query('size') sizeQ?: string,
+    @Query('firmness') firmnessQ?: string,
     @Query('purchaseStatus') purchaseStatusQ?: string,
     @Query('asIsReasonCodeId') asIsReasonCodeId?: string,
   ): Promise<PageResponse<ProductListRow>> {
@@ -327,6 +388,24 @@ export class CatalogProductsController {
         sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND lower(${schema.productVariants.attributesJson} ->> 'group') = lower(${groupQ.trim()}))`,
       );
     }
+    // A22.2: size and firmness are variant columns now — any spelling
+    // ("cal king", "California King", "CK") resolves to the canonical one.
+    if (sizeQ?.trim()) {
+      const size = normalizeSize(sizeQ);
+      if (!size) throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.size} = ${size})`,
+      );
+    }
+    if (firmnessQ?.trim()) {
+      const firmness = normalizeFirmness(firmnessQ);
+      if (!firmness) {
+        throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
+      }
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.firmness} = ${firmness})`,
+      );
+    }
     if (purchaseStatusQ) {
       if (!(PRODUCT_PURCHASE_STATUSES as readonly string[]).includes(purchaseStatusQ)) {
         throw new BadRequestException(
@@ -358,11 +437,14 @@ export class CatalogProductsController {
             // Parenthesised: without the brackets the OR binds looser than
             // the AND `and()` puts between the filters, so a variant match
             // would smuggle a row past the active / vendor / category ones.
+            // A22.2: the product's words and a variant's words (size,
+            // firmness, SKU, barcode) count together, so "queen bamboo
+            // sheets" finds the Queen variant of "BAMBOO SHEETS WHITE".
             sql`(${schema.products.searchTsv} @@ ${tsq}
                 OR EXISTS (
                   SELECT 1 FROM ${schema.productVariants} v
                   WHERE v.product_id = ${schema.products.id}
-                    AND v.search_tsv @@ ${tsq}
+                    AND (${schema.products.searchTsv} || v.search_tsv) @@ ${tsq}
                 ))`,
           ),
         )
@@ -456,6 +538,8 @@ export class CatalogProductsController {
         priceCents: schema.productVariants.priceCents,
         costCents: schema.productVariants.costCents,
         group: sql<string | null>`${schema.productVariants.attributesJson} ->> 'group'`,
+        size: schema.productVariants.size,
+        firmness: schema.productVariants.firmness,
         vendorName: schema.vendors.name,
         isActive: schema.productVariants.isActive,
       })
@@ -494,6 +578,8 @@ export class CatalogProductsController {
         vendorName: v?.vendorName ?? null,
         vendorModel: v?.vendorSku ?? null,
         group: v?.group ?? null,
+        size: v?.size ?? null,
+        firmness: v?.firmness ?? null,
         priceCents: v?.priceCents ?? null,
         costCents: canSeeCost ? (v?.costCents ?? null) : null,
         onHand: t?.onHand ?? 0,
@@ -675,6 +761,57 @@ export class CatalogProductsController {
     return { deactivated, kept, skippedGroups };
   }
 
+  /**
+   * A22.2: the values the pickers offer — every STORIS group code, size
+   * and firmness this business's variants carry, with counts.
+   */
+  @Get('facets')
+  @RequirePermission('products.view')
+  async facets(@CurrentTenant() tenant: RequestTenantContext): Promise<{
+    groups: { value: string; count: number }[];
+    sizes: { value: string; count: number }[];
+    firmness: { value: string; count: number }[];
+  }> {
+    const businessId = tenant.businessId!;
+    const count = sql<number>`count(*)::int`;
+    const groupExpr = sql<string>`${schema.productVariants.attributesJson} ->> 'group'`;
+    const groups = await this.db
+      .select({ value: groupExpr, count })
+      .from(schema.productVariants)
+      .where(and(eq(schema.productVariants.businessId, businessId), sql`${groupExpr} IS NOT NULL`))
+      .groupBy(groupExpr)
+      .orderBy(groupExpr);
+    const sizes = await this.db
+      .select({ value: schema.productVariants.size, count })
+      .from(schema.productVariants)
+      .where(
+        and(
+          eq(schema.productVariants.businessId, businessId),
+          isNotNull(schema.productVariants.size),
+        ),
+      )
+      .groupBy(schema.productVariants.size);
+    const firmness = await this.db
+      .select({ value: schema.productVariants.firmness, count })
+      .from(schema.productVariants)
+      .where(
+        and(
+          eq(schema.productVariants.businessId, businessId),
+          isNotNull(schema.productVariants.firmness),
+        ),
+      )
+      .groupBy(schema.productVariants.firmness);
+    const order = (list: readonly string[]) => (a: { value: string }, b: { value: string }) =>
+      list.indexOf(a.value) - list.indexOf(b.value);
+    return {
+      groups: groups.map((g) => ({ value: g.value, count: g.count })),
+      sizes: sizes.map((r) => ({ value: r.value!, count: r.count })).sort(order(MATTRESS_SIZES)),
+      firmness: firmness
+        .map((r) => ({ value: r.value!, count: r.count }))
+        .sort(order(FIRMNESS_LEVELS)),
+    };
+  }
+
   @Get(':id')
   @RequirePermission('products.view')
   async get(
@@ -759,6 +896,8 @@ export class CatalogProductsController {
         priceCents: v.priceCents,
         costCents: canSeeCost ? (v.costCents ?? null) : null,
         attributesJson: v.attributesJson,
+        size: v.size ?? null,
+        firmness: v.firmness ?? null,
         isActive: v.isActive,
         reorderPoint: v.reorderPoint ?? null,
         reorderQty: v.reorderQty ?? null,
@@ -789,6 +928,8 @@ export class CatalogProductsController {
       vendorName: vendor?.name ?? null,
       vendorModel: primary?.vendorSku ?? null,
       group: typeof group === 'string' ? group : null,
+      size: primary?.size ?? null,
+      firmness: primary?.firmness ?? null,
       stock,
     };
   }
@@ -835,6 +976,7 @@ export class CatalogProductsController {
           costCents: v.costCents ?? null,
           barcode: v.barcode ?? null,
           attributesJson: (v.attributesJson ?? null) as never,
+          ...deriveVariantSizing(v, p.name),
         })),
       );
     }

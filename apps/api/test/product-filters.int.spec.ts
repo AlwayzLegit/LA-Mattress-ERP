@@ -60,6 +60,9 @@ const CATALOG: {
   preferredVendor?: 'helix' | 'purple';
   onHand?: number;
   taxClass?: 'untaxed' | 'override';
+  /** A22.2: what the import files on the variant from the STORIS group code. */
+  size?: string;
+  firmness?: string;
 }[] = [
   // Shopify-shaped Helix names: size first, firmness inside, no vendor link.
   { sku: 'HX-TW-DUSK', name: 'Twin Helix Dusk 12" Medium Firm Hybrid Mattress', onHand: 3 },
@@ -86,6 +89,22 @@ const CATALOG: {
   { sku: 'SVC-PB-INSTALL', name: 'POWER BASE INSTALLATION', taxClass: 'untaxed' },
   // A product on a class with a per-store override (no size / vendor / stock, so the other filters ignore it).
   { sku: 'ACC-PROTECTOR', name: 'MATTRESS PROTECTOR', taxClass: 'override' },
+  // STORIS-shaped rows (A22.2): the size is nowhere in the name — the
+  // import filed it from the group code (CKSHEE, KING) onto the variant.
+  {
+    sku: 'MAL-SHEET-CK',
+    name: 'BAMBOO SHEETS WHITE',
+    attributes: { group: 'CKSHEE' },
+    size: 'Cal King',
+  },
+  {
+    sku: 'MICAH-K',
+    name: 'E KINGMICAH FIRM',
+    attributes: { group: 'KING' },
+    size: 'King',
+    firmness: 'Firm',
+    onHand: 1,
+  },
 ];
 
 async function seed() {
@@ -208,6 +227,8 @@ async function seed() {
           sku: `${item.sku}-V`,
           name: item.variantName ?? null,
           attributesJson: (item.attributes ?? null) as never,
+          size: item.size ?? null,
+          firmness: item.firmness ?? null,
           priceCents: 100_000,
           preferredVendorId:
             item.preferredVendor === 'helix'
@@ -324,6 +345,9 @@ describe('Add Product filters', () => {
     expect(by.get('PR-Q-REST')).toMatchObject({ size: 'Queen', firmness: 'Plush' });
     expect(by.get('BASE-K')).toMatchObject({ size: 'King', firmness: null });
     expect(by.get('PR-K-XF')).toMatchObject({ size: 'King', firmness: 'Extra Firm' });
+    // Filed on the variant, whatever the name says (A22.2).
+    expect(by.get('MAL-SHEET-CK')).toMatchObject({ size: 'Cal King', firmness: null });
+    expect(by.get('MICAH-K')).toMatchObject({ size: 'King', firmness: 'Firm' });
   });
 
   it('filters by size', async () => {
@@ -333,8 +357,22 @@ describe('Add Product filters', () => {
       'PR-Q-REST',
     ]);
     expect(skus(await search({ size: 'Twin' }))).toEqual(['HX-TW-DUSK']);
-    expect(skus(await search({ size: 'King' }))).toEqual(['BASE-K', 'PR-K-XF']);
-    expect(skus(await search({ size: 'cal king' }))).toEqual(['HX-CK-MID']);
+    expect(skus(await search({ size: 'King' }))).toEqual(['BASE-K', 'MICAH-K', 'PR-K-XF']);
+    expect(skus(await search({ size: 'cal king' }))).toEqual(['HX-CK-MID', 'MAL-SHEET-CK']);
+    // Any spelling of the size lands on the canonical one.
+    expect(skus(await search({ size: 'California King' }))).toEqual(['HX-CK-MID', 'MAL-SHEET-CK']);
+    expect(skus(await search({ size: 'CK' }))).toEqual(['HX-CK-MID', 'MAL-SHEET-CK']);
+  });
+
+  it('matches every search word in any order, size included (A22.2)', async () => {
+    expect(skus(await search({ q: 'cal king bamboo' }))).toEqual(['MAL-SHEET-CK']);
+    expect(skus(await search({ q: 'bamboo sheets' }))).toEqual(['MAL-SHEET-CK']);
+    expect(skus(await search({ q: 'queen bamboo' }))).toEqual([]);
+    expect(skus(await search({ q: 'micah firm king' }))).toEqual(['MICAH-K']);
+    expect(skus(await search({ q: 'firm helix twilight' }))).toEqual([
+      'HELIX-SLEEP-TWILIGHT-Q-3DA9',
+      'HX-Q-TWI',
+    ]);
   });
 
   it('filters by firmness', async () => {
@@ -342,6 +380,7 @@ describe('Add Product filters', () => {
     expect(skus(await search({ firmness: 'Firm' }))).toEqual([
       'HELIX-SLEEP-TWILIGHT-Q-3DA9',
       'HX-Q-TWI',
+      'MICAH-K',
     ]);
     expect(skus(await search({ firmness: 'Plush' }))).toEqual(['HX-SK-SUN', 'PR-Q-REST']);
   });
@@ -362,7 +401,12 @@ describe('Add Product filters', () => {
   });
 
   it('combines with in-stock and with each other', async () => {
-    expect(skus(await search({ inStock: '1' }))).toEqual(['HX-Q-TWI', 'HX-TW-DUSK', 'PR-Q-REST']);
+    expect(skus(await search({ inStock: '1' }))).toEqual([
+      'HX-Q-TWI',
+      'HX-TW-DUSK',
+      'MICAH-K',
+      'PR-Q-REST',
+    ]);
     expect(skus(await search({ size: 'Queen', inStock: '1', vendorId: helixVendorId }))).toEqual([
       'HX-Q-TWI',
     ]);
