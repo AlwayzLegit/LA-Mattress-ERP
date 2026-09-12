@@ -5,5 +5,7 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**', '.next/**'],
   },
-  esbuild: { target: 'es2022' },
+  // jsx: the app's tsconfig leaves JSX for Next to compile; component
+  // tests need esbuild to emit it.
+  esbuild: { target: 'es2022', jsx: 'automatic' },
 });

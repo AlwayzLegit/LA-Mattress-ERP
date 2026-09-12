@@ -5495,3 +5495,27 @@ sends the return salesperson the API already accepts (slice 6).
   `catalog` (+3), `categorize-products` (+2: every sized group code filed,
   SQL backfill == importer on all 1,948 rows). Migration `0099` runs on
   deploy — no ops step.
+
+### Checkpoint — 2026-09-11 (Modern invoice: Invoice / Sales Order + Exchange Order)
+
+Owner asked to modernize the invoices the stores print; six questions settled it:
+modern clean layout, logo + brand accent, Letter laser output only, Invoice +
+Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment).
+
+- API: `GET /v1/orders/:id/document` → `business.accentColor` (Settings → Branding,
+  null until set). `orders.int.spec.ts` +1.
+- Web: `InvoiceDoc` rewritten — accent header rule + title, Amount due / Credit due /
+  Paid in full callout, header-note notice bar, Sold to / Ship to / Order details
+  cards, clean line grid (item + model · brand + comment), payments + totals card
+  with the due row filled in the accent, footer note + printed stamp. `@page letter`,
+  `print-color-adjust: exact`, repeating grid header, rows don't split. Readable
+  text on any accent (luminance).
+- Owner review (same day): 1-inch margins all round; default accent is the LA
+  Mattress logo navy `#0f2057` (from the logo SVG on the store site); the header
+  prints the selling store's full address, never its name, and the Store cell is
+  gone.
+- Owner (same day): each payment prints the register's reference — a bare last 4
+  as "•••• 4242", approval / check numbers as entered. `processorRef` was already
+  in the document payload; `orders.int.spec.ts` +1 proves the round trip.
+- Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
+  JSX for web component tests).
