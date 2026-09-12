@@ -197,8 +197,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               className="topbar-icon"
-              aria-label={inbox.unread > 0 ? `Inbox, ${inbox.unread} unread` : 'Inbox'}
-              title="Inbox"
+              aria-label="Notifications"
+              title={inbox.unread > 0 ? `Inbox · ${inbox.unread} unread` : 'Inbox'}
               data-testid="notifications-bell"
               onClick={() => setDrawer(true)}
             >
