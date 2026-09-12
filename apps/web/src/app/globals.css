@@ -220,16 +220,14 @@
   /* ------------------------------------------------------------------
      Legacy aliases — every screen built before the redesign reads
      these names and picks the new ramp up unchanged. Phase 2 and the
-     per-screen phases migrate call sites; Phase 12 deletes the aliases.
+     per-screen phases migrate call sites; Phase 12 dropped the unread ones
+     and the rest go when their last screen is restyled (see PHASE_NOTES).
      ------------------------------------------------------------------ */
   --surface2: var(--surface-2);
   --border2: var(--border-strong);
   --text2: var(--text-2);
   --brand: var(--accent);
-  --brand-hover: var(--accent-ink);
   --brand-soft: var(--accent-soft);
-  --brand-soft-text: var(--accent-ink);
-  --accent-line: var(--status-scheduled-border);
   --surface-muted: var(--surface-2);
   --text-secondary: var(--text-2);
   --text-muted: var(--muted);
@@ -241,8 +239,6 @@
   --warn-soft: var(--status-waiting-bg);
   --warn-ink: var(--status-waiting-fg);
   --warning: var(--status-waiting-fg);
-  --warning-soft: var(--status-waiting-bg);
-  --warning-soft-text: var(--status-waiting-fg);
   --danger: var(--status-risk-fg);
   --danger-soft: var(--status-risk-bg);
   --danger-ink: var(--status-risk-fg);
@@ -252,7 +248,6 @@
   --info-ink: var(--status-scheduled-fg);
   --info-soft-text: var(--status-scheduled-fg);
   --neutral-soft: var(--surface-2);
-  --neutral-soft-text: var(--text-2);
 }
 
 /* ------------------------------------------------------------------
@@ -2265,7 +2260,7 @@ th[aria-sort='descending'] .sort-btn::after {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted);
 }
 .count-chip {
   font-family: var(--font-mono);
@@ -2554,7 +2549,7 @@ kbd.key {
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted);
   padding: 0 8px 5px;
 }
 .nav-item {
@@ -3042,7 +3037,7 @@ kbd.key {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
-  color: var(--faint);
+  color: var(--muted);
 }
 .sched-table td {
   padding: 5px 4px;
@@ -3066,7 +3061,7 @@ kbd.key {
   background: transparent;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -6427,7 +6422,7 @@ select.picker-from {
 }
 .dh-email {
   margin-left: 6px;
-  color: var(--faint);
+  color: var(--muted);
 }
 .dh-top-actions {
   display: flex;
@@ -6803,7 +6798,7 @@ select.picker-from {
 }
 .tender-count {
   font-size: 11px;
-  color: var(--faint);
+  color: var(--muted);
 }
 
 /* Cash on hand column. */

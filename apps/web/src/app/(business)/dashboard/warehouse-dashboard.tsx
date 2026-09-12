@@ -332,7 +332,7 @@ function TruckCard({ truck, allMode }: { truck: Truck; allMode: boolean }) {
                   gap: 8,
                   alignItems: 'center',
                   fontSize: 12,
-                  color: done ? 'var(--faint)' : undefined,
+                  color: done ? 'var(--muted)' : undefined,
                 }}
               >
                 <span className="mono" style={{ color: 'var(--muted)' }}>
@@ -394,7 +394,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
     void load(null);
   }, [load]);
 
-  const who = <span style={{ marginLeft: 8, color: 'var(--faint)' }}>· {userName}</span>;
+  const who = <span style={{ marginLeft: 8, color: 'var(--muted)' }}>· {userName}</span>;
 
   if (error) {
     return (

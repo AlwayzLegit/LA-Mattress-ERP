@@ -17,7 +17,9 @@
 > 2026-09-12 (PR #168); Phase 8 (Deliveries board + day sheet) merged 2026-09-12 (PR #169);
 > Phase 9 (Owner + Manager dashboards, cash pickups) merged 2026-09-12 (PR #170); Phase 10
 > (Operations, Warehouse, Z-report) merged 2026-09-12 (PR #171); Phase 11 (Sales competitions)
-> in review; Phase 12 (Accessibility pass, states, polish, cleanup) is next.
+> merged 2026-09-12 (PR #172); Phase 12 (Accessibility pass, states, polish, cleanup) in
+> review — the programme's consolidated Later list and the README §5 answers are in
+> `PHASE_NOTES.md` under Phase 12.
 
 ---
 

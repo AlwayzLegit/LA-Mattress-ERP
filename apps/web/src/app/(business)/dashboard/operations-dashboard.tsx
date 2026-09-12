@@ -331,7 +331,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
         <h1 className="page-title">Operations</h1>
         <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 3 }}>
           {pageSub}
-          <span style={{ marginLeft: 8, color: 'var(--faint)' }}>· {userName}</span>
+          <span style={{ marginLeft: 8, color: 'var(--muted)' }}>· {userName}</span>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} data-noprint="true">

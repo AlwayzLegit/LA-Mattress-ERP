@@ -675,7 +675,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
               .join(' · '),
             title: `${r.deliveryState.replace(/_/g, ' ')}${r.driverName ? ` · driver ${r.driverName}` : ''}`,
             d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
-            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
+            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--muted)',
           }))}
         />
 
@@ -765,7 +765,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
               .filter(Boolean)
               .join(' · '),
             d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
-            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
+            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--muted)',
           }))}
         />
 
@@ -990,7 +990,7 @@ function Leaderboard({
               fontSize: 12.5,
             }}
           >
-            <span className="mono" style={{ color: 'var(--faint)', fontSize: 11 }}>
+            <span className="mono" style={{ color: 'var(--muted)', fontSize: 11 }}>
               {String(i + 1).padStart(2, '0')}
             </span>
             <span
@@ -1166,7 +1166,7 @@ function QueueTable({
                   className="num"
                   style={{
                     fontWeight: r.balanceDueCents > 0 ? 600 : 400,
-                    color: r.balanceDueCents > 0 ? 'var(--text)' : 'var(--faint)',
+                    color: r.balanceDueCents > 0 ? 'var(--text)' : 'var(--muted)',
                   }}
                 >
                   {r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—'}

@@ -926,3 +926,108 @@ printable sheet, overtaken notices, TV mode and the owner's settings. Migration
 - Store-manager notices for the Stores race; a "who won" push at month end.
 - The leads list for managers across their store (the API supports `?all=1`; the panel shows
   the viewer's own).
+
+---
+
+## Phase 12 — Accessibility pass, states, polish, cleanup (2026-09-12)
+
+Canvas: `Redesign 9 Handoff.dc.html` (9a focus order, 9b dialogs, 9c contrast, 9d–9k
+handoff sheets, the state matrix and the motion spec). No new screens; every change is
+to what Phases 1–11 shipped.
+
+### What changed
+
+- **Dialogs.** Every remaining hand-rolled dialog now runs the shared `useFocusTrap`
+  (Tab / Shift+Tab cycle inside, Escape closes, focus returns to the opener): the security
+  override PIN prompt (`active` follows `open`, since it stays mounted), the customer picker,
+  order action dialogs (`aria-labelledby` from a generated id), the PO delete-draft dialog,
+  the payment-list and shift-editor dialogs. Their private window Escape listeners are gone.
+  The account menu and the store / date controls close on Escape.
+- **Tables.** Every clickable `<tr onClick>` (product search, customer picker, GL account,
+  Sales, customer and salesperson activity, Members, Roles, Products, Counts, the manager
+  home's two tables, payment list, changes card) spreads `rowKeys` from `components/ui/table`
+  — `role="link"`, `tabIndex=0`, Enter / Space activates. `aria-sort` on Orders and Products
+  headers was already correct.
+- **Labels.** `aria-label` on the three unlabeled controls found (cleanup list, stock search,
+  sales search). Shortcut hints render through `Kbd` / `formatKeys` everywhere — the order
+  notes hint and the palette footer (chords from `GO_KEYS`) were the last literals; no `⌘K`
+  string remains outside the `Kbd` source and its test.
+- **Loading / error states.** `LoadingRows` and `ShimmerRows` expose `aria-busy` (`ShimmerRows`
+  is a `role="status"` "Loading"). Every error `Alert` on a role home or list screen carries a
+  **Retry** (manager, operations, warehouse, My Day, Products, Deliveries board, day sheet).
+  State-matrix copy: "No stops scheduled for this day — nothing to print." (day sheet), "No
+  drawer opened at {store} on this day." (Z-report), "Nothing to call about today." (manager),
+  "No serials recorded for this product.", the month cap reads "No truck" at zero, and the
+  owner headline empty line is "Nothing written yet today. Yesterday: $N." (the owner endpoint
+  now returns `yesterdayWrittenCents`).
+- **Contrast (9c).** All token pairs on the sheet measure ≥ 4.5:1 with the live values
+  (lowest: muted on surface-2 at 4.51:1). `--faint` (2.9:1) is decoration only, so the text
+  that still used it moved to `--muted`: `.eyebrow`, `.nav-group-label`, schedule dates and
+  cells, `.dh-email`, `.tender-count`, and the dashboard "· name", "no money", empty-amount
+  and impact-kind spans. Arrows, chevrons and disabled buttons keep faint. Focus rings on
+  inset controls (`.seg-btn`, `.kpi-cell`, `.wh-fig`, stores footer cells) use a −2px offset
+  so they are never clipped.
+- **Reduced motion.** One global rule: every duration collapses, the skeleton is a static
+  two-tone bar, the spinner hides, and the deliveries drag lift is a border change only
+  (`transform: none`). The duplicate `@keyframes shimmer` and the deliveries-only
+  reduced-motion block are gone.
+- **Cleanup.** Deleted the dead `revenue-trend`, `order-quick-view` and `global-search`
+  components, `StatLink` / `usdShort`, the unused `.dt th.is-sortable` rules and the ui
+  barrel's unused exports. Dropped the six legacy aliases nothing reads (`--brand-hover`,
+  `--brand-soft-text`, `--accent-line`, `--warning-soft`, `--warning-soft-text`,
+  `--neutral-soft-text`). The `/inventory/*` routes are redirects only (`next.config.mjs`);
+  the print counts sheet links back to `/products/counts`. The e2e CI job is "Playwright E2E".
+
+### Assumptions
+
+- The remaining legacy aliases (`--surface2`, `--text2`, `--danger`, `--warn`, `--brand`, …)
+  still have roughly 300 call sites on screens outside the twelve phases (agency, team tasks,
+  GL, settings). They stay until those screens are restyled; deleting them now would recolour
+  nothing and break nothing, but the migration is not a Phase 12 change.
+- `--faint` on `.btn:disabled` is intentional (disabled controls are exempt from the 4.5:1
+  rule) and the eyebrow / nav-group labels at `--muted` read the same weight at 4.6:1.
+- No axe spec: the checks were done by hand against 9a/9b (focus order on New Sale and the
+  Orders book, trap/return on every dialog). A Playwright + axe pass belongs in Later.
+- The kiosk time clock has no loading state on purpose (it renders the keypad immediately).
+
+### README §5 answers (as built)
+
+| Question                                            | Answer in the build                                                                                                                                                              |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Delivery fee rule                                   | Per order: New Sale's "More" row takes a dollar fee (`deliveryFeeCents`), blank means none. No flat-$99 default is coded; the store types it.                                    |
+| Cancel deposit default                              | Store credit — the cancel dialog defaults `depositTo` to `store_credit`, refund to the original tender is the other choice.                                                      |
+| Who may unlock a printed order                      | Owner and Manager (`orders.unlock`, typed reason required); Operations, Cashier and Warehouse do not have it.                                                                    |
+| Store minimums per location                         | Yes — `location_inventory.reorder_point` (STORIS "Min Stock" per store); below it shows amber in the Products browser and the variant's reorder point is the sum across stores.  |
+| Cost column visibility                              | By permission: `products.cost.view` (Owner and Manager among the system roles) — the API omits cost otherwise and the column never renders.                                      |
+| Cap per truck or per day                            | Per day, business-wide (`ops.deliveryDailyCap`, default 15 stops; one fleet, not one per store); an optional per-day capacity-unit budget sits beside it. Per-truck stays Later. |
+| "Same day last month"                               | Calendar day (`sameDayLastMonth`), clamped to the previous month's last day.                                                                                                     |
+| Second approver for sign-off with an open exception | Not required — one signer; the open-exception count is stored on the sign-off row and printed on the Z-report.                                                                   |
+| Sweep bonus                                         | Replaces the per-card $100s: 4 / 5 / 6 of 6 pay $1,000 / $1,500 / $2,000 by default, editable in Settings › Competitions.                                                        |
+| Cash pickup thresholds                              | $1,500 on hand or a cash payment older than 3 days (`PICKUP_DUE_CENTS` / `PICKUP_DUE_DAYS`, constants, not yet settings).                                                        |
+| Managers record their own pickup                    | Yes — `pos.cash.pickup_record` for their own store; confirming the pickup stays with the Owner / Operations (`pos.cash.pickup_confirm`).                                         |
+
+### Consolidated Later (all phases)
+
+- **Type and tokens.** A licensed grotesk if the owner buys one; the `@theme` block shrinks to
+  the new names once the ~300 legacy-alias call sites outside the redesign are restyled.
+- **Kit.** `SortHeader` / `RowLink` are only used by `/dev/components`; Orders and Products
+  keep their hand-rolled (correct) headers until one of them changes again. A Playwright + axe
+  spec over the dev previews.
+- **Shell.** Sidebar collapses to icons below 1280; the business switcher folds into the
+  account menu.
+- **New Sale.** ATP as a number (on hand − reserved + open POs) once search returns open-PO
+  units; server-side "in stock first" ordering and paging past 100 rows; mattress / base
+  detection from the category instead of the name.
+- **Orders.** Per-store order prefix; the reserved sort and bar in units; a first-class order
+  history endpoint with actor names.
+- **Products.** Sticky first column past 1440 and a Cost column by permission rather than by
+  returned data; modelled transfer / special-order lead times behind Next promise; a
+  `/v1/reason-codes` class for receiving damage.
+- **Deliveries.** Reservation state on the board rows (Waiting / At risk chips); per-truck
+  capacity; restyle `/deliveries/search` and `/deliveries/confirm`.
+- **Dashboards.** The manager's everyone-on-shift time-clock strip (`/v1/timeclock/store`);
+  a pickups history page and slip reprint; a cashier-facing recount flow with a notice; a
+  sign-offs report across stores and the owner's unsigned-days view.
+- **Competitions.** Rank recount on return completion; store-manager notices for the Stores
+  race and a month-end "who won" push; the managers' store-wide leads list (API supports
+  `?all=1`).
