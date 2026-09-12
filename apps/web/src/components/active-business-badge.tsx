@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { readActiveBusinessId } from '@/lib/offline';
 import { useBusinessName } from '@/lib/business-settings';
+import { LoadingRows } from '@/components/ui';
 
 interface MembershipSummary {
   businessId: string;
@@ -100,7 +101,11 @@ export function ActiveBusinessBadge() {
           className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[240px] rounded-card border border-border bg-surface p-1.5 shadow-[var(--shadow-lg)]"
           data-testid="business-switcher"
         >
-          {memberships == null && <p className="muted m-0 px-2 py-1.5 text-[12px]">Loading…</p>}
+          {memberships == null && (
+            <div className="px-2 py-1.5">
+              <LoadingRows rows={3} height={20} what="Your businesses" />
+            </div>
+          )}
           {memberships?.length === 0 && (
             <p className="muted m-0 px-2 py-1.5 text-[12px]">No businesses to show.</p>
           )}

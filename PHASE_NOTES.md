@@ -87,3 +87,82 @@ Phase 12 entry.
 - Once Phase 12 deletes the legacy aliases, the `@theme` block shrinks to the new names.
 - Tailwind `rounded-*` utilities with off-scale radii still exist in ~13 TSX files (dashboard
   cards, team tasks, agency page); they are restyled with their screens in Phases 3–10.
+
+---
+
+## Phase 2 — Component kit (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` (restarted from `main` after the Phase 1 squash) ·
+**Scope:** `apps/web` only. Every existing import of `@/components/ui` keeps working; the
+single `ui.tsx` is now a `components/ui/` directory.
+
+### What changed
+
+- **Button** — four tiers to canvas 2e: primary (accent fill, 600), secondary (hairline),
+  ghost (accent text), destructive (outlined risk red, 600, never filled). Height follows
+  the density preset (`--control-h`), radius 5. `kbd="F8"` / `kbd="mod+k"` appends a
+  shortcut chip. `variant="danger"` still works as the old name for destructive. `Button`,
+  `Input` and `Select` forward refs so dialogs can name their initial focus.
+- **Kbd** — platform-aware shortcut chip: `mod` renders ⌘ on a Mac and `Ctrl` on the
+  Windows registers (`usePlatform`, `formatKeys`; server renders the Windows form and the
+  client corrects after hydration). Chords (`g o`) keep their space; ⌘K does not.
+- **Field** — label always visible, 12px / 500 / text-2; an error turns the label red and
+  shows the message; hint is muted. `.input-mono` and `.input-num` for phone numbers, SKUs
+  and money (mono, tabular, right-aligned).
+- **Table** — `RowLink` (anchor in the first cell with an `::after` overlay so the whole
+  row is clickable while the anchor takes focus; other controls in the row sit above it
+  via `.row-action`) and `SortHeader` (`<th aria-sort>` around a button that inherits the
+  header type; the indicator is drawn from `aria-sort`). Rows are `--row-h` tall with a
+  `surface-2` hairline, hover `bg`, selected `accent-soft`; headers are 11px / 600 /
+  uppercase / .05em.
+- **StatusChip** — the six statuses from `design-tokens.ts`, glyph + word + colour with a
+  1px border of the tint; Cancelled is struck. `StatusBadge` / `DisplayStatusBadge` keep
+  their APIs and vocabularies but render the same anatomy: `.badge` now carries a glyph
+  from its tone class (○ neutral · ◔ warning · ◷ info · ✓ success · ▲ danger · ◑ brand)
+  and cancelled / refunded strings are struck on the neutral tint. The word is still the
+  only text, so existing e2e text matchers hold.
+- **Dialog** / **SlideOver** on a shared `useFocusTrap`: `role=dialog` (or `alertdialog`)
+  with `aria-modal` and `aria-labelledby`, focus moves in on open (to `initialFocus`, else
+  the first control), Tab and Shift+Tab cycle, Esc closes, focus returns to the opener.
+  Dialog sizes 420 / 560 / 880 / 1080; title is Archivo 16px, description wired to
+  `aria-describedby`. SlideOver is 640px from the right, 160ms, mono title option for
+  document numbers. `ModalDialog` (3 callers) and `ConfirmDialog` (3 callers) are rebuilt on
+  it — ConfirmDialog is now an `alertdialog` whose safe button has default focus and whose
+  destructive action is outlined.
+- **Toast** — sonner stays the API; the Toaster now runs 2.4s with hover-pause, and the
+  CSS renders a white sheet with a hairline and a left rule in the status colour (no more
+  `richColors`).
+- **EmptyState** — dashed border, title, one action, no fill.
+- **Skeleton → ErrorState** — `LoadingRows` keeps its 93 call sites unchanged and gains the
+  4-second budget: past it the rows become `ErrorState` ("{what} is taking longer than it
+  should", "Nothing you typed is lost…", Retry). `useLoadBudget` exposes the timer;
+  `ErrorState` takes a title, a sentence, `onRetry`, and an optional `retryIn` countdown
+  that auto-retries at zero.
+- **Bare "Loading…" removed** where it was a state rather than a busy button label: the
+  auth gate (now a shell-shaped skeleton with an `sr-only` status), the business switcher,
+  four order read-dialogs, the attachments dialog, the warehouse home subtitle, and the two
+  print documents.
+- **`/dev/components`** shows every part in every state, including the register-density
+  block, the dialog / alertdialog / slide-over, the four toast tones, and the live
+  skeleton → error handoff with a Restart control.
+- **Deleted legacy kit:** `.input-lg`, `.input-adorned`, `.modal-backdrop`, `.modal-panel`,
+  `.modal-panel-lg`, `.subnav*` (no consumers). `vitest.config.ts` gained the `@/` alias so
+  component tests resolve the kit.
+
+### Assumptions
+
+- Storybook is not added; `/dev/components` is the living gallery (the prompt allowed
+  either).
+- `LoadingRows` without `onRetry` still hands off to the error component at 4s (with the
+  copy but no button) rather than shimmering forever; call sites gain a Retry as their
+  screens are rebuilt in Phases 3–10.
+- The legacy `.badge` tone → glyph mapping is mine (the spec defines glyphs only for the six
+  order statuses); `brand` uses ◑ for "partly" states.
+
+### Later
+
+- The 13 remaining hand-rolled `role="dialog"` implementations (command palette, product
+  search, notifications drawer, payment list, shift editor, order quick view, …) move onto
+  `Dialog` / `SlideOver` with their screens (Phases 3, 5, 6, 9).
+- `SortHeader` replaces the local `SortTh` in Orders and the header buttons in Products in
+  Phases 6 and 7.

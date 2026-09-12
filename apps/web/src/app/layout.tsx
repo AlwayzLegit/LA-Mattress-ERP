@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         {children}
         {/* BA-0040: bottom-right so toasts never cover the top-bar
             controls (New sale lives top-right). */}
-        <Toaster position="bottom-right" richColors closeButton />
+        <Toaster position="bottom-right" duration={2400} closeButton />
       </body>
     </html>
   );

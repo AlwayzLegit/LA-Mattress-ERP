@@ -1,66 +1,29 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, type ReactNode } from 'react';
+import { forwardRef, useId, type ReactNode } from 'react';
+
+import { cx } from './cx';
 
 /**
- * Shared UI primitives over the design tokens in globals.css.
+ * Layout + form primitives over the design tokens in globals.css.
  * Pages adopt these instead of bespoke inline styles; anything not
- * covered can still pass `style`/`className` through.
+ * covered can still pass `style`/`className` through. Buttons, chips,
+ * dialogs, tables and the loading / empty / error states live in their
+ * own files beside this one; `index.tsx` re-exports the whole kit.
  */
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  function Input(props, ref) {
+    return <input {...props} ref={ref} className={cx('input', props.className)} />;
+  },
+);
 
-export function Button({
-  variant = 'secondary',
-  size,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: Variant;
-  size?: 'sm';
-}) {
-  return (
-    <button
-      type="button"
-      {...props}
-      className={cx('btn', `btn-${variant}`, size === 'sm' && 'btn-sm', className)}
-    />
-  );
-}
-
-export function LinkButton({
-  href,
-  variant = 'secondary',
-  size,
-  className,
-  children,
-  ...props
-}: {
-  href: string;
-  variant?: Variant;
-  size?: 'sm';
-  className?: string;
-  children: ReactNode;
-} & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
-  return (
-    <Link
-      href={href}
-      {...props}
-      className={cx('btn', `btn-${variant}`, size === 'sm' && 'btn-sm', className)}
-    >
-      {children}
-    </Link>
-  );
-}
-
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cx('input', props.className)} />;
-}
-
-export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cx('select', props.className)} />;
-}
+export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
+  function Select(props, ref) {
+    return <select {...props} ref={ref} className={cx('select', props.className)} />;
+  },
+);
 
 export function Field({
   label,
@@ -482,126 +445,6 @@ export function Alert({
   );
 }
 
-const STATUS_TONES: Record<string, string> = {
-  // documents
-  quote: 'warning',
-  draft: 'neutral',
-  open: 'info',
-  confirmed: 'info',
-  ordered: 'info',
-  partially_fulfilled: 'brand',
-  partially_received: 'brand',
-  partially_refunded: 'warning',
-  fulfilled: 'success',
-  received: 'success',
-  completed: 'success',
-  delivered: 'success',
-  paid: 'success',
-  active: 'success',
-  succeeded: 'success',
-  blocked: 'danger',
-  partial: 'warning',
-  valid: 'success',
-  committed: 'success',
-  scheduled: 'info',
-  out_for_delivery: 'brand',
-  in_service: 'info',
-  awaiting_parts: 'warning',
-  intake: 'warning',
-  ready: 'success',
-  pending: 'neutral',
-  due: 'neutral',
-  invalid: 'danger',
-  overdue: 'danger',
-  failed: 'danger',
-  cancelled: 'danger',
-  canceled: 'danger',
-  refunded: 'danger',
-  disabled: 'danger',
-  suspended: 'danger',
-};
-
-/** Colored pill for any document/lifecycle status string. */
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const tone = STATUS_TONES[status] ?? 'neutral';
-  return (
-    <span className={cx('badge', `badge-${tone}`, className)}>{status.replace(/_/g, ' ')}</span>
-  );
-}
-
-/**
- * P-013 (S01 audit): the ONE owner-facing order-status vocabulary —
- * list badges, the detail page, and the filter all use these words.
- */
-export const DISPLAY_STATUS_TONES: Record<string, string> = {
-  Draft: 'neutral',
-  Pending: 'neutral',
-  'On PO': 'info',
-  Reserved: 'brand',
-  Scheduled: 'info',
-  'Out for Delivery': 'brand',
-  Delivered: 'success',
-  Quote: 'warning',
-  Layaway: 'warning',
-  Cancelled: 'danger',
-  'Awaiting Return Pickup': 'warning',
-  Returned: 'neutral',
-  Exchanged: 'neutral',
-};
-
-export function DisplayStatusBadge({
-  displayStatus,
-  poNumber,
-  className,
-}: {
-  displayStatus: string;
-  poNumber?: string | null;
-  className?: string;
-}) {
-  const tone = DISPLAY_STATUS_TONES[displayStatus] ?? 'neutral';
-  return (
-    <span className={cx('badge', `badge-${tone}`, className)}>
-      {displayStatus}
-      {poNumber ? ` (${poNumber})` : ''}
-    </span>
-  );
-}
-
-export function EmptyState({
-  title,
-  action,
-  children,
-}: {
-  /** Short bold line; `children` is the explanation under it. */
-  title?: ReactNode;
-  /** One button (usually secondary `size="sm"`) — "Clear filters", "New …". */
-  action?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="empty-state">
-      {title && <div className="empty-state-title">{title}</div>}
-      {children}
-      {action && <div className="empty-state-action">{action}</div>}
-    </div>
-  );
-}
-
-export function Skeleton({ style }: { style?: React.CSSProperties }) {
-  return <div className="skeleton" style={style} />;
-}
-
-/** Three shimmering rows — the standard "table is loading" placeholder. */
-export function LoadingRows({ rows = 3 }: { rows?: number }) {
-  return (
-    <div className="loading-rows">
-      {Array.from({ length: rows }, (_, i) => (
-        <Skeleton key={i} style={{ height: 32 }} />
-      ))}
-    </div>
-  );
-}
-
 /**
  * Collapsible section for long grouped content (permission editors,
  * settings sheets). Header carries a title on the left and an optional
@@ -681,8 +524,4 @@ export function Accordion({
       )}
     </div>
   );
-}
-
-function cx(...parts: (string | false | undefined | null)[]): string {
-  return parts.filter(Boolean).join(' ');
 }
