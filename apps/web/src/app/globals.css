@@ -5775,3 +5775,633 @@ select.picker-from {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ------------------------------------------------------------------
+   Deliveries board (redesign Phase 8, canvas 7a–7d). Week is the working
+   view, Month the overview; every day header carries n / cap and a 4px
+   bar; cards have a handle; the drop target draws itself.
+   ------------------------------------------------------------------ */
+.db {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.db-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.db-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.db-title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.db-range {
+  font-size: 13px;
+  color: var(--muted);
+}
+.db-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.db-seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--bg);
+}
+.db-seg button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.db-seg button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(28 27 24 / 0.12);
+}
+.db-nav {
+  display: inline-flex;
+  gap: 4px;
+}
+.db-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.db-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border: 1px solid var(--status-risk-border);
+  border-left: 3px solid var(--status-risk-fg);
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.db-banner-glyph {
+  font-family: var(--font-mono);
+  color: var(--status-risk-fg);
+}
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.db-grid.is-month {
+  gap: 6px;
+}
+.db-day {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+  padding: 0 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out;
+}
+.db-day.is-weekend {
+  background: var(--bg);
+}
+.db-day.is-over {
+  border-color: var(--status-risk-fg);
+}
+.db-day.is-target {
+  border: 1px dashed var(--accent);
+  background: var(--bg);
+}
+.db-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+.db-day-head a {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  text-decoration: none;
+}
+.db-day-head a:hover {
+  text-decoration: underline;
+}
+.db-day.is-today .db-day-head a {
+  color: var(--accent);
+}
+.db-cap {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.db-cap.is-ok {
+  color: var(--status-fulfilled-fg);
+}
+.db-cap.is-near {
+  color: var(--status-waiting-fg);
+}
+.db-cap.is-over {
+  color: var(--status-risk-fg);
+}
+.db-cap.is-none {
+  color: var(--muted);
+  font-weight: 400;
+}
+.db-bar {
+  height: 4px;
+  margin: 0 10px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.db-bar-fill {
+  height: 100%;
+  background: var(--status-fulfilled-fg);
+  transition: width 120ms ease-out;
+}
+.db-bar-fill.is-near {
+  background: var(--status-waiting-fg);
+}
+.db-bar-fill.is-over {
+  background: var(--status-risk-fg);
+}
+.db-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px;
+  flex: 1;
+}
+.db-card {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 6px;
+  padding: 7px 8px 7px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-scheduled-fg);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    box-shadow 120ms ease-out,
+    transform 120ms ease-out,
+    opacity 120ms ease-out;
+}
+.db-card:hover {
+  box-shadow: 0 2px 6px rgb(28 27 24 / 0.1);
+}
+.db-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.db-card.is-pickup {
+  border-left-color: var(--status-waiting-fg);
+  background: var(--status-waiting-bg);
+}
+.db-card.is-risk {
+  border-left-color: var(--status-risk-fg);
+}
+.db-card.is-done {
+  border-left-color: var(--status-fulfilled-fg);
+  opacity: 0.85;
+}
+.db-card.is-dragging {
+  border-style: dashed;
+  opacity: 0.45;
+}
+.db-card.is-lifted {
+  box-shadow: 0 8px 24px rgb(28 27 24 / 0.22);
+  transform: translateY(-2px) rotate(-1deg);
+  border-color: var(--accent);
+}
+.db-card[draggable='true'] .db-grip {
+  cursor: grab;
+}
+.db-grip {
+  font-family: var(--font-mono);
+  color: var(--border);
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: -2px;
+  user-select: none;
+}
+.db-card > span:last-child {
+  min-width: 0;
+}
+.db-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.db-card-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.db-card-win {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.db-card-cust {
+  display: block;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-card .chip {
+  font-size: 10.5px;
+  padding: 1px 6px 1px 5px;
+}
+.db-card-due {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--status-waiting-fg);
+  white-space: nowrap;
+}
+.db-empty {
+  flex: 1;
+  min-height: 70px;
+  margin: 0 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-decoration: none;
+  text-align: center;
+}
+.db-drop-hint {
+  margin: 0 8px;
+  padding: 10px;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-control);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.db-capnote {
+  margin: 4px 8px 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.db-capnote strong {
+  color: var(--status-risk-fg);
+}
+.db-roll {
+  padding: 6px 10px 0;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.db-roll-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-2);
+}
+.db-roll-row .g {
+  font-family: var(--font-mono);
+  margin-right: 4px;
+}
+.db-roll-due {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--surface-2);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--status-waiting-fg);
+}
+.db-notruck {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px 0;
+}
+.db-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.db-foot strong {
+  color: var(--text);
+}
+.db-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 200px;
+  max-height: 320px;
+  overflow: auto;
+}
+@media (max-width: 1100px) {
+  .db-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-card,
+  .db-day,
+  .db-bar-fill {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Day sheet (canvas 7e): a clipboard in a truck cab. On screen a paper
+   preview; in print, letter, black on white, 14pt, no chrome.
+   ------------------------------------------------------------------ */
+.ds-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ds-page {
+  width: 816px;
+  max-width: 100%;
+  margin: 0 auto;
+  background: #fff;
+  color: #000;
+  padding: 40px 48px;
+  font-size: 14px;
+  line-height: 1.35;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(28 27 24 / 0.08);
+}
+.ds-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #000;
+}
+.ds-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ds-title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ds-head-right {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ds-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid #000;
+  font-size: 13px;
+}
+.ds-meta strong {
+  font-weight: 600;
+}
+.ds-meta .mono {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.ds-meta-right {
+  margin-left: auto;
+}
+.ds-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 8px 0 4px;
+  margin-top: 10px;
+  border-bottom: 2px solid #000;
+  font-size: 13px;
+  break-after: avoid;
+}
+.ds-run-head strong {
+  font-size: 15px;
+}
+.ds-run + .ds-run {
+  margin-top: 6px;
+}
+.ds-capnote {
+  padding: 8px 0;
+  border-bottom: 1px solid #bdb9b0;
+  font-size: 13px;
+}
+.ds-capnote strong {
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+.ds-stop {
+  display: grid;
+  grid-template-columns: 36px 1fr 200px;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid #bdb9b0;
+  break-inside: avoid;
+}
+.ds-stop-num {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ds-stop-line1 {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.ds-stop-order {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.ds-stop-cust {
+  font-weight: 600;
+  font-size: 15px;
+}
+.ds-stop-phone {
+  font-family: var(--font-mono);
+}
+.ds-stop-addr {
+  margin-top: 2px;
+}
+.ds-pieces {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ds-pieces li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ds-tick {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #000;
+  flex: none;
+  display: inline-block;
+}
+.ds-note {
+  margin-top: 6px;
+  font-style: italic;
+}
+.ds-stop-right {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.ds-window {
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+.ds-due-label {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.ds-due {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.ds-due.is-owed {
+  font-weight: 600;
+}
+.ds-sig {
+  margin-top: auto;
+  width: 100%;
+  font-size: 12px;
+  text-align: left;
+}
+.ds-sig-line {
+  border-bottom: 1px solid #000;
+  height: 28px;
+}
+.ds-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  font-size: 12px;
+}
+.ds-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: #4a4843;
+}
+@media print {
+  @page {
+    size: letter;
+    margin: 0.6in 0.6in 0.9in;
+  }
+  .ds-toolbar,
+  .no-print {
+    display: none !important;
+  }
+  .ds-wrap {
+    display: block;
+  }
+  .ds-page {
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    font-size: 14pt;
+    color: #000;
+  }
+  .ds-title {
+    font-size: 28pt;
+  }
+  .ds-stop-num {
+    font-size: 26pt;
+  }
+  .ds-due {
+    font-size: 22pt;
+  }
+  .ds-window {
+    font-size: 15pt;
+  }
+  .ds-foot {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #fff;
+    padding: 6pt 0 0;
+    border-top: 1px solid #000;
+  }
+  .ds-stop {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

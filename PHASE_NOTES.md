@@ -549,3 +549,81 @@ list / stock / receiving endpoints extended. No schema change.
   rather than by returned data.
 - Modelled transfer / special-order lead times behind Next promise.
 - A dedicated `/v1/reason-codes` class for receiving damage.
+
+## Phase 8 — Deliveries board and day sheet (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** `/deliveries` rebuilt as the Week | Month board,
+`/deliveries/day/[date]` rebuilt as the print day sheet, over-capacity enforcement on reschedule.
+`/deliveries/search`, `/deliveries/confirm`, `/deliveries/dispatch` and the delivery page are
+unchanged. No schema change.
+
+### What changed
+
+- **Board** (README §3.4, canvas 7a–7d) — header `Deliveries · Mon Sep 8 – Sun Sep 14`, then
+  controls that match the view: **Week | Month** segmented, ‹ Today ›, a divider, Confirm calls,
+  Dispatch, Print day sheet (and Search). Week: 7 Monday-first columns; every day header carries
+  **`n / cap`** in mono and a 4px bar — green under, amber at cap − 2 … cap, red over (the day
+  also takes a red border). Cards are real links (`delivery-card`, click → `/deliveries/[id]`)
+  with a ⋮⋮ grab handle, order number · window, customer · city, status chip (Scheduled /
+  Loaded / Out for delivery / Delivered / Failed; return pickups get the Waiting tint and read
+  **Pickup** with the RMA), and `$1,240.17 due` in amber. Empty day = dashed "No stops ·
+  Schedule here" linking to the orders waiting for a date. Month: the same grid for 35 days,
+  fraction + bar, a status roll-up per day and **Due at door**, no cards.
+- **Drag** — Scheduled and Loaded cards drag by the handle: the origin goes dashed at 45%, the
+  target column gets a navy dashed outline and previews **"Drop here · 8 → 9 / 15"**, drop
+  settles in 120ms (none under reduced motion), a toast offers **Undo**. **Keyboard**: focus a
+  card, press **M**, pick a day from a 14-day menu that shows each day's fraction. The audit
+  log gets the `delivery.update` row with the date change as before.
+- **Over cap** — allowed, never silent. A move onto a full day comes back `409 OVER_CAPACITY`;
+  the board asks for a one-line note ("Move anyway" stays disabled until it is written), the
+  day turns red, the note sits under that day's cards, and a banner at the top names each
+  over-cap day with its note ("Move a stop or confirm the note before printing the day sheet").
+- **Day sheet** (canvas 7e) — an 816px paper on screen, letter in print: header `{business} ·
+{truck}` / `Day sheet — Friday, September 12` / stops · pieces / driver / printed; meta strip
+  with Route, **COD to collect** (sum of what is owed on live delivery stops), the dispatch
+  instruction; the day's over-cap notes; per stop the number at 26pt, order · customer · phone,
+  address, **one tick box per piece**, notes in italics, window, "Collect at door" with the
+  amount bold when owed (or "Paid in full" / "Return pickup"), a signature line; the failed-stop
+  instruction is a fixed footer so it prints on every page. `@page { size: letter }`, 14pt,
+  black on white, no chrome. "All tickets (no lock)" is kept beside Print.
+- **Server** — `PATCH /v1/deliveries/:id` now runs the same soft-cap check as scheduling when
+  the date changes (stops, and pieces / capacity units when ops sets budgets): `409
+OVER_CAPACITY` with the dimensions, or, with `confirmOverCapacity: true`, a **required
+  `overCapacityNote`** that is appended to the stop's notes as `Over cap {date}: {note} — {who}`
+  (that line is what the board and the day sheet read), plus the `delivery.cap_override` audit
+  row and the `delivery_cap_override` exception the create path already writes.
+- Day sheet review follow-ups: stops print **grouped by run** (one strip per truck with its
+  driver, route, departed state, stops · pieces · COD; stops on no run come last as "Not on a
+  truck yet"), so a second truck's stops never sit under the first driver's header. Tick boxes
+  and the pieces count use the line's physical pieces (`quantity × pieces per unit`, now on
+  every delivery line as `pieces`). COD is counted once per order. The driver's name rides on
+  the run (`driverName`) so a Warehouse or Cashier login with `deliveries.view` sees it without
+  `users.view`. The board reads `?view` / `?d` through `useSearchParams` under Suspense so the
+  server and first client render agree.
+- The day header's `n / cap` counts every stop that used or will use the truck (delivered and
+  failed included, cancelled excluded); the capacity endpoint's live-only figure is a floor.
+  The board asks the list endpoint for `limit=2000` so a 35-day month is never truncated
+  (the endpoint now takes `limit`, capped at 2000, default 500).
+- `/dev/deliveries` (`?view=month`) and `/dev/deliveries/day/{today}` preview the board and the
+  sheet; fixtures are anchored on today (4 dispatched today, 16 over cap tomorrow with a note,
+  the pickup and a near-cap day after that, an empty day, a full day) so the interesting days
+  are always ahead of the viewer whatever the weekday.
+
+### Assumptions
+
+- The cap is the business's `ops.deliveryDailyCap` (default 15), business-wide — per-truck or
+  per-store caps are still an open question in the handoff (README §5).
+- The over-cap note lives on the moved stop's notes (no new column); a stop moved twice keeps
+  both lines. Booking a _new_ delivery over the cap from an order still uses the existing
+  confirm without a note.
+- "Waiting on stock" / "At risk" cards need the order's reservation state on the delivery row;
+  until the list carries it, cards show the delivery's own status.
+- Month view is a rolling five weeks from the anchor week, as the shipped calendar was.
+- Depart time and helper are not modelled; the sheet shows the run's route, truck and driver
+  when a run exists for the day.
+
+### Later
+
+- Reservation state on `GET /v1/deliveries` rows so Waiting / At risk chips appear on the board.
+- Per-store or per-truck capacity once decided.
+- Restyle `/deliveries/search` and `/deliveries/confirm` onto the kit headers.
