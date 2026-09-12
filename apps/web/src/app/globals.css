@@ -1,201 +1,288 @@
 /* ============================================================
    LA Mattress ERP — design tokens + base styles
-   Tailwind v4 supplies utilities (responsive grids, spacing,
-   etc.); the @theme block below maps our tokens into Tailwind's
-   palette so `bg-brand`, `text-danger`, `border-border` work.
-   The hand-rolled component classes (.btn/.card/.table/...) stay —
-   the shared components in src/components/ui.tsx build on them.
+   Redesign Phase 1 (2026-09-12): the token sheet from the design
+   hand-off (`design_handoff_redesign_12_phases/README.md` §1,
+   canvas `Redesign 2 System.dc.html` artboard 2d). Values are
+   literal; nothing is computed. Light mode only.
+
+   Tailwind v4 supplies utilities (responsive grids, spacing, …);
+   the @theme block maps the tokens into Tailwind's palette so
+   `bg-surface`, `text-muted`, `border-border` keep working. The
+   hand-rolled component classes (.btn/.card/.table/…) stay — the
+   shared components in src/components/ui.tsx build on them and are
+   rebuilt to the 2e artboard in Phase 2.
    ============================================================ */
 
 @import 'tailwindcss';
 
-/* Geist + Geist Mono, self-hosted variable fonts (dashboard redesign
-   2026-09-04): no render-blocking third-party stylesheet, and the register
-   still gets its type when the store is offline. Latin subsets from Google
-   Fonts (Geist v5). */
+/* ---------------------------------------------------------------
+   Fonts — self-hosted variable woff2 (latin + latin-ext subsets),
+   no render-blocking third-party stylesheet, and the register still
+   gets its type when the store is offline.
+     Public Sans 400–600   text
+     Archivo 500–700       numbers and headings (always tabular)
+     JetBrains Mono 400–500 SKUs, order numbers, money, times
+   --------------------------------------------------------------- */
 @font-face {
-  font-family: 'Geist';
+  font-family: 'Public Sans';
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/geist-latin-ext.woff2') format('woff2');
+  src: url('/fonts/public-sans-latin-ext.woff2') format('woff2');
   unicode-range:
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
     U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
     U+A720-A7FF;
 }
 @font-face {
-  font-family: 'Geist';
+  font-family: 'Public Sans';
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/geist-latin.woff2') format('woff2');
+  src: url('/fonts/public-sans-latin.woff2') format('woff2');
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: 'Geist Mono';
+  font-family: 'Archivo';
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 500 700;
   font-display: swap;
-  src: url('/fonts/geist-mono-latin-ext.woff2') format('woff2');
+  src: url('/fonts/archivo-latin-ext.woff2') format('woff2');
   unicode-range:
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
     U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
     U+A720-A7FF;
 }
 @font-face {
-  font-family: 'Geist Mono';
+  font-family: 'Archivo';
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 500 700;
   font-display: swap;
-  src: url('/fonts/geist-mono-latin.woff2') format('woff2');
+  src: url('/fonts/archivo-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
     U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-@theme inline {
-  --color-brand: var(--brand);
-  --color-brand-hover: var(--brand-hover);
-  --color-brand-soft: var(--brand-soft);
-  --color-surface: var(--surface);
-  --color-surface-muted: var(--surface-muted);
+@theme {
+  /* Neutral ramp */
   --color-page: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-text: var(--text);
-  --color-secondary: var(--text-secondary);
-  --color-muted: var(--text-muted);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-danger: var(--danger);
-  --color-info: var(--info);
-  --color-surface-2: var(--surface2);
+  --color-text-2: var(--text-2);
+  --color-muted: var(--muted);
   --color-faint: var(--faint);
+  /* Accent */
   --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
-  --font-sans: var(--font);
+  --color-accent-ink: var(--accent-ink);
+  /* Status (fg only; bg/border are read from the CSS variables) */
+  --color-status-draft: var(--status-draft-fg);
+  --color-status-waiting: var(--status-waiting-fg);
+  --color-status-scheduled: var(--status-scheduled-fg);
+  --color-status-fulfilled: var(--status-fulfilled-fg);
+  --color-status-cancelled: var(--status-cancelled-fg);
+  --color-status-risk: var(--status-risk-fg);
+  /* Legacy utility names still in the tree (bg-surface-muted, text-secondary, …) */
+  --color-brand: var(--accent);
+  --color-brand-hover: var(--accent-ink);
+  --color-brand-soft: var(--accent-soft);
+  --color-surface-muted: var(--surface-2);
+  --color-secondary: var(--text-2);
+  --color-success: var(--status-fulfilled-fg);
+  --color-warning: var(--status-waiting-fg);
+  --color-danger: var(--status-risk-fg);
+  --color-info: var(--status-scheduled-fg);
+  --font-sans: var(--font-text);
+  --font-display: var(--font-display);
   --font-mono: var(--font-mono);
-  --radius-card: var(--radius);
-  --radius-control: var(--radius-sm);
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
 }
 
 :root {
   /* ------------------------------------------------------------------
-     Design tokens — LA Mattress ERP dashboard redesign (Claude Design
-     hand-off, 2026-09-04). Neutral grays, one green accent, Geist type.
-     Light values live here; `[data-theme="dark"]` swaps the same names
-     below. The legacy names further down are aliases so every screen
-     built before the redesign picks the new palette up unchanged.
+     Colour — warm neutral ramp, one accent, six statuses (README §1).
      ------------------------------------------------------------------ */
-  --bg: #f3f4f6;
-  --surface: #ffffff;
-  --surface2: #f8f9fb;
-  --border: #e3e6ea;
-  --border2: #c9cfd6;
-  --text: #13161b;
-  --text2: #485160;
-  --muted: #6f7886;
-  --faint: #a3aab5;
-  --accent: oklch(0.62 0.15 155);
-  --accent-ink: oklch(0.42 0.13 155);
-  --accent-soft: oklch(0.96 0.03 155);
-  --accent-line: oklch(0.85 0.08 155);
-  --danger: oklch(0.6 0.19 25);
-  --danger-soft: oklch(0.96 0.03 25);
-  --danger-ink: oklch(0.45 0.16 25);
-  --warn: oklch(0.7 0.15 70);
-  --warn-soft: oklch(0.96 0.04 80);
-  --warn-ink: oklch(0.48 0.12 70);
-  --info: oklch(0.6 0.15 250);
-  --info-soft: oklch(0.95 0.03 250);
-  --info-ink: oklch(0.42 0.13 250);
-  --shadow: 0 1px 2px rgb(20 24 32 / 0.05), 0 8px 24px rgb(20 24 32 / 0.06);
-  --overlay: rgb(20 24 32 / 0.45);
-  /* Density (Cozy by default; `[data-density="compact"]` tightens). */
-  --rowy: 7px;
-  --pad: 14px;
-  --kpi: 24px;
+  --bg: #f6f5f2; /* app background */
+  --surface: #ffffff; /* sheets, rows */
+  --surface-2: #efeeea; /* hover, zebra, disabled, hairline rows */
+  --border: #dcd9d2; /* hairlines */
+  --border-strong: #bdb9b0; /* input hover, grips */
+  --text: #1c1b18; /* primary · 15.6:1 on surface */
+  --text-2: #4a4843; /* secondary · 8.6:1 */
+  --muted: #6f6c65; /* labels · 5.1:1 */
+  --faint: #9b978e; /* decoration only, never text */
+  --accent: #1e3a5f; /* primary button, links, focus ring, own row */
+  --accent-soft: #e7edf5; /* selected row, today, store-context chip */
+  --accent-ink: #16304f; /* link hover */
 
-  /* ---- Legacy aliases (pre-redesign class names keep working) ---- */
-  --brand: var(--accent);
-  --brand-hover: var(--accent-ink);
-  --brand-soft: var(--accent-soft);
-  --brand-soft-text: var(--accent-ink);
-  --surface-muted: var(--surface2);
-  --border-strong: var(--border2);
-  --text-secondary: var(--text2);
-  --text-muted: var(--muted);
-  --text-faint: var(--faint);
-  --success: var(--accent);
-  --success-soft: var(--accent-soft);
-  --success-soft-text: var(--accent-ink);
-  --warning: var(--warn);
-  --warning-soft: var(--warn-soft);
-  --warning-soft-text: var(--warn-ink);
-  --danger-soft-text: var(--danger-ink);
-  --info-soft-text: var(--info-ink);
-  --neutral-soft: var(--surface2);
-  --neutral-soft-text: var(--text2);
-  --shadow-sm: 0 1px 2px rgb(20 24 32 / 0.05);
+  /* Status chips — always glyph + word + colour, 1px border of the tint. */
+  --status-draft-fg: #6f6c65;
+  --status-draft-bg: #efeeea;
+  --status-draft-border: #dcd9d2;
+  --status-waiting-fg: #8a5a00;
+  --status-waiting-bg: #fbf1dc;
+  --status-waiting-border: #f0d9a6;
+  --status-scheduled-fg: #1f5fa8;
+  --status-scheduled-bg: #e5eef9;
+  --status-scheduled-border: #c9dcf2;
+  --status-fulfilled-fg: #1a6e43;
+  --status-fulfilled-bg: #e3f2e9;
+  --status-fulfilled-border: #bfe0cc;
+  --status-cancelled-fg: #6f6c65;
+  --status-cancelled-bg: #efeeea;
+  --status-cancelled-border: #dcd9d2;
+  --status-risk-fg: #b3261e;
+  --status-risk-bg: #fbe7e5;
+  --status-risk-border: #f0c4c0;
+  /* Destructive tier: outlined risk red on white, never filled. */
+  --destructive: var(--status-risk-fg);
+
+  --shadow: 0 1px 2px rgb(28 27 24 / 0.06), 0 8px 24px rgb(28 27 24 / 0.08);
+  --shadow-sm: 0 1px 2px rgb(28 27 24 / 0.06);
   --shadow-md: var(--shadow);
   --shadow-lg: var(--shadow);
+  --overlay: rgb(28 27 24 / 0.45);
 
-  /* Shape + type */
-  --radius: 9px;
-  --radius-sm: 6px;
-  --font:
-    'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  /* ------------------------------------------------------------------
+     Type — Public Sans text, Archivo numbers + headings, JetBrains
+     Mono for SKUs / order numbers / money / times.
+     ------------------------------------------------------------------ */
+  --font-text:
+    'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display:
+    'Archivo', 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --font: var(--font-text);
+
+  /* ------------------------------------------------------------------
+     Spacing 4 · 8 · 12 · 16 · 24 · 32 · 48.
+     Radius 3 (chips, inputs) · 5 (buttons, cards) · 0 (tables, sheets).
+     ------------------------------------------------------------------ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-chip: 3px;
+  --radius-input: 3px;
+  --radius-control: 3px;
+  --radius-button: 5px;
+  --radius-card: 5px;
+  --radius-sheet: 0;
+  /* Legacy radius names (pre-redesign classes) */
+  --radius: var(--radius-card);
+  --radius-sm: var(--radius-control);
+
+  /* Motion: 120ms ease-out for state changes only; slide-over 160ms. */
+  --motion: 120ms ease-out;
+  --motion-slide: 160ms ease-out;
 
   /* Shell */
   --sidebar-width: 220px;
   --sidebar-bg: var(--surface);
-  --sidebar-text: var(--text2);
+  --sidebar-text: var(--text-2);
   --sidebar-text-active: var(--text);
-  --sidebar-active-bg: var(--surface2);
+  --sidebar-active-bg: var(--surface-2);
   --topbar-height: 50px;
   color-scheme: light;
+
+  /* ------------------------------------------------------------------
+     Legacy aliases — every screen built before the redesign reads
+     these names and picks the new ramp up unchanged. Phase 2 and the
+     per-screen phases migrate call sites; Phase 12 deletes the aliases.
+     ------------------------------------------------------------------ */
+  --surface2: var(--surface-2);
+  --border2: var(--border-strong);
+  --text2: var(--text-2);
+  --brand: var(--accent);
+  --brand-hover: var(--accent-ink);
+  --brand-soft: var(--accent-soft);
+  --brand-soft-text: var(--accent-ink);
+  --accent-line: var(--status-scheduled-border);
+  --surface-muted: var(--surface-2);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--muted);
+  --text-faint: var(--faint);
+  --success: var(--status-fulfilled-fg);
+  --success-soft: var(--status-fulfilled-bg);
+  --success-soft-text: var(--status-fulfilled-fg);
+  --warn: var(--status-waiting-fg);
+  --warn-soft: var(--status-waiting-bg);
+  --warn-ink: var(--status-waiting-fg);
+  --warning: var(--status-waiting-fg);
+  --warning-soft: var(--status-waiting-bg);
+  --warning-soft-text: var(--status-waiting-fg);
+  --danger: var(--status-risk-fg);
+  --danger-soft: var(--status-risk-bg);
+  --danger-ink: var(--status-risk-fg);
+  --danger-soft-text: var(--status-risk-fg);
+  --info: var(--status-scheduled-fg);
+  --info-soft: var(--status-scheduled-bg);
+  --info-ink: var(--status-scheduled-fg);
+  --info-soft-text: var(--status-scheduled-fg);
+  --neutral-soft: var(--surface-2);
+  --neutral-soft-text: var(--text-2);
 }
 
-html[data-theme='dark'],
-body[data-theme='dark'] {
-  --bg: #0e1013;
-  --surface: #15181d;
-  --surface2: #1b1f26;
-  --border: #262b33;
-  --border2: #39404b;
-  --text: #e9ebef;
-  --text2: #b3bac4;
-  --muted: #7f8794;
-  --faint: #565d69;
-  --accent: oklch(0.72 0.15 155);
-  --accent-ink: oklch(0.8 0.13 155);
-  --accent-soft: oklch(0.28 0.05 155);
-  --accent-line: oklch(0.4 0.08 155);
-  --danger: oklch(0.7 0.17 25);
-  --danger-soft: oklch(0.3 0.06 25);
-  --danger-ink: oklch(0.78 0.14 25);
-  --warn: oklch(0.78 0.14 75);
-  --warn-soft: oklch(0.3 0.06 80);
-  --warn-ink: oklch(0.82 0.12 75);
-  --info: oklch(0.72 0.13 250);
-  --info-soft: oklch(0.28 0.05 250);
-  --info-ink: oklch(0.78 0.11 250);
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.5);
-  --overlay: rgb(0 0 0 / 0.6);
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  color-scheme: dark;
+/* ------------------------------------------------------------------
+   Density — two presets as data attributes. Management is the default
+   everywhere; the register (New Sale, product picker) opts in with
+   `data-density="register"` on its root and every descendant reads
+   the larger row / text / control / hit-target.
+     management  row 36px · text 13px · control 30px
+     register    row 44px · text 14px · control 38px · hit target ≥ 44px
+   The legacy --rowy / --pad / --kpi names derive from the preset.
+   ------------------------------------------------------------------ */
+:root,
+[data-density='management'] {
+  --row-h: 36px;
+  --text-size: 13px;
+  --control-h: 30px;
+  --hit-target: 30px;
+  --rowy: 7px;
+  --pad: 14px;
+  --kpi: 24px;
 }
-
-html[data-density='compact'],
-body[data-density='compact'] {
-  --rowy: 4px;
-  --pad: 10px;
-  --kpi: 20px;
+[data-density='register'] {
+  --row-h: 44px;
+  --text-size: 14px;
+  --control-h: 38px;
+  --hit-target: 44px;
+  --rowy: 11px;
+  --pad: 16px;
+  --kpi: 26px;
+  font-size: var(--text-size);
 }
 
 * {
@@ -209,20 +296,23 @@ body {
 }
 
 body {
-  font-family: var(--font);
+  font-family: var(--font-text);
   color: var(--text);
   background: var(--bg);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: var(--text-size);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: 'tnum' 1;
+  font-variant-numeric: tabular-nums;
 }
 
+/* Headings and numbers: Archivo, tabular at every size. */
 h1,
 h2,
 h3,
 h4 {
   color: var(--text);
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 
@@ -231,23 +321,120 @@ h4 {
    specificity — which painted the sidebar nav brand-on-navy. */
 @layer base {
   a {
-    color: var(--brand);
+    color: var(--accent);
+  }
+  a:hover {
+    color: var(--accent-ink);
   }
 }
 
-code {
+code,
+kbd,
+samp,
+pre {
   font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
 ::selection {
-  background: var(--brand-soft);
+  background: var(--accent-soft);
 }
 
+/* Focus ring — 2px accent outline, 2px offset, never removed. */
 :focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 1px;
-  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Type scale (canvas 2d) ---------- */
+
+.t-display-xl {
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.t-display-xl-lg {
+  font-size: 56px;
+}
+.t-display-l {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+.t-heading {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.t-title {
+  font-family: var(--font-text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.t-body {
+  font-family: var(--font-text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-body-register {
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.t-label {
+  font-family: var(--font-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.t-mono-sm {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Motion: nothing moves unless state changed ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* The skeleton shimmer is the one loop; it becomes a static two-tone bar. */
+  .skeleton,
+  .shimmer {
+    animation: none !important;
+    background: linear-gradient(90deg, var(--surface-2) 0 62%, var(--border) 62% 100%) !important;
+    background-size: auto !important;
+  }
 }
 
 /* ---------- Buttons ---------- */
@@ -258,7 +445,7 @@ code {
   justify-content: center;
   gap: 6px;
   padding: 6px 13px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-button);
   border: 1px solid transparent;
   font-family: var(--font);
   font-size: 12.5px;
@@ -282,12 +469,13 @@ code {
 }
 
 .btn-primary {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .btn-primary:hover:not(:disabled) {
-  opacity: 0.88;
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
 }
 
 .btn-secondary {
@@ -311,12 +499,11 @@ code {
 
 .btn-danger {
   background: var(--surface);
-  color: var(--danger);
-  border-color: var(--border-strong);
+  color: var(--destructive);
+  border-color: var(--destructive);
 }
 .btn-danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-  border-color: var(--danger);
+  background: var(--status-risk-bg);
 }
 
 .btn-sm {
@@ -348,9 +535,12 @@ code {
 .input:focus,
 .select:focus,
 .textarea:focus {
-  outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input:hover:not(:disabled):not(:focus),
+.select:hover:not(:disabled):not(:focus),
+.textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--border-strong);
 }
 
 /* Compact controls for table-row editors and totals rails. */
@@ -431,13 +621,6 @@ code {
   white-space: nowrap;
 }
 
-.table th:first-child {
-  border-top-left-radius: 8px;
-}
-.table th:last-child {
-  border-top-right-radius: 8px;
-}
-
 .table td {
   padding: var(--rowy) 10px;
   border-bottom: 1px solid var(--border);
@@ -505,7 +688,7 @@ code {
   font-weight: 500;
   letter-spacing: 0;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   white-space: nowrap;
   text-transform: capitalize;
 }
@@ -565,9 +748,9 @@ code {
 /* Sonner richColors success toast text measured 4.26:1 on its green tint
    (QA contrast sweep); sonner exposes these vars for exactly this override. */
 [data-sonner-toast][data-rich-colors='true'][data-type='success'] {
-  --success-bg: #f0fdf4;
-  --success-text: #166534;
-  --success-border: #bbf7d0;
+  --success-bg: var(--status-fulfilled-bg);
+  --success-text: var(--status-fulfilled-fg);
+  --success-border: var(--status-fulfilled-border);
 }
 
 .empty-state {
@@ -577,7 +760,7 @@ code {
   font-size: 13px;
   background: var(--surface-muted);
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
 }
 
 /* HubSpot-style pill tabs / filter chips. Active tab gets .pill-active. */
@@ -586,7 +769,7 @@ code {
   align-items: center;
   gap: 6px;
   padding: 5px 14px;
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text-secondary);
@@ -603,9 +786,9 @@ code {
   color: var(--text);
 }
 .pill-active {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 /* ---------- Skeletons ---------- */
@@ -620,8 +803,8 @@ code {
 }
 
 .skeleton {
-  border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, #eceef1 25%, #f5f6f8 50%, #eceef1 75%);
+  border-radius: var(--radius-chip);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--bg) 50%, var(--surface-2) 75%);
   background-size: 800px 100%;
   animation: shimmer 1.4s infinite linear;
   min-height: 14px;
@@ -655,10 +838,6 @@ code {
 .select[aria-invalid='true'] {
   border-color: var(--danger);
 }
-.input[aria-invalid='true']:focus,
-.select[aria-invalid='true']:focus {
-  box-shadow: 0 0 0 3px var(--danger-soft);
-}
 .field-error {
   margin: 4px 0 0;
   font-size: 12px;
@@ -678,7 +857,7 @@ code {
   background: none;
   color: var(--text-muted);
   padding: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   display: inline-flex;
 }
@@ -709,10 +888,10 @@ code {
   background: var(--danger);
 }
 .strength[data-score='2'] .strength-seg.on {
-  background: #f59e0b;
+  background: var(--status-waiting-fg);
 }
 .strength[data-score='3'] .strength-seg.on {
-  background: #22c55e;
+  background: var(--status-fulfilled-fg);
 }
 .strength[data-score='4'] .strength-seg.on {
   background: var(--success);
@@ -732,7 +911,7 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   border: 1px solid;
   font-size: 13px;
   line-height: 1.45;
@@ -741,22 +920,22 @@ code {
 .alert-error {
   background: var(--danger-soft);
   color: var(--danger-soft-text);
-  border-color: #fecaca;
+  border-color: var(--status-risk-border);
 }
 .alert-success {
   background: var(--success-soft);
   color: var(--success-soft-text);
-  border-color: #bbf7d0;
+  border-color: var(--status-fulfilled-border);
 }
 .alert-info {
   background: var(--info-soft);
   color: var(--info-soft-text);
-  border-color: #bfdbfe;
+  border-color: var(--status-scheduled-border);
 }
 .alert-warning {
-  background: #fffbeb;
-  color: #92400e;
-  border-color: #fde68a;
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting-fg);
+  border-color: var(--status-waiting-border);
 }
 .alert-title {
   font-weight: 600;
@@ -793,9 +972,7 @@ td > .alert,
   align-items: center;
   justify-content: center;
   padding: 48px 16px;
-  background:
-    radial-gradient(1200px 600px at 10% -10%, var(--brand-soft), transparent 60%),
-    radial-gradient(900px 500px at 110% 110%, #ecfeff, transparent 55%), var(--bg);
+  background: var(--bg);
 }
 .auth-column {
   width: 100%;
@@ -812,7 +989,7 @@ td > .alert,
   display: inline-flex;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--brand);
   color: #fff;
   font-weight: 800;
@@ -830,7 +1007,7 @@ td > .alert,
 .auth-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-lg);
   padding: 28px 28px 24px;
 }
@@ -978,9 +1155,7 @@ td > .alert,
 }
 .choice:hover,
 .choice:focus-visible {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
-  outline: none;
+  border-color: var(--accent);
 }
 .btn-link {
   background: none;
@@ -1030,7 +1205,7 @@ td > .alert,
   width: min(720px, calc(100vw - 32px));
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
   overflow: hidden;
 }
@@ -1059,7 +1234,7 @@ td > .alert,
   width: 100%;
   text-align: left;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: none;
   background: transparent;
   color: inherit;
@@ -1108,7 +1283,7 @@ td > .alert,
   --rdp-day-width: 34px;
   --rdp-day_button-height: 32px;
   --rdp-day_button-width: 32px;
-  --rdp-day_button-border-radius: 8px;
+  --rdp-day_button-border-radius: var(--radius-control);
   --rdp-selected-border: 2px solid var(--brand);
   font-size: 13px;
   margin: 0 auto;
@@ -1541,7 +1716,7 @@ td > .alert,
 .stat-tile {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-sm);
   padding: 12px 14px;
   min-width: 0;
@@ -1604,16 +1779,12 @@ td > .alert,
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--surface);
   -webkit-overflow-scrolling: touch;
 }
 .table-wrap > .table {
   min-width: 100%;
-}
-.table-wrap .table th:first-child,
-.table-wrap .table th:last-child {
-  border-radius: 0;
 }
 /* In a flush card the card IS the frame, so the wrap drops its own. */
 .card-flush > .table-wrap {
@@ -1691,7 +1862,7 @@ td > .alert,
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-md);
 }
 .menu-item {
@@ -1704,14 +1875,13 @@ td > .alert,
   color: var(--text);
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   text-decoration: none;
 }
 .menu-item:hover,
 .menu-item:focus-visible {
   background: var(--neutral-soft);
-  outline: none;
 }
 .menu-item:disabled {
   color: var(--text-faint);
@@ -1741,7 +1911,6 @@ td > .alert,
 .popover-option:focus-visible,
 .popover-option[aria-selected='true'] {
   background: var(--neutral-soft);
-  outline: none;
 }
 
 /* ---------- Typeahead: suggestion list anchored under an input ---------- */
@@ -1750,7 +1919,7 @@ td > .alert,
   margin-top: var(--space-1);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-md);
   overflow: hidden;
 }
@@ -1802,7 +1971,7 @@ td > .alert,
   color: var(--text-secondary);
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   text-decoration: none;
 }
@@ -1862,11 +2031,10 @@ td > .alert,
 }
 
 /* ============================================================
-   Redesign kit (2026-09-04) — the shell, the role homes and the
-   overlays use these. Values come straight from the hand-off:
-   9px card radius, 6px controls, 12.5px control type, Geist Mono
-   for every number. Everything reads the tokens above so it flips
-   with `data-theme` and `data-density`.
+   Shell / role-home kit (2026-09-04, re-tokened 2026-09-12 for
+   redesign Phase 1): card radius 5, controls 3/5, JetBrains Mono for
+   every number. Everything reads the tokens above; Phase 3 rebuilds
+   the shell itself and Phases 9–10 the role homes.
    ============================================================ */
 
 .mono {
@@ -1880,13 +2048,13 @@ td > .alert,
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface2);
 }
 .seg-btn {
   padding: 3px 9px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   font-size: 12px;
   font-weight: 500;
   background: transparent;
@@ -1913,7 +2081,7 @@ td > .alert,
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
@@ -1954,7 +2122,7 @@ td > .alert,
   min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-card);
 }
 .panel-clip {
   overflow: hidden;
@@ -1999,7 +2167,7 @@ td > .alert,
   padding: 9px var(--pad);
   background: var(--surface2);
   border-top: 1px solid var(--border);
-  border-radius: 0 0 9px 9px;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
 }
 .eyebrow {
   font-size: 11px;
@@ -2014,7 +2182,7 @@ td > .alert,
   color: var(--muted);
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
 }
 
 /* KPI strip: one bordered row, N equal cells, each a link. */
@@ -2023,7 +2191,7 @@ td > .alert,
   grid-template-columns: repeat(6, minmax(0, 1fr));
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-card);
   overflow: hidden;
 }
 .kpi-cell {
@@ -2114,8 +2282,8 @@ td > .alert,
   }
 }
 .shimmer {
-  border-radius: 4px;
-  background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+  border-radius: var(--radius-chip);
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--bg) 50%, var(--surface-2) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -2167,7 +2335,7 @@ td > .alert,
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
   animation: slideUp 0.18s ease;
 }
@@ -2196,7 +2364,7 @@ td > .alert,
   padding: 12px 18px;
   border-top: 1px solid var(--border);
   background: var(--surface2);
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
 }
 .icon-btn {
   width: 28px;
@@ -2204,7 +2372,7 @@ td > .alert,
   display: grid;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
@@ -2235,7 +2403,7 @@ td > .alert,
   z-index: 30;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow);
   animation: slideUp 0.15s ease;
   overflow: hidden;
@@ -2251,7 +2419,7 @@ td > .alert,
   width: 100%;
   padding: 7px 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   text-align: left;
   font-size: 12.5px;
@@ -2272,7 +2440,7 @@ kbd.key {
   font-size: 10.5px;
   padding: 0 5px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   background: var(--surface);
   color: var(--muted);
   line-height: 1.6;
@@ -2297,7 +2465,7 @@ kbd.key {
   align-items: center;
   gap: 9px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   font-size: 13px;
   color: var(--text2);
   text-decoration: none;
@@ -2332,7 +2500,7 @@ kbd.key {
   gap: 7px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface);
   font-size: 12.5px;
   font-weight: 500;
@@ -2350,7 +2518,7 @@ kbd.key {
   display: grid;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
@@ -2365,7 +2533,7 @@ kbd.key {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-chip);
   background: var(--danger);
   color: #fff;
   font-size: 10px;
@@ -2393,7 +2561,7 @@ kbd.key {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   text-align: left;
   white-space: nowrap;
@@ -2510,7 +2678,7 @@ kbd.key {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   text-align: left;
   white-space: nowrap;
@@ -2534,7 +2702,7 @@ kbd.key {
   display: inline-block;
   margin-left: 6px;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-chip);
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-size: 10px;
@@ -2577,7 +2745,7 @@ kbd.key {
 .pickup-box {
   margin-top: 14px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-card);
   overflow: hidden;
 }
 .pickup-box.is-outstanding {
@@ -2626,7 +2794,7 @@ kbd.key {
   padding: 10px var(--pad);
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-card);
   font-size: 12.5px;
 }
 .stores-foot-cell {
@@ -2656,7 +2824,7 @@ kbd.key {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   text-align: left;
   white-space: nowrap;
@@ -2716,7 +2884,7 @@ kbd.key {
   padding: 9px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-card);
   font-size: 12.5px;
 }
 .tc-chip {
@@ -2725,7 +2893,7 @@ kbd.key {
   gap: 5px;
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-chip);
   font-size: 11.5px;
   color: var(--muted);
   white-space: nowrap;
@@ -2733,7 +2901,7 @@ kbd.key {
 .tc-btn {
   padding: 6px 13px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -2804,7 +2972,7 @@ kbd.key {
   width: 100%;
   padding: 5px 2px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-card);
   background: transparent;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2837,7 +3005,7 @@ kbd.key {
   place-items: center;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -2856,7 +3024,7 @@ kbd.key {
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;

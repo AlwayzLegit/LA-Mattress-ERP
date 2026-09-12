@@ -18,7 +18,6 @@ const GROUPS: { label: string; items: { label: string; keys: string[] }[] }[] = 
       { label: 'New sale', keys: ['N'] },
       { label: 'Change period (dashboard)', keys: ['P'] },
       { label: 'Table page prev / next', keys: ['[', ']'] },
-      { label: 'Toggle theme', keys: ['T'] },
       { label: 'This panel', keys: ['?'] },
       { label: 'Close anything', keys: ['Esc'] },
     ],

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#f6f5f2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f}</style>
+</helmet>
+<div style="max-width:960px;margin:0 auto;padding:56px 32px;display:flex;flex-direction:column;gap:28px">
+  <div><div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65;letter-spacing:.04em">LA MATTRESS ERP · REDESIGN</div><h1 style="margin:6px 0 0;font-family:'Archivo',sans-serif;font-size:34px;font-weight:600;letter-spacing:-.02em;line-height:1.1">Nine phases, three working prototypes.</h1><p style="margin:10px 0 0;font-size:14.5px;line-height:1.55;color:#4a4843;max-width:720px">Each phase is a canvas: artboards at 1440 with the user, the first question, what we removed, and the team's disagreements and how they were settled. Phases 4–6 embed live prototypes you can click into. The current ERP design is untouched.</p></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <sc-for list="{{ phases }}" as="p" hint-placeholder-count="9">
+      <a href="{{ p.href }}" style="display:grid;grid-template-columns:44px 1fr;gap:12px;padding:16px 18px;background:#fff;border:1px solid #dcd9d2;text-decoration:none;color:inherit" style-hover="border-color:#1e3a5f"><span style="font-family:'Archivo',sans-serif;font-size:26px;font-weight:600;color:#1e3a5f;line-height:1">{{ p.n }}</span><span><span style="display:block;font-weight:600;font-size:15px">{{ p.title }}</span><span style="display:block;font-size:12.5px;color:#4a4843;margin-top:3px;line-height:1.45">{{ p.desc }}</span></span></a>
+    </sc-for>
+  </div>
+  <div style="background:#fff;border:1px solid #dcd9d2;padding:18px 20px"><div style="font-weight:600;margin-bottom:8px">Prototypes</div><div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px"><a href="Proto New Sale.dc.html">New Sale (register) →</a><a href="Proto Orders.dc.html">Orders + slide-over →</a><a href="Proto Products.dc.html">Products browser, page, adjust, receive →</a><a href="Proto Dashboard.dc.html">Dashboards (owner, manager, ops, warehouse) →</a><a href="Proto Competition.dc.html">Sales competition strip →</a></div><div style="font-size:12.5px;color:#6f6c65;margin-top:8px">Each prototype has a Scene tweak to jump to a state. Keys in New Sale: F2 add product, F8 take payment, Esc closes.</div></div>
+  <div style="font-size:12.5px;color:#6f6c65;line-height:1.55">Decisions carried from your answers: stores Glendale · Koreatown · La Brea · Studio City · West LA · Warehouse; SO- order numbers; management density by default; one accent #1e3a5f; Public Sans / Archivo / JetBrains Mono; five collapsible nav groups; right-rail totals; colour + glyph + word status chips; owner dashboard leads with company written today vs same day last week and last month, every existing card kept.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return { phases: [['1', 'Principles and the three-second test', 'Six rules, the first question per role, and the screen-priority matrix.', 'Redesign 1 Principles.dc.html'], ['2', 'Design system', 'Three type candidates and a winner; tokens; components in both densities.', 'Redesign 2 System.dc.html'], ['3', 'Shell, navigation and store context', '35 links → 5 groups. Acting-for chip. Palette. Loading and error at the shell level.', 'Redesign 3 Shell.dc.html'], ['4', 'New Sale, the register', 'Live prototype in six states: empty, mid-sale, picker, payment, completed, $0 warning.', 'Redesign 4 New Sale.dc.html'], ['5', 'Orders and order detail', 'List, filtered, slide-over, locked, cancel confirm — all live.', 'Redesign 5 Orders.dc.html'], ['6', 'Products, stock and cross-store visibility', 'Browser with a column per store, product page led by the location grid, adjustment dialog, receive.', 'Redesign 6 Products.dc.html'], ['7', 'Deliveries and dispatch', 'Week and month boards with n / 15, drag in progress, over-cap, day sheet.', 'Redesign 7 Deliveries.dc.html'], ['8', 'Dashboard and owner reporting', 'Critique, then the owner and manager homes and the Z-report close screen.', 'Redesign 8 Dashboard.dc.html'], ['9', 'Accessibility, states and handoff', 'Focus order, state matrix, contrast, motion, a handoff sheet per screen.', 'Redesign 9 Handoff.dc.html'], ['10', 'Sales competitions', 'The six-race strip on every dashboard: anatomy, all cards, leaderboards, lead capture, month states, TV mode, owner settings.', 'Redesign 10 Competitions.dc.html']].map(([n, title, desc, href]) => ({ n, title, desc, href })) };
+  }
+}
+</script>
+</body>
+</html>
