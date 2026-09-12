@@ -122,6 +122,8 @@ export const PERMISSIONS = {
   'pos.cash.approve': 'Approve an out-of-tolerance or suspended drawer count',
   'pos.cash.pickup_confirm':
     'Tick a cash payment as physically picked up from the store (dashboard store cards)',
+  'pos.cash.pickup_record':
+    'Record and post a cash pickup — count the drawer against its cash payments, write the slip (Owner, Operations, and a manager for their own store)',
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',

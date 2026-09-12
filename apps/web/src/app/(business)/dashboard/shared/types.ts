@@ -91,7 +91,7 @@ export interface PaymentListResponse {
 }
 
 export type ChangeTone = 'danger' | 'warn' | 'ok' | 'info';
-export type ChangesFilter = 'all' | 'money' | 'unseen';
+export type ChangesFilter = 'all' | 'critical' | 'warning' | 'money' | 'unseen';
 
 export interface ChangeRow {
   id: string;
@@ -171,4 +171,61 @@ export interface TimeClockMe {
   hoursWeek: number;
   scheduledToday: { startMinutes: number; endMinutes: number } | null;
   allowed: PunchType[];
+}
+
+// ---- Redesign Phase 9: cash pickups --------------------------------------
+
+export type PickupStatus = 'none' | 'collected' | 'holding' | 'due';
+
+export interface PendingCashRow {
+  paymentId: string;
+  docKind: 'order' | 'sale' | 'service';
+  docId: string;
+  docNumber: string;
+  customerName: string | null;
+  salespersonName: string | null;
+  paidAt: string;
+  /** Store-local days since the payment was taken (0 = today). */
+  ageDays: number;
+  amountCents: number;
+}
+
+export interface PickupSummary {
+  id: string;
+  number: string;
+  recordedAt: string;
+  byName: string;
+  countedCents: number;
+  expectedCents: number;
+  varianceCents: number;
+  slip: string | null;
+  note: string | null;
+  paymentCount: number;
+}
+
+export interface CashPickupStore {
+  locationId: string;
+  name: string;
+  timezone: string;
+  status: PickupStatus;
+  pendingCents: number;
+  pendingCount: number;
+  oldestDays: number | null;
+  since: string;
+  lastPickup: PickupSummary | null;
+  payments: PendingCashRow[];
+  canRecord: boolean;
+}
+
+export interface CashPickupQueue {
+  date: string;
+  rule: { dueCents: number; dueDays: number };
+  viewer: { membershipId: string | null; canRecord: boolean };
+  stores: CashPickupStore[];
+  totals: { storeCount: number; pendingCents: number; dueCount: number; holdingCount: number };
+}
+
+export interface PostPickupResult {
+  pickup: PickupSummary & { locationId: string; paymentIds: string[] };
+  store: CashPickupStore;
 }

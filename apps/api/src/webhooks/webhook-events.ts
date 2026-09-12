@@ -45,6 +45,10 @@ export const WEBHOOK_EVENT_TYPES = [
   // locationId, receivedByMembershipId } — the owner's or Operations'
   // tick that a cash payment was physically picked up (dashboard 2026-09-10).
   'cash_pickup.confirmed',
+  // Payload: { pickupId, number, locationId, countedCents, expectedCents,
+  // varianceCents, slip, paymentIds, recordedByMembershipId } — a posted
+  // drawer pickup (redesign Phase 9).
+  'cash_pickup.posted',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

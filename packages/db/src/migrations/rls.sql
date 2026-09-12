@@ -152,6 +152,8 @@ DECLARE
     'order_tasks',
     'member_notifications',
     'cash_pickup_receipts',
+    'cash_pickups',
+    'cash_pickup_items',
     'order_change_acks',
     'staff_shifts',
     'time_punches',

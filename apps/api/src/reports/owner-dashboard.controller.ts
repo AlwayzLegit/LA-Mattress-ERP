@@ -57,6 +57,31 @@ export interface OwnerDashboard {
   } | null;
   trend: TrendPoint[];
   compareTrend: TrendPoint[];
+  /**
+   * Redesign Phase 9 headline: company written today against the same
+   * weekday last week and the same calendar day last month, plus the six
+   * small figures and their baselines. Always store-local "today",
+   * whatever window the chart is on.
+   */
+  today: {
+    date: string;
+    writtenCents: number;
+    ticketCount: number;
+    storeCount: number;
+    avgTicketCents: number;
+    lastWeek: { date: string; writtenCents: number };
+    lastMonth: { date: string; writtenCents: number };
+    collectedCents: number;
+    collectedLastWeekCents: number;
+    balanceDueCents: number;
+    refundsCents: number;
+    refundsLastWeekCents: number;
+    cancellations: number;
+    cancellationsLastWeek: number;
+    deliveries: { booked: number; cap: number };
+  };
+  monthToDate: { range: DayRange; writtenCents: number; prior: DayRange; priorCents: number };
+  exceptions: { open: number; critical: number };
 }
 
 export interface OwnerOrderRow {
@@ -87,6 +112,14 @@ function shiftDays(day: string, n: number): string {
   const d = new Date(`${day}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
+}
+
+/** The same calendar day one month earlier, clamped to that month's length. */
+export function sameDayLastMonth(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  const lastOfPrev = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
+  const prev = new Date(Date.UTC(y, m - 2, Math.min(d, lastOfPrev)));
+  return prev.toISOString().slice(0, 10);
 }
 
 function daysInclusive(range: DayRange): number {
@@ -392,7 +425,163 @@ export class OwnerDashboardController {
       .limit(1);
     const cap = (biz?.ops as { deliveryDailyCap?: number } | null)?.deliveryDailyCap ?? 15;
 
+    // ---- Phase 9 headline, figures and side tiles -------------------------
+    const lastWeekDay = shiftDays(today, -7);
+    const lastMonthDay = sameDayLastMonth(today);
+    const dayRange = (d: string): DayRange => ({ start: d, end: d });
+    const mtd: DayRange = { start: `${today.slice(0, 7)}-01`, end: today };
+    const priorMtd: DayRange = {
+      start: `${lastMonthDay.slice(0, 7)}-01`,
+      end: lastMonthDay,
+    };
+    const payLocation = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const scopePayments = and(
+      salesScopeCond(tenant, payLocation),
+      locationIds
+        ? sql`${payLocation} IN (${sql.join(
+            locationIds.map((id) => sql`${id}::uuid`),
+            sql`, `,
+          )})`
+        : undefined,
+    );
+    const paymentsFor = async (
+      r: DayRange,
+      sign: 'in' | 'out',
+    ): Promise<{ cents: number; count: number }> => {
+      const from = tzDayStart(r.start, tz);
+      const to = tzDayEndExclusive(r.end, tz);
+      const [row] = await this.db
+        .select({
+          count: sql<number>`count(*)::int`,
+          cents: sql<number>`coalesce(sum(${sign === 'in' ? schema.payments.amountCents : sql`-${schema.payments.amountCents}`}), 0)::int`,
+        })
+        .from(schema.payments)
+        .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
+        .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
+        .leftJoin(schema.serviceOrders, eq(schema.serviceOrders.id, schema.payments.serviceOrderId))
+        .where(
+          and(
+            eq(schema.payments.businessId, businessId),
+            eq(schema.payments.status, 'succeeded'),
+            sign === 'in'
+              ? sql`${schema.payments.amountCents} > 0`
+              : sql`${schema.payments.amountCents} < 0`,
+            sql`${schema.payments.createdAt} >= ${from} AND ${schema.payments.createdAt} < ${to}`,
+            isNull(schema.sales.importedAt),
+            isNull(schema.orders.importedAt),
+            isNull(schema.serviceOrders.importedAt),
+            scopePayments,
+          ),
+        );
+      return { cents: row?.cents ?? 0, count: row?.count ?? 0 };
+    };
+    const cancellationsFor = async (r: DayRange): Promise<number> => {
+      const from = tzDayStart(r.start, tz);
+      const to = tzDayEndExclusive(r.end, tz);
+      const [row] = await this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.businessId, businessId),
+            eq(schema.orders.status, 'cancelled'),
+            isNull(schema.orders.importedAt),
+            sql`${schema.orders.cancelledAt} >= ${from} AND ${schema.orders.cancelledAt} < ${to}`,
+            scopeOrders,
+          ),
+        );
+      return row?.n ?? 0;
+    };
+    const writtenFor = async (r: DayRange): Promise<number> => {
+      const rows = await trendFor(r);
+      return sum(rows, 'orderCents') + sum(rows, 'registerCents');
+    };
+    const [
+      todayWritten,
+      todayCounts,
+      lastWeekWritten,
+      lastMonthWritten,
+      mtdWritten,
+      priorMtdWritten,
+      collectedToday,
+      collectedLastWeek,
+      refundsToday,
+      refundsLastWeek,
+      saleRefundsToday,
+      saleRefundsLastWeek,
+      cancelsToday,
+      cancelsLastWeek,
+      exceptionRows,
+      storeRows,
+    ] = await Promise.all([
+      writtenFor(dayRange(today)),
+      countFor(dayRange(today)),
+      writtenFor(dayRange(lastWeekDay)),
+      writtenFor(dayRange(lastMonthDay)),
+      writtenFor(mtd),
+      writtenFor(priorMtd),
+      paymentsFor(dayRange(today), 'in'),
+      paymentsFor(dayRange(lastWeekDay), 'in'),
+      paymentsFor(dayRange(today), 'out'),
+      paymentsFor(dayRange(lastWeekDay), 'out'),
+      refundsFor(dayRange(today)),
+      refundsFor(dayRange(lastWeekDay)),
+      cancellationsFor(dayRange(today)),
+      cancellationsFor(dayRange(lastWeekDay)),
+      this.db
+        .select({ severity: schema.exceptionEvents.severity, n: sql<number>`count(*)::int` })
+        .from(schema.exceptionEvents)
+        .where(
+          and(
+            eq(schema.exceptionEvents.businessId, businessId),
+            isNull(schema.exceptionEvents.acknowledgedAt),
+          ),
+        )
+        .groupBy(schema.exceptionEvents.severity),
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.locations)
+        .where(
+          and(
+            eq(schema.locations.businessId, businessId),
+            eq(schema.locations.isActive, true),
+            sql`${schema.locations.locationType} <> 'warehouse'`,
+            locationIds ? inArray(schema.locations.id, locationIds) : undefined,
+            tenant.dataScope === 'store'
+              ? inArray(schema.locations.id, tenant.scopeLocationIds ?? [])
+              : undefined,
+          ),
+        ),
+    ]);
+    const todayTickets = todayCounts.orders + todayCounts.tickets;
+    const exceptionsOpen = exceptionRows.reduce((n, r) => n + r.n, 0);
+    const exceptionsCritical = exceptionRows.find((r) => r.severity === 'critical')?.n ?? 0;
+
     return {
+      today: {
+        date: today,
+        writtenCents: todayWritten,
+        ticketCount: todayTickets,
+        storeCount: storeRows[0]?.n ?? 0,
+        avgTicketCents: todayTickets > 0 ? Math.round(todayWritten / todayTickets) : 0,
+        lastWeek: { date: lastWeekDay, writtenCents: lastWeekWritten },
+        lastMonth: { date: lastMonthDay, writtenCents: lastMonthWritten },
+        collectedCents: collectedToday.cents,
+        collectedLastWeekCents: collectedLastWeek.cents,
+        balanceDueCents: openBook?.balance ?? 0,
+        refundsCents: refundsToday.cents + saleRefundsToday.cents,
+        refundsLastWeekCents: refundsLastWeek.cents + saleRefundsLastWeek.cents,
+        cancellations: cancelsToday,
+        cancellationsLastWeek: cancelsLastWeek,
+        deliveries: { booked, cap },
+      },
+      monthToDate: {
+        range: mtd,
+        writtenCents: mtdWritten,
+        prior: priorMtd,
+        priorCents: priorMtdWritten,
+      },
+      exceptions: { open: exceptionsOpen, critical: exceptionsCritical },
       date: today,
       range,
       compare,

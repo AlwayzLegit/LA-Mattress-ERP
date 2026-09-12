@@ -42,6 +42,8 @@ export * from './schedule';
 export const TENANT_SCOPED_TABLES = [
   'order_attachments',
   'cash_pickup_receipts',
+  'cash_pickups',
+  'cash_pickup_items',
   'order_change_acks',
   'staff_shifts',
   'time_punches',

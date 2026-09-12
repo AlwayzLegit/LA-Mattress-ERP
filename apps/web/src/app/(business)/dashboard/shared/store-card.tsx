@@ -1,80 +1,69 @@
 'use client';
 
-import { StatusPill, usdWhole } from '../owner/owner-kit';
-import { clockTime, dayAndTime, dayShort, plural, stamp, tenderMeta } from './kit';
+import { usdWhole } from '../owner/owner-kit';
+import { CashOnHandPanel, type CashPickupsApi } from './cash-pickups';
+import { clockTime, dayAndTime, plural, tenderMeta } from './kit';
 import type { StoreCardData, StorePeriod } from './types';
 
 /**
- * Screen 2 — one store's card (hand-off 2026-09-10): header with the
- * manager, selling count and cash pill; five-cell stat strip; and, when
- * expanded, the salesperson table beside money received by tender and
- * the cash pickup list with a tick per cash payment.
+ * One store's card (redesign Phase 9, canvas 8 "Stores"): a header with
+ * the manager and salesperson count on the left and Written · Delivered
+ * · Received · Refunds on the right; then three columns — the
+ * salespeople table, money received by method (each row opens the
+ * payment list), and cash on hand with the tick list and the Record →
+ * Post pickup flow.
  */
 export function StoreCard({
   card,
   period,
   open,
   onToggle,
-  canTick,
-  busy,
-  onTick,
-  onBulk,
   onOpenPayments,
+  cp,
+  actorName,
 }: {
   card: StoreCardData;
   period: StorePeriod;
   open: boolean;
   onToggle: () => void;
-  canTick: boolean;
-  /** Payment ids with a tick request in flight. */
-  busy: Set<string>;
-  onTick: (paymentId: string, received: boolean) => void;
-  onBulk: (received: boolean) => void;
   onOpenPayments: (method: string) => void;
+  cp: CashPickupsApi;
+  actorName?: string | null;
 }) {
   const tz = card.timezone;
-  const outstanding = card.cashPendingCents > 0;
-  const allTicked = card.cashPaymentCount > 0 && card.cashReceivedCount === card.cashPaymentCount;
-  const cashState =
-    card.cashPaymentCount === 0
-      ? 'no cash'
-      : allTicked
-        ? 'all cash picked up'
-        : card.cashReceivedCount > 0
-          ? `${card.cashReceivedCount} of ${card.cashPaymentCount} picked up`
-          : 'awaiting pickup';
-  const cashReceivedCents = card.cashTotalCents - card.cashPendingCents;
-  const cashNote =
-    card.cashPaymentCount === 0
-      ? null
-      : allTicked
-        ? 'all picked up'
-        : card.cashReceivedCount === 0
-          ? 'none picked up'
-          : `${usdWhole(cashReceivedCents)} received`;
+  const reps = card.salespeople;
 
   return (
     <section
-      className="panel panel-clip"
+      className="panel panel-clip sc"
       data-testid="store-card"
       data-location-id={card.locationId}
+      id={`store-${card.locationId}`}
     >
-      <div className="panel-head" style={{ gap: 10 }}>
-        <h2 style={{ fontSize: 14 }}>{card.name}</h2>
-        <span className="panel-sub">
-          {card.manager ? `${card.manager.name} · manager · ` : ''}
-          {card.sellingCount} selling
+      <div className="sc-head">
+        <h3 className="sc-name">{card.name}</h3>
+        <span className="sc-sub">
+          {card.manager ? `${card.manager.name} · ` : ''}
+          {plural(Math.max(card.sellingCount, reps.length), 'salesperson', 'salespeople')}
         </span>
-        <StatusPill tone={outstanding ? 'warn' : 'ok'}>
-          <span className="mono">
-            {usdWhole(outstanding ? card.cashPendingCents : card.cashTotalCents)}
-          </span>
-          <span>{cashState}</span>
-        </StatusPill>
+        <div className="sc-figs" data-testid="store-figs">
+          <Fig label="Written" value={usdWhole(card.writtenCents)} strong />
+          <Fig
+            label="Delivered"
+            value={card.deliveredCents ? usdWhole(card.deliveredCents) : '—'}
+            muted={!card.deliveredCents}
+          />
+          <Fig label="Received" value={usdWhole(card.receivedCents)} />
+          <Fig
+            label="Refunds"
+            value={card.refundsCents ? `−${usdWhole(card.refundsCents)}` : '—'}
+            danger={card.refundsCents > 0}
+            muted={!card.refundsCents}
+          />
+        </div>
         <button
           type="button"
           className="btn btn-secondary btn-sm"
-          style={{ marginLeft: 'auto' }}
           onClick={onToggle}
           data-testid="store-card-toggle"
         >
@@ -82,73 +71,39 @@ export function StoreCard({
         </button>
       </div>
 
-      <div className="store-stats">
-        <Stat
-          label="Written"
-          value={usdWhole(card.writtenCents)}
-          sub={plural(card.writtenCount, 'order')}
-        />
-        <Stat
-          label="Delivered"
-          value={usdWhole(card.deliveredCents)}
-          sub={plural(card.deliveredCount, 'order')}
-        />
-        <Stat label="Avg ticket" value={usdWhole(card.avgTicketCents)} />
-        <Stat
-          label="Money received"
-          value={usdWhole(card.receivedCents)}
-          sub={plural(card.receivedCount, 'payment')}
-          color="var(--accent-ink)"
-        />
-        <Stat
-          label="Cash awaiting pickup"
-          value={usdWhole(card.cashPendingCents)}
-          sub={card.cashPaymentCount > 0 ? `of ${usdWhole(card.cashTotalCents)}` : 'no cash'}
-          color={outstanding ? 'var(--warn)' : 'var(--accent-ink)'}
-        />
-      </div>
-
       {open && (
-        <div className="store-detail" data-testid="store-card-detail">
-          <div style={{ minWidth: 0, overflowX: 'auto' }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
-              Salesperson activity
-            </div>
-            {card.salespeople.length === 0 ? (
-              <div style={{ padding: '20px 0', color: 'var(--muted)', fontSize: 12.5 }}>
-                Nothing written at this store in the period.
-              </div>
+        <div className="sc-body" data-testid="store-card-detail">
+          <div className="sc-col" style={{ minWidth: 0, overflowX: 'auto' }}>
+            <div className="eyebrow sc-col-title">Salespeople</div>
+            {reps.length === 0 ? (
+              <div className="sc-empty">Nothing written at this store in the period.</div>
             ) : (
               <table className="store-table">
                 <thead>
                   <tr>
-                    <th>Salesperson</th>
+                    <th>Name</th>
                     <th className="num">Written</th>
-                    <th className="num">Delivered</th>
                     <th className="num">Orders</th>
-                    <th className="num">Avg ticket</th>
+                    <th className="num">Avg</th>
                     <th className="num">Collected</th>
                     <th className="num" style={{ paddingRight: 0 }}>
-                      Last write-up
+                      Last sale
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {card.salespeople.map((s) => (
+                  {reps.map((s) => (
                     <tr key={s.membershipId} data-testid="store-salesperson">
                       <td style={{ fontWeight: s.isManager ? 600 : 400 }}>
                         {s.name}
                         {s.isManager && <span className="manager-badge">Manager</span>}
                       </td>
                       <td className="num">{usdWhole(s.writtenCents)}</td>
-                      <td className="num" style={{ color: 'var(--text2)' }}>
-                        {usdWhole(s.deliveredCents)}
-                      </td>
                       <td className="num" style={{ color: 'var(--muted)' }}>
                         {s.orders}
                       </td>
                       <td className="num" style={{ color: 'var(--muted)' }}>
-                        {usdWhole(s.avgTicketCents)}
+                        {s.orders ? usdWhole(s.avgTicketCents) : '—'}
                       </td>
                       <td className="num">{usdWhole(s.collectedCents)}</td>
                       <td
@@ -159,7 +114,7 @@ export function StoreCard({
                           ? period === 'today'
                             ? clockTime(s.lastWriteUpAt, tz)
                             : dayAndTime(s.lastWriteUpAt, tz)
-                          : '—'}
+                          : 'no sales'}
                       </td>
                     </tr>
                   ))}
@@ -168,10 +123,8 @@ export function StoreCard({
             )}
           </div>
 
-          <div style={{ minWidth: 0 }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
-              Money received · click for payments
-            </div>
+          <div className="sc-col" style={{ minWidth: 0 }}>
+            <div className="eyebrow sc-col-title">Money received · by method</div>
             <div data-testid="store-tenders">
               {card.tenders.map((t) => {
                 const meta = tenderMeta(t.method);
@@ -183,116 +136,36 @@ export function StoreCard({
                     className="tender-row"
                     disabled={empty}
                     onClick={() => onOpenPayments(t.method)}
+                    title={empty ? undefined : 'Show the payments'}
                     data-testid={`tender-${t.method}`}
                   >
-                    <span style={{ minWidth: 0 }}>
+                    <span style={{ minWidth: 0, color: empty ? 'var(--muted)' : undefined }}>
                       <span className="tender-swatch" style={{ background: meta.swatch }} />
                       {meta.label}
-                      {!empty && (
-                        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--faint)' }}>
-                          {plural(t.count, 'payment')}
-                        </span>
-                      )}
+                      {!empty && <span className="tender-count"> · {t.count}</span>}
                     </span>
-                    <span style={{ fontSize: 11.5, color: 'var(--accent-ink)' }}>
-                      {t.method === 'cash' && cashNote}
-                    </span>
+                    <span />
                     <span className="mono" style={{ color: empty ? 'var(--faint)' : undefined }}>
                       {empty ? '—' : usdWhole(t.cents)}
                     </span>
                   </button>
                 );
               })}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '9px 6px 0',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                }}
-              >
+              <div className="sc-total">
                 <span>Total received</span>
                 <span className="mono">{usdWhole(card.receivedCents)}</span>
               </div>
               {card.refundsCents > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '4px 6px 0',
-                    fontSize: 12.5,
-                  }}
-                >
-                  <span style={{ color: 'var(--muted)' }}>Refunds paid out</span>
-                  <span className="mono" style={{ color: 'var(--danger)' }}>
-                    {usdWhole(card.refundsCents)}
-                  </span>
+                <div className="sc-total is-refund">
+                  <span>Refunds paid out</span>
+                  <span className="mono">−{usdWhole(card.refundsCents)}</span>
                 </div>
               )}
             </div>
+          </div>
 
-            <div
-              className={`pickup-box${outstanding ? ' is-outstanding' : ''}`}
-              data-testid="cash-pickup"
-            >
-              <div className="pickup-head">
-                <span className="eyebrow">Cash pickup</span>
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>
-                  {usdWhole(card.cashTotalCents)}
-                </span>
-                {canTick && card.cashPaymentCount > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    style={{ marginLeft: 'auto' }}
-                    onClick={() => onBulk(!allTicked)}
-                    data-testid="cash-pickup-bulk"
-                  >
-                    {allTicked ? 'Clear all ticks' : 'Mark all received'}
-                  </button>
-                )}
-              </div>
-              {card.cashPayments.length === 0 ? (
-                <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--muted)' }}>
-                  No cash taken this period.
-                </div>
-              ) : (
-                card.cashPayments.map((p) => {
-                  const done = !!p.receipt;
-                  return (
-                    <label
-                      key={p.paymentId}
-                      className={`pickup-row${done ? ' is-received' : ''}`}
-                      data-testid="cash-pickup-row"
-                      style={{ cursor: canTick ? 'pointer' : 'default' }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={done}
-                        disabled={!canTick || busy.has(p.paymentId)}
-                        onChange={(e) => onTick(p.paymentId, e.target.checked)}
-                        style={{ accentColor: 'var(--accent)', width: 15, height: 15 }}
-                        aria-label={`${p.docNumber} cash ${done ? 'received' : 'awaiting pickup'}`}
-                      />
-                      <span style={{ minWidth: 0 }}>
-                        <span className="mono">{p.docNumber}</span>
-                        <span style={{ color: 'var(--muted)' }}>
-                          {' '}
-                          · sold {dayShort(p.soldAt, tz)}
-                        </span>
-                        <div className="pickup-meta">
-                          {p.receipt
-                            ? `Received ${stamp(p.receipt.receivedAt, tz)} · ${p.receipt.byName}${p.receipt.byRole ? ` (${p.receipt.byRole})` : ''}`
-                            : `${p.kind}${p.customerName ? ` · ${p.customerName}` : ''} · awaiting pickup`}
-                        </div>
-                      </span>
-                      <span className="pickup-amount">{usdWhole(p.amountCents)}</span>
-                    </label>
-                  );
-                })
-              )}
-            </div>
+          <div className="sc-col" style={{ minWidth: 0 }}>
+            <CashOnHandPanel cp={cp} locationId={card.locationId} actorName={actorName} />
           </div>
         </div>
       )}
@@ -300,24 +173,28 @@ export function StoreCard({
   );
 }
 
-function Stat({
+function Fig({
   label,
   value,
-  sub,
-  color,
+  strong,
+  danger,
+  muted,
 }: {
   label: string;
   value: string;
-  sub?: string;
-  color?: string;
+  strong?: boolean;
+  danger?: boolean;
+  muted?: boolean;
 }) {
   return (
-    <div className="store-stat">
-      <div className="store-stat-label">{label}</div>
-      <div className="store-stat-value" style={{ color }}>
-        <span>{value}</span>
-        {sub && <span className="store-stat-sub">{sub}</span>}
-      </div>
-    </div>
+    <span className="sc-fig">
+      <span className="sc-fig-label">{label}</span>
+      <span
+        className={`sc-fig-value mono${strong ? ' is-strong' : ''}`}
+        style={{ color: danger ? 'var(--status-risk-fg)' : muted ? 'var(--faint)' : undefined }}
+      >
+        {value}
+      </span>
+    </span>
   );
 }

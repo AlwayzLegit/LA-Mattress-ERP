@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
 import { presetLabel } from '@/lib/date-range';
@@ -8,25 +9,19 @@ import { ChangesCard } from '../shared/changes-card';
 import { StaffSchedule } from '../shared/staff-schedule';
 import { StoresSection } from '../shared/stores-section';
 import { MorningBriefCard, type MorningBrief } from './morning-brief';
-import {
-  CardHandle,
-  KpiStrip,
-  Panel,
-  pctDelta,
-  usdShort,
-  usdWhole,
-  type KpiTile,
-} from './owner-kit';
+import { CardHandle, Panel, pctDelta, shortDay, usdWhole } from './owner-kit';
 import { WrittenBusinessChart, type TrendPoint } from './written-business';
 
 /**
- * The owner home (Claude Design hand-off 2026-09-04, reworked 2026-09-10):
- * KPI strip, written-business chart and morning brief following the
- * topbar's period, store scope and compare-to; then one card per store
- * (salespeople, money received, cash pickup ticks) and the full-width
- * Changes log — both scoped to the topbar's stores, with their own
- * month-to-date / today toggle — and the editable staff schedule. Cards
- * can be reordered / hidden per browser ("Customize").
+ * The owner home (redesign Phase 9, README §3.5, canvas 8): one
+ * headline — company written today with the same weekday last week and
+ * the same day last month beside it — two side tiles (Month to date,
+ * Open exceptions), six small figures each with a baseline, the cash
+ * pickups queue, one card per store, then Written business and the
+ * Morning brief side by side, the Changes log and the Staff schedule.
+ * Every card the previous home shipped is still here; the chart and the
+ * cards still follow the topbar's store scope, the chart its period.
+ * Cards can be reordered / hidden per browser ("Customize").
  */
 interface OwnerData {
   date: string;
@@ -49,19 +44,55 @@ interface OwnerData {
   previous: { writtenCents: number; registerCents: number; refundsCents: number } | null;
   trend: TrendPoint[];
   compareTrend: TrendPoint[];
+  today: {
+    date: string;
+    writtenCents: number;
+    ticketCount: number;
+    storeCount: number;
+    avgTicketCents: number;
+    lastWeek: { date: string; writtenCents: number };
+    lastMonth: { date: string; writtenCents: number };
+    collectedCents: number;
+    collectedLastWeekCents: number;
+    balanceDueCents: number;
+    refundsCents: number;
+    refundsLastWeekCents: number;
+    cancellations: number;
+    cancellationsLastWeek: number;
+    deliveries: { booked: number; cap: number };
+  };
+  monthToDate: {
+    range: { start: string; end: string };
+    writtenCents: number;
+    prior: { start: string; end: string };
+    priorCents: number;
+  };
+  exceptions: { open: number; critical: number };
 }
 
-type CardId = 'revenue' | 'brief' | 'stores' | 'changes' | 'schedule';
-const CARD_IDS: CardId[] = ['revenue', 'brief', 'stores', 'changes', 'schedule'];
-const LAYOUT_KEY = 'jetnine.dashboard.layout';
+type CardId = 'pickups' | 'stores' | 'revenue' | 'brief' | 'changes' | 'schedule';
+const CARD_IDS: CardId[] = ['pickups', 'stores', 'revenue', 'brief', 'changes', 'schedule'];
+const LAYOUT_KEY = 'jetnine.dashboard.layout.v2';
 interface Layout {
   order: CardId[];
   hidden: Partial<Record<CardId, boolean>>;
 }
 
-function greeting(): string {
-  const h = new Date().getHours();
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+function countWord(n: number): string {
+  return WORDS[n] ?? String(n);
+}
+function weekdayOf(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short' });
+}
+function longDate(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 export default function OwnerHome({ userName, email }: { userName: string; email: string }) {
@@ -127,77 +158,6 @@ export default function OwnerHome({ userName, email }: { userName: string; email
   const compareLabel = f.compare === 'year' ? 'Last year' : f.compare === 'prior' ? 'Prior' : null;
   const cmpFull =
     f.compare === 'year' ? 'Same period last year' : f.compare === 'prior' ? 'Prior period' : null;
-  const vs = compareLabel
-    ? `vs ${compareLabel.toLowerCase()}`
-    : presetLabel(f.range.preset).toLowerCase();
-
-  const tiles = useMemo<KpiTile[]>(() => {
-    const k = data?.kpis;
-    const p = data?.previous ?? null;
-    const dash = (v: string) => (k ? v : '—');
-    return [
-      {
-        key: 'written',
-        label: 'Written',
-        value: dash(k ? usdWhole(k.writtenCents) : ''),
-        delta: k && p ? pctDelta(k.writtenCents, p.writtenCents) : null,
-        deltaTone: k && p && k.writtenCents < p.writtenCents ? 'down' : 'up',
-        sub: k
-          ? `${k.writtenCount} order${k.writtenCount === 1 ? '' : 's'} · ${vs}`
-          : 'unavailable',
-        href: '/orders',
-        testid: 'kpi-written',
-      },
-      {
-        key: 'register',
-        label: 'Register',
-        value: dash(k ? usdWhole(k.registerCents) : ''),
-        delta: k && p ? pctDelta(k.registerCents, p.registerCents) : null,
-        deltaTone: k && p && k.registerCents < p.registerCents ? 'down' : 'up',
-        sub: k ? `${k.ticketCount} ticket${k.ticketCount === 1 ? '' : 's'}` : 'unavailable',
-        href: '/sales',
-      },
-      {
-        key: 'refunds',
-        label: 'Refunds',
-        value: dash(k ? usdWhole(k.refundsCents) : ''),
-        delta: k && p ? pctDelta(k.refundsCents, p.refundsCents) : null,
-        deltaTone: k && p && k.refundsCents > p.refundsCents ? 'down' : 'up',
-        sub: k ? `${k.refundCount} refund${k.refundCount === 1 ? '' : 's'}` : 'unavailable',
-        href: '/returns',
-        tone: k && k.refundsCents > 0 ? 'danger' : undefined,
-      },
-      {
-        key: 'open',
-        label: 'Open orders',
-        value: dash(k ? String(k.openOrders) : ''),
-        sub: k ? `${usdShort(k.openBalanceCents)} balance outstanding` : '',
-        href: '/orders?status=open',
-      },
-      {
-        key: 'ar',
-        label: 'Receivables',
-        value: k?.receivablesCents != null ? usdWhole(k.receivablesCents) : '—',
-        sub:
-          k?.receivableAccounts != null
-            ? `${k.receivableAccounts} account${k.receivableAccounts === 1 ? '' : 's'} owing`
-            : 'financial reports only',
-        href: '/reports',
-      },
-      {
-        key: 'trucks',
-        label: 'Trucks today',
-        value: k ? `${k.trucksToday.booked} / ${k.trucksToday.cap}` : '—',
-        sub: k
-          ? Object.entries(k.trucksToday.byStatus)
-              .map(([s, n]) => `${n} ${s.replace(/_/g, ' ')}`)
-              .join(' · ') || 'nothing booked'
-          : '',
-        href: '/deliveries/dispatch',
-        tone: k && k.trucksToday.booked > k.trucksToday.cap ? 'danger' : undefined,
-      },
-    ];
-  }, [data, vs]);
 
   const card = (id: CardId) => {
     const i = layout.order.indexOf(id);
@@ -205,7 +165,7 @@ export default function OwnerHome({ userName, email }: { userName: string; email
     return {
       style: {
         order: i + 1,
-        display: hidden && !customize ? 'none' : 'flex',
+        display: hidden && !customize ? 'none' : undefined,
         opacity: hidden ? 0.45 : 1,
       } as React.CSSProperties,
       handle: customize ? (
@@ -231,33 +191,96 @@ export default function OwnerHome({ userName, email }: { userName: string; email
     };
   };
 
-  const today = new Date();
-  const storeCount = f.storeIds?.length ?? f.stores.length;
-  const sub = `${today.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} · ${storeCount} store${storeCount === 1 ? '' : 's'} · ${presetLabel(f.range.preset).toLowerCase()}`;
+  const t = data?.today;
+  const storeCount =
+    f.storeIds?.length ?? f.stores.filter((s) => s.locationType !== 'warehouse').length;
+  const scopeWord = f.storeIds ? f.storeLabel : 'every store';
   const trendEmpty = !!data && data.trend.every((p) => p.orderCents + p.registerCents === 0);
+  const wk = t ? pctDelta(t.writtenCents, t.lastWeek.writtenCents) : null;
+  const mo = t ? pctDelta(t.writtenCents, t.lastMonth.writtenCents) : null;
+  const mtdDelta = data
+    ? pctDelta(data.monthToDate.writtenCents, data.monthToDate.priorCents)
+    : null;
+  const up = (now: number, base: number) => now >= base;
+  const delta = (now: number, base: number, invert = false) => {
+    const p = pctDelta(now, base);
+    if (!p) return { text: null as string | null, tone: 'muted' as const };
+    const good = invert ? now <= base : now >= base;
+    return { text: p, tone: good ? ('ok' as const) : ('bad' as const) };
+  };
+
+  const figures = t
+    ? [
+        {
+          key: 'collected',
+          label: 'Collected',
+          value: usdWhole(t.collectedCents),
+          ...delta(t.collectedCents, t.collectedLastWeekCents),
+          href: '/reports',
+        },
+        {
+          key: 'balance',
+          label: 'Balance due',
+          value: usdWhole(t.balanceDueCents),
+          text: `${data!.kpis.openOrders} open`,
+          tone: 'muted' as const,
+          href: '/orders?balanceDue=1',
+        },
+        {
+          key: 'refunds',
+          label: 'Refunds',
+          value: usdWhole(t.refundsCents),
+          text:
+            t.refundsCents - t.refundsLastWeekCents === 0
+              ? 'same as last week'
+              : `${t.refundsCents > t.refundsLastWeekCents ? '+' : '−'}${usdWhole(Math.abs(t.refundsCents - t.refundsLastWeekCents))}`,
+          tone: t.refundsCents > t.refundsLastWeekCents ? ('bad' as const) : ('muted' as const),
+          danger: t.refundsCents > 0,
+          href: '/returns',
+        },
+        {
+          key: 'cancels',
+          label: 'Cancellations',
+          value: String(t.cancellations),
+          text:
+            t.cancellations - t.cancellationsLastWeek === 0
+              ? 'same as last week'
+              : `${t.cancellations > t.cancellationsLastWeek ? '+' : '−'}${Math.abs(t.cancellations - t.cancellationsLastWeek)}`,
+          tone: t.cancellations > t.cancellationsLastWeek ? ('bad' as const) : ('muted' as const),
+          href: '/orders?status=Cancelled',
+        },
+        {
+          key: 'avg',
+          label: 'Avg ticket',
+          value: t.ticketCount ? usdWhole(t.avgTicketCents) : '—',
+          ...(t.lastWeek.writtenCents
+            ? { text: `${t.ticketCount} today`, tone: 'muted' as const }
+            : { text: null, tone: 'muted' as const }),
+          href: '/reports',
+        },
+        {
+          key: 'deliveries',
+          label: 'Deliveries today',
+          value: String(t.deliveries.booked),
+          text: `/ ${t.deliveries.cap}`,
+          tone: t.deliveries.booked > t.deliveries.cap ? ('bad' as const) : ('muted' as const),
+          href: `/deliveries`,
+        },
+      ]
+    : [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }} data-testid="owner-home">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'space-between',
-          gap: 16,
-        }}
-      >
+    <div className="dh" data-testid="owner-home">
+      <div className="dh-top">
         <div>
-          <h1 className="page-title">
-            {greeting()}, {userName.split(' ')[0]}
-          </h1>
-          <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 3 }}>
-            {sub}
-            <span data-testid="dashboard-email" style={{ marginLeft: 8, color: 'var(--faint)' }}>
+          <div className="dh-eyebrow">
+            {t ? longDate(t.date) : '…'} · {scopeWord}
+            <span data-testid="dashboard-email" className="dh-email">
               · {email}
             </span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} data-noprint="true">
+        <div className="dh-top-actions" data-noprint="true">
           <button
             type="button"
             className={`btn btn-sm ${customize ? 'btn-primary' : 'btn-secondary'}`}
@@ -272,63 +295,21 @@ export default function OwnerHome({ userName, email }: { userName: string; email
       </div>
 
       {error && (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '10px 14px',
-            border: '1px solid var(--danger)',
-            borderRadius: 8,
-            background: 'var(--danger-soft)',
-            fontSize: 12.5,
-          }}
-        >
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: 'var(--danger)',
-              flex: 'none',
-            }}
-          />
+        <div role="alert" className="dh-alert is-error">
           <span style={{ flex: 1 }}>
-            <strong style={{ fontWeight: 600 }}>Couldn&apos;t reach the sales service.</strong>{' '}
-            Written, register and refund figures are unavailable; inventory and delivery data are
-            live.
+            <strong>Couldn&apos;t reach the sales service.</strong> Written, collected and refund
+            figures are unavailable; stores, deliveries and the schedule are live.
           </span>
-          <button
-            type="button"
-            className="btn btn-sm"
-            style={{
-              border: '1px solid var(--danger)',
-              color: 'var(--danger)',
-              background: 'var(--surface)',
-            }}
-            onClick={load}
-          >
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
             Retry
           </button>
         </div>
       )}
       {customize && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '10px 14px',
-            border: '1px dashed var(--accent)',
-            borderRadius: 8,
-            background: 'var(--accent-soft)',
-            fontSize: 12.5,
-          }}
-        >
+        <div className="dh-alert is-note">
           <span style={{ flex: 1 }}>
-            <strong style={{ fontWeight: 600 }}>Customizing your home.</strong> Use ▲ ▼ to reorder
-            cards and ⊘ to hide them. Saved to this browser.
+            <strong>Customizing your home.</strong> Use ▲ ▼ to reorder cards and ⊘ to hide them.
+            Saved to this browser.
           </span>
           <button
             type="button"
@@ -354,72 +335,161 @@ export default function OwnerHome({ userName, email }: { userName: string; email
         </div>
       )}
 
-      {!denied && <KpiStrip tiles={tiles} loading={loading && !data} />}
+      {!denied && (
+        <div className="dh-head" data-testid="dh-head">
+          <section className="panel dh-headline" data-testid="dh-headline">
+            <div className="dh-label">Company written today{t ? ` · ${longDate(t.date)}` : ''}</div>
+            {loading && !data ? (
+              <div className="shimmer" style={{ height: 56, width: 260, margin: '6px 0' }} />
+            ) : (
+              <div className="dh-value" data-testid="dh-written">
+                {t ? usdWhole(t.writtenCents) : '—'}
+              </div>
+            )}
+            <div className="dh-baselines">
+              <div>
+                <strong
+                  className={`mono ${t && up(t.writtenCents, t.lastWeek.writtenCents) ? 'is-up' : 'is-down'}`}
+                >
+                  {wk ?? '—'}
+                </strong>{' '}
+                vs same day last week{' '}
+                <span className="mono dh-base">
+                  {t
+                    ? `${usdWhole(t.lastWeek.writtenCents)} last ${weekdayOf(t.lastWeek.date)}`
+                    : ''}
+                </span>
+              </div>
+              <div>
+                <strong
+                  className={`mono ${t && up(t.writtenCents, t.lastMonth.writtenCents) ? 'is-up' : 'is-down'}`}
+                >
+                  {mo ?? '—'}
+                </strong>{' '}
+                vs same day last month{' '}
+                <span className="mono dh-base">
+                  {t ? `${usdWhole(t.lastMonth.writtenCents)} ${shortDay(t.lastMonth.date)}` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="dh-sub">
+              {t
+                ? `${t.ticketCount} ticket${t.ticketCount === 1 ? '' : 's'} across ${countWord(storeCount || t.storeCount)} store${(storeCount || t.storeCount) === 1 ? '' : 's'}${t.ticketCount ? ` · avg ${usdWhole(t.avgTicketCents)}` : ''}`
+                : ' '}
+            </div>
+          </section>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-          gap: 18,
-          gridAutoFlow: 'dense',
-        }}
-      >
+          <Link href="/reports" className="panel dh-side" data-testid="dh-mtd">
+            <div className="dh-label">Month to date</div>
+            <div className="dh-side-value mono">
+              {data ? usdWhole(data.monthToDate.writtenCents) : '—'}
+            </div>
+            <div className="dh-side-delta">
+              {mtdDelta && (
+                <strong
+                  className={`mono ${data && up(data.monthToDate.writtenCents, data.monthToDate.priorCents) ? 'is-up' : 'is-down'}`}
+                >
+                  {mtdDelta}
+                </strong>
+              )}{' '}
+              <span className="dh-base">
+                {data
+                  ? `vs ${shortDay(data.monthToDate.prior.start)}–${shortDay(data.monthToDate.prior.end).replace(/^\w+ /, '')}`
+                  : ''}
+              </span>
+            </div>
+            <span className="dh-side-link">Written business →</span>
+          </Link>
+
+          <Link href="/exceptions" className="panel dh-side" data-testid="dh-exceptions">
+            <div className="dh-label">Open exceptions</div>
+            <div
+              className="dh-side-value mono"
+              style={{
+                color: data && data.exceptions.open > 0 ? 'var(--status-risk-fg)' : undefined,
+              }}
+            >
+              {data ? data.exceptions.open : '—'}
+            </div>
+            <div className="dh-side-delta">
+              {data && data.exceptions.critical > 0 && (
+                <strong className="mono is-down">{data.exceptions.critical} critical</strong>
+              )}{' '}
+              <span className="dh-base">· from the 10pm close</span>
+            </div>
+            <span className="dh-side-link">Review →</span>
+          </Link>
+        </div>
+      )}
+
+      {!denied && (
+        <div className="dh-figs" data-testid="kpi-row">
+          {(figures.length
+            ? figures
+            : Array.from({ length: 6 }, (_, i) => ({ key: String(i) }))
+          ).map((g) => {
+            const fig = g as (typeof figures)[number];
+            return (
+              <Link
+                key={fig.key}
+                href={fig.href ?? '#'}
+                className="dh-fig"
+                data-testid={`kpi-${fig.key}`}
+              >
+                <div className="dh-fig-label">{fig.label ?? ''}</div>
+                <div className="dh-fig-row">
+                  {fig.value == null ? (
+                    <div className="shimmer" style={{ height: 18, width: 70 }} />
+                  ) : (
+                    <span
+                      className="dh-fig-value mono"
+                      style={{ color: fig.danger ? 'var(--status-risk-fg)' : undefined }}
+                    >
+                      {fig.value}
+                    </span>
+                  )}
+                  {fig.text && (
+                    <span className={`dh-fig-delta mono is-${fig.tone}`}>{fig.text}</span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="dh-grid">
+        <StoresSection
+          locationIds={f.storeIds}
+          showQueue
+          actorName={userName}
+          handle={card('stores').handle}
+          queueHandle={card('pickups').handle}
+          style={{ gridColumn: 'span 2', ...card('stores').style }}
+          queueStyle={{ gridColumn: 'span 2', ...card('pickups').style }}
+        />
+
         {!denied && (
           <Panel
             title="Written business"
-            sub={`${presetLabel(f.range.preset)} · ${f.storeLabel}`}
-            style={{ gridColumn: 'span 4', ...card('revenue').style }}
+            sub={`${presetLabel(f.range.preset).toLowerCase()} · ${scopeWord}`}
+            link={{ href: '/reports', label: 'Reports' }}
+            style={card('revenue').style}
             clip={false}
             actions={
               <>
-                <div
-                  style={{
-                    marginLeft: 'auto',
-                    display: 'flex',
-                    gap: 14,
-                    fontSize: 12,
-                    color: 'var(--muted)',
-                  }}
-                >
+                <div className="dh-legend">
                   <span>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        width: 8,
-                        height: 8,
-                        borderRadius: 2,
-                        background: 'var(--accent)',
-                        marginRight: 5,
-                        verticalAlign: 'middle',
-                      }}
-                    />
+                    <i style={{ background: 'var(--accent)' }} />
                     Orders
                   </span>
                   <span>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        width: 8,
-                        height: 8,
-                        borderRadius: 2,
-                        background: 'var(--border2)',
-                        marginRight: 5,
-                        verticalAlign: 'middle',
-                      }}
-                    />
+                    <i style={{ background: 'var(--border2)' }} />
                     Register
                   </span>
                   {cmpFull && data && data.compareTrend.length > 0 && (
                     <span>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          width: 10,
-                          borderTop: '2px dashed var(--warn)',
-                          marginRight: 5,
-                          verticalAlign: 'middle',
-                        }}
-                      />
+                      <i className="is-dashed" />
                       {cmpFull}
                     </span>
                   )}
@@ -439,7 +509,9 @@ export default function OwnerHome({ userName, email }: { userName: string; email
           </Panel>
         )}
 
-        <div style={{ gridColumn: 'span 2', ...card('brief').style, flexDirection: 'column' }}>
+        <div
+          style={{ display: 'flex', flexDirection: 'column', minWidth: 0, ...card('brief').style }}
+        >
           <MorningBriefCard
             brief={brief}
             loading={briefLoading}
@@ -448,21 +520,15 @@ export default function OwnerHome({ userName, email }: { userName: string; email
           />
         </div>
 
-        <StoresSection
-          locationIds={f.storeIds}
-          handle={card('stores').handle}
-          style={{ gridColumn: 'span 6', ...card('stores').style }}
-        />
-
         <ChangesCard
           locationIds={f.storeIds}
           handle={card('changes').handle}
-          style={{ gridColumn: 'span 6', ...card('changes').style }}
+          style={{ gridColumn: 'span 2', ...card('changes').style }}
         />
 
         <StaffSchedule
           handle={card('schedule').handle}
-          style={{ gridColumn: 'span 6', ...card('schedule').style }}
+          style={{ gridColumn: 'span 2', ...card('schedule').style }}
         />
       </div>
     </div>

@@ -627,3 +627,93 @@ OVER_CAPACITY` with the dimensions, or, with `confirmOverCapacity: true`, a **re
 - Reservation state on `GET /v1/deliveries` rows so Waiting / At risk chips appear on the board.
 - Per-store or per-truck capacity once decided.
 - Restyle `/deliveries/search` and `/deliveries/confirm` onto the kit headers.
+
+## Phase 9 — Dashboards: owner and manager, cash pickups (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** the owner home and the manager home rebuilt
+per README §3.5 / canvas 8 with every shipped card kept, and the cash pickups model built:
+`cash_pickups` + `cash_pickup_items` (migration `0100_phase9_cash_pickups`), the queue and the
+Record → Post flow. Operations, Warehouse and the Z-report are Phase 10.
+
+### What changed
+
+- **Owner home** (`dashboard/owner/owner-home.tsx`, `.dh-*`) — one headline, **Company written
+  today** at 56px with **vs same day last week** (same weekday) and **vs same day last month**
+  (same calendar day, clamped) beside it; side tiles **Month to date** (vs the same days last
+  month) and **Open exceptions** (with the critical count, "from the 10pm close"); six small
+  figures each with a baseline — Collected (vs last week), Balance due (open orders), Refunds
+  (± vs last week), Cancellations (± vs last week), Avg ticket, Deliveries today (/ cap). Then
+  the **Cash pickups** queue, the **Stores** cards, Written business and the Morning brief side
+  by side, **Changes** with a severity filter (All · Critical · Warning · Unseen), and the
+  editable **Staff schedule** with Publish. Customize (reorder / hide per browser) and Print
+  stay; the layout key moved to `jetnine.dashboard.layout.v2` so old layouts do not hide the
+  new cards.
+- **Store card** (`shared/store-card.tsx`, `.sc-*`) — header: store, manager · n salespeople,
+  **Written · Delivered · Received · Refunds**, Show/Hide detail. Body: **Salespeople** (Name,
+  Written, Orders, Avg, Collected, Last sale) · **Money received · by method** (swatch, count,
+  amount; a row opens the payment list dialog) · **Cash on hand** (below).
+- **Cash pickups** (`shared/cash-pickups.tsx`, `.cq-*` / `.coh-*`) — per store: cash on hand
+  since the last pickup with a chip **Collected / Holding / Pickup due / No cash**; due when the
+  store holds more than $1,500 or any cash payment is older than 3 days. One tick row per
+  waiting payment (order · customer · date · "in drawer" / "4d old"), **Record pickup** (·
+  N ticked) and **Tick all**; the recording form shows "Picking up $X from N payments · by
+  {actor}", **Counted** (pre-filled with the expected total), **Slip #**, the variance line
+  ("▲ Variance −$84.50 — will be flagged to the 10pm exceptions with your name"), **Post
+  pickup** / Cancel. Posting refreshes the store, clears the ticks and toasts
+  `PU-0091 · $3,973.60 picked up from Glendale by Alex Rivera · variance −$84.50 flagged`.
+  Owner and Operations get the **cross-store queue** above the stores (Store, Cash on hand,
+  Payments, Oldest, Last pickup, Status; due rows first and tinted; "Record pickup" opens the
+  card, starts the form and scrolls to it); the Manager records inside their own store card.
+- **Server** — `GET /v1/dashboard/cash-pickups/queue` (per store: status, pending cents /
+  count, oldest age, the last pickup, the waiting payments, `canRecord`), `POST
+/v1/dashboard/cash-pickups` (`locationId`, optional `paymentIds` — none = all, `countedCents`,
+  `slip`, `note`) and `GET …/history`. Posting inserts the pickup with the next `PU-nnnn` for
+  the business, one item per payment, and a `cash_pickup_receipts` stamp per payment (so the
+  older per-payment tick agrees), writes the `cash_pickup.post` audit row, fires
+  `cash_pickup.posted`, and records a `cash_pickup_variance` exception (warning; critical from
+  $50) when counted ≠ expected. New permission **`pos.cash.pickup_record`**: Owner and
+  Operations everywhere, **Manager for the stores their membership is scoped to** (the same
+  "store manager" rule the cards use); `pos.cash.pickup_confirm` stays as it was.
+- **Owner API** — `/v1/dashboard/owner` gains `today` (written, tickets, avg, same-day-last-week
+  and same-day-last-month baselines, collected, balance due, refunds incl. negative payment
+  rows, cancellations by `cancelled_at`, deliveries vs cap), `monthToDate` (vs the same days
+  last month) and `exceptions` (open / critical).
+- **Manager home** (`manager-dashboard.tsx`) — the time-clock strip, "Acting for {store}"
+  header with the store picker and New Sale, the **store headline** with both baselines and
+  "n tickets · 3 by Arman · avg", side tiles **Needs a call today** (past-due promises + orders
+  short on stock → the at-risk queue) and **Last night's close** (the last closed drawer:
+  Clean / Short / Over / Suspended, variance, who), **My store**, then the kept board, open
+  sales queue, **Incoming stock · Drawer & tenders · Store activity** (3-up), Deliveries /
+  Backorders / Aging carts / Returns, **My call-backs · My deliveries · My wins · My follow-up
+  money**, and the read-only schedule last. `/v1/dashboard/manager` gains `headline`,
+  `needsCall` and `lastClose`.
+- `/dev/dashboard` (owner) and `/dev/dashboard/manager` preview both homes on the canvas's
+  five stores, with a postable cash-pickup stub.
+
+### Assumptions
+
+- **Cash on hand** counts every cash payment with no pickup receipt taken in the last 60 days
+  (`PICKUP_LOOKBACK_DAYS`). A payment left unticked by a partial pickup stays in the drawer
+  until it is posted; the lookback only keeps a tenant with years of never-ticked history from
+  waking up with every store "due". The older per-payment untick refuses a payment that a
+  posted pickup carried out (409), so the slip and the drawer always agree.
+- "Same day last month" is the same calendar day (README §5), clamped to the shorter month;
+  "same day last week" is the same weekday. Month to date compares to the same day-range of
+  the prior month.
+- A Manager's "own store" = the stores their membership is scoped to (`membership_location_
+scopes`), which is also what makes them the store's manager on the cards. A manager scoped
+  to no store cannot post.
+- Variance severity: any variance is a warning exception; $50 or more is critical. The exact
+  threshold is the owner's call (README §5 lists the pickup thresholds as open).
+- The severity filter on Changes maps the row tone: danger → Critical, warn → Warning. The
+  per-viewer Unseen tick stays as the fourth option.
+- The Z-report link on the manager's Last night's close tile points at `/shifts` until Phase
+  10 ships `/shifts/close/[date]`.
+
+### Later
+
+- Phase 10 puts the cash pickups queue on the Operations home and adds the Z-report.
+- The manager's time-clock strip is still the member's own clock, not the canvas's
+  everyone-on-shift strip; that needs a `/v1/timeclock/store` read (Phase 10 with the
+  Operations / Warehouse homes).
+- A pickups history page / report (the `history` endpoint exists) and reprinting a slip.
