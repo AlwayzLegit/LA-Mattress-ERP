@@ -622,6 +622,61 @@ describe('Documents + A1 print lock (PLAN-POS-OPERATIONS P4)', () => {
     expect(res.body.order.totalCents).toBe(res.body.order.subtotalCents + res.body.order.taxCents);
   });
 
+  it("Document payload carries each payment's reference (the card last 4) for the invoice", async () => {
+    const order = await makeOrder();
+    const pay = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.id}/payments`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ method: 'card', amountCents: 1000, kind: 'deposit', processorRef: '4242' });
+    expect(pay.status).toBe(201);
+    const res = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.id}/document`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(res.status).toBe(200);
+    // The payments endpoint answers with the order detail, so match the row
+    // by what we sent rather than by id.
+    const printed = res.body.order.payments.find(
+      (p: { method: string; amountCents: number }) => p.method === 'card' && p.amountCents === 1000,
+    );
+    expect(printed).toBeTruthy();
+    expect(printed.processorRef).toBe('4242');
+    expect(printed.status).toBe('succeeded');
+  });
+
+  it('Document payload carries the branding accent for the invoice (null until set)', async () => {
+    const order = await makeOrder();
+    const before = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.id}/document`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(before.status).toBe(200);
+    expect(before.body.business.accentColor).toBeNull();
+
+    await request(app.getHttpServer())
+      .patch('/v1/business/settings')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ branding: { accentColor: '#0f766e' } })
+      .expect(200);
+    try {
+      const after = await request(app.getHttpServer())
+        .get(`/v1/orders/${order.id}/document`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId);
+      expect(after.status).toBe(200);
+      expect(after.body.business.accentColor).toBe('#0f766e');
+    } finally {
+      await request(app.getHttpServer())
+        .patch('/v1/business/settings')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ branding: { accentColor: null } })
+        .expect(200);
+    }
+  });
+
   it('Individual ticket print locks: edits refuse 409 until unlocked with a reason', async () => {
     const order = await makeOrder();
 

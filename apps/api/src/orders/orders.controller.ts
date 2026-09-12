@@ -512,6 +512,8 @@ interface OrderDocument {
   business: {
     name: string;
     logoUrl: string | null;
+    /** Settings → Branding accent (#rrggbb); the invoice's brand color. */
+    accentColor: string | null;
     invoiceHeaderNote: string | null;
     invoiceFooterNote: string | null;
   };
@@ -4533,7 +4535,11 @@ export class OrdersController {
       .from(schema.businesses)
       .where(eq(schema.businesses.id, tenant.businessId!))
       .limit(1);
-    const branding = (biz?.brandingJson ?? {}) as { logoUrl?: string; publicName?: string };
+    const branding = (biz?.brandingJson ?? {}) as {
+      logoUrl?: string;
+      publicName?: string;
+      accentColor?: string;
+    };
     const ops = (biz?.opsSettingsJson ?? {}) as {
       invoiceHeaderNote?: string;
       invoiceFooterNote?: string;
@@ -4720,6 +4726,7 @@ export class OrdersController {
       business: {
         name: branding.publicName ?? biz?.name ?? '',
         logoUrl: branding.logoUrl ?? null,
+        accentColor: branding.accentColor ?? null,
         invoiceHeaderNote: ops.invoiceHeaderNote ?? null,
         invoiceFooterNote: ops.invoiceFooterNote ?? null,
       },
