@@ -141,6 +141,7 @@ test.describe('Day 9 — QA sweep', () => {
     await expect(hit).toBeVisible();
     await hit.click();
     await page.getByTestId('fulfillment-method').selectOption('take_with');
+    await page.getByTestId('take-payment').click();
     await page.getByTestId('pay-method').selectOption('cash');
     await page.getByTestId('pay-amount').fill('10.00');
     await page.getByTestId('add-payment').click();

@@ -226,6 +226,7 @@ function installStub() {
       return json(CUSTOMERS.find((c) => c.id === cm[1]) ?? CUSTOMERS[0]);
     }
     if (p === '/v1/deliveries/capacity') return json({ cap: 15, days: [{ booked: 8 }] });
+    if (p === '/v1/pos/catalog-count') return json({ total: 1948 });
     if (p === '/v1/vendors')
       return json([...new Set(PRODUCTS.map((x) => x.vendorName))].map((n) => ({ id: n, name: n })));
     if (p === '/v1/pos/product-search') {

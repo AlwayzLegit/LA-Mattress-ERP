@@ -11,8 +11,9 @@
 > this tracker as 12 phases — spec in `design_handoff_redesign_12_phases/README.md`, plan in
 > `CLAUDE_CODE_PROMPT.md` beside it, per-phase log in `PHASE_NOTES.md`. Phase 1 (tokens and
 > fonts) merged 2026-09-12 (PR #162); Phase 2 (component kit) merged
-> 2026-09-12 (PR #163); Phase 3 (shell) is PR #164; Phase 4 (New Sale layout, lines,
-> sourcing) follows on the same branch; Phase 5 (Add Product dialog + payments) is next.
+> 2026-09-12 (PR #163); Phase 3 (shell) PR #164; Phase 4 (New Sale layout, lines,
+> sourcing) PR #165; Phase 5 (Add Product dialog + payments) follows on the same branch;
+> Phase 6 (Orders + slide-over) is next.
 
 ---
 

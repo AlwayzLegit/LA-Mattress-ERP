@@ -1,17 +1,23 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
-import { Button, Card, Input, Select, TableEmpty, TableWrap, Toolbar } from '@/components/ui';
+import { Button, Dialog, Field, Input, Kbd, LoadingRows, Select } from '@/components/ui';
 
 /**
- * The Add Product popup shared by New Sale and the order page's line
- * editor: search with vendor/stock filters, availability + ATP for the
- * chosen "From" location, click a row to add it. The caller owns what
- * "add" means (a cart line, an order line).
+ * Add Product (redesign Phase 5, README §3.1, canvas 4c): a real dialog
+ * (role, focus trap, Esc, focus return), 1080px. Search matches every
+ * word in any order; Vendor, Size, Firmness filters; **From** is the
+ * loudest control (accent-filled) because the whole risk of the
+ * warehouse default is a salesperson not noticing where a line will
+ * pull from; "In stock first" sorts. Columns: Product / vendor, SKU,
+ * Size, Firmness, Price, At {From} (green > 0, red 0), All stores, ATP
+ * with its definition on hover, Add. Footer: "Showing N of 1,948", where
+ * the line will source from and why, ↵ adds the first row, esc closes.
+ * Shared with the order page's line editor; the caller owns what "add"
+ * means.
  */
 
 export interface ProductSearchLocation {
@@ -41,9 +47,9 @@ interface VendorRow {
   id: string;
   name: string;
 }
-// A22.2: one vocabulary with the API and the product page.
 const SIZES = MATTRESS_SIZES;
 const FIRMNESS = FIRMNESS_LEVELS;
+
 export function ProductSearchDialog({
   locationId,
   locationName,
@@ -52,6 +58,7 @@ export function ProductSearchDialog({
   onChangeLocation,
   onAdd,
   onClose,
+  sourceNote,
 }: {
   locationId: string;
   locationName: string | null;
@@ -60,80 +67,30 @@ export function ProductSearchDialog({
   onChangeLocation: (id: string) => void;
   onAdd: (row: SearchRow) => void;
   onClose: () => void;
+  /** Why the footer's source is what it is: "the default; take-with lines switch to the store". */
+  sourceNote?: string;
 }) {
   const [q, setQ] = useState('');
   const [vendorId, setVendorId] = useState('');
-  const [stockFilter, setStockFilter] = useState<'' | '1' | '0'>('');
   const [size, setSize] = useState('');
   const [firmness, setFirmness] = useState('');
-  const [rows, setRows] = useState<SearchRow[]>([]);
+  const [inStockFirst, setInStockFirst] = useState(true);
+  const [rows, setRows] = useState<SearchRow[] | null>(null);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
-  // BA-0010: arrow keys move a visible highlight through the results,
-  // Enter adds the highlighted row.
+  const [total, setTotal] = useState<number | null>(null);
   const [hi, setHi] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
-  // BA-0011: focus returns to whatever opened the dialog when it closes.
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    return () => opener?.focus?.();
-  }, []);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void api<{ data: VendorRow[] } | VendorRow[]>('/v1/vendors?limit=100')
       .then((r) => setVendors(Array.isArray(r) ? r : r.data))
       .catch(() => setVendors([]));
+    void api<{ total: number }>('/v1/pos/catalog-count')
+      .then((r) => setTotal(r.total))
+      .catch(() => setTotal(null));
   }, []);
-
-  // BA-0011: focus trap — Tab wraps inside the dialog, Escape closes.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      if (rows.length > 0) {
-        e.preventDefault();
-        const next =
-          e.key === 'ArrowDown' ? Math.min(hi + 1, rows.length - 1) : Math.max(hi - 1, 0);
-        setHi(next);
-        panelRef.current
-          ?.querySelectorAll('[data-testid="product-result"]')
-          [next]?.scrollIntoView({ block: 'nearest' });
-      }
-      return;
-    }
-    // Enter adds the highlighted row only from the search box — buttons
-    // and selects keep their native Enter behavior.
-    if (
-      e.key === 'Enter' &&
-      rows[hi] &&
-      (e.target as HTMLElement).getAttribute('data-testid') === 'product-query'
-    ) {
-      e.preventDefault();
-      onAdd(rows[hi]);
-      return;
-    }
-    if (e.key === 'Tab' && panelRef.current) {
-      const focusables = Array.from(
-        panelRef.current.querySelectorAll<HTMLElement>(
-          'button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'));
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (!first || !last) return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  };
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -141,7 +98,6 @@ export function ProductSearchDialog({
       const params = new URLSearchParams();
       if (q.trim()) params.set('q', q.trim());
       if (vendorId) params.set('vendorId', vendorId);
-      if (stockFilter) params.set('inStock', stockFilter);
       if (size) params.set('size', size);
       if (firmness) params.set('firmness', firmness);
       params.set('locationId', locationId);
@@ -152,193 +108,262 @@ export function ProductSearchDialog({
           setHi(0);
         })
         .catch(() => setRows([]));
-    }, 250);
-  }, [q, vendorId, stockFilter, size, firmness, locationId]);
+    }, 220);
+  }, [q, vendorId, size, firmness, locationId]);
+
+  const shown = useMemo(() => {
+    if (!rows) return [];
+    if (!inStockFirst) return rows;
+    return [...rows].sort((a, b) => Number(b.availableHere > 0) - Number(a.availableHere > 0));
+  }, [rows, inStockFirst]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (shown.length > 0) {
+        e.preventDefault();
+        const next =
+          e.key === 'ArrowDown' ? Math.min(hi + 1, shown.length - 1) : Math.max(hi - 1, 0);
+        setHi(next);
+        listRef.current
+          ?.querySelectorAll('[data-testid="product-result"]')
+          [next]?.scrollIntoView({ block: 'nearest' });
+      }
+      return;
+    }
+    // Enter adds the highlighted row from the search box only — buttons
+    // and selects keep their native Enter behavior.
+    if (
+      e.key === 'Enter' &&
+      shown[hi] &&
+      (e.target as HTMLElement).getAttribute('data-testid') === 'product-query'
+    ) {
+      e.preventDefault();
+      onAdd(shown[hi]);
+    }
+  };
+
+  const sorted = [...locations].sort((a, b) =>
+    a.locationType === b.locationType
+      ? a.name.localeCompare(b.name)
+      : a.locationType === 'warehouse'
+        ? -1
+        : 1,
+  );
+  const fromLabel = (loc: ProductSearchLocation) =>
+    loc.locationType === 'warehouse'
+      ? `${loc.name} — warehouse`
+      : loc.id === storeId
+        ? `${loc.name} — this store`
+        : loc.name;
+  // Header and footer name the place plainly ("At Warehouse"); the select
+  // carries the "— warehouse / — this store" qualifier.
+  const fromName = locations.find((l) => l.id === locationId)?.name ?? locationName ?? 'here';
 
   return (
-    // Modal chrome: no shared overlay primitive exists yet, so the
-    // backdrop/panel positioning is structural utility classes.
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[8vh]"
-      onClick={onClose}
+    <Dialog
+      title="Add product"
+      description="Availability and the line's inventory source follow “From”. Each line can be changed afterwards."
+      onClose={onClose}
+      size="xl"
+      initialFocus={searchRef}
+      testId="product-search-dialog"
+      className="picker"
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Add Product"
-        className="w-[min(760px,94vw)]"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={onKeyDown}
-        data-testid="product-search-dialog"
-      >
-        <Card
-          title="Add Product"
-          description="Availability and the added line’s inventory source follow the “From” location — each line can still be changed on the order afterwards."
-          actions={
-            <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close Add Product">
-              <X size={14} aria-hidden />
-            </Button>
-          }
-        >
-          <Toolbar
-            end={
-              rows.length >= 100 ? (
-                <span className="muted">Showing first 100 — refine your search.</span>
-              ) : undefined
-            }
-          >
+      <div className="picker-body" onKeyDown={onKeyDown}>
+        <div className="picker-toolbar">
+          <Field label="Search" className="picker-search">
             <Input
-              autoFocus
+              ref={searchRef}
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search model, brand, size, SKU — any order"
-              aria-label="Search products"
+              placeholder="Name, SKU or vendor model — any words, any order"
               data-testid="product-query"
+              autoComplete="off"
             />
+          </Field>
+          <Field label="Vendor">
             <Select
               value={vendorId}
               onChange={(e) => setVendorId(e.target.value)}
-              aria-label="Vendor filter"
               data-testid="vendor-filter"
             >
-              <option value="">All vendors</option>
+              <option value="">Any</option>
               {vendors.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
                 </option>
               ))}
             </Select>
+          </Field>
+          <Field label="Size">
             <Select
               value={size}
               onChange={(e) => setSize(e.target.value)}
-              aria-label="Size filter"
               data-testid="size-filter"
             >
-              <option value="">All sizes</option>
+              <option value="">Any</option>
               {SIZES.map((x) => (
                 <option key={x} value={x}>
                   {x}
                 </option>
               ))}
             </Select>
+          </Field>
+          <Field label="Firmness">
             <Select
               value={firmness}
               onChange={(e) => setFirmness(e.target.value)}
-              aria-label="Firmness filter"
               data-testid="firmness-filter"
             >
-              <option value="">All firmness</option>
+              <option value="">Any</option>
               {FIRMNESS.map((x) => (
                 <option key={x} value={x}>
                   {x}
                 </option>
               ))}
             </Select>
-            <Select
-              value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value as typeof stockFilter)}
-              data-testid="stock-filter"
-              aria-label="Stock filter"
-            >
-              <option value="">All stock</option>
-              <option value="1">In stock</option>
-              <option value="0">Not in stock</option>
-            </Select>
+          </Field>
+          <Field label="From" className="picker-from-field">
             <Select
               value={locationId}
               onChange={(e) => onChangeLocation(e.target.value)}
               data-testid="search-source"
-              aria-label="Inventory from"
+              className="picker-from"
             >
-              {[...locations]
-                .sort((a, b) =>
-                  a.locationType === b.locationType
-                    ? a.name.localeCompare(b.name)
-                    : a.locationType === 'warehouse'
-                      ? -1
-                      : 1,
-                )
-                .map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    From {loc.name}
-                    {loc.locationType === 'warehouse' ? ' (WH)' : ''}
-                    {loc.id === storeId ? ' — this store' : ''}
-                  </option>
-                ))}
+              {sorted.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  From {fromLabel(loc)}
+                </option>
+              ))}
             </Select>
-          </Toolbar>
-          <TableWrap maxHeight="52vh">
-            <table className="table table-sticky">
+          </Field>
+          <label className="picker-check">
+            <input
+              type="checkbox"
+              checked={inStockFirst}
+              onChange={(e) => setInStockFirst(e.target.checked)}
+              data-testid="stock-filter"
+            />
+            In stock first
+          </label>
+        </div>
+
+        <div className="picker-list" ref={listRef}>
+          {rows == null ? (
+            <div style={{ padding: 16 }}>
+              <LoadingRows rows={6} height={40} what="The catalog" />
+            </div>
+          ) : (
+            <table className="table table-sticky picker-table">
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th>Size</th>
                   <th>SKU</th>
-                  <th>Vendor</th>
+                  <th>Size</th>
+                  <th>Firmness</th>
                   <th className="num">Price</th>
-                  <th className="num" title={locationName ?? undefined}>
-                    {locationName ? `At ${locationName}` : 'Here'}
+                  <th className="num">At {fromName}</th>
+                  <th className="num">All stores</th>
+                  <th className="num">
+                    <abbr title="Available to promise: on hand minus reserved, plus units on open purchase orders">
+                      ATP
+                    </abbr>
                   </th>
-                  <th className="num">All</th>
-                  <th>ATP</th>
+                  <th className="actions">
+                    <span className="sr-only">Add</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
+                {shown.map((r, i) => (
                   <tr
                     key={r.variantId}
                     onClick={() => onAdd(r)}
                     onMouseEnter={() => setHi(i)}
-                    style={{
-                      cursor: 'pointer',
-                      // BA-0010: the keyboard highlight is visible.
-                      background: i === hi ? 'var(--surface-hover, rgb(0 0 0 / 0.06))' : undefined,
-                    }}
+                    className={i === hi ? 'is-selected' : undefined}
                     aria-selected={i === hi}
                     data-testid="product-result"
                   >
                     <td>
-                      {r.productName}
-                      {r.variantName ? ` — ${r.variantName}` : ''}
+                      <div className="picker-name">{r.productName}</div>
+                      <div className="picker-sub">
+                        {[r.vendorName, r.variantName].filter(Boolean).join(' · ') || '—'}
+                      </div>
                     </td>
-                    <td data-testid="result-size">
-                      {r.size ?? '—'}
-                      {r.firmness ? <span className="muted"> · {r.firmness}</span> : null}
-                    </td>
-                    <td>
-                      <code>{r.sku ?? '—'}</code>
-                    </td>
-                    <td>{r.vendorName ?? '—'}</td>
-                    <td className="num">
+                    <td className="mono">{r.sku ?? '—'}</td>
+                    <td data-testid="result-size">{r.size ?? '—'}</td>
+                    <td>{r.firmness ?? '—'}</td>
+                    <td className="num mono">
                       {r.priceCents > 0 ? (
                         <Money cents={r.priceCents} />
                       ) : (
-                        // D12: an unpriced catalog item is priced at the
-                        // register — say so instead of showing "$0.00".
-                        <span className="muted">price at register</span>
+                        <span className="muted">at register</span>
                       )}
                     </td>
-                    <td className="num">{r.availableHere}</td>
-                    <td className="num">{r.availableTotal}</td>
-                    <td className="muted">
+                    <td
+                      className={`num mono picker-here${r.availableHere > 0 ? ' is-in' : ' is-out'}`}
+                    >
+                      {r.availableHere}
+                    </td>
+                    <td className="num mono">{r.availableTotal}</td>
+                    <td className="num mono">
                       {r.availableTotal > 0
-                        ? ''
+                        ? r.availableTotal
                         : r.atpDate
-                          ? `~${new Date(r.atpDate).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                            })}`
-                          : 'no PO'}
+                          ? `~${new Date(r.atpDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                          : '—'}
+                    </td>
+                    <td className="actions">
+                      <Button
+                        size="sm"
+                        className="row-action"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAdd(r);
+                        }}
+                        aria-label={`Add ${r.productName}${r.variantName ? ` ${r.variantName}` : ''}`}
+                      >
+                        Add
+                      </Button>
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && <TableEmpty colSpan={8}>No matches.</TableEmpty>}
+                {shown.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="table-empty">
+                      <div style={{ fontWeight: 600, color: 'var(--text)' }}>
+                        Nothing matches {q.trim() ? `“${q.trim()}”` : 'these filters'}
+                      </div>
+                      <div>Try fewer words, or clear the vendor, size and firmness filters.</div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
-          </TableWrap>
-        </Card>
+          )}
+        </div>
+
+        <div className="picker-foot">
+          <span>
+            Showing <strong className="mono">{shown.length}</strong>
+            {total != null ? (
+              <>
+                {' '}
+                of <span className="mono">{total.toLocaleString('en-US')}</span> products
+              </>
+            ) : (
+              ' products'
+            )}
+          </span>
+          <span className="picker-foot-source">
+            Added lines source from <strong>{fromName}</strong>
+            {sourceNote ? ` ${sourceNote}` : ''}
+          </span>
+          <span className="picker-foot-keys">
+            <Kbd keys="enter" /> adds the first row · <Kbd keys="esc" /> closes
+          </span>
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

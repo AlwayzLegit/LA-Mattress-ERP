@@ -324,3 +324,62 @@ lives in the ops settings registry like every other operational knob.
   until the order fulfillment changes) — call out in the PR per the handoff.
 - Mattress/base detection from the product's category instead of the name once the picker
   returns it (Phase 5).
+
+## Phase 5 — New Sale: Add Product dialog and payments (2026-09-12)
+
+**Branch:** `claude/new-session-q4kc7l` · **Scope:** the picker (`components/product-search-dialog.tsx`,
+rewritten on the kit `Dialog`), the payments panel in the register rail, one read-only
+endpoint for the footer count. No schema change.
+
+### What changed
+
+- **Add Product dialog** (README §3.1, canvas 4c) — a true dialog: `role=dialog`,
+  `aria-modal`, focus trap, Esc closes, focus returns to the Add product button; 1080px
+  and `min(800px, 90vh)` tall so the toolbar and footer stay put while the list scrolls.
+  Title "Add product" with the one-line explanation beside it. Toolbar: Search (every word,
+  any order — the API already matches this way across name, variant, SKU, size, firmness
+  and brand), Vendor, Size, Firmness, **From** (accent-filled select, defaulting per the
+  Phase 4 resolution order, labelled "From {Location} — warehouse / — this store"), and
+  "In stock first" (client sort of the fetched page). Columns: Product with vendor · model
+  under it, SKU (mono), Size, Firmness, Price, **At {From}** in green when > 0 and red at 0
+  with the header in accent, All stores, ATP behind `<abbr title="Available to promise: on
+hand minus reserved, plus units on open purchase orders">`, Add. ↑/↓ move the highlight,
+  Enter from the search box adds the highlighted (first) row, a click anywhere on the row
+  adds too. Empty: "Nothing matches “…”. Try fewer words, or clear the vendor, size and
+  firmness filters." Footer: "Showing N of 1,948 products" (the total comes from
+  `GET /v1/pos/catalog-count`, active variants of active products), "Added lines source
+  from **{From}** {why}" where _why_ is "(your choice for this draft)", "because the order is
+  take-with", "— the default; take-with lines switch to the store", and `↵ adds the first
+row · esc closes`.
+- **Payments** (canvas 4d) — the action block is now **Take payment** (44px, accent, `F8`
+  badge; disabled with no lines, a $0 block, or nothing left to collect) over Complete /
+  Save draft and the hint. Take payment or F8 swaps the button for the "Take a payment"
+  panel (accent border): Method, Amount (mono, right-aligned, Enter records), **Card last 4**
+  for card only (a reference field for the other non-cash tenders, nothing for cash), Pay
+  in full / 50% deposit, **Record $X** (the button names the amount), Done. Record repeats
+  to $0: after a partial the cursor returns to Amount; once the balance reaches $0 the
+  panel closes on its own. Payments remain negative lines under Total with `remove`; the
+  Due band turns green at $0.
+- **Complete** — unchanged semantics (locks everything, reserves per line source, chip →
+  Scheduled, green sentence, Print receipt P, New sale N); now the secondary 36px button
+  beside Save draft as on the canvas, since Take payment is the primary.
+- e2e: the register flows click `take-payment` before filling the tender.
+- `/dev/register` stubs the catalog count (1,948) so the footer reads as on the canvas.
+
+### Assumptions
+
+- While the panel is open, Complete and Save draft stay visible under it (the prototype
+  hides them until Done). One click fewer to complete after a deposit; Done is still there.
+- "In stock first" sorts the fetched page (100 rows) client-side rather than adding a sort
+  parameter to the search endpoint; the endpoint still orders by relevance.
+- The vendor filter lists the first 100 vendors from `/v1/vendors`.
+- ATP shows the all-stores available count when there is stock, else an approximate date
+  from the earliest open PO (`~Sep 20`) — the endpoint does not yet return an on-order
+  quantity.
+
+### Later
+
+- ATP as a number (on hand − reserved + on open POs) once the search endpoint returns
+  open-PO units per variant.
+- Server-side "in stock first" ordering and paging past 100 rows.
+- Mattress/base detection from the category for the add-on chips (carried from Phase 4).

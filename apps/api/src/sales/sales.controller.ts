@@ -232,6 +232,28 @@ export class SalesController {
    * substring search. Returns active variants only.
    */
   /**
+   * Redesign Phase 5: the Add Product footer reads "Showing N of 1,948" —
+   * the denominator is the sellable catalog (active variants of active
+   * products), independent of the current filters.
+   */
+  @Get('pos/catalog-count')
+  @RequirePermission('pos.access')
+  async catalogCount(@CurrentTenant() tenant: RequestTenantContext): Promise<{ total: number }> {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.productVariants)
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .where(
+        and(
+          eq(schema.products.businessId, tenant.businessId!),
+          eq(schema.productVariants.isActive, true),
+          eq(schema.products.isActive, true),
+        ),
+      );
+    return { total: row?.n ?? 0 };
+  }
+
+  /**
    * New Sale product popup (PLAN-POS-OPERATIONS §4): searchable, vendor-
    * filterable results carrying live stock at the selling location plus
    * everywhere, and — when a variant is out of stock — the ATP date: the
