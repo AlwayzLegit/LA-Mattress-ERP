@@ -47,7 +47,6 @@ import { api } from '@/lib/api';
 import { useSession } from '@/lib/auth-client';
 import { useBusinessBranding, useBusinessName } from '@/lib/business-settings';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
-import { useUiPrefs } from '@/lib/ui-prefs';
 import { CommandPalette } from '@/components/shell/command-palette';
 import { PeriodControls, RoleSwitcher, StoreScope } from '@/components/shell/dashboard-controls';
 import { useNotifications } from '@/components/shell/notifications-drawer';
@@ -171,7 +170,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const session = useSession();
   const filters = useDashboardFilters();
-  const prefs = useUiPrefs();
   const isDashboard = pathname === '/dashboard';
   // Owner 2026-09-02: Orders and New Sale get more room so an added
   // product's whole line shows without a sideways scroll.
@@ -273,7 +271,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       const k = e.key;
       if (k === '?') setHelp((v) => !v);
       else if (k === 'n') router.push('/pos');
-      else if (k === 't') prefs.toggleTheme();
       else if (k === 'p' && isDashboard) {
         (
           document.querySelector('[data-testid="trend-range"] button') as HTMLElement | null
@@ -292,7 +289,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeAll, isDashboard, prefs, router]);
+  }, [closeAll, isDashboard, router]);
 
   const hiddenNav = new Set(me?.hiddenNav ?? []);
   const isActive = (href: string) =>

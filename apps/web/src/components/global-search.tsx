@@ -174,7 +174,7 @@ export function GlobalSearch() {
           aria-label="Search customers and orders"
           aria-expanded={open && hits != null}
           aria-controls="global-search-results"
-          className="w-full rounded-full border border-border bg-surface py-1.5 pl-[30px] pr-2.5 text-[13px] text-text placeholder:text-[var(--text-faint)] focus:border-brand focus:outline-none focus:ring-[3px] focus:ring-brand-soft"
+          className="w-full rounded-[3px] border border-border bg-surface py-1.5 pl-[30px] pr-2.5 text-[13px] text-text placeholder:text-[var(--faint)] hover:border-border-strong focus:border-accent"
         />
       </div>
       {open && hits && (

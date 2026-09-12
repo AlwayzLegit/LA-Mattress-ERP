@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { signOut } from '@/lib/auth-client';
-import { useUiPrefs } from '@/lib/ui-prefs';
 import { ConfirmDialog } from './confirm-dialog';
 
 export interface MenuUser {
@@ -20,35 +19,9 @@ function initialsOf(name: string | null, email: string): string {
   return (a + b).toUpperCase();
 }
 
-function Seg<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { key: T; label: string }[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="seg">
-      {options.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          className={`seg-btn${o.key === value ? ' is-active' : ''}`}
-          style={{ padding: '2px 9px', fontSize: 11.5 }}
-          onClick={() => onChange(o.key)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /**
  * Avatar button + the account menu from the design: selling store,
- * shortcuts, help, theme / density, sign out (with the option to revoke
+ * shortcuts, help, sign out (with the option to revoke
  * every other device's session).
  */
 export function UserMenu({
@@ -68,7 +41,6 @@ export function UserMenu({
   const [confirm, setConfirm] = useState(false);
   const [others, setOthers] = useState(false);
   const [busy, setBusy] = useState(false);
-  const prefs = useUiPrefs();
   const initials = initialsOf(user.name, user.email);
   const first = (user.name?.trim().split(/\s+/)[0] ?? user.email.split('@')[0]) || 'You';
 
@@ -231,42 +203,6 @@ export function UserMenu({
                 <span style={{ color: 'var(--muted)' }}>?</span>
                 <span style={{ flex: 1 }}>Reports &amp; help</span>
               </a>
-            </div>
-            <div
-              style={{
-                padding: '10px 14px',
-                borderTop: '1px solid var(--border)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <div
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <span style={{ fontSize: 12, color: 'var(--text2)' }}>Theme</span>
-                <Seg
-                  value={prefs.theme}
-                  options={[
-                    { key: 'light', label: 'Light' },
-                    { key: 'dark', label: 'Dark' },
-                  ]}
-                  onChange={prefs.setTheme}
-                />
-              </div>
-              <div
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <span style={{ fontSize: 12, color: 'var(--text2)' }}>Density</span>
-                <Seg
-                  value={prefs.density}
-                  options={[
-                    { key: 'comfortable', label: 'Cozy' },
-                    { key: 'compact', label: 'Compact' },
-                  ]}
-                  onChange={prefs.setDensity}
-                />
-              </div>
             </div>
             <div
               style={{

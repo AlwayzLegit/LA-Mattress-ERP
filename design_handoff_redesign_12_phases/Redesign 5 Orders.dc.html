@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#e9e7e2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65">LA MATTRESS ERP · REDESIGN</span><h1 style="margin:0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">Phase 5 — Orders and order detail</h1><span style="font-size:13px;color:#6f6c65">Live prototype (<a href="Proto Orders.dc.html">Proto Orders.dc.html</a>) in five states. Sort, filter, open, cancel — all work.</span></div>
+  <div style="width:1440px;min-width:1440px;flex:none;background:#fff;border:1px solid #dcd9d2;padding:24px 32px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px;font-size:13.5px;line-height:1.55;color:#4a4843">
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">The user and the question</div><p style="margin:0">A salesperson with a customer on the phone, or a manager scanning the store's book. <em>"Where is this order, and can I still change it?"</em> The list answers with the status chip and the reserved bar in the same row; the slide-over answers the second half with a lock banner that says who printed the ticket and who may unlock it.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">What the audit asked for</div><p style="margin:0">Real links in every row (the order number is an anchor; Enter opens it). A Store column and a Store filter defaulting to the signed-in store. Every column sortable with aria-sort. A written-date range. One status token set from Phase 2 instead of five grey pills. Reserved progress as a bar with the fraction beside it, not a number alone. Cancel in the destructive tier, far from the primary action, with a confirm that names the deposit.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">Design notes</div><p style="margin:0 0 8px"><strong style="color:#1c1b18">Forstall vs Ive on the reserved bar:</strong> Ive called it a second status. Forstall: status says <em>what</em>, the bar says <em>how close</em> — a Waiting-on-stock order at 2/3 is a phone call, at 0/3 is a PO. Jobs kept the bar with the fraction so the bar is never read alone.</p><p style="margin:0 0 8px"><strong style="color:#1c1b18">Chaudhri on the slide-over:</strong> 640px, actions in one row under the title, Cancel alone on the right in red outline. History is a vertical timeline with the actor on every entry because the owner reads it to settle disputes.</p><p style="margin:0"><strong style="color:#1c1b18">Later:</strong> the brief's per-store order prefix (GL-10437). Kept SO- per your call; the Store column carries the information instead.</p></div>
+  </div>
+  <sc-for list="{{ boards }}" as="b" hint-placeholder-count="5">
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <div id="{{ b.id }}" style="position:relative;width:1440px;min-width:1440px;flex:none;height:900px;border:1px solid #dcd9d2;overflow:hidden;background:#f6f5f2">
+        <a href="#{{ b.id }}" style="position:absolute;top:8px;right:8px;z-index:30;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#fff;text-decoration:none;color:#6f6c65">{{ b.id }}</a>
+        <dc-import name="Proto Orders" scene="{{ b.scene }}" hint-size="1440px,900px"></dc-import>
+      </div>
+      <div style="width:440px;background:#fff;border:1px solid #dcd9d2;padding:22px 26px;font-size:13.5px;line-height:1.55;color:#4a4843">
+        <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18">{{ b.title }}</div>
+        <div style="font-size:12px;color:#6f6c65;margin:2px 0 10px">first question: <em>{{ b.q }}</em></div>
+        <sc-for list="{{ b.notes }}" as="n" hint-placeholder-count="2"><p style="margin:0 0 10px">{{ n }}</p></sc-for>
+        <div style="font-weight:600;color:#1c1b18;margin-top:12px">What we removed</div>
+        <ul style="margin:4px 0 0;padding-left:18px"><sc-for list="{{ b.removed }}" as="r" hint-placeholder-count="2"><li>{{ r }}</li></sc-for></ul>
+      </div>
+    </div>
+  </sc-for>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return { boards: [
+      { id: '5a', scene: 'list', title: 'List — Glendale, last 30 days', q: 'What is open in my store, and what is owed?', notes: ['The store filter defaults to the signed-in store; the footer says so in words so nobody wonders where the other stores went. The summary line beside the title turns the list into an answer: 6 of 12, $4,079 balance due. Order numbers are links; the row highlights on hover and the anchor takes keyboard focus.', 'Six statuses, one token set. Cancelled stays in the list with its word struck, never hidden — Jobs: hiding a cancelled order is how a refund gets forgotten.'], removed: ['Clickable rows with no anchor.', 'Five near-identical grey pills.', 'A separate "Drafts" tab — drafts are a status like any other.'] },
+      { id: '5b', scene: 'filtered', title: 'List filtered — all stores, at risk, balance due', q: 'Which promises across the company will we break, and is money on them?', notes: ['A manager widening to all stores, at-risk only, balance due. Active filters appear as removable chips under the toolbar so the state is legible and reversible one chip at a time. Clear filters returns to the store default, not to "everything".', 'Matas argued the chips duplicate the selects. Forstall: the selects say what you can choose; the chips say what you did choose, and they survive a scroll.'], removed: ['A saved-views dropdown (later, if managers ask).', 'Pagination — the list scrolls inside the sheet with a sticky header; the footer carries the count.'] },
+      { id: '5c', scene: 'slideover', title: 'Slide-over — waiting on stock', q: 'What is holding this order, and what has happened to it?', notes: ['SO-10435 is short one line at the Warehouse with 4 on a PO due Sep 5. The three-column summary (customer, fulfillment, money) reads in one glance; the lines table says which line is short and from where; the history says when the system noticed. Actions sit in one row; Cancel is alone at the far right in the destructive tier.', 'The slide-over is a dialog: focus moves in, Escape closes, focus returns to the order link that opened it. The list stays visible behind it so the user keeps their place.'], removed: ['A tabbed detail page.', 'Icon-only action buttons.', 'The dev note "Delivery scheduling arrives with the Day 3 build".'] },
+      { id: '5d', scene: 'locked', title: 'Locked — delivery ticket printed', q: 'Why can I not edit this, and who can?', notes: ['The banner names the event (ticket printed Sep 4, 8:12 AM), the consequence (lines, prices, addresses frozen) and the escape hatch (Unlock, owner or store manager, written to history). Edit lines is disabled with the banner as its explanation; Take payment and Print stay live because money and paper are not what the lock protects.', 'Unlock is a link inside the sentence, not a button — Ive wanted it to read as an exception, not an option.'], removed: ['A padlock icon without words.', 'Disabling the whole slide-over.'] },
+      { id: '5e', scene: 'cancel', title: 'Cancel confirm — says what happens to the deposit', q: 'What happens to the $1,500 they already paid?', notes: ['An alertdialog with the order number in the title and a paragraph that spells out money, stock and the delivery board. Reason is required; the deposit destination is a choice (store credit by default, refund to tender). The destructive button is outlined red and is not the default focus — Keep order is.', 'Forstall wanted a typed "CANCEL" confirmation. Jobs: if the sentence is clear, a ritual is theatre. The sentence is clear.'], removed: ['A generic "Are you sure?"', 'Filled red button.', 'Undo toast for cancel — cancellation is audited and reversible only by re-writing the order.'] },
+    ] };
+  }
+}
+</script>
+</body>
+</html>

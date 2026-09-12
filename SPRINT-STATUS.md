@@ -7,6 +7,12 @@
 
 **Sprint state:** Build track COMPLETE through Day 9 + UI overhaul + integrations + five post-checkpoint batches — checkpoint 5 merged to main 2026-08-25 (PR #29, squash `138ba82`) and live on staging (`596b8d4`). Remaining build items (rehearsal #2 = sales history + customers from the STORIS invoice register, Day 10 final import) are blocked on that export; all other unchecked items are **Ops**. Old stores 06/08/09 are out of migration scope (final). · **Rehearsal imports done:** 1/2 (products + inventory, real data, PASS) · **Recon gates passed:** gates 1–2 on the real product/inventory export; 3–5 need the invoice/customer export
 
+> **Redesign programme (2026-09-12):** the dashboard & register redesign runs alongside
+> this tracker as 12 phases — spec in `design_handoff_redesign_12_phases/README.md`, plan in
+> `CLAUDE_CODE_PROMPT.md` beside it, per-phase log in `PHASE_NOTES.md`. Phase 1 (tokens and
+> fonts) shipped on `claude/new-session-q4kc7l`; Phase 2 (component kit) starts once
+> Phase 1 is merged or approved.
+
 ---
 
 ## Day 1 — Order spine + extraction kickoff

@@ -202,7 +202,6 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             borderBottom: '1px solid var(--border)',
             background: 'transparent',
             fontSize: 14,
-            outline: 'none',
             width: '100%',
             color: 'var(--text)',
           }}

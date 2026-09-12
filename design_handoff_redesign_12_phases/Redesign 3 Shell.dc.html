@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#e9e7e2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f} @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65">LA MATTRESS ERP · REDESIGN</span><h1 style="margin:0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">Phase 3 — Shell, navigation and store context</h1><span style="font-size:13px;color:#6f6c65">35 links → 5 groups, role-trimmed. Store context lives in the header. Ctrl K on Windows, ⌘K on Mac.</span></div>
+
+  <sc-for list="{{ boards }}" as="b" hint-placeholder-count="4">
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <div id="{{ b.id }}" style="width:{{ b.width }};min-width:{{ b.width }};flex:none;height:860px;background:#f6f5f2;border:1px solid #dcd9d2;position:relative;display:grid;grid-template-columns:{{ b.sidebarW }} minmax(0,1fr);overflow:hidden;font-size:13px">
+        <a href="#{{ b.id }}" style="position:absolute;top:8px;right:8px;z-index:5;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#fff;text-decoration:none;color:#6f6c65">{{ b.id }}</a>
+        <!-- sidebar -->
+        <nav style="background:#fff;border-right:1px solid #dcd9d2;display:flex;flex-direction:column;padding:12px 10px 14px;gap:14px;overflow:hidden">
+          <a href="#{{ b.id }}" style="display:flex;align-items:center;gap:9px;padding:4px 8px;text-decoration:none;color:inherit"><span style="width:26px;height:26px;background:#1e3a5f;color:#fff;display:grid;place-items:center;font:600 11px 'Archivo',sans-serif;letter-spacing:-.02em;border-radius:5px">LA</span><span style="line-height:1.15"><span style="display:block;font-weight:600;font-size:13px">LA Mattress</span><span style="display:block;font:400 10.5px 'JetBrains Mono',monospace;color:#6f6c65">build 7f3a1c</span></span></a>
+          <a href="#{{ b.id }}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;text-decoration:none;color:#1c1b18;font-weight:500;background:{{ b.homeBg }}"><span style="width:6px;height:6px;border-radius:50%;background:#1e3a5f"></span>{{ b.homeLabel }}</a>
+          <sc-for list="{{ b.groups }}" as="g" hint-placeholder-count="5">
+            <div>
+              <button style="display:flex;align-items:center;gap:6px;width:100%;padding:2px 8px 6px;border:0;background:transparent;font:600 10.5px 'Public Sans',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#6f6c65;cursor:pointer;text-align:left"><span style="font-family:'JetBrains Mono',monospace;font-size:10px">{{ g.chev }}</span>{{ g.label }}</button>
+              <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}"><div style="display:flex;flex-direction:column;gap:1px">
+                <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5"><a href="#{{ b.id }}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;text-decoration:none;color:{{ it.fg }};font-weight:{{ it.weight }};background:{{ it.bg }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ it.dot }}"></span><span style="flex:1">{{ it.label }}</span><sc-if value="{{ it.count }}" hint-placeholder-val="{{ false }}"><span style="font:500 11px 'JetBrains Mono',monospace;color:#6f6c65">{{ it.count }}</span></sc-if></a></sc-for>
+              </div></sc-if>
+            </div>
+          </sc-for>
+          <div style="margin-top:auto;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#6f6c65"><div style="display:flex;align-items:center;gap:8px;padding:4px 8px"><span style="width:6px;height:6px;border-radius:50%;background:{{ b.syncDot }}"></span>{{ b.syncLabel }}</div><a href="#{{ b.id }}" style="display:flex;align-items:center;gap:8px;padding:4px 8px;text-decoration:none;color:#6f6c65">Keyboard shortcuts<kbd style="margin-left:auto;font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#f6f5f2">?</kbd></a></div>
+        </nav>
+        <!-- main -->
+        <div style="display:flex;flex-direction:column;min-width:0">
+          <header style="height:50px;background:#fff;border-bottom:1px solid #dcd9d2;display:flex;align-items:center;gap:10px;padding:0 20px">
+            <button style="height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 10px 0 8px;border:1px solid #dcd9d2;border-radius:5px;background:#e7edf5;color:#1e3a5f;font:600 13px 'Public Sans',sans-serif;cursor:pointer" title="Every sale, drawer and report on this screen is for this store"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">⌂</span>Acting for {{ b.store }}<span style="font-size:10px;margin-left:2px">▾</span></button>
+            <sc-if value="{{ b.showRole }}" hint-placeholder-val="{{ true }}"><div style="display:inline-flex;padding:2px;border:1px solid #dcd9d2;border-radius:5px;background:#efeeea;gap:1px"><sc-for list="{{ b.roles }}" as="r" hint-placeholder-count="5"><button style="height:26px;padding:0 9px;border:0;border-radius:4px;background:{{ r.bg }};color:{{ r.fg }};font:500 12px 'Public Sans',sans-serif;box-shadow:{{ r.shadow }}">{{ r.label }}</button></sc-for></div></sc-if>
+            <button style="flex:1;min-width:0;max-width:{{ b.searchMax }};height:32px;margin-left:6px;display:inline-flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #dcd9d2;border-radius:5px;background:#f6f5f2;color:#6f6c65;font:400 13px 'Public Sans',sans-serif;text-align:left;cursor:pointer"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">⌕</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Search orders, customers, SKUs…</span><kbd style="font:500 11px 'JetBrains Mono',monospace;padding:1px 6px;border:1px solid #dcd9d2;border-radius:3px;background:#fff;color:#1c1b18">{{ b.kbd }}</kbd></button>
+            <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+              <button style="width:32px;height:32px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;position:relative;font-family:'JetBrains Mono',monospace;font-size:13px" aria-label="Inbox, 3 unread">◔<span style="position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#b3261e;color:#fff;font:600 10px 'Archivo',sans-serif;display:grid;place-items:center">3</span></button>
+              <button style="height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border:1px solid #1e3a5f;border-radius:5px;background:#1e3a5f;color:#fff;font:600 13px 'Public Sans',sans-serif">New sale<kbd style="font:500 11px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid rgba(255,255,255,.4);border-radius:3px;color:rgba(255,255,255,.85)">N</kbd></button>
+              <button style="height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 8px 0 4px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;font:500 13px 'Public Sans',sans-serif"><span style="width:24px;height:24px;border-radius:50%;background:#efeeea;display:grid;place-items:center;font:600 10.5px 'Archivo',sans-serif;color:#4a4843">{{ b.initials }}</span>{{ b.user }}<span style="font-size:10px;color:#6f6c65">▾</span></button>
+            </div>
+          </header>
+          <main style="flex:1;padding:22px 24px;min-width:0;position:relative;overflow:hidden">
+            <sc-if value="{{ b.isNormal }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px"><div><div style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#6f6c65;font-weight:600">Sell · Glendale</div><h2 style="margin:2px 0 0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">New sale</h2></div><div style="font-size:12.5px;color:#6f6c65">Draft <span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">SO-10441</span> · saves as you type</div></div>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start">
+                <div style="background:#fff;border:1px solid #dcd9d2;height:560px;display:grid;place-items:center;color:#9b978e;font-size:13px">register content · Phase 4</div>
+                <div style="background:#fff;border:1px solid #dcd9d2;height:560px;display:grid;place-items:center;color:#9b978e;font-size:13px">totals rail · Phase 4</div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ b.isLoading }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px"><div><div style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#6f6c65;font-weight:600">Sell · Glendale</div><h2 style="margin:2px 0 0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">New sale</h2></div><div style="font-size:12.5px;color:#6f6c65">Connecting to the register… <span style="font-family:'JetBrains Mono',monospace">2s</span></div></div>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start">
+                <div style="background:#fff;border:1px solid #dcd9d2;padding:16px;display:flex;flex-direction:column;gap:14px">{{ skeletonRows }}</div>
+                <div style="background:#fff;border:1px solid #dcd9d2;padding:16px;display:flex;flex-direction:column;gap:14px">{{ skeletonRail }}</div>
+              </div>
+              <div style="margin-top:14px;font-size:12.5px;color:#6f6c65">Shortcuts and the sidebar work while this loads. If nothing arrives in 4 seconds this becomes the error state (<a href="#3d">3d</a>) — never a bare "Loading…".</div>
+            </sc-if>
+            <sc-if value="{{ b.isError }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px"><div><div style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#6f6c65;font-weight:600">Sell · Glendale</div><h2 style="margin:2px 0 0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">New sale</h2></div></div>
+              <div style="max-width:620px;border:1px solid #f0c4c0;border-left:3px solid #b3261e;background:#fff;padding:16px 18px;display:flex;gap:14px;align-items:flex-start"><span style="font-family:'JetBrains Mono',monospace;color:#b3261e;font-size:16px">▲</span><div style="font-size:13.5px;line-height:1.5"><div style="font-weight:600;font-size:15px">The register could not reach the server</div><div style="color:#4a4843;margin-top:4px">Your draft <span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">SO-10441</span> (2 lines, $2,598.00) is kept on this machine. Retry now, or keep writing — items and payments will save when the connection is back. Nothing has been lost.</div><div style="display:flex;gap:8px;margin-top:12px"><button style="height:30px;padding:0 12px;border:1px solid #1e3a5f;border-radius:5px;background:#1e3a5f;color:#fff;font:600 13px 'Public Sans',sans-serif">Retry now</button><button style="height:30px;padding:0 12px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;font:500 13px 'Public Sans',sans-serif">Keep writing offline</button><span style="margin-left:auto;font:400 12px 'JetBrains Mono',monospace;color:#6f6c65;align-self:center">retrying in 8s · attempt 2</span></div></div></div>
+              <div style="margin-top:22px;font-size:12.5px;color:#6f6c65;max-width:620px">Same component at the shell level when the whole API is cold: the sidebar stays, the store context stays, and the message names the draft. The audit's bare "Loading…" with no retry is this state with no words.</div>
+            </sc-if>
+            <sc-if value="{{ b.isPalette }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px;opacity:.35"><div><div style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#6f6c65;font-weight:600">Sell · Glendale</div><h2 style="margin:2px 0 0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">New sale</h2></div></div>
+              <div style="position:absolute;inset:0;background:rgba(28,27,24,.28);display:flex;justify-content:center;padding-top:60px">
+                <div role="dialog" aria-modal="true" aria-label="Search and go to" style="width:640px;height:fit-content;background:#fff;border:1px solid #dcd9d2;border-radius:5px;box-shadow:0 20px 60px rgba(28,27,24,.22);overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #dcd9d2"><span style="font-family:'JetBrains Mono',monospace;color:#6f6c65">⌕</span><input value="hadd" style="flex:1;border:0;outline:0;font:400 15px 'Public Sans',sans-serif;color:#1c1b18;background:transparent"><kbd style="font:500 11px 'JetBrains Mono',monospace;padding:1px 6px;border:1px solid #dcd9d2;border-radius:3px;background:#f6f5f2;color:#6f6c65">esc</kbd></div>
+                  <sc-for list="{{ palette }}" as="grp" hint-placeholder-count="3">
+                    <div style="padding:8px 8px 4px 16px;font:600 10.5px 'Public Sans',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#6f6c65">{{ grp.label }}</div>
+                    <sc-for list="{{ grp.items }}" as="r" hint-placeholder-count="3"><div style="display:grid;grid-template-columns:110px 1fr auto;align-items:center;gap:12px;padding:8px 16px;background:{{ r.bg }};font-size:13.5px"><span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500">{{ r.a }}</span><span>{{ r.b }} <span style="color:#6f6c65">{{ r.c }}</span></span><span style="font:400 12px 'JetBrains Mono',monospace;color:#6f6c65">{{ r.d }}</span></div></sc-for>
+                  </sc-for>
+                  <div style="display:flex;gap:16px;padding:10px 16px;border-top:1px solid #dcd9d2;background:#f6f5f2;font-size:12px;color:#6f6c65"><span><kbd style="font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#fff">↑↓</kbd> move</span><span><kbd style="font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#fff">↵</kbd> open</span><span><kbd style="font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#fff">g o</kbd> orders · <kbd style="font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#fff">g d</kbd> deliveries · <kbd style="font:500 10.5px 'JetBrains Mono',monospace;padding:0 5px;border:1px solid #dcd9d2;border-radius:3px;background:#fff">g p</kbd> products</span><span style="margin-left:auto">phone digits match customers</span></div>
+                </div>
+              </div>
+            </sc-if>
+          </main>
+        </div>
+      </div>
+      <div style="width:440px;background:#fff;border:1px solid #dcd9d2;padding:22px 26px;font-size:13.5px;line-height:1.55;color:#4a4843">
+        <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18">{{ b.title }}</div>
+        <div style="font-size:12px;color:#6f6c65;margin:2px 0 10px">{{ b.who }} · first question: <em>{{ b.q }}</em></div>
+        <sc-for list="{{ b.notes }}" as="n" hint-placeholder-count="3"><p style="margin:0 0 10px">{{ n }}</p></sc-for>
+        <div style="font-weight:600;color:#1c1b18;margin-top:12px">What we removed</div>
+        <ul style="margin:4px 0 0;padding-left:18px"><sc-for list="{{ b.removed }}" as="r" hint-placeholder-count="3"><li>{{ r }}</li></sc-for></ul>
+      </div>
+    </div>
+  </sc-for>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const G = (label, items, open = true, chev = '▾') => ({ label, open, chev, items: items.map(([l, count, active]) => ({ label: l, count: count ? String(count) : false, fg: active ? '#1c1b18' : '#4a4843', weight: active ? 600 : 400, bg: active ? '#e7edf5' : 'transparent', dot: active ? '#1e3a5f' : '#dcd9d2' })) });
+    const ownerGroups = [
+      G('Sell', [['New sale', 0, true], ['Orders', 31], ['Customers'], ['Deliveries', 14], ['At risk', 4], ['My day']]),
+      G('After sale', [['Returns'], ['Exchanges'], ['Service'], ['Special orders']], false, '▸'),
+      G('Stock', [['Products'], ['Purchasing'], ['Transfers'], ['As-Is review'], ['Gift cards']], false, '▸'),
+      G('Money', [['Sales'], ['Shifts'], ['Reports'], ['Commissions'], ['General ledger']], false, '▸'),
+      G('People & setup', [['Salespeople'], ['Team tasks', 3], ['Members & roles'], ['Time clock'], ['Settings']], false, '▸'),
+    ];
+    const cashierGroups = [
+      G('Sell', [['New sale', 0, true], ['Orders', 6], ['Customers'], ['Deliveries', 3], ['My day']]),
+      G('Stock', [['Products']]),
+      G('Money', [['Sales'], ['My drawer']]),
+      G('Me', [['Time clock']]),
+    ];
+    const roles = (active) => ['Owner', 'Manager', 'Operations', 'Warehouse', 'Cashier'].map((label) => ({ label, bg: label === active ? '#fff' : 'transparent', fg: label === active ? '#1c1b18' : '#6f6c65', shadow: label === active ? '0 1px 2px rgba(28,27,24,.12)' : 'none' }));
+    const sk = (ws) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } }, ws.map((w, i) => React.createElement('div', { key: i, style: { height: 12, width: w, borderRadius: 3, background: 'linear-gradient(90deg,#efeeea 25%,#f6f5f2 50%,#efeeea 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s linear infinite' } })));
+    const base = { store: 'Glendale', user: 'Arman', initials: 'AR', kbd: 'Ctrl K', syncDot: '#1a6e43', syncLabel: 'Synced · 9:41 AM', homeLabel: 'Dashboard', homeBg: 'transparent', isNormal: false, isLoading: false, isError: false, isPalette: false, showRole: true, searchMax: '320px' };
+    const boards = [
+      { ...base, id: '3a', width: '1440px', sidebarW: '220px', groups: ownerGroups, roles: roles('Owner'), user: 'Alex', initials: 'AL', kbd: '⌘K', isNormal: true, title: 'Shell at 1440 — owner, Mac', who: 'Owner signed in on a MacBook', q: 'Which store am I acting for, and where is the thing I came for?',
+        notes: ["Forstall's first cut kept all 35 links and made them smaller. Ive: a new hire cannot learn 35 things in a day; five they can. The five groups are verbs the business already uses — Sell, After sale, Stock, Money, People & setup — not the STORIS module names. Only the group the user is in stays open; the rest collapse to a heading a click away. The owner sees every group; a cashier sees eight links (3b).", "Chaudhri moved the store context from a filter chip on the dashboard into the header for every screen, as the first control after the sidebar, filled in accent-soft so it cannot be missed. 'Acting for Glendale' is deliberate phrasing: it says the sale, the drawer and the report all belong to that store. Selling-restricted members can only pick stores they are approved for; everyone else can switch, and the switch is audited.", "Jobs cut the role switcher for everyone but the owner — a role is who you are, not a filter — and kept it for the owner as a preview tool, because the owner will otherwise ask 'what does Maya see'. The search box shows ⌘K here and Ctrl K on the Windows registers (3b); the audit found ⌘K on every machine."],
+        removed: ['26 top-level links (folded into collapsed groups).', 'The full-width period picker in the header — it belongs to the dashboard and reports, so it moves there.', 'The theme toggle. Light mode is locked.', 'The store-scope dropdown on the dashboard, replaced by the header context.'] },
+      { ...base, id: '3b', width: '1280px', sidebarW: '200px', groups: cashierGroups, showRole: false, searchMax: '280px', isNormal: true, title: 'Shell at 1280 — cashier, Windows register', who: 'Salesperson at a Glendale register', q: 'Is this register on my store, and can I start a sale?',
+        notes: ["At 1280 the sidebar narrows to 200 and the search shrinks to 280; nothing wraps, nothing hides. Below 1280 (not a target) the sidebar would collapse to icons — the team recorded this under 'later' since no register runs that narrow.", "Role-trimming is done by the owner in Members & roles, but the default cashier set is eight links: New sale, Orders, Customers, Deliveries, My day, Products, Sales, My drawer, Time clock. Forstall pushed for a ninth (Returns); Jobs asked how many returns a cashier opens a day, and it became a link inside the order slide-over instead.", "The 'Acting for' chip is the same size and position as at 1440. Matas: the one thing that must be in the same place on every machine is the thing that tells you where the money is going."],
+        removed: ['Role switcher (cashiers have one role).', 'Reports, Purchasing, Transfers, Settings from the cashier sidebar.', 'The keyboard-shortcut chip inside the primary button when the width drops — the shortcut still works.'] },
+      { ...base, id: '3c', width: '1440px', sidebarW: '220px', groups: ownerGroups, roles: roles('Owner'), user: 'Alex', initials: 'AL', kbd: '⌘K', isPalette: true, title: 'Command palette open', who: 'Anyone', q: 'Take me to that order, customer or SKU.',
+        notes: ["One box for navigation and search. Typing matches orders by number and customer, customers by name and phone digits, products by name and SKU, and pages by name. Results are grouped and the top result is preselected so Enter is always the fastest path.", "Chaudhri added the two-key 'g' chords in the footer (g o, g d, g p) because the palette is a mouse-free route to a page in two keystrokes; Ive wanted the footer gone. Settled: the footer stays but is the palette's only decoration.", "The dialog traps focus, restores it on close, and dims the page rather than hiding it, so the user keeps the sense of where they were."],
+        removed: ['Recent-items list when the query is empty (it became the Inbox).', 'Category tabs across the top of the palette.', 'Icons per result row — the mono identifier in the first column does that job.'] },
+      { ...base, id: '3d', width: '1440px', sidebarW: '220px', groups: cashierGroups, showRole: false, isError: true, syncDot: '#b3261e', syncLabel: 'Offline · retrying', title: 'Global error state — API cold', who: 'Salesperson mid-sale when the API sleeps', q: 'Did I lose the sale, and what do I do now?',
+        notes: ["The audit's worst finding: a bare 'Loading…' with no retry, on the one screen with a customer waiting. The error component names the draft, says it is safe, and gives two buttons whose labels are actions, not 'OK'.", "Forstall wanted auto-retry with a countdown, shown; Ive wanted only the manual button. Both: it retries on its own with a visible timer, and the button jumps the queue. The sidebar's sync indicator turns red so the state is visible from any screen.", "Loading (below) is the same layout with skeletons in place of content and a 4-second budget; when the budget runs out it becomes this. Nothing in the product may show a spinner without a sentence."],
+        removed: ['The word "Loading…" as a screen.', 'Any spinner without a timeout.', 'Modal error dialogs that block the sidebar.'] },
+      { ...base, id: '3e', width: '1440px', sidebarW: '220px', groups: cashierGroups, showRole: false, isLoading: true, syncDot: '#8a5a00', syncLabel: 'Connecting…', title: 'Global loading state', who: 'Salesperson opening the register', q: 'Is it coming, and how long?',
+        notes: ["Skeleton rows stand in for the items table and the totals rail in exactly their final positions so nothing jumps when data lands. A timer in the header shows elapsed seconds; Matas argued a number is more honest than a bar.", "The sidebar and store context render immediately from the session, before any API call, so the user can navigate away if this screen is slow."],
+        removed: ['Centered full-page spinner.', 'Onboarding checklist that used to occupy this moment on the dashboard.'] },
+    ];
+    const palette = [
+      { label: 'Orders', items: [['SO-10437', 'Omar Haddad', '· Glendale · Scheduled Sep 6', '$1,240.00 due', true], ['SO-10402', 'Dana Wu', '· Koreatown · Fulfilled', '—'], ['SO-10371', 'Grace Kim', '· West LA · Cancelled', 'refund pending']] },
+      { label: 'Customers', items: [['(818) 555-0142', 'Omar Haddad', '· 2 orders · Glendale', 'open']] },
+      { label: 'Go to', items: [['g o', 'Orders', '', '↵'], ['g d', 'Deliveries', '', ''], ['g p', 'Products', '', '']] },
+    ].map((g) => ({ ...g, items: g.items.map(([a, b, c, d, on]) => ({ a, b, c, d, bg: on ? '#e7edf5' : 'transparent' })) }));
+    return { boards, palette, skeletonRows: sk([220, 420, 380, 300, 460, 240]), skeletonRail: sk([140, 200, 180, 120]) };
+  }
+}
+</script>
+</body>
+</html>

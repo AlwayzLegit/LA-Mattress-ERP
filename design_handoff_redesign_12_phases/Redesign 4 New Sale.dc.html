@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#e9e7e2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65">LA MATTRESS ERP · REDESIGN</span><h1 style="margin:0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">Phase 4 — New Sale, the register</h1><span style="font-size:13px;color:#6f6c65">Every artboard below is the live prototype (<a href="Proto New Sale.dc.html">Proto New Sale.dc.html</a>) in a given state. Click into any of them.</span></div>
+  <div style="width:1440px;min-width:1440px;flex:none;background:#fff;border:1px solid #dcd9d2;padding:24px 32px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px;font-size:13.5px;line-height:1.55;color:#4a4843">
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">The user and the question</div><p style="margin:0">A salesperson with a customer in front of them. <em>"What do I need to finish this sale?"</em> The answer is always the rail: the customer (or the field to find one), the total, the balance, and one large button. The items table gets the full content width so every column — including Amount, which the audit found off-screen — sits in view at 1440 and at 1280.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">Sourcing defaults (from the handoff)</div><p style="margin:0">Add Product opens from <strong>Warehouse — warehouse</strong>. A line whose effective fulfillment is take-with follows the order's Store. Untouched lines re-source when the order's fulfillment or store changes; an <span style="font:500 10.5px 'JetBrains Mono',monospace;padding:1px 5px;border:1px solid #dcd9d2;border-radius:3px;color:#6f6c65;background:#f6f5f2">auto</span> badge shows while a value is derived and disappears once the salesperson edits it. A touched line is never moved silently — it gets an inline note. Take-with with zero stock gets its own warning copy.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">Design notes</div><p style="margin:0 0 8px"><strong style="color:#1c1b18">Ive vs Forstall on the rail:</strong> Ive wanted a footer so items could run edge to edge. Forstall: the customer field must be where the eye lands before the first item, and a footer puts the total behind the keyboard tray on a 1280 register. Jobs took the rail (also your call), then made Ive's point stick — the rail is 316px and holds only four things.</p><p style="margin:0 0 8px"><strong style="color:#1c1b18">Chaudhri on the picker:</strong> a real dialog (role, focus trap, Escape) with From as the loudest control in the toolbar — filled accent — because the whole risk of the warehouse default is a salesperson not noticing. "At Glendale" column header follows the selection; ATP gets a hover definition.</p><p style="margin:0"><strong style="color:#1c1b18">Matas on motion:</strong> a new line arrives from the top of the table in 120ms and the total re-counts; that is the only motion on the screen.</p></div>
+  </div>
+
+  <sc-for list="{{ boards }}" as="b" hint-placeholder-count="6">
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <div id="{{ b.id }}" style="position:relative;width:1440px;min-width:1440px;flex:none;height:900px;border:1px solid #dcd9d2;overflow:hidden;background:#f6f5f2">
+        <a href="#{{ b.id }}" style="position:absolute;top:8px;right:8px;z-index:30;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#fff;text-decoration:none;color:#6f6c65">{{ b.id }}</a>
+        <dc-import name="Proto New Sale" scene="{{ b.scene }}" hint-size="1440px,900px"></dc-import>
+      </div>
+      <div style="width:440px;background:#fff;border:1px solid #dcd9d2;padding:22px 26px;font-size:13.5px;line-height:1.55;color:#4a4843">
+        <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18">{{ b.title }}</div>
+        <div style="font-size:12px;color:#6f6c65;margin:2px 0 10px">first question: <em>{{ b.q }}</em></div>
+        <sc-for list="{{ b.notes }}" as="n" hint-placeholder-count="2"><p style="margin:0 0 10px">{{ n }}</p></sc-for>
+        <div style="font-weight:600;color:#1c1b18;margin-top:12px">What we removed</div>
+        <ul style="margin:4px 0 0;padding-left:18px"><sc-for list="{{ b.removed }}" as="r" hint-placeholder-count="2"><li>{{ r }}</li></sc-for></ul>
+      </div>
+    </div>
+  </sc-for>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return { boards: [
+      { id: '4a', scene: 'empty', title: 'Empty — register just opened', q: 'Where do I start?', notes: ['Two things on screen: a place to find the customer and a button to add a product, both at register size (38–44px). The empty state names the sourcing rule in one sentence so the warehouse default is never a surprise. Three drafts from the store are one click away — drafts are visible store-wide by decision.', 'Forstall wanted the customer search to auto-focus; Chaudhri agreed but only when the screen opens from N or from login, never after a completed sale (where the cursor should rest on New sale). Settled that way.'], removed: ['An onboarding banner.', 'Recently sold products carousel.', 'The Store select from above the table — it lives in Order details, where it changes sourcing.'] },
+      { id: '4b', scene: 'midsale', title: 'Mid-sale — four lines, mixed fulfillment', q: 'Is every line right, and what does the customer owe?', notes: ['Two delivery lines source from the Warehouse (auto). The pillows are take-with and follow the order\'s store — Glendale — with the auto badge. The protector was explicitly set to pickup from Koreatown, so its badge is gone and the salesperson owns that choice. Amount sits at the far right, in view, tabular.', 'The status chip in the title is computed: Draft, or Waiting on stock the moment any line is short at its source. Try it: set the mattress to Take-with and watch its source snap to Glendale and its availability drop to 1.'], removed: ['A separate "order default" label — it now reads "Same as order · Delivery".', 'The special-order warning copy on take-with lines (replaced by the take-with copy).', 'Per-line ellipsis menus. Remove is a text link under the SKU.'] },
+      { id: '4c', scene: 'picker', title: 'Add Product — a real dialog', q: 'Do we have it, where, and can I add it?', notes: ['Search matches every word in any order. Vendor, size and firmness filters, in-stock-first sort. The From select is the loudest control — filled navy — and the availability column header follows it. ATP has a definition on hover. The footer says "Showing 8 of 1,948", where the sale line will source from, and why.', 'Ive asked to drop the All-stores column; Chaudhri kept it because "who has this anywhere" is the spec question and a salesperson should not have to open Products to answer it.'], removed: ['"Showing first 100" without a denominator.', 'A plain div with no dialog role — this one traps focus and closes on Escape.', 'The "— this store" only labelling; the default now reads "Warehouse — warehouse".'] },
+      { id: '4d', scene: 'payment', title: 'Payment in progress — split to $0', q: 'How much is left, and how do they want to pay it?', notes: ['$1,500 on a card is recorded; the rail shows the balance in the same place it showed the total, and the payment panel offers Pay in full and 50% deposit as one-tap amounts. Card last-4 is captured because the invoice prints it. Record, and the panel stays open until the balance is $0 or the salesperson presses Done.', 'Forstall wanted Complete with balance hidden until a deposit exists; Jobs kept it visible with its hint ("$1,367.17 collected at the door") because delivery sales with COD are the common case in this business.'], removed: ['A separate Payments page.', 'A modal for each tender.', 'Change-due arithmetic for cash (the drawer app does it).'] },
+      { id: '4e', scene: 'completed', title: 'Completed — stock reserved, print', q: 'Is it done, and where is the receipt?', notes: ['Everything locks. The status chip turns Scheduled. The rail says in one sentence what happened to stock and money, and the one big button is Print receipt. New sale is one key away and clears the register.', 'Matas asked for a confetti-free completion: the only signal is the chip changing and the green sentence.'], removed: ['A success modal.', 'The Take payment button (there is nothing left to take).'] },
+      { id: '4f', scene: 'zero', title: '$0.00 price — warning state', q: 'Did I mean to give this away?', notes: ['The Sealy line is priced at $0.00. Its row tints amber, the price field gets an amber border, and the rail blocks Take payment until the salesperson ticks "$0.00 is intentional". The audit found the register accepted a 0.00 price silently.', 'Also visible here: the take-with pillows now source from Glendale with 6 available; set their quantity to 7 to see the take-with-specific warning.'], removed: ['A manager-approval step for $0 lines — the brief says inline price edit, no approval; a confirmation is the compromise.'] },
+    ] };
+  }
+}
+</script>
+</body>
+</html>
