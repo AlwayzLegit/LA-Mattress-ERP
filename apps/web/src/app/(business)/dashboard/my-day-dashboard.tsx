@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Card,
@@ -186,7 +186,11 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
   const [error, setError] = useState<string | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
 
+  // The store the last request asked for — Retry re-asks for it even when
+  // the request that failed was a store switch.
+  const attempted = useRef<string | null>(null);
   const load = useCallback(async (loc: string | null) => {
+    attempted.current = loc;
     setError(null);
     try {
       const qs = loc ? `?locationId=${loc}` : '';
@@ -211,7 +215,7 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
         <Alert
           tone="error"
           action={
-            <Button size="sm" onClick={() => void load(null)}>
+            <Button size="sm" onClick={() => void load(attempted.current)}>
               Retry
             </Button>
           }

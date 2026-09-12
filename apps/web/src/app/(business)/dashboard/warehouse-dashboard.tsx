@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Select, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
@@ -370,7 +370,11 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   const [loadout, setLoadout] = useState<Loadout | null>(null);
   const [picklist, setPicklist] = useState<Picklist | null>(null);
 
+  // The store the last request asked for — Retry re-asks for it even when
+  // the request that failed was a store switch.
+  const attempted = useRef<string | null>(null);
   const load = useCallback(async (loc: string | null) => {
+    attempted.current = loc;
     setError(null);
     try {
       // No selection = the combined view; the server defaults the same way.
@@ -404,7 +408,7 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
         <Alert
           tone="error"
           action={
-            <Button size="sm" onClick={() => void load(null)}>
+            <Button size="sm" onClick={() => void load(attempted.current)}>
               Retry
             </Button>
           }

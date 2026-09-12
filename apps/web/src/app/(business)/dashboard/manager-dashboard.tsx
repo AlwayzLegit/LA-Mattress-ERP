@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { Alert, LinkButton, Select, rowKeys, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
@@ -228,7 +228,11 @@ export default function ManagerDashboardView({ userName }: { userName: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function load(loc: string | null) {
+  // The store the user last asked for — Retry re-asks for it, not the
+  // default-store fallback and not the store that last loaded.
+  const attempted = useRef<string | null>(null);
+  async function load(loc: string | null, isFallback = false) {
+    if (!isFallback) attempted.current = loc;
     setError(null);
     try {
       const qs = loc ? `?locationId=${loc}` : '';
@@ -237,7 +241,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       setLocationId(d.location.id);
     } catch (err) {
       if (loc) {
-        void load(null);
+        void load(null, true);
         return;
       }
       setError(err instanceof Error ? err.message : String(err));
@@ -296,7 +300,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
         <Alert
           tone="error"
           action={
-            <Button size="sm" onClick={() => void load(locationId)}>
+            <Button size="sm" onClick={() => void load(attempted.current)}>
               Retry
             </Button>
           }
