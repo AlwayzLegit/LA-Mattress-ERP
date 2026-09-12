@@ -11,6 +11,7 @@ import {
   ShimmerRows,
   StatusPill,
   orderStatusMeta,
+  pctDelta,
   shortDay,
   usdShort,
   usdWhole,
@@ -126,6 +127,22 @@ interface ManagerDashboard {
     latestAt: string;
     events: { action: string; actorName: string | null; createdAt: string }[];
   }[];
+  headline: {
+    writtenCents: number;
+    ticketCount: number;
+    avgTicketCents: number;
+    lastWeek: { date: string; writtenCents: number };
+    lastMonth: { date: string; writtenCents: number };
+    topRep: { name: string; count: number } | null;
+  };
+  needsCall: { total: number; atRisk: number; waitingOnStock: number };
+  lastClose: {
+    status: 'clean' | 'short' | 'over' | 'open' | 'suspended' | 'none';
+    varianceCents: number | null;
+    closedAt: string | null;
+    byName: string | null;
+    closeDay: string | null;
+  };
 }
 
 const PIPELINE_LABELS: Record<string, string> = {
@@ -142,6 +159,19 @@ const PIPELINE_COLORS: Record<string, string> = {
   scheduled: 'var(--accent)',
 };
 const PIPELINE_DEFAULT_COLOR = 'var(--accent)';
+
+function longDate(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+function weekdayOf(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short' });
+}
 
 function ageDays(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
@@ -220,12 +250,12 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}
     >
       <div>
-        <h1 className="page-title">Hi, {firstName}</h1>
+        <h1 className="page-title">{data ? data.location.name : `Hi, ${firstName}`}</h1>
         <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 3 }}>
           {data ? (
             <>
-              {data.date} at <strong style={{ fontWeight: 600 }}>{data.location.name}</strong> (
-              {data.location.timezone})
+              Acting for <strong style={{ fontWeight: 600 }}>{data.location.name}</strong> ·{' '}
+              {longDate(data.date)} · {firstName}
             </>
           ) : (
             'Loading your store…'
@@ -313,7 +343,123 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       <TimeClockStrip />
       {header}
 
-      <StoresSection locationIds={[data.location.id]} single />
+      <div className="dh-head" data-testid="dh-head">
+        <section className="panel dh-headline" data-testid="dh-headline">
+          <div className="dh-label">{store} written today</div>
+          <div className="dh-value" data-testid="dh-written">
+            {usdWhole(data.headline.writtenCents)}
+          </div>
+          <div className="dh-baselines">
+            <div>
+              <strong
+                className={`mono ${data.headline.writtenCents >= data.headline.lastWeek.writtenCents ? 'is-up' : 'is-down'}`}
+              >
+                {pctDelta(data.headline.writtenCents, data.headline.lastWeek.writtenCents) ?? '—'}
+              </strong>{' '}
+              vs same day last week{' '}
+              <span className="mono dh-base">
+                {usdWhole(data.headline.lastWeek.writtenCents)} last{' '}
+                {weekdayOf(data.headline.lastWeek.date)}
+              </span>
+            </div>
+            <div>
+              <strong
+                className={`mono ${data.headline.writtenCents >= data.headline.lastMonth.writtenCents ? 'is-up' : 'is-down'}`}
+              >
+                {pctDelta(data.headline.writtenCents, data.headline.lastMonth.writtenCents) ?? '—'}
+              </strong>{' '}
+              vs same day last month{' '}
+              <span className="mono dh-base">
+                {usdWhole(data.headline.lastMonth.writtenCents)}{' '}
+                {shortDay(data.headline.lastMonth.date)}
+              </span>
+            </div>
+          </div>
+          <div className="dh-sub">
+            {data.headline.ticketCount} ticket{data.headline.ticketCount === 1 ? '' : 's'}
+            {data.headline.topRep
+              ? ` · ${data.headline.topRep.count} by ${data.headline.topRep.name.split(' ')[0]}`
+              : ''}
+            {data.headline.ticketCount ? ` · avg ${usdWhole(data.headline.avgTicketCents)}` : ''}
+          </div>
+        </section>
+
+        <Link href="/jeopardy" className="panel dh-side" data-testid="dh-needs-call">
+          <div className="dh-label">Needs a call today</div>
+          <div
+            className="dh-side-value mono"
+            style={{ color: data.needsCall.total > 0 ? 'var(--status-risk-fg)' : undefined }}
+          >
+            {data.needsCall.total}
+          </div>
+          <div className="dh-side-delta">
+            {data.needsCall.total > 0 ? (
+              <strong className="mono is-down">
+                {[
+                  data.needsCall.atRisk ? `${data.needsCall.atRisk} at risk` : null,
+                  data.needsCall.waitingOnStock
+                    ? `${data.needsCall.waitingOnStock} waiting on stock`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </strong>
+            ) : (
+              <span className="dh-base">every promise is on track</span>
+            )}
+          </div>
+          <span className="dh-side-link">Open the queue →</span>
+        </Link>
+
+        <Link href="/shifts" className="panel dh-side" data-testid="dh-last-close">
+          <div className="dh-label">Last night&apos;s close</div>
+          <div
+            className="dh-side-value"
+            style={{
+              color:
+                data.lastClose.status === 'clean'
+                  ? 'var(--status-fulfilled-fg)'
+                  : data.lastClose.status === 'short' || data.lastClose.status === 'suspended'
+                    ? 'var(--status-risk-fg)'
+                    : data.lastClose.status === 'over'
+                      ? 'var(--status-waiting-fg)'
+                      : undefined,
+            }}
+          >
+            {
+              {
+                clean: 'Clean',
+                short: 'Short',
+                over: 'Over',
+                open: 'Open',
+                suspended: 'Suspended',
+                none: '—',
+              }[data.lastClose.status]
+            }
+          </div>
+          <div className="dh-side-delta">
+            <strong
+              className={`mono ${data.lastClose.status === 'clean' ? 'is-up' : data.lastClose.status === 'none' ? '' : 'is-down'}`}
+            >
+              {data.lastClose.status === 'clean'
+                ? 'balanced'
+                : data.lastClose.varianceCents
+                  ? `${data.lastClose.varianceCents > 0 ? '+' : '−'}${usdWhole(Math.abs(data.lastClose.varianceCents))}`
+                  : data.lastClose.status === 'none'
+                    ? 'no drawer closed yet'
+                    : ''}
+            </strong>{' '}
+            <span className="dh-base">
+              {data.lastClose.byName
+                ? `· ${data.lastClose.closeDay ? shortDay(data.lastClose.closeDay) : ''} · ${data.lastClose.byName}`
+                : ''}
+            </span>
+          </div>
+          <span className="dh-side-link">Z-report →</span>
+        </Link>
+      </div>
+
+      <StoresSection locationIds={[data.location.id]} single actorName={userName} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
         <Panel title="This week's board" sub={store}>
@@ -374,83 +520,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       </Panel>
 
       <SectionRow title="Store operations" sub={`${store} · today`} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 18 }}>
-        <OpsPanel
-          title="Deliveries"
-          count={queues.todaysDeliveries.length}
-          link={{ href: `/deliveries/day/${data.date}`, label: 'Dispatch' }}
-          testid="today-deliveries"
-          empty="No deliveries scheduled from this store today or tomorrow."
-          rows={queues.todaysDeliveries.map((r) => ({
-            key: r.deliveryId,
-            href: `/orders/${r.id}`,
-            a: r.number,
-            b: customerLine(r),
-            c: [
-              r.scheduledDate === data.date ? 'Today' : 'Tomorrow',
-              windowOf(r),
-              r.driverName ?? 'no driver',
-            ]
-              .filter(Boolean)
-              .join(' · '),
-            title: `${r.deliveryState.replace(/_/g, ' ')}${r.driverName ? ` · driver ${r.driverName}` : ''}`,
-            d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
-            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
-          }))}
-        />
-
-        <OpsPanel
-          title="Backorder watch"
-          count={queues.backorders.length}
-          link={{ href: '/jeopardy', label: 'At risk' }}
-          testid="backorders"
-          empty="Every promised order has its stock reserved."
-          rows={queues.backorders.map((r) => ({
-            key: r.id,
-            href: `/orders/${r.id}`,
-            a: r.number,
-            b: customerLine(r),
-            c: r.requestedDate ? `promised ${shortDay(r.requestedDate)}` : 'no promise date',
-            cColor: r.requestedDate && r.requestedDate < data.date ? 'var(--danger)' : undefined,
-            title: r.salespersonName ? `rep ${r.salespersonName}` : undefined,
-            d: `${r.shortUnits} short`,
-            dColor: 'var(--danger)',
-          }))}
-        />
-
-        <OpsPanel
-          title="Aging carts"
-          count={queues.staleCarts.length}
-          link={{ href: '/orders', label: 'Orders' }}
-          testid="stale-carts"
-          empty="No parked drafts or quotes. Clean register!"
-          rows={queues.staleCarts.map((r) => ({
-            key: r.id,
-            href: `/orders/${r.id}`,
-            a: r.number,
-            b: customerLine(r),
-            c: `${orderStatusMeta(r.status).label} · ${ageDays(r.createdAt)}d`,
-            title: r.salespersonName ? `rep ${r.salespersonName}` : undefined,
-            d: usdWhole(r.totalCents),
-          }))}
-        />
-
-        <OpsPanel
-          title="Returns & exchanges"
-          count={data.returnsInFlight.length}
-          link={{ href: '/returns', label: 'Returns' }}
-          testid="returns-in-flight"
-          empty="Nothing awaiting goods or a refund."
-          rows={data.returnsInFlight.map((r) => ({
-            key: r.id,
-            href: r.orderId ? `/orders/${r.orderId}` : '/returns',
-            a: r.rmaNumber,
-            b: [r.orderNumber, r.customerName].filter(Boolean).join(' · ') || '—',
-            c: r.status.replace(/_/g, ' '),
-            d: `${ageDays(r.createdAt)}d`,
-          }))}
-        />
-
+      <div className="dh-three">
         <Panel
           title="Incoming stock"
           sub={<span className="count-chip">{data.incoming.length}</span>}
@@ -567,8 +637,83 @@ export default function ManagerDashboardView({ userName }: { userName: string })
           )}
         </Panel>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 18 }}>
+        <OpsPanel
+          title="Deliveries"
+          count={queues.todaysDeliveries.length}
+          link={{ href: `/deliveries/day/${data.date}`, label: 'Dispatch' }}
+          testid="today-deliveries"
+          empty="No deliveries scheduled from this store today or tomorrow."
+          rows={queues.todaysDeliveries.map((r) => ({
+            key: r.deliveryId,
+            href: `/orders/${r.id}`,
+            a: r.number,
+            b: customerLine(r),
+            c: [
+              r.scheduledDate === data.date ? 'Today' : 'Tomorrow',
+              windowOf(r),
+              r.driverName ?? 'no driver',
+            ]
+              .filter(Boolean)
+              .join(' · '),
+            title: `${r.deliveryState.replace(/_/g, ' ')}${r.driverName ? ` · driver ${r.driverName}` : ''}`,
+            d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
+            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
+          }))}
+        />
 
-      <StaffSchedule lockedLocationId={data.location.id} readOnly />
+        <OpsPanel
+          title="Backorder watch"
+          count={queues.backorders.length}
+          link={{ href: '/jeopardy', label: 'At risk' }}
+          testid="backorders"
+          empty="Every promised order has its stock reserved."
+          rows={queues.backorders.map((r) => ({
+            key: r.id,
+            href: `/orders/${r.id}`,
+            a: r.number,
+            b: customerLine(r),
+            c: r.requestedDate ? `promised ${shortDay(r.requestedDate)}` : 'no promise date',
+            cColor: r.requestedDate && r.requestedDate < data.date ? 'var(--danger)' : undefined,
+            title: r.salespersonName ? `rep ${r.salespersonName}` : undefined,
+            d: `${r.shortUnits} short`,
+            dColor: 'var(--danger)',
+          }))}
+        />
+
+        <OpsPanel
+          title="Aging carts"
+          count={queues.staleCarts.length}
+          link={{ href: '/orders', label: 'Orders' }}
+          testid="stale-carts"
+          empty="No parked drafts or quotes. Clean register!"
+          rows={queues.staleCarts.map((r) => ({
+            key: r.id,
+            href: `/orders/${r.id}`,
+            a: r.number,
+            b: customerLine(r),
+            c: `${orderStatusMeta(r.status).label} · ${ageDays(r.createdAt)}d`,
+            title: r.salespersonName ? `rep ${r.salespersonName}` : undefined,
+            d: usdWhole(r.totalCents),
+          }))}
+        />
+
+        <OpsPanel
+          title="Returns & exchanges"
+          count={data.returnsInFlight.length}
+          link={{ href: '/returns', label: 'Returns' }}
+          testid="returns-in-flight"
+          empty="Nothing awaiting goods or a refund."
+          rows={data.returnsInFlight.map((r) => ({
+            key: r.id,
+            href: r.orderId ? `/orders/${r.orderId}` : '/returns',
+            a: r.rmaNumber,
+            b: [r.orderNumber, r.customerName].filter(Boolean).join(' · ') || '—',
+            c: r.status.replace(/_/g, ' '),
+            d: `${ageDays(r.createdAt)}d`,
+          }))}
+        />
+      </div>
 
       <SectionRow title="My day" sub={`${firstName} · ${store}`} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 18 }}>
@@ -679,6 +824,8 @@ export default function ManagerDashboardView({ userName }: { userName: string })
           </table>
         </Panel>
       </div>
+
+      <StaffSchedule lockedLocationId={data.location.id} readOnly />
     </div>
   );
 }

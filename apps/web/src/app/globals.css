@@ -6405,3 +6405,554 @@ select.picker-from {
     page-break-inside: avoid;
   }
 }
+
+/* ============================================================
+   Redesign Phase 9 — role homes: owner and manager (README §3.5,
+   canvas 8). One headline with two baselines, side tiles, a row of
+   small figures each with a baseline, the cash pickups queue, store
+   cards with the cash-on-hand column, then the kept cards.
+   ============================================================ */
+.dh {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.dh-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dh-eyebrow {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dh-email {
+  margin-left: 6px;
+  color: var(--faint);
+}
+.dh-top-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.dh-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  font-size: 12.5px;
+}
+.dh-alert.is-error {
+  border-color: var(--status-risk-border);
+  background: var(--status-risk-bg);
+}
+.dh-alert.is-note {
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+}
+.dh-alert strong {
+  font-weight: 600;
+}
+
+/* Headline row: the one number, then two side tiles. */
+.dh-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.dh-headline,
+.dh-side {
+  padding: 16px 18px 14px;
+  gap: 0;
+}
+.dh-side {
+  display: flex;
+  flex-direction: column;
+  color: inherit;
+  text-decoration: none;
+}
+.dh-side:hover {
+  border-color: var(--border2);
+  background: var(--surface2);
+}
+.dh-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dh-value {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.dh-baselines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+.dh-baselines strong,
+.dh-side-delta strong {
+  font-weight: 600;
+}
+.dh-baselines .is-up,
+.dh-side-delta .is-up {
+  color: var(--status-fulfilled-fg);
+}
+.dh-baselines .is-down,
+.dh-side-delta .is-down {
+  color: var(--status-risk-fg);
+}
+.dh-base {
+  color: var(--muted);
+}
+.dh-sub {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dh-side-value {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.dh-side-delta {
+  margin-top: 6px;
+  font-size: 12.5px;
+  min-height: 18px;
+}
+.dh-side-link {
+  margin-top: auto;
+  padding-top: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-ink);
+}
+
+/* Six small figures: the same numbers, one-fifth the height. */
+.dh-figs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.dh-fig {
+  min-width: 0;
+  padding: 8px 14px 9px;
+  border-right: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+}
+.dh-fig:last-child {
+  border-right: 0;
+}
+.dh-fig:hover {
+  background: var(--surface2);
+}
+.dh-fig-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.dh-fig-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 2px;
+  min-width: 0;
+}
+.dh-fig-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.dh-fig-delta {
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dh-fig-delta.is-ok {
+  color: var(--status-fulfilled-fg);
+}
+.dh-fig-delta.is-bad {
+  color: var(--status-risk-fg);
+}
+.dh-fig-delta.is-muted {
+  color: var(--muted);
+}
+
+/* The kept cards: chart + brief side by side, everything else full width. */
+.dh-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+.dh-grid > * {
+  min-width: 0;
+}
+.dh-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dh-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.dh-legend i.is-dashed {
+  width: 10px;
+  height: 0;
+  border-top: 2px dashed var(--status-waiting-fg);
+}
+.dh-three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+/* Cash pickups queue. */
+.cq.is-due {
+  border-color: var(--status-risk-border);
+}
+.cq-total {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cq-total-amt {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.cq.is-due .cq-total-amt {
+  color: var(--status-risk-fg);
+}
+.cq.is-holding .cq-total-amt {
+  color: var(--status-waiting-fg);
+}
+.cq.is-ok .cq-total-amt {
+  color: var(--status-fulfilled-fg);
+}
+.cq-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.cq-table th {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.cq-table td {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.cq-table tr:last-child td {
+  border-bottom: 0;
+}
+.cq-table .num,
+.cq-table th.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.cq-table tr.is-due td {
+  background: var(--status-risk-bg);
+}
+.cq-empty {
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--muted);
+}
+.cq-rule {
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+}
+.cq-rule strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Stores header + store card. */
+.stores-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stores-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+.stores-head-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.sc-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+.sc-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.sc-figs {
+  margin-left: auto;
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.sc-fig {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sc-fig-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.sc-fig-value.is-strong {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+.sc-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.1fr);
+}
+.sc-col {
+  padding: 12px 14px 14px;
+  border-right: 1px solid var(--border);
+}
+.sc-col:last-child {
+  border-right: 0;
+}
+.sc-col-title {
+  margin-bottom: 8px;
+}
+.sc-empty {
+  padding: 16px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.sc-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 6px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.sc-total.is-refund {
+  padding-top: 4px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.sc-total.is-refund .mono {
+  color: var(--status-risk-fg);
+}
+.tender-count {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* Cash on hand column. */
+.coh {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.coh-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.coh-amt {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+.coh-last {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.coh-empty {
+  padding: 10px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.coh-list {
+  display: flex;
+  flex-direction: column;
+}
+.coh-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 6px;
+  margin: 0 -6px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+}
+.coh-row:last-child {
+  border-bottom: 0;
+}
+.coh-row.is-ticked {
+  background: var(--accent-soft);
+}
+.coh-row-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.coh-row-meta {
+  color: var(--muted);
+}
+.coh-row-amt {
+  font-variant-numeric: tabular-nums;
+}
+.coh-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.coh-form {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.coh-form-line {
+  font-size: 12.5px;
+}
+.coh-form-line strong {
+  font-weight: 600;
+}
+.coh-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.coh-variance {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--status-risk-fg);
+}
+.coh-history {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+@media (max-width: 1100px) {
+  .dh-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dh-figs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .dh-fig:nth-child(3n) {
+    border-right: 0;
+  }
+  .dh-fig:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--border);
+  }
+  .dh-grid,
+  .dh-three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dh-grid > * {
+    grid-column: auto !important;
+  }
+  .sc-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sc-col {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .sc-col:last-child {
+    border-bottom: 0;
+  }
+}
+@media (max-width: 640px) {
+  .dh-value {
+    font-size: 40px;
+  }
+  .dh-figs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dh-fig:nth-child(3n) {
+    border-right: 1px solid var(--border);
+  }
+  .dh-fig:nth-child(2n) {
+    border-right: 0;
+  }
+  .dh-fig:nth-child(-n + 4) {
+    border-bottom: 1px solid var(--border);
+  }
+  .coh-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

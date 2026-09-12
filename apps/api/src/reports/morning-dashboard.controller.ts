@@ -177,6 +177,25 @@ interface ManagerDashboard {
     latestAt: Date;
     events: { action: string; actorName: string | null; createdAt: Date }[];
   }[];
+  /** Redesign Phase 9: the store headline with both baselines. */
+  headline: {
+    writtenCents: number;
+    ticketCount: number;
+    avgTicketCents: number;
+    lastWeek: { date: string; writtenCents: number };
+    lastMonth: { date: string; writtenCents: number };
+    topRep: { name: string; count: number } | null;
+  };
+  /** "Needs a call today": past-due promises and orders short on stock. */
+  needsCall: { total: number; atRisk: number; waitingOnStock: number };
+  /** Last night's close: the most recent closed drawer at the store. */
+  lastClose: {
+    status: 'clean' | 'short' | 'over' | 'open' | 'suspended' | 'none';
+    varianceCents: number | null;
+    closedAt: Date | null;
+    byName: string | null;
+    closeDay: string | null;
+  };
 }
 
 const REFUND_ACTIONS = [
@@ -1278,7 +1297,133 @@ export class MorningDashboardController {
         ),
       );
 
+    // ---- Phase 9 headline baselines, needs-a-call, last night's close ----
+    const [baseRow] = await this.db
+      .select({
+        lastWeek: sql<string>`((now() AT TIME ZONE ${tz})::date - 7)::text`,
+        lastMonth: sql<string>`LEAST((now() AT TIME ZONE ${tz})::date - interval '1 month', (date_trunc('month', (now() AT TIME ZONE ${tz})::date) - interval '1 day'))::date::text`,
+      })
+      .from(schema.businesses)
+      .where(eq(schema.businesses.id, businessId))
+      .limit(1);
+    const lastWeekDay = baseRow!.lastWeek;
+    const lastMonthDay = baseRow!.lastMonth;
+    const writtenOn = async (day: string): Promise<number> => {
+      const [o] = await this.db
+        .select({ cents: sql<number>`COALESCE(SUM(${schema.orders.totalCents}), 0)::int` })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.businessId, businessId),
+            eq(schema.orders.locationId, loc.id),
+            sql`${schema.orders.status} NOT IN ('draft', 'quote', 'cancelled')`,
+            isNull(schema.orders.importedAt),
+            sql`(${schema.orders.createdAt} AT TIME ZONE ${tz})::date::text = ${day}`,
+          ),
+        );
+      const [r] = await this.db
+        .select({ cents: sql<number>`COALESCE(SUM(${schema.sales.totalCents}), 0)::int` })
+        .from(schema.sales)
+        .where(
+          and(
+            eq(schema.sales.businessId, businessId),
+            eq(schema.sales.locationId, loc.id),
+            eq(schema.sales.status, 'completed'),
+            isNull(schema.sales.importedAt),
+            sql`(${schema.sales.createdAt} AT TIME ZONE ${tz})::date::text = ${day}`,
+          ),
+        );
+      return (o?.cents ?? 0) + (r?.cents ?? 0);
+    };
+    const [lastWeekCents, lastMonthCents] = await Promise.all([
+      writtenOn(lastWeekDay),
+      writtenOn(lastMonthDay),
+    ]);
+    const repCounts = new Map<string, number>();
+    for (const o of orderRows) {
+      if (o.day !== today || !o.primary) continue;
+      repCounts.set(o.primary, (repCounts.get(o.primary) ?? 0) + 1);
+    }
+    const topRepEntry = [...repCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    let topRepName: string | null = null;
+    if (topRepEntry) {
+      topRepName = memberName.get(topRepEntry[0]) ?? null;
+      if (!topRepName) {
+        const [m] = await this.db
+          .select({ name: schema.users.name, email: schema.users.email })
+          .from(schema.memberships)
+          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+          .where(eq(schema.memberships.id, topRepEntry[0]))
+          .limit(1);
+        topRepName = m?.name ?? m?.email ?? null;
+      }
+    }
+    const shortOpen = openRows.filter((r) => r.status === 'open' && (shortMap.get(r.id) ?? 0) > 0);
+    const lateOpen = openRows.filter(
+      (r) => r.status !== 'draft' && r.requestedDate != null && r.requestedDate < today,
+    );
+    const needsCallIds = new Set([...shortOpen, ...lateOpen].map((r) => r.id));
+    const [closedShift] = await this.db
+      .select({
+        closedAt: schema.cashShifts.closedAt,
+        varianceCents: schema.cashShifts.varianceCents,
+        suspendedAt: schema.cashShifts.suspendedAt,
+        byName: schema.users.name,
+        byEmail: schema.users.email,
+        closeDay: sql<
+          string | null
+        >`(${schema.cashShifts.closedAt} AT TIME ZONE ${tz})::date::text`,
+      })
+      .from(schema.cashShifts)
+      .leftJoin(schema.users, eq(schema.users.id, schema.cashShifts.closedByUserId))
+      .where(
+        and(
+          eq(schema.cashShifts.businessId, businessId),
+          eq(schema.cashShifts.locationId, loc.id),
+          sql`${schema.cashShifts.closedAt} IS NOT NULL`,
+        ),
+      )
+      .orderBy(desc(schema.cashShifts.closedAt))
+      .limit(1);
+    const lastClose: ManagerDashboard['lastClose'] = lastShift?.suspendedAt
+      ? {
+          status: 'suspended',
+          varianceCents: lastShift.closedAt ? (closedShift?.varianceCents ?? null) : null,
+          closedAt: closedShift?.closedAt ?? null,
+          byName: closedShift?.byName ?? closedShift?.byEmail ?? null,
+          closeDay: closedShift?.closeDay ?? null,
+        }
+      : !closedShift
+        ? { status: 'none', varianceCents: null, closedAt: null, byName: null, closeDay: null }
+        : {
+            status:
+              (closedShift.varianceCents ?? 0) === 0
+                ? 'clean'
+                : (closedShift.varianceCents ?? 0) < 0
+                  ? 'short'
+                  : 'over',
+            varianceCents: closedShift.varianceCents ?? 0,
+            closedAt: closedShift.closedAt,
+            byName: closedShift.byName ?? closedShift.byEmail ?? null,
+            closeDay: closedShift.closeDay,
+          };
+
     return {
+      headline: {
+        writtenCents: kpiStore.writtenCents,
+        ticketCount: kpiStore.writtenCount,
+        avgTicketCents:
+          kpiStore.writtenCount > 0 ? Math.round(kpiStore.writtenCents / kpiStore.writtenCount) : 0,
+        lastWeek: { date: lastWeekDay, writtenCents: lastWeekCents },
+        lastMonth: { date: lastMonthDay, writtenCents: lastMonthCents },
+        topRep: topRepEntry && topRepName ? { name: topRepName, count: topRepEntry[1] } : null,
+      },
+      needsCall: {
+        total: needsCallIds.size,
+        atRisk: lateOpen.length,
+        waitingOnStock: shortOpen.length,
+      },
+      lastClose,
       date: today,
       location: { id: loc.id, name: loc.name, timezone: tz },
       locations: pickable.map((l) => ({ id: l.id, name: l.name })),

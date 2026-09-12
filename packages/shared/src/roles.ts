@@ -60,6 +60,8 @@ const operationsPermissions: Permission[] = [
   // Owner 2026-09-10: the tick that says the cash was physically handed
   // over, stamped with the member who confirmed it.
   'pos.cash.pickup_confirm',
+  // Redesign Phase 9: counts the drawer, writes the slip, posts the pickup.
+  'pos.cash.pickup_record',
   // Step 2 (2026-09-10): sets and publishes the staff schedule; punches
   // their own clock like everyone else.
   'schedule.view',
