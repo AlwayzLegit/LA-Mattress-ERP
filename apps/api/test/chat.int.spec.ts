@@ -1247,14 +1247,12 @@ describe('transfer and response targets', () => {
           version: context.version,
         }),
       ).rejects.toThrow('changed');
-      await db
-        .insert(schema.membershipPermissionOverrides)
-        .values({
-          businessId,
-          membershipId: membership!.id,
-          permission: 'chat.reply',
-          allowed: false,
-        });
+      await db.insert(schema.membershipPermissionOverrides).values({
+        businessId,
+        membershipId: membership!.id,
+        permission: 'chat.reply',
+        allowed: false,
+      });
       expect(
         (await service.context(staff, second.conversationId)).agents.some(
           (agent) => agent.id === membership!.id,
@@ -1287,5 +1285,125 @@ describe('transfer and response targets', () => {
     await expect(
       service.customerCandidates({ ...staff, businessId: otherBusinessId }, { q: 'Synthetic' }),
     ).rejects.toThrow();
+  });
+});
+
+describe('first person to accept', () => {
+  it('assigns exactly one winner when two different staff accept together', async () => {
+    const [user] = await db
+      .insert(schema.users)
+      .values({
+        name: 'Competing agent',
+        email: `claim-${randomUUID()}@example.test`,
+        emailVerified: true,
+      })
+      .returning();
+    const [membership] = await db
+      .insert(schema.memberships)
+      .values({ businessId, userId: user!.id, roleId: staff.roleId!, status: 'active' })
+      .returning();
+    const teammate = { ...staff, userId: user!.id, membershipId: membership!.id };
+    try {
+      await service.availability(staff, { available: true, capacity: 20 });
+      await service.availability(teammate, { available: true, capacity: 20 });
+      const start = await service.startConversation(auth, randomUUID(), input('First accept race'));
+      const [row] = await db
+        .select()
+        .from(schema.chatConversations)
+        .where(eq(schema.chatConversations.id, start.conversationId));
+      const result = await Promise.allSettled(
+        [staff, teammate].map((person) =>
+          service.workflow(person, row!.id, { action: 'claim', version: row!.version }),
+        ),
+      );
+      expect(result.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+      const winner = result.findIndex((item) => item.status === 'fulfilled');
+      const [saved] = await db
+        .select()
+        .from(schema.chatConversations)
+        .where(eq(schema.chatConversations.id, row!.id));
+      expect(saved!.assignedMembershipId).toBe([staff, teammate][winner]!.membershipId);
+      expect(saved!.acceptedAt).not.toBeNull();
+      await expect(
+        service.workflow([staff, teammate][1 - winner]!, row!.id, {
+          action: 'claim',
+          version: saved!.version,
+        }),
+      ).rejects.toThrow('already accepted');
+    } finally {
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
+  });
+});
+
+describe('shared inbox across stores', () => {
+  it('shows unassigned shared chats to store staff and preserves access after they accept', async () => {
+    const settings = await service.settings(staff);
+    await service.settings(staff, {
+      version: settings.version,
+      config: { ...settings.config, sharedInbox: true, autoAssign: false },
+    });
+    const [user] = await db
+      .insert(schema.users)
+      .values({
+        name: 'Store agent',
+        email: `shared-${randomUUID()}@example.test`,
+        emailVerified: true,
+      })
+      .returning();
+    const [member] = await db
+      .insert(schema.memberships)
+      .values({
+        businessId,
+        userId: user!.id,
+        roleId: staff.roleId!,
+        status: 'active',
+        dataScope: 'store',
+      })
+      .returning();
+    const agent = {
+      ...staff,
+      userId: user!.id,
+      membershipId: member!.id,
+      dataScope: 'store' as const,
+    };
+    try {
+      const start = await service.startConversation(
+        auth,
+        randomUUID(),
+        input('Shared store queue'),
+      );
+      const row = (await service.staffLiveSnapshot(agent)).find(
+        (row) => row.id === start.conversationId,
+      )!;
+      expect(row).toBeDefined();
+      await expect(service.sendStaffMessage(agent, row.id, input('Too early'))).rejects.toThrow(
+        'Accept this chat',
+      );
+      await service.workflow(agent, row.id, { action: 'claim', version: row.version });
+      expect((await service.staffHistory(agent, row.id)).data).toHaveLength(1);
+      await service.sendStaffMessage(agent, row.id, input('Accepted from store'));
+      const [location] = await db
+        .insert(schema.locations)
+        .values({
+          businessId,
+          name: 'Restricted historical showroom',
+          timezone: 'America/Los_Angeles',
+        })
+        .returning();
+      const restricted = await service.startConversation(
+        auth,
+        randomUUID(),
+        input('Store restricted'),
+        { topic: 'showroom', locationId: location!.id, pagePath: '/' },
+      );
+      await expect(service.staffHistory(agent, restricted.conversationId)).rejects.toThrow(
+        'not found',
+      );
+    } finally {
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+      const current = await service.settings(staff);
+      await service.settings(staff, { version: current.version, config: settings.config });
+    }
   });
 });

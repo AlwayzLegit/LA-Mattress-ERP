@@ -303,7 +303,11 @@ function ConversationPanel({
             : {}),
         }),
       });
-      setStatus('Conversation updated.');
+      setStatus(
+        action === 'claim'
+          ? 'Chat accepted. You are now handling this conversation.'
+          : 'Conversation updated.',
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to update conversation');
     } finally {
@@ -386,6 +390,25 @@ function ConversationPanel({
           </Button>
         </header>
         <div className={styles.workflow}>
+          {conversation &&
+            !conversation.assignedMembershipId &&
+            ['queued', 'open'].includes(conversation.status) && (
+              <Button
+                variant="primary"
+                disabled={workflowBusy}
+                onClick={() => void workflow('claim')}
+              >
+                {workflowBusy ? 'Accepting…' : 'Accept chat'}
+              </Button>
+            )}
+          {conversation?.assignedMembershipId && (
+            <span className={styles.arrival}>
+              {conversation.assignedToMe
+                ? 'You are handling this chat'
+                : 'A teammate is handling this chat'}
+            </span>
+          )}
+
           {conversation?.assignedToMe && !conversation.acceptedAt && (
             <Button
               disabled={workflowBusy}
@@ -530,18 +553,25 @@ function ConversationPanel({
         )}
         <FollowupPanel id={id} version={conversation?.version} />
         <div className={styles.composer} data-note={note}>
+          {!conversation?.assignedToMe && (
+            <p className={styles.arrival}>
+              {conversation?.assignedMembershipId
+                ? 'A teammate is handling this chat.'
+                : 'Accept this chat to start replying.'}
+            </p>
+          )}
           <div className={styles.modes}>
             <Button
               aria-pressed={!note}
               onClick={() => setNote(false)}
-              disabled={form.formState.isSubmitting}
+              disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
             >
               Reply to visitor
             </Button>
             <Button
               aria-pressed={note}
               onClick={() => setNote(true)}
-              disabled={form.formState.isSubmitting}
+              disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
             >
               Private note
             </Button>
@@ -552,7 +582,7 @@ function ConversationPanel({
               <select
                 className="input"
                 value=""
-                disabled={form.formState.isSubmitting}
+                disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
                 onChange={(event) => {
                   if (event.target.value)
                     form.setValue('body', event.target.value, { shouldDirty: true });
@@ -624,7 +654,7 @@ function ConversationPanel({
                   }).catch(() => {});
                 },
               })}
-              disabled={form.formState.isSubmitting}
+              disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
               data-sentry-mask
               aria-invalid={Boolean(form.formState.errors.body)}
             />
@@ -632,7 +662,11 @@ function ConversationPanel({
             <FormRootError />
             <div className={styles.toolbar}>
               <span role="status">{status}</span>
-              <Button type="submit" variant="primary" disabled={form.formState.isSubmitting}>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
+              >
                 {form.formState.isSubmitting
                   ? 'Saving…'
                   : note

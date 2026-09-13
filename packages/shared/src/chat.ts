@@ -104,6 +104,7 @@ export const chatSettingsSchema = z
   .object({
     enabled: z.boolean().default(true),
     autoAssign: z.boolean().default(false),
+    sharedInbox: z.boolean().default(false),
     hoursEnabled: z.boolean().default(false),
     hours: z
       .array(

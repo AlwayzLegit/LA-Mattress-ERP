@@ -1,6 +1,7 @@
 import { ALL_PERMISSIONS, SUPER_ADMIN_ONLY_PERMISSIONS, type Permission } from './permissions.js';
 
 export type SystemRoleName =
+  | 'Chat Agent'
   | 'Chat Receptionist'
   | 'Owner'
   | 'Manager'
@@ -214,6 +215,12 @@ const bookkeeperPermissions: Permission[] = [
 ];
 
 export const SYSTEM_ROLES: SystemRoleDefinition[] = [
+  {
+    name: 'Chat Agent',
+    description:
+      'Receives shared incoming chats, accepts one and replies. Shared inbox must be enabled for cross-store reception.',
+    permissions: ['chat.view_assigned', 'chat.reply', 'chat.assign'],
+  },
   {
     name: 'Chat Receptionist',
     description:

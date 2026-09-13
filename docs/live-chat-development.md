@@ -281,3 +281,23 @@ services were provisioned. Reconcile the storefront feature patches with actual 
 history before rollout; never push its snapshot baseline. Attachments remain the
 proposal's explicitly later phase. These limits do not prevent the local application
 from running and being tested now.
+
+## Shared incoming queue — September 13, 2026
+
+Visitor start now asks only for a message; no showroom or topic selection. The local
+business has sharedInbox=true and autoAssign=false. All chat-enabled staff can see
+unassigned, location-free open/queued chats across stores. The first successful Accept
+chat owns it; transaction locking and version checks prevent two winners. Store-scoped
+owners retain access to their shared conversation. Existing location-tagged conversations
+retain store restrictions. Public replies to shared chats require ownership.
+
+New Chat Agent role: chat.view_assigned, chat.reply, chat.assign. Assign it (or equivalent
+permissions) to participating store staff; no real member assignments were made. Chat
+Receptionist remains available for team supervision. Keep the inbox open and enable sound
+on each workstation for the browser chime. This does not add alerts to every other ERP page.
+Background push remains opt-in and requires browser permission.
+
+Verified: 33 API/database tests including different-user simultaneous accepts, shared
+store visibility, ownership and rejection before acceptance; six adapter tests; API/shared
+builds, both web type checks and changed-file lint. Browser confirmed the simple visitor
+start and successful acceptance. No production deployment.

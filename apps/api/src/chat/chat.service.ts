@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { or, and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext, type DrizzleTransaction } from '@jetnine/db';
 import {
@@ -138,6 +138,8 @@ export class ChatService {
         and(eq(schema.chatAgents.businessId, businessId), eq(schema.memberships.status, 'active')),
       );
     const eligible = [];
+    const sharedIncoming =
+      !locationId && (await this.settingsIn(tx, businessId)).config.sharedInbox;
     for (const row of members) {
       const permissions = await tx
         .select()
@@ -162,7 +164,7 @@ export class ChatService {
         (!effective.has('chat.view_team') && !effective.has('chat.view_assigned'))
       )
         continue;
-      if (row.member.dataScope !== 'all') {
+      if (row.member.dataScope !== 'all' && !sharedIncoming) {
         if (row.member.dataScope !== 'store' || !locationId) continue;
         const allowed = await tx
           .select()
@@ -1005,6 +1007,15 @@ export class ChatService {
       async (tx) => {
         const member = await this.requireStaff(tx, tenant, true);
         const conversation = await this.staffConversation(tx, tenant, conversationId);
+        if (
+          member.sharedInbox &&
+          !conversation.locationId &&
+          kind !== 'note' &&
+          conversation.assignedMembershipId !== member.id
+        )
+          throw new ConflictException(
+            'Accept this chat before replying. Another teammate may already be handling it.',
+          );
         const saved = await this.append(
           tx,
           conversation,
@@ -1109,6 +1120,7 @@ export class ChatService {
       effectivePermissions: effective,
       canViewTeam: effective.has('chat.view_team'),
       scopeLocations: locations.map((row) => row.id),
+      sharedInbox: (await this.settingsIn(tx, tenant.businessId!)).config.sharedInbox,
     };
   }
   private scope(member: {
@@ -1116,14 +1128,30 @@ export class ChatService {
     dataScope: string;
     canViewTeam: boolean;
     scopeLocations: string[];
+    sharedInbox: boolean;
   }) {
-    return and(
-      member.canViewTeam ? undefined : eq(conversations.assignedMembershipId, member.id),
-      member.dataScope === 'all'
-        ? undefined
-        : member.dataScope === 'store' && member.scopeLocations.length
-          ? inArray(conversations.locationId, member.scopeLocations)
-          : sql`false`,
+    const shared = member.sharedInbox
+      ? and(
+          isNull(conversations.locationId),
+          or(
+            eq(conversations.assignedMembershipId, member.id),
+            and(
+              isNull(conversations.assignedMembershipId),
+              sql`${conversations.status} in ('queued','open')`,
+            ),
+          ),
+        )
+      : sql`false`;
+    return or(
+      shared,
+      and(
+        member.canViewTeam ? undefined : eq(conversations.assignedMembershipId, member.id),
+        member.dataScope === 'all'
+          ? undefined
+          : member.dataScope === 'store' && member.scopeLocations.length
+            ? inArray(conversations.locationId, member.scopeLocations)
+            : sql`false`,
+      ) ?? sql`true`,
     );
   }
   private async staffConversation(
@@ -1490,6 +1518,12 @@ export class ChatService {
         await this.requireStaff(tx, tenant, 'chat.assign');
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
         const row = await this.staffConversation(tx, tenant, id);
+        if (
+          parsed.data.action === 'claim' &&
+          row.assignedMembershipId &&
+          row.assignedMembershipId !== tenant.membershipId
+        )
+          throw new ConflictException('Another teammate already accepted this chat.');
         if (row.version !== parsed.data.version)
           throw new ConflictException('Conversation changed. Review its latest state and retry.');
         const action = parsed.data.action;
@@ -1522,12 +1556,6 @@ export class ChatService {
           }
         }
 
-        if (
-          action === 'claim' &&
-          row.assignedMembershipId &&
-          row.assignedMembershipId !== tenant.membershipId
-        )
-          throw new ConflictException('Another teammate already owns this chat.');
         if (row.assignedMembershipId && row.assignedMembershipId !== tenant.membershipId)
           await this.manager(tx, tenant);
         const until = parsed.data.snoozedUntil ? new Date(parsed.data.snoozedUntil) : null;

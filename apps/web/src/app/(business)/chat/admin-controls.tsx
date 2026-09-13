@@ -129,11 +129,30 @@ export function AdminControls() {
           <label>
             <input
               type="checkbox"
-              checked={settings.config.autoAssign}
-              onChange={(e) => update({ autoAssign: e.target.checked })}
+              checked={settings.config.sharedInbox}
+              onChange={(e) => update({ sharedInbox: e.target.checked })}
             />{' '}
-            Assign waiting chats automatically to available staff
+            Share incoming website chats with chat staff at every store
           </label>
+          <p>
+            Shared chats can be accepted by any chat-enabled teammate. Existing store-specific
+            conversations keep their access restrictions.
+          </p>
+          <label>
+            How chats are assigned
+            <select
+              className="input"
+              value={settings.config.autoAssign ? 'automatic' : 'first_accept'}
+              onChange={(e) => update({ autoAssign: e.target.value === 'automatic' })}
+            >
+              <option value="first_accept">First person to accept</option>
+              <option value="automatic">Automatically choose an available teammate</option>
+            </select>
+          </label>
+          <p>
+            First to accept keeps new chats unassigned so staff with inbox access can respond. Only
+            one person can accept each chat.
+          </p>
           <label>
             <input
               type="checkbox"
