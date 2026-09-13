@@ -819,7 +819,8 @@ Sales competitions are Phase 11.
 > stores line on the banner or the printable sheet; `?scope` is gone from
 > `GET /v1/competitions/current` and `races` / `prizeStoreCents` are no longer settings (a
 > stored value is ignored). Every active member whose role can log a lead
-> (`competitions.leads.log` — Owner, Manager, Cashier by default) is on every card from day
+> (`competitions.leads.log` — Manager, Cashier by default; never the Owner role, who is off
+> the board entirely, pinned row and ledger included) is on every card from day
 > one, sales or not: the ranked rows come first, then the people the race cannot rank yet
 > (no sales for a $ race or Least Exchanges; neither a lead nor a sale for a count race) in
 > name order with `rank: null`, "—" for a $ value and "no sales yet" as the secondary. The

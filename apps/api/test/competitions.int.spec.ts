@@ -207,11 +207,13 @@ describe('GET /v1/competitions/current', () => {
     const res = await as('owner').get('/v1/competitions/current').expect(200);
     const board = res.body as CompetitionBoard;
     for (const c of board.cards) {
-      expect(names(c)).toEqual(
-        expect.arrayContaining(['Priya Nair', 'Maya Torres', 'Olive Owner']),
-      );
-      // Operations cannot log a lead, so Dana does not compete.
+      expect(names(c)).toEqual(expect.arrayContaining(['Priya Nair', 'Maya Torres']));
+      // Operations cannot log a lead, so Dana does not compete; the Owner
+      // role never competes (owner 2026-09-13), and watching the race gets
+      // no pinned row.
       expect(names(c)).not.toContain('Dana Whitmore');
+      expect(names(c)).not.toContain('Olive Owner');
+      expect(c.you).toBeNull();
       // Ranked rows first, then the unranked — never interleaved.
       const firstUnranked = c.rows.findIndex((r) => r.rank === null);
       if (firstUnranked >= 0) {

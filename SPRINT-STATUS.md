@@ -5619,7 +5619,8 @@ Owner: "We don't need by store, only people… put all managers in there even wi
 not just top 2." The Stores race is retired end to end (toggle, prizes, store winner
 column, banner and sheet lines, `?scope`, the `races` / `prizeStoreCents` settings — a
 stored value is ignored). The competitor pool is every active member whose role can log a
-lead (`competitions.leads.log`: Owner, Manager, Cashier by default), seeded onto every card
+lead (`competitions.leads.log`: Manager, Cashier by default — the Owner role is off the
+board entirely, pinned row and ledger sales included, owner ask the same day), seeded onto every card
 at zero from day one; ranked rows first, then the unranked (no sales for a $ race or
 Least Exchanges, nothing at all for a count race) in name order with `rank: null`, "—"
 for a $ value and "no sales yet". The strip lists everyone expanded and the top three

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { phoneDigits } from '@jetnine/shared';
@@ -17,8 +17,9 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
  * comes off the board; ties break by net sales; the sweep tiers replace
  * the per-card prizes. Imported legacy documents never count (D8).
  *
- * Every active member whose role can log a lead (`competitions.leads.log`)
- * is on every card, sales or not (owner 2026-09-13): the ranked rows come
+ * Every active member whose role can log a lead (`competitions.leads.log`),
+ * except the Owner role, is on every card, sales or not (owner
+ * 2026-09-13): the ranked rows come
  * first, then the people the race cannot rank yet (no sales for a $ race,
  * nothing at all for a count race) with no rank number. The Stores race
  * was retired the same day — only people compete.
@@ -447,10 +448,11 @@ export class CompetitionsService {
   }
 
   /**
-   * Who competes: every active member whose role can log a lead (Owner,
-   * Manager, Cashier by default). They are on every card from day one,
-   * sales or not — the store shown is the first one their access covers
-   * until they sell somewhere.
+   * Who competes: every active member whose role can log a lead (Manager,
+   * Cashier by default) — never the Owner role (owner 2026-09-13: the
+   * owner is off the board entirely, ledger and all). They are on every
+   * card from day one, sales or not — the store shown is the first one
+   * their access covers until they sell somewhere.
    */
   private async competitors(
     businessId: string,
@@ -468,6 +470,7 @@ export class CompetitionsService {
       })
       .from(schema.memberships)
       .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+      .innerJoin(schema.roles, eq(schema.roles.id, schema.memberships.roleId))
       .innerJoin(
         schema.rolePermissions,
         and(
@@ -476,10 +479,24 @@ export class CompetitionsService {
         ),
       )
       .where(
-        and(eq(schema.memberships.businessId, businessId), eq(schema.memberships.status, 'active')),
+        and(
+          eq(schema.memberships.businessId, businessId),
+          eq(schema.memberships.status, 'active'),
+          ne(schema.roles.name, 'Owner'),
+        ),
       )
       .orderBy(asc(schema.users.name));
     return rows.map((r) => ({ id: r.id, name: r.name?.trim() || r.email, storeId: r.storeId }));
+  }
+
+  /** Memberships that never appear on the board: the Owner role, in any month. */
+  private async nonCompetitors(businessId: string): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ id: schema.memberships.id })
+      .from(schema.memberships)
+      .innerJoin(schema.roles, eq(schema.roles.id, schema.memberships.roleId))
+      .where(and(eq(schema.memberships.businessId, businessId), eq(schema.roles.name, 'Owner')));
+    return new Set(rows.map((r) => r.id));
   }
 
   private async memberNames(businessId: string): Promise<Map<string, string>> {
@@ -634,18 +651,20 @@ export class CompetitionsService {
   /**
    * Every person on the board with the month folded in: the competitors
    * first (all of them, zero to start), then anyone else the ledger names
-   * — a former member's completed orders still count for the month.
+   * — a former member's completed orders still count for the month. The
+   * `excluded` memberships (the Owner role) never appear, sales or not.
    */
   private buildSubjects(
     data: Awaited<ReturnType<CompetitionsService['loadMonth']>>,
     names: Map<string, string>,
     stores: { id: string; name: string; code: string }[],
     competitors: { id: string; name: string; storeId: string | null }[],
+    excluded: Set<string>,
   ): Map<string, Subject> {
     const byStore = new Map(stores.map((s) => [s.id, s]));
     const subjects = new Map<string, Subject>();
     const get = (key: string | null, storeId: string | null, name?: string): Subject | null => {
-      if (!key) return null;
+      if (!key || excluded.has(key)) return null;
       let s = subjects.get(key);
       if (!s) {
         const st = storeId ? byStore.get(storeId) : undefined;
@@ -895,9 +914,12 @@ export class CompetitionsService {
     // ledger says: no zero-sale "winner" from an empty month, no rank for
     // someone hired since.
     const competitors = month === today.slice(0, 7) ? await this.competitors(businessId) : [];
-    const subjects = this.buildSubjects(data, names, stores, competitors);
+    const excluded = await this.nonCompetitors(businessId);
+    const subjects = this.buildSubjects(data, names, stores, competitors, excluded);
     const viewerStore = await this.viewerStore(tenant, stores, subjects);
-    const meId = tenant.membershipId;
+    // An owner watches the race; there is no pinned row for someone off the board.
+    const meId =
+      tenant.membershipId && !excluded.has(tenant.membershipId) ? tenant.membershipId : null;
     const isDayOne = data.orders.length === 0 && data.leadRows.length === 0;
 
     const cards: RaceCard[] = [];
@@ -1364,7 +1386,8 @@ export class CompetitionsService {
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
     const competitors = await this.competitors(businessId);
-    const people = this.buildSubjects(data, names, stores, competitors);
+    const excluded = await this.nonCompetitors(businessId);
+    const people = this.buildSubjects(data, names, stores, competitors, excluded);
     const [order] = await this.db
       .select({ repId: schema.orders.salespersonMembershipId, number: schema.orders.number })
       .from(schema.orders)
