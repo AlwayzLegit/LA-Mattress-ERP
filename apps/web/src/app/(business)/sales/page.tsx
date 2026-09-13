@@ -10,16 +10,21 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Input,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 interface SaleRow {
@@ -42,6 +47,65 @@ interface SalesPageData {
 
 const PAGE_LIMIT = 50;
 
+const SALE_COLUMNS: ColumnDef<SaleRow>[] = [
+  {
+    id: 'number',
+    label: 'Sale',
+    sortValue: (s) => s.number,
+    render: (s) => <code>{s.number}</code>,
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (s) => s.customerName ?? (s.customerId ? null : 'Walk-in'),
+    render: (s) => s.customerName ?? (s.customerId ? '—' : <span className="muted">Walk-in</span>),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (s) => s.status,
+    render: (s) => <StatusBadge status={s.status} />,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (s) => s.totalCents,
+    render: (s) => <Money cents={s.totalCents} />,
+  },
+  {
+    id: 'date',
+    label: 'Date',
+    className: 'nowrap',
+    sortValue: (s) => s.completedAt ?? s.createdAt,
+    render: (s) => (
+      <>
+        {new Date(s.completedAt ?? s.createdAt).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })}{' '}
+        {new Date(s.completedAt ?? s.createdAt).toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+        })}
+      </>
+    ),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (s) => (
+      <LinkButton size="sm" href={`/sales/${s.id}`}>
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function SalesPage() {
   const router = useRouter();
   const [rows, setRows] = useState<SaleRow[] | null>(null);
@@ -52,6 +116,7 @@ export default function SalesPage() {
   // Created-date window (owner 2026-09-02), kept in the URL as
   // `?range=` / `?start=&end=`. "All time" sends no bounds.
   const [range, setRange, rangeReady] = useUrlDateRange('all');
+  const cols = useListColumns('sales', SALE_COLUMNS, rows);
 
   const buildUrl = useCallback((query: string, dateRange: DateRange, cursor?: string | null) => {
     const params = new URLSearchParams();
@@ -176,60 +241,26 @@ export default function SalesPage() {
             <TableWrap maxHeight="calc(100vh - 240px)">
               <table className="table table-dense table-sticky">
                 <thead>
-                  <tr>
-                    <th>Sale</th>
-                    <th>Customer</th>
-                    <th>Status</th>
-                    <th className="num">Total</th>
-                    <th>Date</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="sales" />
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <TableEmpty colSpan={6}>
+                    <TableEmpty colSpan={cols.ordered.length}>
                       {q.trim() ? `No sales match "${q.trim()}".` : 'No sales in this window.'}
                     </TableEmpty>
                   )}
-                  {rows.map((s) => (
+                  {cols.sorted.map((s) => (
                     <tr
                       key={s.id}
                       onClick={() => router.push(`/sales/${s.id}`)}
                       className="cursor-pointer"
                     >
-                      <td>
-                        <code>{s.number}</code>
-                      </td>
-                      <td>
-                        {s.customerName ??
-                          (s.customerId ? '—' : <span className="muted">Walk-in</span>)}
-                      </td>
-                      <td>
-                        <StatusBadge status={s.status} />
-                      </td>
-                      <td className="num">
-                        <Money cents={s.totalCents} />
-                      </td>
-                      <td className="nowrap">
-                        {new Date(s.completedAt ?? s.createdAt).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}{' '}
-                        {new Date(s.completedAt ?? s.createdAt).toLocaleTimeString('en-US', {
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </td>
-                      <td className="actions">
-                        <LinkButton size="sm" href={`/sales/${s.id}`}>
-                          Open
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={s} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         ) : null}
