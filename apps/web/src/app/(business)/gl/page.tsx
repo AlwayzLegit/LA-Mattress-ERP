@@ -9,6 +9,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -17,12 +20,14 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -54,6 +59,34 @@ interface TrialRow {
 }
 
 const TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
+
+const TRIAL_COLUMNS: ColumnDef<TrialRow>[] = [
+  {
+    id: 'account',
+    label: 'Account',
+    sortValue: (r) => r.code,
+    render: (r) => (
+      <>
+        <code>{r.code}</code> {r.name}
+      </>
+    ),
+  },
+  { id: 'type', label: 'Type', sortValue: (r) => r.accountType, render: (r) => r.accountType },
+  {
+    id: 'debits',
+    label: 'Debits',
+    num: true,
+    sortValue: (r) => r.debitCents,
+    render: (r) => <Money cents={r.debitCents} />,
+  },
+  {
+    id: 'credits',
+    label: 'Credits',
+    num: true,
+    sortValue: (r) => r.creditCents,
+    render: (r) => <Money cents={r.creditCents} />,
+  },
+];
 
 export default function GlPage() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -101,6 +134,60 @@ export default function GlPage() {
       setBusy(false);
     }
   }
+
+  // The Activate / Deactivate cell needs `busy` and `act`.
+  const accountColumns: ColumnDef<Account>[] = [
+    {
+      id: 'code',
+      label: 'Code',
+      sortValue: (a) => a.code,
+      render: (a) => (
+        <Link href={`/gl/accounts/${a.id}`}>
+          <code>{a.code}</code>
+        </Link>
+      ),
+    },
+    { id: 'name', label: 'Name', sortValue: (a) => a.name, render: (a) => a.name },
+    { id: 'type', label: 'Type', sortValue: (a) => a.accountType, render: (a) => a.accountType },
+    {
+      id: 'systemKey',
+      label: 'System key',
+      sortValue: (a) => a.systemKey,
+      render: (a) => (a.systemKey ? <code>{a.systemKey}</code> : '—'),
+    },
+    {
+      id: 'active',
+      label: 'Active',
+      sortValue: (a) => (a.isActive ? 'active' : 'inactive'),
+      render: (a) => <StatusBadge status={a.isActive ? 'active' : 'inactive'} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (a) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() =>
+            void act(() =>
+              api(`/v1/gl/accounts/${a.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ isActive: !a.isActive }),
+              }),
+            )
+          }
+        >
+          {a.isActive ? 'Deactivate' : 'Activate'}
+        </Button>
+      ),
+    },
+  ];
+  const accountCols = useListColumns('gl-accounts', accountColumns, accounts);
+  const trialCols = useListColumns('gl-trial-balance', TRIAL_COLUMNS, trial?.rows ?? null);
 
   if (error && !accounts) {
     return (
@@ -211,50 +298,17 @@ export default function GlPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>System key</th>
-                    <th>Active</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={accountCols} testIdPrefix="gl-accounts" />
                 </thead>
                 <tbody>
-                  {accounts.map((a) => (
+                  {accountCols.sorted.map((a) => (
                     <tr key={a.id} style={a.isActive ? undefined : { opacity: 0.5 }}>
-                      <td>
-                        <Link href={`/gl/accounts/${a.id}`}>
-                          <code>{a.code}</code>
-                        </Link>
-                      </td>
-                      <td>{a.name}</td>
-                      <td>{a.accountType}</td>
-                      <td>{a.systemKey ? <code>{a.systemKey}</code> : '—'}</td>
-                      <td>
-                        <StatusBadge status={a.isActive ? 'active' : 'inactive'} />
-                      </td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() =>
-                            void act(() =>
-                              api(`/v1/gl/accounts/${a.id}`, {
-                                method: 'PATCH',
-                                body: JSON.stringify({ isActive: !a.isActive }),
-                              }),
-                            )
-                          }
-                        >
-                          {a.isActive ? 'Deactivate' : 'Activate'}
-                        </Button>
-                      </td>
+                      <ColumnCells list={accountCols} row={a} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={accountCols} />
             </TableWrap>
           )}
 
@@ -321,52 +375,44 @@ export default function GlPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Type</th>
-                  <th className="num">Debits</th>
-                  <th className="num">Credits</th>
-                </tr>
+                <ColumnHeadRow list={trialCols} testIdPrefix="gl-trial-balance" />
               </thead>
               <tbody>
                 {trialRows.length === 0 && (
-                  <TableEmpty colSpan={4}>No posted activity in {year}.</TableEmpty>
+                  <TableEmpty colSpan={trialCols.ordered.length}>
+                    No posted activity in {year}.
+                  </TableEmpty>
                 )}
-                {trialRows.map((r) => (
+                {trialCols.sorted.map((r) => (
                   <tr key={r.code}>
-                    <td>
-                      <code>{r.code}</code> {r.name}
-                    </td>
-                    <td>{r.accountType}</td>
-                    <td className="num">
-                      <Money cents={r.debitCents} />
-                    </td>
-                    <td className="num">
-                      <Money cents={r.creditCents} />
-                    </td>
+                    <ColumnCells list={trialCols} row={r} />
                   </tr>
                 ))}
               </tbody>
               {trial && trial.rows.length > 0 && (
                 <tfoot>
+                  {/* The totals follow the header order so a moved column keeps its total. */}
                   <tr>
-                    <td colSpan={2}>
-                      <strong>Totals</strong>
-                    </td>
-                    <td className="num">
-                      <strong>
-                        <Money cents={trial.totals.debitCents} />
-                      </strong>
-                    </td>
-                    <td className="num">
-                      <strong>
-                        <Money cents={trial.totals.creditCents} />
-                      </strong>
-                    </td>
+                    {trialCols.ordered.map((c) => (
+                      <td key={c.id} className={c.num ? 'num' : undefined}>
+                        {c.id === 'account' ? (
+                          <strong>Totals</strong>
+                        ) : c.id === 'debits' ? (
+                          <strong>
+                            <Money cents={trial.totals.debitCents} />
+                          </strong>
+                        ) : c.id === 'credits' ? (
+                          <strong>
+                            <Money cents={trial.totals.creditCents} />
+                          </strong>
+                        ) : null}
+                      </td>
+                    ))}
                   </tr>
                 </tfoot>
               )}
             </table>
+            <ResetColumns list={trialCols} />
           </TableWrap>
         </Card>
       </Stack>
