@@ -5727,7 +5727,6 @@ configured (idempotent; a configured default is never overwritten). Tests:
 two-warehouse tenant and a configured one. PHASE_NOTES Phase 4 amended. Take-with lines keep
 sourcing from the order's Store (HANDOFF §3, locked).
 
-
 ### Checkpoint — 2026-09-11 (live chat: persistence foundation, local only)
 
 - [x] Build: chat schema + migration 0099, RLS registries, strict shared DTOs, hashed guest sessions, transactional message/sequence/outbox storage, retry deduplication, visitor-safe history and permission-gated staff writes/private notes.
