@@ -78,6 +78,9 @@ export default function ChatPage() {
     notice,
     latest,
   } = useLiveChat();
+  const waitingCount = conversations.filter(
+    (row) => !row.assignedMembershipId && ['queued', 'open'].includes(row.status),
+  ).length;
   const visible = conversations
     .filter((row) => {
       if (
@@ -143,7 +146,13 @@ export default function ChatPage() {
         </details>
       </div>
       <div className={styles.inboxStatus}>
-        <strong>{unread.length ? `${unread.length} unread` : 'You’re all caught up'}</strong>
+        <strong>
+          {waitingCount
+            ? waitingCount + ' waiting for a teammate'
+            : unread.length
+              ? unread.length + ' unread'
+              : 'No unread messages'}
+        </strong>
         <span role="status">{notice || latest || 'New chats appear here automatically.'}</span>
       </div>
       {connection === 'reconnecting' && (
