@@ -296,7 +296,7 @@ describe('chat persistence foundation on Postgres', () => {
         while (!received.includes(id))
           received += new TextDecoder().decode((await reader.read()).value);
         expect(received).toContain('event: snapshot');
-        expect(received).not.toContain('HTTP question');
+        expect(received).toContain('HTTP question');
         await service.sendVisitorMessage(auth, id, input('Streaming follow-up'));
         received = '';
         while (!received.includes('"visitorSequence":2'))
@@ -666,7 +666,7 @@ describe('chat persistence foundation on Postgres', () => {
 });
 
 describe('live inbox snapshots', () => {
-  it('only advances visitor watermark for public visitor messages and contains no transcript', async () => {
+  it('only advances visitor watermark for public visitor messages and includes only a public visitor preview', async () => {
     const start = await service.startConversation(auth, randomUUID(), input('Live visitor'));
     const before = (await service.staffLiveSnapshot(staff)).find(
       (row) => row.id === start.conversationId,
@@ -684,6 +684,9 @@ describe('live inbox snapshots', () => {
     )!;
     expect(updated.visitorSequence).toBeGreaterThan(staffOnly.visitorSequence);
     expect(updated).not.toHaveProperty('body');
+    expect(updated.preview).toBe('Another visitor message');
+    expect(JSON.stringify(updated)).not.toContain('Private note');
+    expect(JSON.stringify(updated)).not.toContain('Staff reply');
     expect(updated).toHaveProperty('version');
     await expect(
       service.staffLiveSnapshot({ ...staff, businessId: otherBusinessId }),

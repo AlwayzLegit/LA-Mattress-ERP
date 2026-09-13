@@ -1,10 +1,15 @@
 'use client';
 
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiUrl, api, ApiError } from '@/lib/api';
 import { incomingConversations, type LiveConversation } from './live-state';
 
-export function useLiveChat() {
+export function useLiveChatEngine() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const inInbox = useRef(pathname === '/chat');
+  inInbox.current = pathname === '/chat';
   const [conversations, setConversations] = useState<LiveConversation[]>([]);
   const [connection, setConnection] = useState<'connecting' | 'live' | 'reconnecting' | 'denied'>(
     'connecting',
@@ -89,7 +94,7 @@ export function useLiveChat() {
       setNotifications(notificationRef.current);
       setNotice(
         permission === 'granted'
-          ? 'Desktop alerts are on while this inbox stays open.'
+          ? 'Desktop alerts are on while the ERP stays open.'
           : 'Notifications are blocked. Allow them in your browser site settings.',
       );
     } catch {
@@ -101,6 +106,7 @@ export function useLiveChat() {
     setUnread((old) => old.filter((value) => value !== id));
   }, []);
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_LIVE_CHAT_ENABLED !== 'true') return;
     let previous: Map<string, number> | null = null;
     let disposed = false;
     let source: EventSource;
@@ -131,7 +137,11 @@ export function useLiveChat() {
             ...old,
             ...incoming
               .filter(
-                (row) => row.id !== selectedRef.current || document.hidden || !document.hasFocus(),
+                (row) =>
+                  !inInbox.current ||
+                  row.id !== selectedRef.current ||
+                  document.hidden ||
+                  !document.hasFocus(),
               )
               .map((row) => row.id),
           ]),
@@ -163,6 +173,7 @@ export function useLiveChat() {
             notification.onclick = () => {
               window.focus();
               select(fresh[0]!.id);
+              router.push('/chat');
               notification.close();
             };
           } catch {
@@ -199,7 +210,7 @@ export function useLiveChat() {
         setConnection('reconnecting');
     }, 3000);
     const onFocus = () => {
-      if (!document.hidden && selectedRef.current)
+      if (inInbox.current && !document.hidden && selectedRef.current)
         setUnread((old) => old.filter((id) => id !== selectedRef.current));
     };
     window.addEventListener('focus', onFocus);
@@ -212,8 +223,9 @@ export function useLiveChat() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [beep, select]);
+  }, [beep, select, router]);
   useEffect(() => {
+    if (pathname !== '/chat') return;
     const oldTitle = document.title;
     document.title = unread.length
       ? `(${unread.length}) New chats - LA Mattress`
@@ -221,7 +233,7 @@ export function useLiveChat() {
     return () => {
       document.title = oldTitle;
     };
-  }, [unread.length]);
+  }, [unread.length, pathname]);
   useEffect(
     () => () => {
       void audio.current?.close();

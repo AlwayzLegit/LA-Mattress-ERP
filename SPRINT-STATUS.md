@@ -5537,3 +5537,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] Added Chat Receptionist system role for team inbox, replies and assignment. No chat.manage, export or customer permissions. Assign all-store member scope for company-wide unassigned coverage. No staff member was assigned automatically.
 
 - [x] 2026-09-13: Shared cross-store incoming queue and first-person acceptance, with Chat Agent role, no showroom pre-chat selection, ownership-gated replies and concurrent-accept tests. Local settings enabled; no real member assignments.
+
+- [x] **Local chat queue/alerts (2026-09-13):** Public visitor previews, waiting time, assignment names, oldest-first shared queue and inline acceptance. Persistent ERP-layout live provider keeps sound, unread alerts and availability across navigation. API build, web typecheck, lint and 33 chat integration tests pass. Local only.

@@ -1175,7 +1175,7 @@ export class ChatService {
     return row;
   }
 
-  /** Metadata only; each snapshot rechecks membership and runs under tenant RLS. */
+  /** Scoped queue information; preview is limited to public visitor text. */
   async staffLiveSnapshot(tenant: RequestTenantContext) {
     return withDrizzleTenantContext(
       this.db,
@@ -1197,6 +1197,14 @@ export class ChatService {
         return tx
           .select({
             id: conversations.id,
+            createdAt: conversations.createdAt,
+            visitorName: conversations.followupName,
+            preview: sql<
+              string | null
+            >`(select left(m.body, 160) from chat_messages m where m.business_id = "chat_conversations"."business_id" and m.conversation_id = "chat_conversations"."id" and m.sender_type = 'visitor' and m.audience = 'public' order by m.sequence desc limit 1)`,
+            assignedName: sql<
+              string | null
+            >`(select u.name from memberships a join users u on u.id = a.user_id where a.id = "chat_conversations"."assigned_membership_id" and a.business_id = "chat_conversations"."business_id" limit 1)`,
             version: conversations.version,
             overdue: sql<boolean>`coalesce(${conversations.status} not in ('resolved','spam','snoozed') and ${conversations.awaitingSince} < now() - (${config.responseMinutes} * interval '1 minute'), false)`,
             locationId: conversations.locationId,

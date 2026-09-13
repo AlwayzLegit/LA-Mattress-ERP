@@ -136,7 +136,7 @@ are delivered only when a configured worker runs; no Ably credentials exist yet.
 The local ERP inbox now uses `/v1/chat/conversations/live`, a same-origin SSE
 stream. The pilot server queries committed Postgres metadata once per second,
 including the latest public visitor sequence. It rechecks tenant membership and
-permissions on each snapshot, emits no transcript text, and renews connections
+permissions on each snapshot, includes a scoped public visitor preview (up to 160 characters), and renews connections
 at 30 seconds to rerun session/subscription guards. Errors emit generic events;
 access revocation clears the visible inbox. The client reconnects with bounded
 backoff, keeps its watermark across reconnects, and reconciles persisted history.
@@ -301,3 +301,22 @@ Verified: 33 API/database tests including different-user simultaneous accepts, s
 store visibility, ownership and rejection before acceptance; six adapter tests; API/shared
 builds, both web type checks and changed-file lint. Browser confirmed the simple visitor
 start and successful acceptance. No production deployment.
+
+## Queue clarity and ERP-wide alerts - September 13, 2026
+
+The business layout now owns the live chat provider. Chat sound, unread tracking,
+desktop alerts and available-staff heartbeats continue across ERP page navigation.
+A persistent alert outside the inbox shows unread/waiting counts and opens the
+relevant conversation. Sound still requires an explicit browser gesture after a
+full reload; browser notification permission remains optional.
+
+Queue cards show the latest public visitor message, visitor-provided name when
+available, reply waiting time, assignment name and an inline Accept action.
+Unassigned open/queued chats sort oldest first. Accept retains the server's
+version check and atomic first-accept protection, prevents repeated local clicks,
+and reports a competing acceptance clearly. Private notes and staff replies never
+appear in the queue preview. Global alerts contain counts only.
+
+Validation: API build, ERP web typecheck, changed-file web/API lint and all 33
+Postgres chat integration tests pass. Local browser verification covers persistent
+sound and a new unread alert on the dashboard, then navigation to the matching chat.

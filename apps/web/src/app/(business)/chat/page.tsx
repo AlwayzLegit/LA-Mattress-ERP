@@ -10,7 +10,7 @@ import { AdminControls } from './admin-controls';
 import { ContextPanel } from './context-panel';
 import { TeamControls } from './team-controls';
 import { PushControls } from './push-controls';
-import { useLiveChat } from './use-live-chat';
+import { useLiveChat } from './chat-provider';
 import type { LiveConversation } from './live-state';
 
 type Message = {
@@ -35,6 +35,36 @@ const formSchema = z.object({
 export default function ChatPage() {
   const [queue, setQueue] = useState('active');
   const [search, setSearch] = useState('');
+  const [accepting, setAccepting] = useState<string | null>(null);
+  const acceptLock = useRef(false);
+  const [queueNotice, setQueueNotice] = useState('');
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(tick);
+  }, []);
+  async function acceptFromQueue(row: LiveConversation) {
+    if (acceptLock.current || !row.version) return;
+    acceptLock.current = true;
+    setAccepting(row.id);
+    setQueueNotice('');
+    try {
+      await api(`/v1/chat/conversations/${row.id}/workflow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-chat-request': '1' },
+        body: JSON.stringify({ action: 'claim', version: row.version }),
+      });
+      select(row.id);
+      setQueueNotice('Chat accepted. You can reply now.');
+    } catch (error) {
+      setQueueNotice(
+        error instanceof Error ? error.message : 'Could not accept this chat. Please try again.',
+      );
+    } finally {
+      acceptLock.current = false;
+      setAccepting(null);
+    }
+  }
   const {
     conversations,
     connection,
@@ -48,19 +78,36 @@ export default function ChatPage() {
     notice,
     latest,
   } = useLiveChat();
-  const visible = conversations.filter((row) => {
-    if (search && !row.id.toLowerCase().includes(search.trim().toLowerCase())) return false;
-    if (queue === 'overdue') return row.overdue;
-    if (queue === 'followup') return row.followupPending;
-    if (queue === 'all') return true;
-    if (queue === 'mine') return row.assignedToMe && !['resolved', 'spam'].includes(row.status);
-    if (queue === 'unassigned')
-      return !row.assignedMembershipId && !['resolved', 'spam'].includes(row.status);
-    if (queue === 'unread') return unread.includes(row.id);
-    if (queue === 'waiting_team') return ['queued', 'open'].includes(row.status);
-    if (queue === 'active') return !['resolved', 'spam'].includes(row.status);
-    return row.status === queue;
-  });
+  const visible = conversations
+    .filter((row) => {
+      if (
+        search &&
+        ![row.id, row.preview, row.visitorName, row.assignedName]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())
+      )
+        return false;
+      if (queue === 'overdue') return row.overdue;
+      if (queue === 'followup') return row.followupPending;
+      if (queue === 'all') return true;
+      if (queue === 'mine') return row.assignedToMe && !['resolved', 'spam'].includes(row.status);
+      if (queue === 'unassigned')
+        return !row.assignedMembershipId && !['resolved', 'spam'].includes(row.status);
+      if (queue === 'unread') return unread.includes(row.id);
+      if (queue === 'waiting_team') return ['queued', 'open'].includes(row.status);
+      if (queue === 'active') return !['resolved', 'spam'].includes(row.status);
+      return row.status === queue;
+    })
+    .sort((a, b) => {
+      const waitingA = !a.assignedMembershipId && ['queued', 'open'].includes(a.status);
+      const waitingB = !b.assignedMembershipId && ['queued', 'open'].includes(b.status);
+      if (waitingA !== waitingB) return waitingA ? -1 : 1;
+      return waitingA
+        ? (a.createdAt ?? a.updatedAt).localeCompare(b.createdAt ?? b.updatedAt)
+        : b.updatedAt.localeCompare(a.updatedAt);
+    });
   return (
     <div className={styles.root} data-sentry-mask>
       <PageHeader
@@ -125,8 +172,8 @@ export default function ChatPage() {
           </div>
           <input
             className={`input ${styles.search}`}
-            aria-label="Find conversation by reference"
-            placeholder="Find by conversation reference…"
+            aria-label="Search conversations"
+            placeholder="Search name, message or reference…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -155,43 +202,69 @@ export default function ChatPage() {
           )}
           {connection === 'connecting' && <p>Loading conversations...</p>}
           {connection === 'live' && !conversations.length && <p>No conversations yet.</p>}
+          {queueNotice && (
+            <p role="status" className={styles.queueNotice}>
+              {queueNotice}
+            </p>
+          )}
           {visible.map((conversation) => (
-            <button
-              className={styles.item}
-              key={conversation.id}
-              aria-pressed={selected === conversation.id}
-              onClick={() => select(conversation.id)}
-              data-unread={unread.includes(conversation.id)}
-            >
-              <div className={styles.itemTop}>
-                <strong>Website visitor</strong>
-                <time>
-                  {new Date(conversation.updatedAt).toLocaleTimeString([], {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </time>
-              </div>
-              {unread.includes(conversation.id) && (
-                <span className={styles.badge}>New message</span>
-              )}
-              <small>
-                {conversation.assignedToMe
-                  ? 'Assigned to you'
-                  : conversation.assignedMembershipId
-                    ? 'Assigned to teammate'
-                    : 'Unassigned'}
-              </small>
-              {conversation.overdue && <span className={styles.badge}>Reply overdue</span>}
-              {conversation.followupPending && (
-                <span className={styles.badge}>Follow-up requested</span>
-              )}
-              <span>{statusLabels[conversation.status] ?? conversation.status}</span>
-              <small>
-                #{conversation.id.slice(0, 8)} ·{' '}
-                {new Date(conversation.updatedAt).toLocaleDateString()}
-              </small>
-            </button>
+            <div key={conversation.id} className={styles.queueCard}>
+              <button
+                className={styles.item}
+                aria-pressed={selected === conversation.id}
+                onClick={() => select(conversation.id)}
+                data-unread={unread.includes(conversation.id)}
+              >
+                <div className={styles.itemTop}>
+                  <strong>{conversation.visitorName || 'Website visitor'}</strong>
+                  <time>
+                    {new Date(conversation.updatedAt).toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </time>
+                </div>
+                {unread.includes(conversation.id) && (
+                  <span className={styles.badge}>New message</span>
+                )}
+                <small>
+                  {conversation.assignedToMe
+                    ? 'Assigned to you'
+                    : conversation.assignedMembershipId
+                      ? `With ${conversation.assignedName || 'a teammate'}`
+                      : 'Unassigned'}
+                </small>
+                {conversation.overdue && <span className={styles.badge}>Reply overdue</span>}
+                {conversation.followupPending && (
+                  <span className={styles.badge}>Follow-up requested</span>
+                )}
+                <p className={styles.messagePreview}>
+                  {conversation.preview || 'Open conversation to view messages'}
+                </p>
+                {conversation.visitorName && <small>Name provided by visitor</small>}
+                <span>
+                  {conversation.awaitingSince &&
+                  !['resolved', 'spam', 'snoozed'].includes(conversation.status)
+                    ? `Waiting ${Math.max(0, Math.floor((now - new Date(conversation.awaitingSince).getTime()) / 60000))} min for a reply`
+                    : (statusLabels[conversation.status] ?? conversation.status)}
+                </span>
+                <small>
+                  #{conversation.id.slice(0, 8)} ·{' '}
+                  {new Date(conversation.updatedAt).toLocaleDateString()}
+                </small>
+              </button>
+              {!conversation.assignedMembershipId &&
+                ['queued', 'open'].includes(conversation.status) && (
+                  <button
+                    className={styles.acceptQueue}
+                    disabled={accepting !== null}
+                    onClick={() => void acceptFromQueue(conversation)}
+                    aria-label={`Accept chat ${conversation.id.slice(0, 8)}`}
+                  >
+                    {accepting === conversation.id ? 'Accepting…' : 'Accept chat →'}
+                  </button>
+                )}
+            </div>
           ))}
         </aside>
         {selected ? (
@@ -376,7 +449,7 @@ function ConversationPanel({
       <section className={styles.conversation} aria-label="Selected conversation">
         <header className={styles.heading}>
           <div>
-            <h2>Website visitor</h2>
+            <h2>{conversation?.visitorName || 'Website visitor'}</h2>
             <small>
               {statusLabels[conversation?.status ?? 'open']} · #{id.slice(0, 8)}
             </small>
@@ -405,7 +478,7 @@ function ConversationPanel({
             <span className={styles.arrival}>
               {conversation.assignedToMe
                 ? 'You are handling this chat'
-                : 'A teammate is handling this chat'}
+                : `${conversation.assignedName || 'A teammate'} is handling this chat`}
             </span>
           )}
 

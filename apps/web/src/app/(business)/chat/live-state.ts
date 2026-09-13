@@ -1,5 +1,9 @@
 export type LiveConversation = {
   id: string;
+  preview?: string | null;
+  visitorName?: string | null;
+  assignedName?: string | null;
+  createdAt?: string;
   version?: number;
   overdue?: boolean;
   acceptedAt?: string | null;

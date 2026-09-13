@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ChatProvider } from './chat/chat-provider';
 import { AuthGate } from '@/components/auth-gate';
 import { ImpersonationBanner } from '@/components/impersonation-banner';
 import { AppShell } from '@/components/app-shell';
@@ -17,7 +18,9 @@ export default function BusinessLayout({ children }: { children: ReactNode }) {
       <BusinessSettingsProvider>
         <DashboardFiltersProvider>
           <ImpersonationBanner />
-          <AppShell>{children}</AppShell>
+          <ChatProvider>
+            <AppShell>{children}</AppShell>
+          </ChatProvider>
         </DashboardFiltersProvider>
       </BusinessSettingsProvider>
     </AuthGate>
