@@ -5589,3 +5589,15 @@ failed; the one 200 was a store-scoped member with no stores (early return). Fix
 `floor.toISOString()::timestamptz`. `store-dashboard.int.spec.ts` gains two queue tests
 that 500 on the old code (nothing had exercised the endpoint). The two other raw
 `${cutoff}` templates (closeout, orders auto-release) bind date strings and are fine.
+
+### Checkpoint — 2026-09-13 (Products-style columns on every list)
+
+Owner: "similar to how we have it inside of Products — do the same for the remaining that
+have a list." Shared primitive `components/ui/columns.tsx` (`useListColumns`,
+`ColumnHeadRow`, `ColumnCells`, `ResetColumns`; order per browser under
+`jetnine.columns.<screen>`, client-side sort unless the screen sorts through the API).
+Converted by hand: Orders (server sort), Customers, At risk, Returns, Exchanges, Transfers,
+Purchase orders; Products migrated onto the primitive (saved order carried over from the
+old key). The remaining list screens follow in the same PR. README §3.3 amended,
+`PHASE_NOTES.md` amendment. Tests: `columns.test.ts` (4); Chromium on `/dev/orders` and
+`/dev/products`: sort click, drag, persistence, reset.

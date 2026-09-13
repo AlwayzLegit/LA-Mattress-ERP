@@ -936,3 +936,24 @@ showing; the toggle button, chevron, `aria-expanded`, the `jetnine.nav.open`
 localStorage key and the `userKey` prop are gone (`app-shell.tsx`, `/dev/shell`).
 `groupForPath` in `nav.ts` had no other caller and is removed. The `.app-sidebar` column already
 scrolls (`overflow-y: auto`), so the owner's 26 links fit at 1440 and scroll below.
+
+## Amendment — 2026-09-13 (Every list gets Products-style columns)
+
+Owner: "similar to how we have it inside of Products — do the same for the remaining
+that have a list." README §3.3 amended. One implementation now, `components/ui/columns.tsx`:
+`useListColumns(key, columns, rows, { server? })` keeps the order per browser under
+`jetnine.columns.<key>` (unknown ids drop, new ids append), `ColumnHeadRow` renders the
+grip-to-drag / click-to-sort `aria-sort` headers (fixed columns such as Actions never move),
+`ColumnCells` renders a row in the header's order, `ResetColumns` shows once the order
+differs. Drop semantics: dragging right lands after the target, left lands before it, so
+every slot is reachable. Sorting is client-side over the rows on screen (numbers and dates
+numerically, text with numeric awareness, blanks last both ways) unless the screen sorts
+through the API (Products, Orders), where the column carries the server `sortKey`. Products
+migrated onto the primitive; its saved order carries across from the old key. Tests:
+`columns.test.ts` (4). Verified in Chromium on the Orders and Products previews.
+
+### Later
+
+- Keyboard column reordering (a Move-left / Move-right menu on the header) — drag only for now.
+- Client-side sort covers the loaded pages of a cursor list, not the whole result set; a
+  server sort per list needs API `sort`/`dir` support the way Orders and Products have.

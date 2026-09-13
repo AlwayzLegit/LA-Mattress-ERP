@@ -9,13 +9,18 @@ import { Money } from '@/components/money';
 import {
   Alert,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface ExchangeRow {
@@ -33,9 +38,75 @@ interface ExchangeRow {
   createdAt: string;
 }
 
+const EXCHANGE_COLUMNS: ColumnDef<ExchangeRow>[] = [
+  {
+    id: 'number',
+    label: 'Exchange',
+    sortValue: (r) => r.number,
+    render: (r) => (
+      <Link href={`/exchanges/${r.id}`}>
+        <code>{r.number}</code>
+      </Link>
+    ),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.status,
+    render: (r) => <StatusBadge status={r.status} />,
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (r) => r.customerName,
+    render: (r) => r.customerName ?? '—',
+  },
+  {
+    id: 'original',
+    label: 'Original',
+    sortValue: (r) => r.originalOrderNumber ?? r.referencedOrderNumber,
+    render: (r) => <code>{r.originalOrderNumber ?? r.referencedOrderNumber ?? '—'}</code>,
+  },
+  {
+    id: 'returnCredit',
+    label: 'Return credit',
+    num: true,
+    sortValue: (r) => r.returnCents,
+    render: (r) => <Money cents={r.returnCents} />,
+  },
+  {
+    id: 'fee',
+    label: 'Fee',
+    num: true,
+    sortValue: (r) => r.restockingFeeCents,
+    render: (r) => (r.restockingFeeCents > 0 ? <Money cents={r.restockingFeeCents} /> : '—'),
+  },
+  {
+    id: 'replacement',
+    label: 'Replacement',
+    sortValue: (r) => r.saleOrderNumber,
+    render: (r) => <code>{r.saleOrderNumber ?? '—'}</code>,
+  },
+  {
+    id: 'saleTotal',
+    label: 'Sale total',
+    num: true,
+    sortValue: (r) => r.saleTotalCents,
+    render: (r) => <Money cents={r.saleTotalCents} />,
+  },
+  {
+    id: 'written',
+    label: 'Written',
+    className: 'nowrap',
+    sortValue: (r) => r.createdAt,
+    render: (r) => new Date(r.createdAt).toLocaleDateString(),
+  },
+];
+
 export default function ExchangesPage() {
   const list = useCursorList<ExchangeRow>('/v1/exchanges');
   const { rows, error } = list;
+  const cols = useListColumns('exchanges', EXCHANGE_COLUMNS, rows);
 
   useEffect(() => {
     void list.load();
@@ -74,50 +145,17 @@ export default function ExchangesPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Exchange</th>
-                    <th>Status</th>
-                    <th>Customer</th>
-                    <th>Original</th>
-                    <th className="num">Return credit</th>
-                    <th className="num">Fee</th>
-                    <th>Replacement</th>
-                    <th className="num">Sale total</th>
-                    <th>Written</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="exchanges" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td>
-                        <Link href={`/exchanges/${r.id}`}>
-                          <code>{r.number}</code>
-                        </Link>
-                      </td>
-                      <td>
-                        <StatusBadge status={r.status} />
-                      </td>
-                      <td>{r.customerName ?? '—'}</td>
-                      <td>
-                        <code>{r.originalOrderNumber ?? r.referencedOrderNumber ?? '—'}</code>
-                      </td>
-                      <td className="num">
-                        <Money cents={r.returnCents} />
-                      </td>
-                      <td className="num">
-                        {r.restockingFeeCents > 0 ? <Money cents={r.restockingFeeCents} /> : '—'}
-                      </td>
-                      <td>
-                        <code>{r.saleOrderNumber ?? '—'}</code>
-                      </td>
-                      <td className="num">
-                        <Money cents={r.saleTotalCents} />
-                      </td>
-                      <td className="nowrap">{new Date(r.createdAt).toLocaleDateString()}</td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <LoadMore state={list} noun="exchanges" />
           </Card>
