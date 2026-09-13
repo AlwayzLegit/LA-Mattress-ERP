@@ -5696,6 +5696,15 @@ products the file does not name is listed as `strayKept` and left for the next m
 CAKING group category holding a file SKU and two As-Is siblings (all move, CAKING goes)
 and a "Bed in a Box" holding an unlisted product (stays, reported); a partial-file run
 with pruning off deletes nothing.
-**Ops (done in-session once deployed):** run the workflow `validate`, read `strayKept`,
-then `commit`; any category the commit leaves behind names products the file does not
-know — map those in a follow-up file.
+The validate run on the deployed build (#182, 12:15 UTC) then showed 50 strays still
+holding ~370 unlisted products — STORIS GROUP codes (QUFND 20, HBOARD 24, PILLOW 42,
+ADJBAS 25, QUEEN 21, …) and connector product types ("Hybrid Mattress" 9, "Latex
+Mattress" 9, "Foundations" 10, …). Step 3c (`ops/stray-categories.ts`, `classifyStray`)
+now reads those names: every GROUP code resolves to the branch the export's own SKUs in
+that group landed on (read off the products.csv × product-categories.csv join, ≥ 85%
+agreement or the root), refined by the same description words the build script uses
+(HYBRID / LATEX / MEMORY; BB / LP / 9"; ENCASEMENT; PILLOW), plus the connector names.
+A stray the tree cannot read is still `strayKept`. Unit spec `stray-categories.spec.ts`
+(3); int spec seeds QUFND, QUEEN and "Hybrid Mattress" strays (all empty and go) next to
+an unreadable "Gizmos" (stays, reported).
+**Ops (done in-session once deployed):** workflow `validate`, read `strayKept`, `commit`.
