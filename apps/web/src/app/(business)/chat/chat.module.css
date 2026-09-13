@@ -1547,3 +1547,22 @@
 .availableTeamList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 10px 0 0; list-style: none; }
 .availableTeamList li { display: flex; align-items: center; gap: 7px; padding: 6px 10px; max-width: 100%; border: 1px solid var(--status-fulfilled-border); border-radius: 6px; background: var(--status-fulfilled-bg); color: var(--status-fulfilled-fg); font-size: 12px; overflow-wrap: anywhere; }
 .availablePersonDot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; }
+
+.archive { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 16px; }
+.archiveHeader { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.archiveHeader h2 { margin: 0; font-size: 16px; }
+.archiveHeader p { margin: 4px 0 12px; color: var(--muted); }
+.archiveSearch { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+.archiveSearch input { flex: 1; min-width: min(220px,100%); }
+.archiveGrid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 16px; }
+.archiveList { margin: 0; padding: 0; list-style: none; max-height: 520px; overflow: auto; }
+.archiveList button { display: grid; gap: 4px; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 8px; background: var(--surface); color: var(--text); cursor: pointer; }
+.archiveList button[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
+.archiveList span, .archiveList small { font-size: 11px; color: var(--muted); }
+.archiveList p { margin: 4px 0; overflow-wrap: anywhere; }
+.archiveTranscript { border: 1px solid var(--border); border-radius: 6px; padding: 16px; max-height: 620px; overflow: auto; }
+.archiveTranscript h3 { margin: 0 0 8px; }
+.archiveTranscript article { border-top: 1px solid var(--border); padding: 12px 0; }
+.archiveTranscript time { display: block; font-size: 11px; color: var(--muted); }
+.archiveTranscript article p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+@media (max-width: 760px) { .archiveGrid { grid-template-columns: minmax(0,1fr); } }

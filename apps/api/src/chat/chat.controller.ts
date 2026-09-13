@@ -294,6 +294,20 @@ export class ChatStaffController {
   purge(@CurrentTenant() tenant: RequestTenantContext, @Body() body: unknown) {
     return this.chat.retention(tenant, body);
   }
+  @Get('archive')
+  @Header('Cache-Control', 'no-store')
+  archive(@CurrentTenant() tenant: RequestTenantContext, @Query() query: unknown) {
+    return this.chat.archive(tenant, query);
+  }
+  @Get('archive/:id')
+  @Header('Cache-Control', 'no-store')
+  archiveTranscript(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ) {
+    return this.chat.archive(tenant, query, id);
+  }
   @Get(':id/context')
   @Header('Cache-Control', 'no-store')
   context(@CurrentTenant() tenant: RequestTenantContext, @Param('id') id: string) {

@@ -1742,6 +1742,86 @@ export class ChatService {
     );
   }
 
+  /** Read-only shared archive. Private notes and live drafts never enter this feed. */
+  async archive(tenant: RequestTenantContext, query: unknown = {}, id?: string) {
+    if (id) this.uuid(id);
+    const parsed = z
+      .object({
+        offset: z.coerce.number().int().min(0).max(100000).default(0),
+        q: z.string().trim().max(200).default(''),
+        afterSequence: z.coerce.number().int().min(0).default(0),
+      })
+      .strict()
+      .safeParse(query);
+    if (!parsed.success) throw new BadRequestException('Invalid history query');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        const access = await this.requireStaff(tx, tenant);
+        const scope = and(
+          eq(conversations.businessId, tenant.businessId!),
+          inArray(conversations.status, ['resolved', 'spam']),
+          or(isNull(conversations.locationId), this.scope(access)),
+        );
+        if (id) {
+          const [row] = await tx
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(and(scope, eq(conversations.id, id)));
+          if (!row) throw new NotFoundException('Past conversation not found');
+          const rows = await tx
+            .select({
+              id: messages.id,
+              body: messages.body,
+              sender: messages.senderType,
+              createdAt: messages.createdAt,
+              sequence: messages.sequence,
+            })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.businessId, tenant.businessId!),
+                eq(messages.conversationId, id),
+                eq(messages.audience, 'public'),
+                gt(messages.sequence, parsed.data.afterSequence),
+              ),
+            )
+            .orderBy(asc(messages.sequence))
+            .limit(101);
+          return { data: rows.slice(0, 100), hasMore: rows.length > 100 };
+        }
+        const term = '%' + parsed.data.q + '%';
+        const rows = await tx
+          .select({
+            id: conversations.id,
+            visitorName: conversations.followupName,
+            status: conversations.status,
+            updatedAt: conversations.updatedAt,
+            assignedName: sql<
+              string | null
+            >`(select u.name from memberships a join users u on u.id = a.user_id where a.id = ${conversations.assignedMembershipId} and a.business_id = ${conversations.businessId} limit 1)`,
+            preview: sql<
+              string | null
+            >`(select left(m.body,160) from chat_messages m where m.business_id = ${conversations.businessId} and m.conversation_id = ${conversations.id} and m.audience = 'public' order by m.sequence desc limit 1)`,
+          })
+          .from(conversations)
+          .where(
+            and(
+              scope,
+              parsed.data.q
+                ? sql`(${conversations.followupName} ilike ${term} or cast(${conversations.id} as text) ilike ${term} or exists(select 1 from chat_messages m where m.business_id = ${conversations.businessId} and m.conversation_id = ${conversations.id} and m.audience = 'public' and m.body ilike ${term}))`
+                : undefined,
+            ),
+          )
+          .orderBy(sql`${conversations.updatedAt} desc`, conversations.id)
+          .offset(parsed.data.offset)
+          .limit(26);
+        return { data: rows.slice(0, 25), hasMore: rows.length > 25 };
+      },
+    );
+  }
+
   async staffConversations(tenant: RequestTenantContext, query: unknown = {}) {
     const parsed = z
       .object({

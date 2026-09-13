@@ -2334,14 +2334,12 @@ describe('administrator notification policy', () => {
       await expect(
         service.unsubscribePush(staff, { endpoint: 'https://fcm.googleapis.com/fcm/send/test' }),
       ).resolves.toEqual({ subscribed: false });
-      await db
-        .insert(schema.rolePermissions)
-        .values(
-          ['chat.view_team', 'chat.reply'].map((permission) => ({
-            roleId: ownerRole!.id,
-            permission,
-          })),
-        );
+      await db.insert(schema.rolePermissions).values(
+        ['chat.view_team', 'chat.reply'].map((permission) => ({
+          roleId: ownerRole!.id,
+          permission,
+        })),
+      );
       await db
         .update(schema.memberships)
         .set({ roleId: ownerRole!.id })
@@ -2361,4 +2359,62 @@ describe('administrator notification policy', () => {
       await db.delete(schema.roles).where(eq(schema.roles.id, ownerRole!.id));
     }
   });
+});
+
+it('shares completed website transcripts with chat staff without exposing private notes or live chats', async () => {
+  const publicText = 'Archive public ' + randomUUID();
+  const privateText = 'Archive private ' + randomUUID();
+  const start = await service.startConversation(auth, randomUUID(), input(publicText));
+  await service.sendStaffMessage(staff, start.conversationId, input(privateText), 'note');
+  const [user] = await db
+    .insert(schema.users)
+    .values({ email: randomUUID() + '@example.test' })
+    .returning();
+  const [role] = await db
+    .insert(schema.roles)
+    .values({ businessId, name: 'Archive reader' })
+    .returning();
+  await db
+    .insert(schema.rolePermissions)
+    .values({ roleId: role!.id, permission: 'chat.view_assigned' });
+  const [member] = await db
+    .insert(schema.memberships)
+    .values({ businessId, userId: user!.id, roleId: role!.id, status: 'active', dataScope: 'self' })
+    .returning();
+  const reader = {
+    ...staff,
+    userId: user!.id,
+    membershipId: member!.id,
+    roleId: role!.id,
+    dataScope: 'self' as const,
+  };
+  try {
+    await expect(service.archive(reader, {}, start.conversationId)).rejects.toThrow('not found');
+    await db
+      .update(schema.chatConversations)
+      .set({ status: 'resolved', assignedMembershipId: staff.membershipId! })
+      .where(eq(schema.chatConversations.id, start.conversationId));
+    expect((await service.archive(reader, { q: publicText })).data.map((row) => row.id)).toEqual([
+      start.conversationId,
+    ]);
+    const transcript = await service.archive(reader, {}, start.conversationId);
+    expect(JSON.stringify(transcript)).toContain(publicText);
+    expect(JSON.stringify(transcript)).not.toContain(privateText);
+    expect((await service.archive(reader, { q: privateText })).data).toEqual([]);
+    expect(
+      (await service.archive(reader, { afterSequence: 1 }, start.conversationId)).data,
+    ).toEqual([]);
+    await expect(service.staffHistory(reader, start.conversationId)).rejects.toThrow();
+    await expect(
+      service.archive({ ...reader, businessId: otherBusinessId }, {}, start.conversationId),
+    ).rejects.toThrow();
+    await db
+      .update(schema.memberships)
+      .set({ status: 'disabled' })
+      .where(eq(schema.memberships.id, member!.id));
+    await expect(service.archive(reader, {})).rejects.toThrow();
+  } finally {
+    await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    await db.delete(schema.roles).where(eq(schema.roles.id, role!.id));
+  }
 });
