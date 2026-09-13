@@ -5577,3 +5577,15 @@ Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the
 rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
 specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
 the rail with nothing overflowing.
+
+### Checkpoint — 2026-09-13 (Cash on hand: root cause found and fixed)
+
+The new `cause` logging (PR #174) caught it on the first owner load after deploy:
+`ERR_INVALID_ARG_TYPE — The "string" argument must be of type string … Received an
+instance of Date`. Not Postgres at all: `pendingCash` bound the 60-day floor as a raw
+`Date` inside a `sql` template, and Drizzle's postgres-js driver passes timestamptz params
+through untouched, so the driver tried to `Buffer.byteLength` a Date. Every owner load
+failed; the one 200 was a store-scoped member with no stores (early return). Fix: bind
+`floor.toISOString()::timestamptz`. `store-dashboard.int.spec.ts` gains two queue tests
+that 500 on the old code (nothing had exercised the endpoint). The two other raw
+`${cutoff}` templates (closeout, orders auto-release) bind date strings and are fine.
