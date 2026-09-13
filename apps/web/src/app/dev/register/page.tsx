@@ -101,13 +101,13 @@ const PRODUCTS = CAT.map(([name, sku, size, firm, price, vendor, model, avail, p
   vendorName: vendor,
   size,
   firmness: firm,
-  categoryName:
+  categoryPath:
     /mattress|hybrid|adapt/i.test(name) && !/protector/i.test(name)
-      ? 'Mattresses'
+      ? 'Mattresses › Hybrid'
       : /adjustable/i.test(name)
-        ? 'Adjustable Bases'
+        ? 'Adjustable Bases › Adjustable Bed Bases'
         : /protector/i.test(name)
-          ? 'Mattress Protection'
+          ? 'Mattress Protection › Mattress Protectors'
           : /pillow/i.test(name)
             ? 'Pillows'
             : null,

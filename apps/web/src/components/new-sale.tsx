@@ -113,8 +113,8 @@ interface Line {
   /** True once the salesperson picked the source by hand. */
   sourceTouched: boolean;
   deliveryDate: string;
-  /** Catalog category ("Mattresses", "Adjustable Bases", …); decides the add-on chips. */
-  categoryName: string | null;
+  /** Catalog category path ("Mattresses › Hybrid"); its root decides the add-on chips. */
+  categoryPath: string | null;
   /** Removal / Recycling / Declined foundation toggles on mattress and base lines. */
   addons: Addons;
   atpDate?: string | null;
@@ -656,7 +656,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         description: [row.productName, row.variantName].filter(Boolean).join(' — '),
         sku: row.sku,
         size: row.size,
-        categoryName: row.categoryName ?? null,
+        categoryPath: row.categoryPath ?? null,
         quantity: 1,
         unitPriceCents: row.priceCents,
         lineDiscountCents: 0,
@@ -807,7 +807,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           fulfillmentMethod: string | null;
           sourceLocationId: string | null;
           deliveryDate: string | null;
-          categoryName?: string | null;
+          categoryPath?: string | null;
         }[];
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
@@ -839,7 +839,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             description: l.description,
             sku: null,
             size: null,
-            categoryName: l.categoryName ?? null,
+            categoryPath: l.categoryPath ?? null,
             quantity: l.quantity,
             unitPriceCents: l.unitPriceCents,
             lineDiscountCents: l.discountCents,

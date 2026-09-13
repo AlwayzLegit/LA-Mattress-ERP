@@ -5577,6 +5577,13 @@ Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the
 rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
 specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
 the rail with nothing overflowing.
+_2026-09-13 follow-up (owner: "we recently had all of the product categories sorted out"):_
+the A22.1 categorize run files almost every sleep surface on a subcategory (Innerspring,
+Hybrid, Memory Foam, Latex, Adjustable Bed Bases, Standard / Low Profile, Bunkie Board),
+so a rule keyed on the leaf name still missed nearly every real product. The endpoints
+now carry `categoryPath` ("Mattresses › Hybrid") and the rule reads the root; Base
+Accessories & Parts stay off. `pos-addons.test.ts` covers the real subcategories; the
+orders int spec proves the path on search and on a resumed order.
 
 ### Checkpoint — 2026-09-13 (Cash on hand: root cause found and fixed)
 

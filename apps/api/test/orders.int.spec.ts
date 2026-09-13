@@ -436,6 +436,64 @@ describe('Orders list-view + notifications (PLAN-POS-OPERATIONS P3)', () => {
     }
   });
 
+  it('Product search and the order read carry the category path (A22.1 subcategories)', async () => {
+    // The register keys its add-on chips on the path's root: a mattress
+    // filed on "Mattresses › Hybrid" must still read as a mattress.
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql2);
+    let variantId = '';
+    try {
+      const [root] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattresses' })
+        .returning();
+      const [leaf] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Hybrid', parentId: root!.id })
+        .returning();
+      const [p] = await db
+        .insert(schema.products)
+        .values({ businessId, sku: 'PATH-1', name: 'PathFixture Hybrid', categoryId: leaf!.id })
+        .returning();
+      const [v] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: p!.id, sku: 'PATH-1-Q', priceCents: 129900 })
+        .returning();
+      variantId = v!.id;
+      await db.insert(schema.inventoryLevels).values({
+        businessId,
+        variantId,
+        locationId,
+        onHand: 5,
+        reserved: 0,
+      });
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+
+    const search = await request(app.getHttpServer())
+      .get(`/v1/pos/product-search?q=PathFixture&locationId=${locationId}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(search.status).toBe(200);
+    const hit = search.body.find((r: { variantId: string }) => r.variantId === variantId);
+    expect(hit).toBeTruthy();
+    expect(hit.categoryPath).toBe('Mattresses › Hybrid');
+    expect(hit).not.toHaveProperty('categoryName');
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ locationId, customerId, lines: [{ variantId, quantity: 1 }] });
+    expect(created.status).toBe(201);
+    const read = await request(app.getHttpServer())
+      .get(`/v1/orders/${created.body.id}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(read.status).toBe(200);
+    expect(read.body.lines[0].categoryPath).toBe('Mattresses › Hybrid');
+  });
   it('Spec columns + display statuses: Draft, Quote, Reserved, Pending; balance due after payment', async () => {
     const make = async (body: Record<string, unknown>) => {
       const res = await request(app.getHttpServer())
