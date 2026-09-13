@@ -45,7 +45,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             >
               <strong>
                 {help.requests.some(
-                  (row) => row.incoming && ['requested', 'accepted'].includes(row.status),
+                  (row) =>
+                    row.unread > 0 ||
+                    (row.incoming && ['requested', 'accepted'].includes(row.status)),
                 )
                   ? 'Team help needs attention'
                   : count

@@ -179,12 +179,95 @@ describe('chat persistence foundation on Postgres', () => {
     ).rejects.toThrow();
     const accepted = await service.updateHelp(helper, help!.id, { action: 'accept', version: 1 });
     expect(accepted!.status).toBe('accepted');
+    await service.sendStaffMessage(
+      staff,
+      id,
+      input('Private owner note excluded from help context'),
+      'note',
+    );
+    const initialDiscussion = await service.helpDiscussion(helper, help!.id);
+    expect(initialDiscussion.active).toBe(true);
+    expect(
+      initialDiscussion.customer.some((m) => m.body === 'Which mattress would you suggest?'),
+    ).toBe(true);
+    expect(JSON.stringify(initialDiscussion)).not.toContain('Private owner note');
+    await expect(service.staffHistory(helper, id, {})).rejects.toThrow();
+    await expect(
+      service.sendStaffMessage(helper, id, input('Unauthorized public reply')),
+    ).rejects.toThrow();
+    await expect(
+      service.helpDiscussion({ ...helper, membershipId: staff.membershipId }, help!.id),
+    ).rejects.toThrow();
+    const suggestion = {
+      id: randomUUID(),
+      body: 'Private suggested answer for owner review',
+      kind: 'suggestion',
+      mention: true,
+    };
+    const [first, duplicate] = await Promise.all([
+      service.sendHelpMessage(helper, help!.id, suggestion),
+      service.sendHelpMessage(helper, help!.id, suggestion),
+    ]);
+    expect(first!.id).toBe(duplicate!.id);
+    await expect(
+      service.sendHelpMessage(helper, help!.id, { ...suggestion, body: 'Changed retry' }),
+    ).rejects.toThrow('retry');
+    const ownerInbox = (await service.helpInbox(staff)).find((r) => r.id === help!.id)!;
+    expect(ownerInbox.unread).toBe(1);
+    expect(ownerInbox.mentioned).toBe(true);
+    expect((await service.helpInbox(helper)).find((r) => r.id === help!.id)!.unread).toBe(0);
+    await service.sendHelpMessage(staff, help!.id, {
+      id: randomUUID(),
+      body: 'Internal owner response',
+    });
+    const page = await service.helpDiscussion(helper, help!.id, { limit: 1 });
+    expect(page.hasMore).toBe(true);
+    const pageTwo = await service.helpDiscussion(helper, help!.id, {
+      afterSequence: page.nextSequence,
+    });
+    expect(pageTwo.data).toHaveLength(1);
+    expect(pageTwo.data[0]!.body).toBe('Internal owner response');
+    await service.helpActivity(staff, help!.id, { typing: true, readSequence: 9999 });
+    expect((await service.helpDiscussion(helper, help!.id)).teammateTyping).toBe(true);
+    expect((await service.helpInbox(staff)).find((r) => r.id === help!.id)!.unread).toBe(0);
+    await service.helpActivity(staff, help!.id, { typing: false, readSequence: 0 });
+    expect((await service.helpDiscussion(helper, help!.id)).teammateTyping).toBe(false);
+    expect((await service.helpInbox(staff)).find((r) => r.id === help!.id)!.unread).toBe(0);
+    expect(JSON.stringify(await service.visitorHistory(auth, id, {}))).not.toContain(
+      'Private suggested answer',
+    );
+    expect(JSON.stringify(await service.visitorHistory(auth, id, {}))).not.toContain(
+      'Internal owner response',
+    );
+    const foreignMessages = await withDrizzleTenantContext(
+      db,
+      { businessId: otherBusinessId },
+      (tx) => tx.select().from(schema.chatHelpMessages),
+    );
+    expect(foreignMessages.some((m) => m.id === suggestion.id)).toBe(false);
+    await db
+      .update(schema.chatConversations)
+      .set({ assignedMembershipId: helper.membershipId })
+      .where(eq(schema.chatConversations.id, id));
+    expect((await service.helpDiscussion(helper, help!.id)).customer).toEqual([]);
+    await expect(
+      service.sendHelpMessage(helper, help!.id, { id: randomUUID(), body: 'Stale invitation' }),
+    ).rejects.toThrow('no longer active');
+    await db
+      .update(schema.chatConversations)
+      .set({ assignedMembershipId: staff.membershipId })
+      .where(eq(schema.chatConversations.id, id));
+
     await expect(
       service.updateHelp(helper, help!.id, { action: 'finish', version: 1 }),
     ).rejects.toThrow('changed');
     expect(
       (await service.updateHelp(helper, help!.id, { action: 'finish', version: 2 }))!.status,
     ).toBe('finished');
+    expect((await service.helpDiscussion(helper, help!.id)).customer).toEqual([]);
+    await expect(
+      service.sendHelpMessage(helper, help!.id, { id: randomUUID(), body: 'After finishing' }),
+    ).rejects.toThrow('no longer active');
     const [conversation] = await db
       .select()
       .from(schema.chatConversations)

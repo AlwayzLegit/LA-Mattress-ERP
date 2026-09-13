@@ -157,6 +157,34 @@ export class ChatStaffController {
     @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
+  @Get('help/:id/discussion')
+  @RequirePermission('chat.reply')
+  @Header('Cache-Control', 'no-store')
+  helpDiscussion(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ) {
+    return this.chat.helpDiscussion(tenant, id, query);
+  }
+  @Post('help/:id/messages')
+  @RequirePermission('chat.reply')
+  helpMessage(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.sendHelpMessage(tenant, id, body);
+  }
+  @Post('help/:id/activity')
+  @RequirePermission('chat.reply')
+  helpActivity(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.helpActivity(tenant, id, body);
+  }
   @Get('help-inbox')
   @RequirePermission('chat.reply')
   @Header('Cache-Control', 'no-store')

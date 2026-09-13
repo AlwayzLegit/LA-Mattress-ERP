@@ -10,6 +10,8 @@ import { or, and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext, type DrizzleTransaction } from '@jetnine/db';
 import {
+  chatHelpMessageSchema,
+  chatHelpActivitySchema,
   chatHelpRequestSchema,
   chatHelpActionSchema,
   chatPushSubscriptionSchema,
@@ -323,12 +325,213 @@ export class ChatService {
           .from(schema.memberships)
           .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
           .where(eq(schema.memberships.businessId, tenant.businessId!));
+        const m = schema.chatHelpMessages;
+        const unread = await tx
+          .select({ requestId: m.requestId, sequence: m.sequence, mention: m.mention })
+          .from(m)
+          .innerJoin(h, and(eq(h.businessId, m.businessId), eq(h.id, m.requestId)))
+          .where(
+            and(
+              eq(m.businessId, tenant.businessId!),
+              or(eq(h.helperId, tenant.membershipId!), eq(h.requesterId, tenant.membershipId!)),
+              sql`${m.senderId} <> ${tenant.membershipId!}`,
+              sql`${m.sequence} > case when ${h.helperId} = ${tenant.membershipId!} then ${h.helperReadSequence} else ${h.requesterReadSequence} end`,
+            ),
+          );
         return rows.map((row) => ({
+          unread: unread.filter((m) => m.requestId === row.id).length,
+          mentioned: unread.some((m) => m.requestId === row.id && m.mention),
+          unreadSequence: Math.max(
+            0,
+            ...unread.filter((m) => m.requestId === row.id).map((m) => m.sequence),
+          ),
           ...row,
           incoming: row.helperId === tenant.membershipId,
           requesterName: people.find((p) => p.id === row.requesterId)?.name || 'Teammate',
           helperName: people.find((p) => p.id === row.helperId)?.name || 'Teammate',
         }));
+      },
+    );
+  }
+  private async helpParticipant(tx: DrizzleTransaction, tenant: RequestTenantContext, id: string) {
+    await this.requireStaff(tx, tenant, true);
+    // Same ordering as claim/transfer: ownership and help writes cannot race.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
+    const h = schema.chatHelpRequests;
+    const [request] = await tx
+      .select()
+      .from(h)
+      .where(and(eq(h.businessId, tenant.businessId!), eq(h.id, id)))
+      .for('update');
+    if (!request || ![request.requesterId, request.helperId].includes(tenant.membershipId!))
+      throw new NotFoundException('Help discussion not found');
+    const [conversation] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.businessId, tenant.businessId!),
+          eq(conversations.id, request.conversationId),
+        ),
+      )
+      .for('share');
+    const active =
+      request.status === 'accepted' &&
+      conversation?.assignedMembershipId === request.requesterId &&
+      !['resolved', 'spam'].includes(conversation.status);
+    return { request, conversation, active, incoming: request.helperId === tenant.membershipId };
+  }
+  async helpDiscussion(tenant: RequestTenantContext, id: string, query: unknown = {}) {
+    this.uuid(id);
+    const parsed = chatHistoryQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException('Invalid discussion cursor');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        const { request, active, incoming } = await this.helpParticipant(tx, tenant, id);
+        const m = schema.chatHelpMessages;
+        const rows = await tx
+          .select()
+          .from(m)
+          .where(
+            and(
+              eq(m.businessId, tenant.businessId!),
+              eq(m.requestId, id),
+              gt(m.sequence, parsed.data.afterSequence),
+            ),
+          )
+          .orderBy(asc(m.sequence))
+          .limit(parsed.data.limit + 1);
+        const data = rows
+          .slice(0, parsed.data.limit)
+          .map((row) => ({ ...row, mine: row.senderId === tenant.membershipId }));
+        // Helpers receive only public context while their invitation is active.
+        const customer = active
+          ? await tx
+              .select({
+                id: messages.id,
+                body: messages.body,
+                senderType: messages.senderType,
+                sequence: messages.sequence,
+                createdAt: messages.createdAt,
+              })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.businessId, tenant.businessId!),
+                  eq(messages.conversationId, request.conversationId),
+                  eq(messages.audience, 'public'),
+                ),
+              )
+              .orderBy(sql`${messages.sequence} desc`)
+              .limit(100)
+          : [];
+        return {
+          data,
+          hasMore: rows.length > parsed.data.limit,
+          nextSequence: data.at(-1)?.sequence ?? parsed.data.afterSequence,
+          active,
+          incoming,
+          customer: customer.reverse(),
+          teammateTyping:
+            active &&
+            (incoming ? request.requesterTypingUntil : request.helperTypingUntil) !== null &&
+            (incoming ? request.requesterTypingUntil! : request.helperTypingUntil!) > new Date(),
+        };
+      },
+    );
+  }
+  async sendHelpMessage(tenant: RequestTenantContext, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatHelpMessageSchema.safeParse(body);
+    if (!parsed.success)
+      throw new BadRequestException('Write an internal message of up to 4,000 characters');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        const { request, active, incoming } = await this.helpParticipant(tx, tenant, id);
+        if (!active) throw new ConflictException('This help discussion is no longer active');
+        const m = schema.chatHelpMessages;
+        const [existing] = await tx
+          .select()
+          .from(m)
+          .where(and(eq(m.businessId, tenant.businessId!), eq(m.id, parsed.data.id)));
+        if (existing) {
+          if (
+            existing.requestId !== id ||
+            existing.senderId !== tenant.membershipId ||
+            existing.body !== parsed.data.body ||
+            existing.kind !== parsed.data.kind ||
+            existing.mention !== parsed.data.mention
+          )
+            throw new ConflictException('Message retry does not match');
+          return existing;
+        }
+        const [message] = await tx
+          .insert(m)
+          .values({
+            ...parsed.data,
+            businessId: tenant.businessId!,
+            requestId: id,
+            senderId: tenant.membershipId!,
+            sequence: request.lastSequence + 1,
+          })
+          .returning();
+        await tx
+          .update(schema.chatHelpRequests)
+          .set({
+            lastSequence: request.lastSequence + 1,
+            updatedAt: new Date(),
+            ...(incoming ? { helperTypingUntil: null } : { requesterTypingUntil: null }),
+          })
+          .where(
+            and(
+              eq(schema.chatHelpRequests.businessId, tenant.businessId!),
+              eq(schema.chatHelpRequests.id, id),
+            ),
+          );
+        await this.audit(tx, tenant, 'chat.help_message', request.conversationId, {
+          requestId: id,
+          messageId: message!.id,
+          kind: message!.kind,
+          mention: message!.mention,
+        });
+        return message;
+      },
+    );
+  }
+  async helpActivity(tenant: RequestTenantContext, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatHelpActivitySchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid help activity');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        const { request, active, incoming } = await this.helpParticipant(tx, tenant, id);
+        if (parsed.data.typing && !active)
+          throw new ConflictException('This help discussion is no longer active');
+        const read = Math.max(
+          incoming ? request.helperReadSequence : request.requesterReadSequence,
+          Math.min(parsed.data.readSequence ?? 0, request.lastSequence),
+        );
+        const typing =
+          parsed.data.typing === undefined
+            ? {}
+            : incoming
+              ? { helperTypingUntil: parsed.data.typing ? new Date(Date.now() + 6000) : null }
+              : { requesterTypingUntil: parsed.data.typing ? new Date(Date.now() + 6000) : null };
+        const h = schema.chatHelpRequests;
+        await tx
+          .update(h)
+          .set({
+            ...typing,
+            ...(incoming ? { helperReadSequence: read } : { requesterReadSequence: read }),
+          })
+          .where(and(eq(h.businessId, tenant.businessId!), eq(h.id, id)));
+        return { ok: true };
       },
     );
   }

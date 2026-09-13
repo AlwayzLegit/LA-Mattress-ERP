@@ -2,6 +2,8 @@ import { Controller, Get } from '@nestjs/common';
 import { z } from 'zod';
 import {
   CHAT_CONTRACT_VERSION,
+  chatHelpMessageSchema,
+  chatHelpActivitySchema,
   chatHelpRequestSchema,
   chatHelpActionSchema,
   chatMessageInputSchema,
@@ -79,6 +81,29 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/conversations/help/{id}/discussion': {
+      parameters: historyParameters,
+      get: read(
+        'Private participant discussion with sequenced pagination. Public customer context is available only during an accepted invitation while the requester owns an active chat. Requires chat.reply.',
+      ),
+    },
+    '/v1/chat/conversations/help/{id}/messages': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Send a private message or suggested customer reply. A mention targets the other participant only. Stable id deduplicates retries. Never publishes to visitors.',
+        z.toJSONSchema(chatHelpMessageSchema),
+      ),
+    },
+    '/v1/chat/conversations/help/{id}/activity': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Participant read cursor and typing activity. Read cursors are monotonic and capped; typing expires after six seconds.',
+        z.toJSONSchema(chatHelpActivitySchema),
+      ),
+    },
+
     '/v1/chat/conversations/help-inbox': {
       get: read(
         'Private requests addressed to or created by the current member. Requires chat.reply; no conversation access is granted.',

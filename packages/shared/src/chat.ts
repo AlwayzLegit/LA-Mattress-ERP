@@ -175,3 +175,18 @@ export const chatHelpActionSchema = z
     version: z.number().int().positive(),
   })
   .strict();
+
+export const chatHelpMessageSchema = z
+  .object({
+    id: z.string().uuid(),
+    body: z.string().trim().min(1).max(4000),
+    kind: z.enum(['message', 'suggestion']).default('message'),
+    mention: z.boolean().default(false),
+  })
+  .strict();
+export const chatHelpActivitySchema = z
+  .object({
+    readSequence: z.number().int().nonnegative().optional(),
+    typing: z.boolean().optional(),
+  })
+  .strict();

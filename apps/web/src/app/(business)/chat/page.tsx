@@ -312,6 +312,14 @@ function ConversationPanel({
   revision: number;
   conversation?: LiveConversation;
 }) {
+  const { help } = useLiveChat();
+  const suggestionPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (help.suggestion?.conversationId === id) {
+      suggestionPanel.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      suggestionPanel.current?.focus({ preventScroll: true });
+    }
+  }, [help.suggestion, id]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [note, setNote] = useState(false);
@@ -647,6 +655,38 @@ function ConversationPanel({
           </Button>
         )}
         <div className={styles.composer} data-note={note}>
+          {help.suggestion?.conversationId === id && (
+            <section ref={suggestionPanel} tabIndex={-1} className={styles.suggestionPreview}>
+              <strong>Suggested customer reply · review before sending</strong>
+              <p data-sentry-mask>{help.suggestion.body}</p>
+              <Button
+                disabled={!conversation?.assignedToMe || form.formState.isSubmitting}
+                onClick={() => {
+                  const existing = form.getValues('body').trim();
+                  const suggested = help.suggestion!.body;
+                  if ((existing + '\n\n' + suggested).trim().length > 4000) {
+                    setError(
+                      'Your draft plus the suggestion exceeds 4,000 characters. Shorten the draft first.',
+                    );
+                    return;
+                  }
+                  if (note && existing) {
+                    setError('Save or clear your private note before inserting a customer reply.');
+                    return;
+                  }
+                  setNote(false);
+                  form.setValue('body', existing ? existing + '\n\n' + suggested : suggested, {
+                    shouldDirty: true,
+                  });
+                  help.setSuggestion(null);
+                  setStatus('Suggestion added to your draft. Review it, then send when ready.');
+                }}
+              >
+                Add to reply draft
+              </Button>
+              <Button onClick={() => help.setSuggestion(null)}>Dismiss suggestion</Button>
+            </section>
+          )}
           {!conversation?.assignedToMe && (
             <p className={styles.arrival}>
               {conversation?.assignedMembershipId

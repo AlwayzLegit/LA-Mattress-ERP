@@ -4,6 +4,8 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui';
 import { useLiveChat } from './chat-provider';
 import styles from './chat.module.css';
+import { TeamDiscussion } from './team-discussion';
+import type { HelpRequest } from './use-chat-help';
 type Specialist = {
   id: string;
   name: string;
@@ -43,7 +45,8 @@ export function AskForHelp({ id }: { id: string }) {
     <details className={styles.helpPanel}>
       <summary>Ask a specialist for help</summary>
       <p>
-        You stay responsible for this customer. Your teammate receives only this internal question.
+        You stay responsible for this customer. Once they accept, you can discuss privately and they
+        can read the customer conversation.
       </p>
       <label>
         Specialist
@@ -111,11 +114,14 @@ export function AskForHelp({ id }: { id: string }) {
   );
 }
 export function TeamHelp() {
+  const [discussion, setDiscussion] = useState<HelpRequest | null>(null);
   const { help } = useLiveChat();
   const [open, setOpen] = useState(false);
   const seen = useRef(new Set<string>());
   useEffect(() => {
-    const incoming = help.requests.filter((row) => row.incoming && row.status === 'requested');
+    const incoming = help.requests.filter(
+      (row) => row.unread > 0 || (row.incoming && row.status === 'requested'),
+    );
     if (incoming.some((row) => !seen.current.has(row.id))) setOpen(true);
     incoming.forEach((row) => seen.current.add(row.id));
   }, [help.requests]);
@@ -124,78 +130,101 @@ export function TeamHelp() {
   const [status, setStatus] = useState('');
   const count = help.requests.filter((r) => ['requested', 'accepted'].includes(r.status)).length;
   return (
-    <details
-      id="team-help"
-      className={styles.helpPanel}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>Team help · {count} active</summary>
-      <p>Requests to you and from you. Customer chat ownership stays with the requester.</p>
-      {help.error && <p role="alert">{help.error}</p>}
-      {!help.requests.length && <p>No help requests yet.</p>}
-      {help.requests.map((row) => (
-        <article key={row.id} className={styles.helpRequest}>
-          <strong>{row.incoming ? 'From ' + row.requesterName : 'To ' + row.helperName}</strong>
-          <span>
-            {
-              (
-                {
-                  requested: 'Help requested',
-                  accepted: 'Accepted',
-                  finished: 'Finished',
-                  cancelled: 'Cancelled',
-                } as Record<string, string>
-              )[row.status]
-            }
-          </span>
-          <p data-sentry-mask>{row.question}</p>
-          <small>
-            Chat #{row.conversationId.slice(0, 8)} · {new Date(row.updatedAt).toLocaleString()}
-          </small>
-          {(row.incoming
-            ? row.status === 'requested'
-              ? ['accept']
-              : row.status === 'accepted'
-                ? ['finish']
+    <>
+      {discussion && (
+        <TeamDiscussion
+          key={discussion.id}
+          request={discussion}
+          onClose={() => setDiscussion(null)}
+        />
+      )}
+      <details
+        id="team-help"
+        className={styles.helpPanel}
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary>
+          Team help · {count} active
+          {help.requests.some((r) => r.unread > 0)
+            ? ` · ${help.requests.reduce((sum, r) => sum + r.unread, 0)} unread`
+            : ''}
+        </summary>
+        <p>Requests to you and from you. Customer chat ownership stays with the requester.</p>
+        {help.error && <p role="alert">{help.error}</p>}
+        {!help.requests.length && <p>No help requests yet.</p>}
+        {help.requests.map((row) => (
+          <article key={row.id} className={styles.helpRequest}>
+            <strong>{row.incoming ? 'From ' + row.requesterName : 'To ' + row.helperName}</strong>
+            <span>
+              {
+                (
+                  {
+                    requested: 'Help requested',
+                    accepted: 'Accepted',
+                    finished: 'Finished',
+                    cancelled: 'Cancelled',
+                  } as Record<string, string>
+                )[row.status]
+              }
+            </span>
+            {row.unread > 0 && (
+              <strong role="status">
+                {row.mentioned ? '@ You were mentioned · ' : ''}
+                {row.unread} unread
+              </strong>
+            )}
+            <p data-sentry-mask>{row.question}</p>
+            {row.status !== 'requested' && (
+              <Button onClick={() => setDiscussion(row)}>Open private discussion</Button>
+            )}
+            <small>
+              Chat #{row.conversationId.slice(0, 8)} · {new Date(row.updatedAt).toLocaleString()}
+            </small>
+            {(row.incoming
+              ? row.status === 'requested'
+                ? ['accept']
+                : row.status === 'accepted'
+                  ? ['finish']
+                  : []
+              : ['requested', 'accepted'].includes(row.status)
+                ? ['cancel']
                 : []
-            : ['requested', 'accepted'].includes(row.status)
-              ? ['cancel']
-              : []
-          ).map((action) => (
-            <Button
-              key={action}
-              disabled={busy}
-              onClick={async () => {
-                if (lock.current) return;
-                lock.current = true;
-                setBusy(true);
-                try {
-                  await api('/v1/chat/conversations/help/' + row.id, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ action, version: row.version }),
-                  });
-                  setStatus('Help request updated.');
-                  await help.refresh();
-                } catch (e) {
-                  setStatus(e instanceof Error ? e.message : 'Could not update request.');
-                } finally {
-                  lock.current = false;
-                  setBusy(false);
-                }
-              }}
-            >
-              {action === 'accept'
-                ? 'Accept help request'
-                : action === 'finish'
-                  ? 'Finish helping'
-                  : 'Cancel request'}
-            </Button>
-          ))}
-        </article>
-      ))}
-      <p role="status">{status}</p>
-    </details>
+            ).map((action) => (
+              <Button
+                key={action}
+                disabled={busy}
+                onClick={async () => {
+                  if (lock.current) return;
+                  lock.current = true;
+                  setBusy(true);
+                  try {
+                    await api('/v1/chat/conversations/help/' + row.id, {
+                      method: 'POST',
+                      headers,
+                      body: JSON.stringify({ action, version: row.version }),
+                    });
+                    setStatus('Help request updated.');
+                    await help.refresh();
+                  } catch (e) {
+                    setStatus(e instanceof Error ? e.message : 'Could not update request.');
+                  } finally {
+                    lock.current = false;
+                    setBusy(false);
+                  }
+                }}
+              >
+                {action === 'accept'
+                  ? 'Accept help request'
+                  : action === 'finish'
+                    ? 'Finish helping'
+                    : 'Cancel request'}
+              </Button>
+            ))}
+          </article>
+        ))}
+        <p role="status">{status}</p>
+      </details>
+    </>
   );
 }

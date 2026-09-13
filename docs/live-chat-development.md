@@ -393,3 +393,37 @@ Integration checks include private visitor history, tenant isolation, expired
 membership denial, unavailable helper rejection, duplicate requests and invalid
 or stale state transitions. Physical desktop notification delivery remains a
 staging check.
+
+## Specialist collaboration Phase 2 - September 13, 2026
+
+Migration 0107 adds a separate tenant-isolated private message table and per-participant
+read/typing state. Accepted help requests open a two-person discussion alongside the
+latest 100 public customer messages. Customer notes and CRM records are excluded.
+The helper receives no general inbox/history or public-send permission. Both people
+retain their private discussion history; customer context and new messages are disabled
+when help ends, the chat closes, or the requester no longer owns it.
+
+Internal messages and suggested customer replies use sequenced pagination and stable
+retry ids. Mentions target the other participant only. The discussion refreshes every
+two seconds; ERP-wide unread/mention alerts refresh every three seconds, using the
+existing enabled chime/desktop notification preferences. Typing expires after six
+seconds. Read markers advance only for a visible, focused discussion at its latest
+messages. This phase does not add closed-browser push for internal team messages.
+
+Suggestions open a preview in the owner's customer workspace. Adding to the reply
+appends to existing text, refuses to mix a nonempty private note into a public reply,
+and checks the 4,000-character limit. Sending still requires the owner to press Send.
+Ownership transfer remains an explicit action under Visitor details → Transfer to a
+teammate, with server permission, availability and version checks.
+
+Validation: shared/db/API builds; web typecheck and changed-file lint; 34 local Postgres
+integration tests including concurrent duplicate sends, participant checks, private
+history exclusion, tenant RLS, pagination, mentions/unread, monotonic read markers,
+typing, and revoked context after ownership changes or finished help. Browser-tested
+request acceptance, a helper suggestion/mention, private owner reply, unread clearing,
+customer-only context, appending a suggestion to an existing unsent draft, and
+the team-help attention alert on the dashboard.
+
+Local implementation only. Production rollout, authenticated live design comparison,
+upstream reconciliation, and physical desktop push delivery checks remain separate.
+Phase 3 (team channels, direct messages and shared help desk) is not implemented.

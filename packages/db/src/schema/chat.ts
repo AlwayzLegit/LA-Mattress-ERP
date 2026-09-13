@@ -287,10 +287,16 @@ export const chatHelpRequests = pgTable(
     question: text('question').notNull(),
     status: text('status').notNull().default('requested'),
     version: integer('version').notNull().default(1),
+    lastSequence: integer('last_sequence').notNull().default(0),
+    requesterReadSequence: integer('requester_read_sequence').notNull().default(0),
+    helperReadSequence: integer('helper_read_sequence').notNull().default(0),
+    requesterTypingUntil: timestamp('requester_typing_until', { withTimezone: true }),
+    helperTypingUntil: timestamp('helper_typing_until', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    tenantKey: uniqueIndex('chat_help_tenant_key').on(t.businessId, t.id),
     conversationFk: foreignKey({
       columns: [t.businessId, t.conversationId],
       foreignColumns: [chatConversations.businessId, chatConversations.id],
@@ -304,5 +310,33 @@ export const chatHelpRequests = pgTable(
       sql`${t.status} in ('requested','accepted','finished','cancelled')`,
     ),
     distinctPeople: check('chat_help_people', sql`${t.requesterId} <> ${t.helperId}`),
+  }),
+);
+
+export const chatHelpMessages = pgTable(
+  'chat_help_messages',
+  {
+    id: uuid('id').primaryKey(),
+    businessId: businessId(),
+    requestId: uuid('request_id').notNull(),
+    senderId: uuid('sender_id').notNull(),
+    sequence: integer('sequence').notNull(),
+    body: text('body').notNull(),
+    kind: text('kind').notNull().default('message'),
+    mention: boolean('mention').notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    requestFk: foreignKey({
+      columns: [t.businessId, t.requestId],
+      foreignColumns: [chatHelpRequests.businessId, chatHelpRequests.id],
+    }).onDelete('cascade'),
+    sequenceKey: uniqueIndex('chat_help_message_sequence').on(
+      t.businessId,
+      t.requestId,
+      t.sequence,
+    ),
+    bodyCheck: check('chat_help_message_body', sql`length(btrim(${t.body})) between 1 and 4000`),
+    kindCheck: check('chat_help_message_kind', sql`${t.kind} in ('message','suggestion')`),
   }),
 );

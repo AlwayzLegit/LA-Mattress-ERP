@@ -1219,3 +1219,137 @@
   color: var(--muted);
   margin-bottom: 8px;
 }
+
+.teamDialog {
+  width: min(1120px, 94vw);
+  max-height: 90vh;
+  margin: auto;
+  padding: 20px;
+  border: 1px solid #dcd9d2;
+  border-radius: 8px;
+  background: #f6f5f2;
+  color: #1c1b18;
+  font-family: inherit;
+  box-shadow: 0 24px 80px #1e3a5f33;
+}
+.teamDialog::backdrop {
+  background: #17283e80;
+}
+.teamDialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+}
+.teamDialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.teamDialog h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.teamDialog h3 small {
+  display: block;
+  margin-top: 4px;
+  font-weight: 400;
+  color: #65645f;
+}
+.discussionQuestion {
+  background: #e7edf5;
+  padding: 12px;
+  border-left: 3px solid #1e3a5f;
+  white-space: pre-wrap;
+}
+.discussionGrid {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: 20px;
+}
+.discussionGrid > section {
+  min-width: 0;
+}
+.customerContext,
+.teamMessages {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  background: white;
+  border: 1px solid #dcd9d2;
+}
+.customerContext {
+  height: 480px;
+}
+.teamMessages {
+  height: 260px;
+}
+.customerContext article,
+.teamMessages article {
+  padding: 10px;
+  border-bottom: 1px solid #efeeea;
+  overflow-wrap: anywhere;
+}
+.teamMessages article[data-mine='true'] {
+  background: #f6f5f2;
+}
+.teamMessages article[data-suggestion='true'] {
+  border-left: 3px solid #1e3a5f;
+  background: #e7edf5;
+}
+.teamMessages p,
+.customerContext p,
+.suggestionPreview p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.teamMessages time,
+.customerContext time {
+  float: right;
+  font-size: 11px;
+  color: #65645f;
+}
+.teamMessages small {
+  display: block;
+  color: #1e3a5f;
+}
+.teamComposer {
+  display: grid;
+  gap: 10px;
+}
+.teamComposer label {
+  display: grid;
+  gap: 5px;
+}
+.teamComposer select,
+.teamComposer textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #dcd9d2;
+  border-radius: 3px;
+  background: white;
+  font: inherit;
+}
+.teamComposer .mentionChoice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.suggestionPreview {
+  padding: 12px;
+  border: 1px solid #bdcce0;
+  background: #e7edf5;
+}
+.suggestionPreview button {
+  margin-right: 8px;
+}
+@media (max-width: 720px) {
+  .discussionGrid {
+    grid-template-columns: 1fr;
+  }
+  .customerContext {
+    height: 180px;
+  }
+  .teamDialog header {
+    flex-wrap: wrap;
+  }
+}
