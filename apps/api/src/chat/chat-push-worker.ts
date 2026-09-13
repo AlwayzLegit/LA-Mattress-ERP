@@ -120,14 +120,24 @@ export class ChatPushWorker {
         .where(eq(schema.chatSettings.businessId, businessId));
       const chatEnabled =
         (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false;
-      const scoped = Boolean(
+      const shared = Boolean(
         member &&
         conversation &&
-        (canViewTeam || conversation.assignedMembershipId === member.id) &&
-        (member.dataScope === 'all' ||
-          (member.dataScope === 'store' &&
-            scopes.some((row) => row.locationId === conversation.locationId))),
+        !conversation.locationId &&
+        (settings?.configJson as { sharedInbox?: boolean } | undefined)?.sharedInbox &&
+        (conversation.assignedMembershipId === member.id ||
+          (!conversation.assignedMembershipId && ['queued', 'open'].includes(conversation.status))),
       );
+      const scoped =
+        shared ||
+        Boolean(
+          member &&
+          conversation &&
+          (canViewTeam || conversation.assignedMembershipId === member.id) &&
+          (member.dataScope === 'all' ||
+            (member.dataScope === 'store' &&
+              scopes.some((row) => row.locationId === conversation.locationId))),
+        );
       const [source] = conversation
         ? await tx
             .select({
