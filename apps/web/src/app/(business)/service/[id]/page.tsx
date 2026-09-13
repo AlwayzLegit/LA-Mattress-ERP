@@ -10,10 +10,14 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Input,
   KeyValue,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
@@ -21,6 +25,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -77,6 +82,36 @@ const NEXT_STATUSES: Record<string, string[]> = {
   ready: ['in_service'],
 };
 
+const CHARGE_COLUMNS: ColumnDef<TicketLine>[] = [
+  {
+    id: 'description',
+    label: 'Description',
+    sortValue: (l) => l.description,
+    render: (l) => l.description,
+  },
+  {
+    id: 'kind',
+    label: 'Kind',
+    cellClassName: () => 'muted',
+    sortValue: (l) => l.kind,
+    render: (l) => l.kind,
+  },
+  {
+    id: 'qty',
+    label: 'Qty',
+    num: true,
+    sortValue: (l) => l.quantity,
+    render: (l) => `×${l.quantity}`,
+  },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    sortValue: (l) => l.totalCents,
+    render: (l) => formatMoney(l.totalCents),
+  },
+];
+
 export default function ServiceTicketPage() {
   const params = useParams<{ id: string }>();
   const id = (params?.id ?? '') as string;
@@ -90,6 +125,7 @@ export default function ServiceTicketPage() {
   const [noteBody, setNoteBody] = useState('');
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('cash');
+  const chargeCols = useListColumns('service-charges', CHARGE_COLUMNS, ticket?.lines ?? null);
 
   async function load() {
     try {
@@ -195,29 +231,22 @@ export default function ServiceTicketPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>Description</th>
-                        <th>Kind</th>
-                        <th className="num">Qty</th>
-                        <th className="num">Amount</th>
-                      </tr>
+                      <ColumnHeadRow list={chargeCols} testIdPrefix="service-charges" />
                     </thead>
                     <tbody>
                       {ticket.lines.length === 0 && (
-                        <TableEmpty colSpan={4}>
+                        <TableEmpty colSpan={chargeCols.ordered.length}>
                           {live ? 'No charges yet — add a part or labor below.' : 'No charges.'}
                         </TableEmpty>
                       )}
-                      {ticket.lines.map((l) => (
+                      {chargeCols.sorted.map((l) => (
                         <tr key={l.id}>
-                          <td>{l.description}</td>
-                          <td className="muted">{l.kind}</td>
-                          <td className="num">×{l.quantity}</td>
-                          <td className="num">{formatMoney(l.totalCents)}</td>
+                          <ColumnCells list={chargeCols} row={l} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={chargeCols} />
                 </TableWrap>
                 {live && (
                   <>

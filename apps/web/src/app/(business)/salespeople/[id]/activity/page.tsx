@@ -10,10 +10,14 @@ import {
   Alert,
   BackLink,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   KeyValue,
   LinkButton,
   PageHeader,
+  ResetColumns,
   Skeleton,
   Stack,
   StatGrid,
@@ -21,6 +25,7 @@ import {
   StatusBadge,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 
@@ -81,16 +86,17 @@ interface Activity {
   layaways: OrderRow[];
   carts: OrderRow[];
   quotes: OrderRow[];
-  leads: {
-    customerId: string;
-    name: string;
-    phone: string | null;
-    email: string | null;
-    source: string;
-    documentId: string;
-    documentNumber: string;
-    date: string;
-  }[];
+  leads: LeadRow[];
+}
+interface LeadRow {
+  customerId: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  source: string;
+  documentId: string;
+  documentNumber: string;
+  date: string;
 }
 
 const TABS = [
@@ -421,6 +427,115 @@ function OrdersTable({
       : variant === 'cancelled'
         ? (r.cancelledDate ?? r.orderDate)
         : r.orderDate;
+  // Inline: the date column's label and value depend on `variant`, and the
+  // two fulfillment columns only exist for open documents.
+  const columns: ColumnDef<OrderRow>[] = [
+    {
+      id: 'order',
+      label: 'Order',
+      sortValue: (r) => r.number,
+      render: (r) => <Link href={`/orders/${r.id}`}>{r.number}</Link>,
+    },
+    {
+      id: 'orderType',
+      label: 'Order type',
+      sortValue: (r) => r.orderType,
+      render: (r) => r.orderType,
+    },
+    {
+      id: 'customer',
+      label: 'Customer name',
+      sortValue: (r) => r.customerName,
+      render: (r) =>
+        r.customerId ? (
+          <Link href={`/customers/${r.customerId}/activity`}>{r.customerName}</Link>
+        ) : (
+          r.customerName
+        ),
+    },
+    {
+      id: 'fulfillmentType',
+      label: 'Fulfillment type',
+      sortValue: (r) => r.fulfillmentType,
+      render: (r) => r.fulfillmentType,
+    },
+    ...(variant === 'open'
+      ? [
+          {
+            id: 'fulfillmentStatus',
+            label: 'Fulfillment status',
+            sortValue: (r) => r.fulfillmentStatus,
+            render: (r) => r.fulfillmentStatus,
+          } satisfies ColumnDef<OrderRow>,
+        ]
+      : []),
+    {
+      id: 'date',
+      label: dateLabel,
+      sortValue: (r) => dateOf(r),
+      render: (r) => fmtDate(dateOf(r)),
+    },
+    ...(variant === 'open'
+      ? [
+          {
+            id: 'fulfillmentDate',
+            label: 'Fulfillment date',
+            sortValue: (r) => r.fulfillmentDate,
+            render: (r) => fmtDate(r.fulfillmentDate),
+          } satisfies ColumnDef<OrderRow>,
+        ]
+      : []),
+    {
+      id: 'merchandise',
+      label: 'Merchandise',
+      num: true,
+      sortValue: (r) => r.merchandiseCents,
+      render: (r) => <Money cents={r.merchandiseCents} />,
+    },
+    {
+      id: 'total',
+      label: 'Total',
+      num: true,
+      sortValue: (r) => r.totalCents,
+      render: (r) => <Money cents={r.totalCents} />,
+    },
+    {
+      id: 'amountPaid',
+      label: 'Amount paid',
+      num: true,
+      sortValue: (r) => r.amountPaidCents,
+      render: (r) => <Money cents={r.amountPaidCents} />,
+    },
+    {
+      id: 'balance',
+      label: 'Balance',
+      num: true,
+      sortValue: (r) => r.balanceCents,
+      render: (r) =>
+        r.balanceCents > 0 ? (
+          <strong>
+            <Money cents={r.balanceCents} />
+          </strong>
+        ) : (
+          <Money cents={r.balanceCents} />
+        ),
+    },
+    {
+      id: 'salespeople',
+      label: 'Salespeople',
+      num: true,
+      sortValue: (r) => r.salespeople,
+      render: (r) => r.salespeople,
+    },
+  ];
+  const cols = useListColumns('salesperson-activity-orders', columns, rows);
+  const totals: Record<string, { testid: string; cents: number }> = {
+    merchandise: { testid: `${testid}-merch`, cents: sum('merchandiseCents') },
+    total: { testid: `${testid}-total`, cents: sum('totalCents') },
+    amountPaid: { testid: `${testid}-paid`, cents: sum('amountPaidCents') },
+    balance: { testid: `${testid}-balance`, cents: sum('balanceCents') },
+  };
+  const totalsLabelId = cols.ordered.find((c) => !totals[c.id])?.id;
   return (
     <Card title={title} data-testid={testid}>
       {before}
@@ -430,88 +545,61 @@ function OrdersTable({
         <TableWrap>
           <table className="table">
             <thead>
-              <tr>
-                <th>Order</th>
-                <th>Order type</th>
-                <th>Customer name</th>
-                <th>Fulfillment type</th>
-                {variant === 'open' && <th>Fulfillment status</th>}
-                <th>{dateLabel}</th>
-                {variant === 'open' && <th>Fulfillment date</th>}
-                <th className="num">Merchandise</th>
-                <th className="num">Total</th>
-                <th className="num">Amount paid</th>
-                <th className="num">Balance</th>
-                <th className="num">Salespeople</th>
-              </tr>
+              <ColumnHeadRow list={cols} testIdPrefix={testid} />
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {cols.sorted.map((r) => (
                 <tr key={r.id} data-testid={`${testid}-row`}>
-                  <td>
-                    <Link href={`/orders/${r.id}`}>{r.number}</Link>
-                  </td>
-                  <td>{r.orderType}</td>
-                  <td>
-                    {r.customerId ? (
-                      <Link href={`/customers/${r.customerId}/activity`}>{r.customerName}</Link>
-                    ) : (
-                      r.customerName
-                    )}
-                  </td>
-                  <td>{r.fulfillmentType}</td>
-                  {variant === 'open' && <td>{r.fulfillmentStatus}</td>}
-                  <td>{fmtDate(dateOf(r))}</td>
-                  {variant === 'open' && <td>{fmtDate(r.fulfillmentDate)}</td>}
-                  <td className="num">
-                    <Money cents={r.merchandiseCents} />
-                  </td>
-                  <td className="num">
-                    <Money cents={r.totalCents} />
-                  </td>
-                  <td className="num">
-                    <Money cents={r.amountPaidCents} />
-                  </td>
-                  <td className="num">
-                    {r.balanceCents > 0 ? (
-                      <strong>
-                        <Money cents={r.balanceCents} />
-                      </strong>
-                    ) : (
-                      <Money cents={r.balanceCents} />
-                    )}
-                  </td>
-                  <td className="num">{r.salespeople}</td>
+                  <ColumnCells list={cols} row={r} />
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="font-semibold">
-                <td colSpan={variant === 'open' ? 7 : 5}>Totals ({rows.length})</td>
-                <td className="num" data-testid={`${testid}-merch`}>
-                  <Money cents={sum('merchandiseCents')} />
-                </td>
-                <td className="num" data-testid={`${testid}-total`}>
-                  <Money cents={sum('totalCents')} />
-                </td>
-                <td className="num" data-testid={`${testid}-paid`}>
-                  <Money cents={sum('amountPaidCents')} />
-                </td>
-                <td className="num" data-testid={`${testid}-balance`}>
-                  <Money cents={sum('balanceCents')} />
-                </td>
-                <td />
+                {cols.ordered.map((c) => {
+                  const t = totals[c.id];
+                  return (
+                    <td key={c.id} className={c.num ? 'num' : undefined} data-testid={t?.testid}>
+                      {t ? (
+                        <Money cents={t.cents} />
+                      ) : c.id === totalsLabelId ? (
+                        `Totals (${rows.length})`
+                      ) : null}
+                    </td>
+                  );
+                })}
               </tr>
             </tfoot>
           </table>
+          <ResetColumns list={cols} />
         </TableWrap>
       )}
     </Card>
   );
 }
 
+const LEAD_COLUMNS: ColumnDef<LeadRow>[] = [
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (l) => l.name,
+    render: (l) => <Link href={`/customers/${l.customerId}`}>{l.name}</Link>,
+  },
+  { id: 'phone', label: 'Phone', sortValue: (l) => l.phone, render: (l) => l.phone ?? '—' },
+  { id: 'email', label: 'Email', sortValue: (l) => l.email, render: (l) => l.email ?? '—' },
+  { id: 'source', label: 'Source', sortValue: (l) => l.source, render: (l) => l.source },
+  {
+    id: 'document',
+    label: 'Document',
+    sortValue: (l) => l.documentNumber,
+    render: (l) => <Link href={`/orders/${l.documentId}`}>{l.documentNumber}</Link>,
+  },
+  { id: 'date', label: 'Date', sortValue: (l) => l.date, render: (l) => fmtDate(l.date) },
+];
+
 function Leads({ data }: { data: Activity }) {
   const rows = data.leads;
+  const cols = useListColumns('salesperson-activity-leads', LEAD_COLUMNS, rows);
   return (
     <Card
       title="Leads"
@@ -524,32 +612,17 @@ function Leads({ data }: { data: Activity }) {
         <TableWrap>
           <table className="table">
             <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Source</th>
-                <th>Document</th>
-                <th>Date</th>
-              </tr>
+              <ColumnHeadRow list={cols} testIdPrefix="sp-leads" />
             </thead>
             <tbody>
-              {rows.map((l) => (
+              {cols.sorted.map((l) => (
                 <tr key={l.customerId} data-testid="sp-lead-row">
-                  <td>
-                    <Link href={`/customers/${l.customerId}`}>{l.name}</Link>
-                  </td>
-                  <td>{l.phone ?? '—'}</td>
-                  <td>{l.email ?? '—'}</td>
-                  <td>{l.source}</td>
-                  <td>
-                    <Link href={`/orders/${l.documentId}`}>{l.documentNumber}</Link>
-                  </td>
-                  <td>{fmtDate(l.date)}</td>
+                  <ColumnCells list={cols} row={l} />
                 </tr>
               ))}
             </tbody>
           </table>
+          <ResetColumns list={cols} />
         </TableWrap>
       )}
     </Card>

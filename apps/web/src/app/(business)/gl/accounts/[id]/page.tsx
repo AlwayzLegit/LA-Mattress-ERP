@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -9,12 +9,17 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -22,22 +27,95 @@ import {
  * the posted lines behind them with the batch each line came from.
  */
 
+interface PeriodRow {
+  period: number;
+  debitCents: number;
+  creditCents: number;
+}
+interface JournalLine {
+  batchId: string;
+  batchNumber: string;
+  batchType: string;
+  sourceType: string | null;
+  businessDate: string;
+  period: number;
+  memo: string | null;
+  debitCents: number;
+  creditCents: number;
+}
 interface Activity {
   account: { id: string; code: string; name: string; accountType: string };
   fiscalYear: number;
-  byPeriod: { period: number; debitCents: number; creditCents: number }[];
-  lines: {
-    batchId: string;
-    batchNumber: string;
-    batchType: string;
-    sourceType: string | null;
-    businessDate: string;
-    period: number;
-    memo: string | null;
-    debitCents: number;
-    creditCents: number;
-  }[];
+  byPeriod: PeriodRow[];
+  lines: JournalLine[];
 }
+
+const PERIOD_COLUMNS: ColumnDef<PeriodRow>[] = [
+  {
+    id: 'period',
+    label: 'Period',
+    sortValue: (p) => p.period,
+    render: (p) => (p.period === 13 ? 'Year-end' : p.period),
+  },
+  {
+    id: 'debits',
+    label: 'Debits',
+    num: true,
+    sortValue: (p) => p.debitCents,
+    render: (p) => <Money cents={p.debitCents} />,
+  },
+  {
+    id: 'credits',
+    label: 'Credits',
+    num: true,
+    sortValue: (p) => p.creditCents,
+    render: (p) => <Money cents={p.creditCents} />,
+  },
+  {
+    id: 'net',
+    label: 'Net',
+    num: true,
+    sortValue: (p) => p.debitCents - p.creditCents,
+    render: (p) => <Money cents={p.debitCents - p.creditCents} />,
+  },
+];
+
+const JOURNAL_COLUMNS: ColumnDef<JournalLine>[] = [
+  {
+    id: 'date',
+    label: 'Date',
+    className: 'nowrap',
+    sortValue: (l) => l.businessDate,
+    render: (l) => l.businessDate,
+  },
+  {
+    id: 'batch',
+    label: 'Batch',
+    sortValue: (l) => l.batchNumber,
+    render: (l) => <code>{l.batchNumber}</code>,
+  },
+  {
+    id: 'type',
+    label: 'Type',
+    sortValue: (l) => l.sourceType ?? l.batchType,
+    render: (l) => l.sourceType ?? l.batchType,
+  },
+  { id: 'memo', label: 'Memo', sortValue: (l) => l.memo, render: (l) => l.memo ?? '—' },
+  {
+    id: 'debit',
+    label: 'Debit',
+    num: true,
+    sortValue: (l) => l.debitCents,
+    render: (l) => (l.debitCents > 0 ? <Money cents={l.debitCents} /> : '—'),
+  },
+  {
+    id: 'credit',
+    label: 'Credit',
+    num: true,
+    sortValue: (l) => l.creditCents,
+    render: (l) => (l.creditCents > 0 ? <Money cents={l.creditCents} /> : '—'),
+  },
+];
 
 export default function GlAccountActivityPage() {
   const params = useParams<{ id: string }>();
@@ -46,6 +124,17 @@ export default function GlAccountActivityPage() {
   const [data, setData] = useState<Activity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [periodFilter, setPeriodFilter] = useState<number | null>(null);
+  const lines = useMemo(
+    () =>
+      data
+        ? periodFilter
+          ? data.lines.filter((l) => l.period === periodFilter)
+          : data.lines
+        : null,
+    [data, periodFilter],
+  );
+  const periodCols = useListColumns('gl-account-periods', PERIOD_COLUMNS, data?.byPeriod ?? null);
+  const lineCols = useListColumns('gl-account-journal', JOURNAL_COLUMNS, lines);
 
   useEffect(() => {
     if (!id) return;
@@ -62,9 +151,8 @@ export default function GlAccountActivityPage() {
       </div>
     );
   }
-  if (!data) return <LoadingRows rows={6} />;
+  if (!data || !lines) return <LoadingRows rows={6} />;
 
-  const lines = periodFilter ? data.lines.filter((l) => l.period === periodFilter) : data.lines;
   const yearOptions = [year - 1, year, year + 1].filter((v, i, a) => a.indexOf(v) === i);
 
   return (
@@ -101,18 +189,15 @@ export default function GlAccountActivityPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Period</th>
-                  <th className="num">Debits</th>
-                  <th className="num">Credits</th>
-                  <th className="num">Net</th>
-                </tr>
+                <ColumnHeadRow list={periodCols} testIdPrefix="gl-account-periods" />
               </thead>
               <tbody>
                 {data.byPeriod.length === 0 && (
-                  <TableEmpty colSpan={4}>No posted activity in {data.fiscalYear}.</TableEmpty>
+                  <TableEmpty colSpan={periodCols.ordered.length}>
+                    No posted activity in {data.fiscalYear}.
+                  </TableEmpty>
                 )}
-                {data.byPeriod.map((p) => {
+                {periodCols.sorted.map((p) => {
                   const selected = periodFilter === p.period;
                   return (
                     <tr
@@ -122,21 +207,13 @@ export default function GlAccountActivityPage() {
                       style={selected ? { background: 'var(--bg-secondary)' } : undefined}
                       onClick={() => setPeriodFilter(selected ? null : p.period)}
                     >
-                      <td>{p.period === 13 ? 'Year-end' : p.period}</td>
-                      <td className="num">
-                        <Money cents={p.debitCents} />
-                      </td>
-                      <td className="num">
-                        <Money cents={p.creditCents} />
-                      </td>
-                      <td className="num">
-                        <Money cents={p.debitCents - p.creditCents} />
-                      </td>
+                      <ColumnCells list={periodCols} row={p} />
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <ResetColumns list={periodCols} />
           </TableWrap>
         </Card>
 
@@ -154,41 +231,24 @@ export default function GlAccountActivityPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Batch</th>
-                  <th>Type</th>
-                  <th>Memo</th>
-                  <th className="num">Debit</th>
-                  <th className="num">Credit</th>
-                </tr>
+                <ColumnHeadRow list={lineCols} testIdPrefix="gl-account-journal" />
               </thead>
               <tbody>
                 {lines.length === 0 && (
-                  <TableEmpty colSpan={6}>
+                  <TableEmpty colSpan={lineCols.ordered.length}>
                     {periodFilter
                       ? `No posted lines in period ${periodFilter}.`
                       : `No posted lines in ${data.fiscalYear}.`}
                   </TableEmpty>
                 )}
-                {lines.map((l, i) => (
+                {lineCols.sorted.map((l, i) => (
                   <tr key={`${l.batchId}-${i}`}>
-                    <td className="nowrap">{l.businessDate}</td>
-                    <td>
-                      <code>{l.batchNumber}</code>
-                    </td>
-                    <td>{l.sourceType ?? l.batchType}</td>
-                    <td>{l.memo ?? '—'}</td>
-                    <td className="num">
-                      {l.debitCents > 0 ? <Money cents={l.debitCents} /> : '—'}
-                    </td>
-                    <td className="num">
-                      {l.creditCents > 0 ? <Money cents={l.creditCents} /> : '—'}
-                    </td>
+                    <ColumnCells list={lineCols} row={l} index={i} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={lineCols} />
           </TableWrap>
         </Card>
       </Stack>
