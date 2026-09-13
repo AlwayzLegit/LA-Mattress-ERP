@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Money } from '@/components/money';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { Card, LoadingRows, Stack, TableEmpty, TableWrap, Toolbar } from '@/components/ui';
 import { LocationPicker, SectionError, StripTiles, useSection } from './kit';
 import type { SalesHistoryPeriod, Strip } from './types';
@@ -12,7 +13,10 @@ export function SalesHistoryPanel({ productId }: { productId: string }) {
   const { data, error, loading } = useSection<{ strip: Strip; periods: SalesHistoryPeriod[] }>(
     `/v1/products/${productId}/activity/sales-history${locationId ? `?locationId=${locationId}` : ''}`,
   );
-  const costHidden = data ? data.periods.every((p) => p.costCents === null) : false;
+  // Cost access comes from /members/me; the rows alone cannot tell "no
+  // access" from "no cost on file".
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const costHidden = canSeeCost === false;
   return (
     <Stack>
       <Toolbar>
@@ -62,7 +66,7 @@ export function SalesHistoryPanel({ productId }: { productId: string }) {
                     </td>
                     <td className="num">
                       {p.costCents === null ? (
-                        <em className="muted">hidden</em>
+                        <em className="muted">{costHidden ? 'hidden' : '—'}</em>
                       ) : (
                         <Money cents={p.costCents} />
                       )}

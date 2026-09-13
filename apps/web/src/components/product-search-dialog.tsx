@@ -37,6 +37,8 @@ export interface SearchRow {
   vendorName: string | null;
   size: string | null;
   firmness: string | null;
+  /** Catalog category name ("Mattresses"), null when unfiled. */
+  categoryName?: string | null;
   availableHere: number;
   availableTotal: number;
   atpDate: string | null;

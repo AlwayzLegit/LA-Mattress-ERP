@@ -40,7 +40,6 @@ export default function ShellPreview() {
           counts={(href) =>
             cashier ? Math.ceil((COUNTS[href] ?? 0) / 5) || null : (COUNTS[href] ?? null)
           }
-          userKey="preview"
           onShortcuts={() => undefined}
         />
       </aside>

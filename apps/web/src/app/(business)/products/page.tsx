@@ -10,6 +10,7 @@ import {
   PRODUCT_PURCHASE_STATUSES,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { CsvImport } from '@/components/csv-import';
 import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
@@ -227,8 +228,10 @@ const FIXED_AFTER_STORES: Column[] = [
     label: 'Sales margin cost',
     sort: 'costCents',
     num: true,
+    // The column only renders for viewers with cost access, so a null here
+    // means no cost on file — not "you may not see this".
     render: (p) =>
-      p.costCents == null ? <em className="pb-muted">hidden</em> : <Money cents={p.costCents} />,
+      p.costCents == null ? <span className="pb-muted">—</span> : <Money cents={p.costCents} />,
   },
   {
     id: 'asIsOnHand',
@@ -401,7 +404,10 @@ export default function ProductsPage() {
   );
   const defaultOrder = useMemo(() => allColumns.map((c) => c.id), [allColumns]);
   const byId = useMemo(() => new Map(allColumns.map((c) => [c.id, c])), [allColumns]);
-  const showCost = (rows ?? []).some((r) => r.costCents != null);
+  // `canSeeCost` comes from /members/me; until it loads, fall back to
+  // "any row carries a cost" so the column never flashes in and out.
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const showCost = canSeeCost ?? (rows ?? []).some((r) => r.costCents != null);
   const columns = (order ?? defaultOrder)
     .map((id) => byId.get(id))
     .filter((c): c is Column => !!c && (c.id !== 'cost' || showCost));

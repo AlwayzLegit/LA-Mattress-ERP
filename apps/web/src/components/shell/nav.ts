@@ -140,17 +140,3 @@ export function isActiveHref(pathname: string, href: string): boolean {
   if (href === '/dashboard') return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
-
-/** Which group holds the current page, if any. */
-export function groupForPath(groups: NavGroup[], pathname: string): string | null {
-  // Longest matching href wins, so /products/stock belongs to Stock, not Sell.
-  let best: { label: string; len: number } | null = null;
-  for (const g of groups) {
-    for (const i of g.items) {
-      if (isActiveHref(pathname, i.href) && (!best || i.href.length > best.len)) {
-        best = { label: g.label, len: i.href.length };
-      }
-    }
-  }
-  return best?.label ?? null;
-}

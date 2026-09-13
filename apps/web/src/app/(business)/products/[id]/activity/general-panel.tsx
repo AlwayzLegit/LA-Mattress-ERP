@@ -3,6 +3,7 @@
 import { centsToInputString, PRODUCT_PURCHASE_STATUS_LABELS } from '@jetnine/shared';
 import type { ProductPurchaseStatus } from '@jetnine/shared';
 import { Money } from '@/components/money';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { Card, Field, FormGrid, Input, KeyValue, StatusBadge } from '@/components/ui';
 import { SectionError, useSection } from './kit';
 import type { General, Shipping } from './types';
@@ -33,7 +34,10 @@ export function GeneralPanel({
 }) {
   const { data, error } = useSection<General>(`/v1/products/${product.id}/activity/general`);
   const cost = data?.cost;
-  const hidden = <em className="muted">hidden</em>;
+  // "hidden" only without products.cost.view; with access a null figure
+  // is no cost on file.
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const hidden = <em className="muted">{canSeeCost === false ? 'hidden' : '—'}</em>;
   const money = (cents: number | null | undefined) =>
     cents == null ? hidden : <Money cents={cents} />;
 

@@ -522,6 +522,9 @@ describe('the Cashier role', () => {
     const me = await asCashier('/v1/business/members/me').expect(200);
     expect(me.body.cashierDashboard).toBe(true);
     expect(me.body.warehouseDashboard).toBe(false);
+    // The product screens read this to say "hidden" (no cost access)
+    // rather than "—" (no cost on file).
+    expect(me.body.canSeeCost).toBe(false);
     const wh = await request(app.getHttpServer())
       .get('/v1/business/members/me')
       .set('Cookie', warehouseCookie)

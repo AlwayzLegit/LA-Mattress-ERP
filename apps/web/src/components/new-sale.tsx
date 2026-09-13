@@ -13,6 +13,7 @@ import {
   isFinancingMethod,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { lineHasAddons } from '@/lib/pos-addons';
 import { setDraftSummary } from '@/lib/api-status';
 import { SELLING_STORE_KEY } from '@/lib/acting-store';
 import {
@@ -112,6 +113,8 @@ interface Line {
   /** True once the salesperson picked the source by hand. */
   sourceTouched: boolean;
   deliveryDate: string;
+  /** Catalog category ("Mattresses", "Adjustable Bases", …); decides the add-on chips. */
+  categoryName: string | null;
   /** Removal / Recycling / Declined foundation toggles on mattress and base lines. */
   addons: Addons;
   atpDate?: string | null;
@@ -157,13 +160,6 @@ interface Avail {
 let lineKeySeq = 0;
 const nextKey = () => `l${++lineKeySeq}`;
 const NO_ADDONS: Addons = { removal: false, recycling: false, declined: false };
-
-/** Add-on chips show on mattress and base lines only. */
-function isMattressOrBase(description: string): boolean {
-  return /mattress|foundation|box ?spring|adjustable|\bbase\b|hybrid|posturepedic|tempur/i.test(
-    description,
-  );
-}
 
 const EMPTY_ADDRESS = { line1: '', line2: '', city: '', region: '', postalCode: '' };
 const EMPTY_NEW_CUSTOMER = {
@@ -660,6 +656,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         description: [row.productName, row.variantName].filter(Boolean).join(' — '),
         sku: row.sku,
         size: row.size,
+        categoryName: row.categoryName ?? null,
         quantity: 1,
         unitPriceCents: row.priceCents,
         lineDiscountCents: 0,
@@ -810,6 +807,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           fulfillmentMethod: string | null;
           sourceLocationId: string | null;
           deliveryDate: string | null;
+          categoryName?: string | null;
         }[];
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
@@ -841,6 +839,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             description: l.description,
             sku: null,
             size: null,
+            categoryName: l.categoryName ?? null,
             quantity: l.quantity,
             unitPriceCents: l.unitPriceCents,
             lineDiscountCents: l.discountCents,
@@ -2268,7 +2267,7 @@ function LineRow({
             </button>
           )}
         </div>
-        {!isFee && isMattressOrBase(l.description) && (
+        {!isFee && lineHasAddons(l) && (
           <div className="reg-addons">
             {(
               [

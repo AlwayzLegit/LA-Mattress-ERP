@@ -27,7 +27,7 @@ export { NAV };
 /**
  * The (business) application shell (redesign Phase 3, README §2 and
  * canvas 3a–3e): 220px sidebar (200px at 1280) with Dashboard and five
- * collapsible groups, role-trimmed; a 50px topbar whose first control is
+ * always-open groups (owner 2026-09-12), role-trimmed; a 50px topbar whose first control is
  * the "Acting for {Store}" chip, then the owner's role switcher, the
  * search trigger with a platform shortcut chip, the inbox, New sale and
  * the account menu. Period and store-scope controls belong to the
@@ -163,7 +163,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Sidebar
           groups={groups}
           counts={countFor}
-          userKey={user?.id ?? 'anon'}
           onNavigate={() => setOpen(false)}
           onShortcuts={() => setHelp(true)}
         />

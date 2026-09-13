@@ -5239,7 +5239,8 @@ Phase 1 (this branch):
       info; payment terminal — _2026-09-10: `orders/[id]/actions/` (menu +
       dialogs), Order details card, ⋯ per line, `?scope=order` invoice;
       phase-2/3 items stay on the menu and say so instead of hiding._
-- [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
+- [x] Tests (int spec for the new endpoints), docs, CI green, merge —
+      _2026-09-12: box ticked late — PR #154 merged 2026-09-10 23:50Z._
       _2026-09-10: `order-actions.int.spec.ts` (5; CI db
       `jetnine_order_actions`); `orders.int.spec.ts` (101),
       `order-detail-extras` (4) and `customers` (16) still green; PR #154.
@@ -5531,3 +5532,48 @@ Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment
   in the document payload; `orders.int.spec.ts` +1 proves the round trip.
 - Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
   JSX for web component tests).
+
+### Checkpoint — 2026-09-12 (Cost column: "hidden" vs no cost on file)
+
+HANDOFF §5 cosmetic: the product screens printed "hidden" both when the viewer lacks
+`products.cost.view` and when the cost is genuinely null. `/v1/business/members/me` now
+carries `canSeeCost` (super-admin or `products.cost.view`), the acting-store snapshot
+exposes it, and the Products browser, product page (Sales margin cost field + variants
+table), General panel cost figures and Sales history cost column say **hidden** only
+without access and **—** for a missing cost. The browser's cost column now follows the
+permission instead of guessing from whether any row carried a cost. Tests:
+`business.int.spec.ts` (owner true) and `cashier.int.spec.ts` (cashier false).
+Also this session: HANDOFF §4a marked closed (email went live 2026-08-27 — the brief
+predated it) and a dated update block added at its top; PR #154's box ticked.
+
+### Checkpoint — 2026-09-12 (Sidebar: all groups open)
+
+Owner ask: "make the sidebar all open not collapsible." README §2 line amended
+(struck + dated), `PHASE_NOTES.md` amendment logged. Sidebar groups are static
+headings with every link visible; no toggle, no remembered open group, no `userKey`
+prop. CSS: `.nav-group-btn` / `.nav-chev` replaced by `.nav-group-head`.
+
+### Checkpoint — 2026-09-12 (Owner dashboard: "Cash on hand is unavailable")
+
+Live: `GET /v1/dashboard/cash-pickups/queue` returns 500 for the owner's business on every
+call since Phase 9 went live (Render logs: `Failed query: select "payments"…` from
+`pendingCash`), so every store card shows "Cash on hand is unavailable right now". One
+other identity got 200 at 17:03Z. Postgres logged no ERROR for the app role, and the API
+logger dropped the wrapped driver error, so the cause is not yet in evidence. Shipped:
+pino `errWithCause` serializer so the next failure logs the Postgres message and code;
+`nav-counts` returns 403 instead of a TypeError when RLS hides the business row (12
+such 500s 21:52–22:03Z). Read-only production query blocked in-session — owner to allow
+or run. Root cause still open.
+
+### Checkpoint — 2026-09-12 (Register: add-on chips on real products, new-customer form)
+
+Owner: "the recycle removal declined foundation are not showing up" + the new-customer
+form overflowing its card. The chips were keyed on a name regex (/mattress|base|…/) that no
+STORIS name matches ("E KING MICAH FIRM"). They now follow the catalog category
+(`lib/pos-addons.ts`: Mattresses, Adjustable Bases, Foundations & Box Springs; name
+fallback only without a category, accessories excluded) — `/v1/pos/product-search` and
+`GET /v1/orders/:id` lines carry `categoryName` so picked and resumed lines both know.
+Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the 316px
+rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
+specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
+the rail with nothing overflowing.
