@@ -13,6 +13,7 @@ import request from 'supertest';
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { schema } from '@jetnine/db';
 import { SYSTEM_ROLES } from '@jetnine/shared';
 import { AppModule } from '../src/app.module';
@@ -207,11 +208,13 @@ describe('GET /v1/competitions/current', () => {
     const res = await as('owner').get('/v1/competitions/current').expect(200);
     const board = res.body as CompetitionBoard;
     for (const c of board.cards) {
-      expect(names(c)).toEqual(
-        expect.arrayContaining(['Priya Nair', 'Maya Torres', 'Olive Owner']),
-      );
-      // Operations cannot log a lead, so Dana does not compete.
+      expect(names(c)).toEqual(expect.arrayContaining(['Priya Nair', 'Maya Torres']));
+      // Operations cannot log a lead, so Dana does not compete; the Owner
+      // role never competes (owner 2026-09-13), and watching the race gets
+      // no pinned row.
       expect(names(c)).not.toContain('Dana Whitmore');
+      expect(names(c)).not.toContain('Olive Owner');
+      expect(c.you).toBeNull();
       // Ranked rows first, then the unranked — never interleaved.
       const firstUnranked = c.rows.findIndex((r) => r.rank === null);
       if (firstUnranked >= 0) {
@@ -259,7 +262,39 @@ describe('GET /v1/competitions/current', () => {
   });
 
   it('prints a people-only winners sheet, and an empty past month crowns nobody', async () => {
+    // A snapshot frozen before the Owner role left the board still names
+    // the owner as last month's Most Sales winner. It must be rebuilt.
+    const lastMonth = (() => {
+      const d = new Date();
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() - 1);
+      return d.toISOString().slice(0, 7);
+    })();
+    await withDb(async (db) => {
+      await db.insert(schema.competitionResults).values({
+        businessId,
+        month: lastMonth,
+        scope: 'people',
+        race: 'sales',
+        winnerId: members.owner,
+        winnerName: 'Olive Owner',
+        winnerStore: 'Main Store',
+        value: 3,
+        story: '3 completed orders',
+        short: '3 sales',
+        prizeCents: 10_000,
+        rankingJson: [{ id: members.owner, rank: 1 }],
+      });
+    });
     const res = await as('owner').get('/v1/competitions/sheet').expect(200);
+    expect(res.body.month).toBe(lastMonth);
+    const stale = await withDb((db) =>
+      db
+        .select({ id: schema.competitionResults.id })
+        .from(schema.competitionResults)
+        .where(eq(schema.competitionResults.winnerId, members.owner)),
+    );
+    expect(stale).toHaveLength(0);
     expect(res.body).not.toHaveProperty('stores');
     expect(res.body).not.toHaveProperty('storesLine');
     // Last month had no orders: today's roster must not be seeded into it

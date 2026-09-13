@@ -1806,7 +1806,8 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         ['p-ronnie', 'Ronnie Alvarez', 'wl'],
         ['p-elyse', 'Elyse Nakamura', 'sc'],
         ['p-julio', 'Julio Reyes', 'gl'],
-        ['m1', opts.role === 'manager' ? 'Maya Torres' : 'Arman Petrosyan', 'gl'],
+        // The owner never competes: the owner preview has no row and no pinned "You".
+        ...(opts.role === 'owner' ? [] : ([['m1', 'Maya Torres', 'gl']] as const)),
         ['p-geoff', 'Geoff Lam', 'kt'],
         ['p-wayne', 'Wayne Brooks', 'lb'],
         ['p-brandon', 'Brandon Cole', 'sc'],
@@ -1857,7 +1858,7 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         storeName: STORES.find((s) => s.id === st)!.name,
         ...STAT[id]!,
       }));
-      const meId = 'm1';
+      const meId = opts.role === 'owner' ? null : 'm1';
       const defs = [
         {
           key: 'leads',
