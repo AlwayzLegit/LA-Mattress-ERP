@@ -5539,3 +5539,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] 2026-09-13: Shared cross-store incoming queue and first-person acceptance, with Chat Agent role, no showroom pre-chat selection, ownership-gated replies and concurrent-accept tests. Local settings enabled; no real member assignments.
 
 - [x] **Local chat queue/alerts (2026-09-13):** Public visitor previews, waiting time, assignment names, oldest-first shared queue and inline acceptance. Persistent ERP-layout live provider keeps sound, unread alerts and availability across navigation. API build, web typecheck, lint and 33 chat integration tests pass. Local only.
+
+- [x] **Local chat visitor context (2026-09-13):** Organized expandable visitor controls and prominent pending follow-up card with contact preference, timestamps and completion state. Web typecheck/lint and synthetic browser flow verified.

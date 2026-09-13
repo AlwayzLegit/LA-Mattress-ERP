@@ -566,6 +566,7 @@ function ConversationPanel({
             </div>
           </details>
         </div>
+        <FollowupPanel id={id} version={conversation?.version} />
         {conversation?.visitorTyping && (
           <p role="status" className={styles.arrival}>
             Visitor is typing...
@@ -633,7 +634,6 @@ function ConversationPanel({
             Jump to new messages
           </Button>
         )}
-        <FollowupPanel id={id} version={conversation?.version} />
         <div className={styles.composer} data-note={note}>
           {!conversation?.assignedToMe && (
             <p className={styles.arrival}>
@@ -800,15 +800,46 @@ function FollowupPanel({ id, version }: { id: string; version?: number }) {
   }, [id, version]);
   if (!details?.requestedAt && !error) return null;
   return (
-    <details className={styles.preferences}>
-      <summary>Follow-up {details?.completedAt ? 'completed' : 'requested'}</summary>
+    <details
+      key={details?.completedAt ?? 'pending'}
+      className={styles.followupCard}
+      open={!details?.completedAt}
+      data-pending={!details?.completedAt}
+    >
+      <summary>
+        {details?.completedAt ? 'Follow-up completed' : 'Next step: follow up with this visitor'}
+      </summary>
       {error && <p role="alert">{error}</p>}
       {details?.requestedAt && (
         <>
-          <p>
-            {details.name} · {details.method}: {details.contact}
-          </p>
-          <p>Visitor-provided contact details. Identity is unverified.</p>
+          <dl className={styles.visitorFacts}>
+            <dt>Visitor</dt>
+            <dd>{details.name || 'Name not provided'}</dd>
+            <dt>Preferred reply</dt>
+            <dd>
+              {details.method === 'email'
+                ? 'Email'
+                : details.method === 'phone'
+                  ? 'Phone'
+                  : details.method || 'Not specified'}
+            </dd>
+            <dt>Contact</dt>
+            <dd>{details.contact || 'Not provided'}</dd>
+            <dt>Requested</dt>
+            <dd>{new Date(details.requestedAt).toLocaleString()}</dd>
+            {details.completedAt && (
+              <>
+                <dt>Completed</dt>
+                <dd>{new Date(details.completedAt).toLocaleString()}</dd>
+              </>
+            )}
+          </dl>
+          <p>Visitor-provided details · identity unverified.</p>
+          {!details.completedAt && (
+            <p>
+              Contact the visitor using their preferred method, then mark the follow-up complete.
+            </p>
+          )}
           {!details.completedAt && (
             <Button
               disabled={busy}
@@ -832,7 +863,7 @@ function FollowupPanel({ id, version }: { id: string; version?: number }) {
                 }
               }}
             >
-              Mark follow-up complete
+              {busy ? 'Saving…' : 'Mark follow-up complete'}
             </Button>
           )}
         </>

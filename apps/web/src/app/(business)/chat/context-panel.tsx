@@ -69,134 +69,161 @@ export function ContextPanel({
   }
   return (
     <aside className={styles.context} aria-label="Visitor context">
-      <h2>Visitor context</h2>
+      <h2>Visitor details</h2>
+      {!details && !status && <p role="status">Loading visitor details…</p>}
       <p role="status">{status}</p>
       {details && (
         <>
-          <p>Topic: {details.context?.topic ?? 'Not selected'}</p>
-          <p>Page: {details.context?.pagePath ?? 'Not supplied'}</p>
-          <p>Showroom: {details.locationName ?? 'Any showroom'}</p>
-          <h3>Transfer conversation</h3>
-          <label>
-            Available teammate
-            <select value={member} onChange={(e) => setMember(e.target.value)}>
-              <option value="">Choose teammate</option>
-              {details.agents.map((agent) => (
-                <option
-                  key={agent.id}
-                  value={agent.id}
-                  disabled={!agent.available || agent.workload >= agent.capacity}
-                >
-                  {agent.name} ({agent.workload}/{agent.capacity})
-                  {!agent.available ? ' · away' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            disabled={busy || !member}
-            onClick={() =>
-              void save('transfer', { membershipId: member, version: details.version })
-            }
-          >
-            Transfer chat
-          </Button>
-          <h3>Saved replies</h3>
-          {details.templates.length ? (
-            details.templates.map((template, index) => (
-              <Button key={index} onClick={() => onTemplate(template.body)}>
-                {template.title}
-              </Button>
-            ))
-          ) : (
-            <p>A manager can add replies in chat administration.</p>
-          )}
-          <h3>Customer link</h3>
-          <p>
-            Contact details supplied by a visitor are unverified. Verify identity using your
-            existing customer process first.
-          </p>
-          {details.customerId && details.customerVerifiedAt && (
-            <a href={`/customers/${details.customerId}`}>Open linked ERP customer</a>
-          )}
-          <label>
-            Find an existing customer
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name, email or phone"
-            />
-          </label>
-          <Button
-            disabled={busy || query.trim().length < 3}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                setCandidates(
-                  await api(
-                    `/v1/chat/conversations/customer-candidates?q=${encodeURIComponent(query.trim())}`,
-                  ),
-                );
-                setStatus('Choose the matching record and verify identity before linking.');
-              } catch {
-                setStatus('Customer search requires manager and customer-view permissions.');
-              } finally {
-                setBusy(false);
+          <dl className={styles.visitorFacts}>
+            <dt>Chat started from</dt>
+            <dd>{details.context?.pagePath ?? 'Website page not available'}</dd>
+            {details.context?.topic && details.context.topic !== 'other' && (
+              <>
+                <dt>Visitor is asking about</dt>
+                <dd>{details.context.topic}</dd>
+              </>
+            )}
+            <dt>Team coverage</dt>
+            <dd>{details.locationName ?? 'Shared across all stores'}</dd>
+            <dt>Customer record</dt>
+            <dd>
+              {details.customerId && details.customerVerifiedAt
+                ? 'Verified customer linked'
+                : 'Not linked to a verified customer'}
+            </dd>
+          </dl>
+          <details className={styles.detailSection}>
+            <summary>Transfer to a teammate</summary>
+            <p>Choose someone available to continue this conversation.</p>
+            <label>
+              Available teammate
+              <select value={member} onChange={(e) => setMember(e.target.value)}>
+                <option value="">Choose teammate</option>
+                {details.agents.map((agent) => (
+                  <option
+                    key={agent.id}
+                    value={agent.id}
+                    disabled={!agent.available || agent.workload >= agent.capacity}
+                  >
+                    {agent.name} ({agent.workload}/{agent.capacity})
+                    {!agent.available ? ' · away' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              disabled={busy || !member}
+              onClick={() =>
+                void save('transfer', { membershipId: member, version: details.version })
               }
-            }}
-          >
-            Search customers
-          </Button>
-          <label>
-            Matching customer
-            <select
-              value={customer}
-              onChange={(event) => {
-                setCustomer(event.target.value);
-                setVerified(false);
+            >
+              Transfer chat
+            </Button>
+          </details>
+          <details className={styles.detailSection}>
+            <summary>Team saved replies</summary>
+            <p>Choose a reply, then edit it before sending.</p>
+            {details.templates.length ? (
+              details.templates.map((template, index) => (
+                <Button key={index} onClick={() => onTemplate(template.body)}>
+                  {template.title}
+                </Button>
+              ))
+            ) : (
+              <p>A manager can add replies in chat administration.</p>
+            )}
+          </details>
+          <details className={styles.detailSection}>
+            <summary>Link an existing customer</summary>
+            <p>
+              Contact details supplied by a visitor are unverified. Verify identity using your
+              existing customer process first.
+            </p>
+            {details.customerId && details.customerVerifiedAt && (
+              <a href={`/customers/${details.customerId}`}>Open linked ERP customer</a>
+            )}
+            <label>
+              Find an existing customer
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Name, email or phone"
+              />
+            </label>
+            <Button
+              disabled={busy || query.trim().length < 3}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  setCandidates(
+                    await api(
+                      `/v1/chat/conversations/customer-candidates?q=${encodeURIComponent(query.trim())}`,
+                    ),
+                  );
+                  setStatus('Choose the matching record and verify identity before linking.');
+                } catch {
+                  setStatus('Customer search requires manager and customer-view permissions.');
+                } finally {
+                  setBusy(false);
+                }
               }}
             >
-              <option value="">No customer link</option>
-              {details.customerId && !candidates.some((row) => row.id === details.customerId) && (
-                <option value={details.customerId}>Currently linked customer</option>
-              )}
-              {candidates.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {[row.firstName, row.lastName].filter(Boolean).join(' ')}
-                  {row.number ? ` · ${row.number}` : ''}
-                </option>
+              Search customers
+            </Button>
+            <label>
+              Matching customer
+              <select
+                value={customer}
+                onChange={(event) => {
+                  setCustomer(event.target.value);
+                  setVerified(false);
+                }}
+              >
+                <option value="">No customer link</option>
+                {details.customerId && !candidates.some((row) => row.id === details.customerId) && (
+                  <option value={details.customerId}>Currently linked customer</option>
+                )}
+                {candidates.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {[row.firstName, row.lastName].filter(Boolean).join(' ')}
+                    {row.number ? ` · ${row.number}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={verified}
+                onChange={(e) => setVerified(e.target.checked)}
+              />
+              I have verified this customer’s identity
+            </label>
+            <Button
+              disabled={busy || !verified}
+              onClick={() =>
+                void save('customer', {
+                  customerId: customer || null,
+                  verificationConfirmed: true,
+                  version: details.version,
+                })
+              }
+            >
+              Save customer link
+            </Button>
+          </details>
+          <details className={styles.detailSection}>
+            <summary>Assignment history</summary>
+            {!details.assignmentHistory.length && <p>No assignments yet.</p>}
+            <ol>
+              {details.assignmentHistory.map((row, index) => (
+                <li key={index}>
+                  {row.action.replace('chat.', '').replaceAll('_', ' ')} ·{' '}
+                  {new Date(row.at).toLocaleString()}
+                </li>
               ))}
-            </select>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={verified}
-              onChange={(e) => setVerified(e.target.checked)}
-            />
-            I have verified this customer’s identity
-          </label>
-          <Button
-            disabled={busy || !verified}
-            onClick={() =>
-              void save('customer', {
-                customerId: customer || null,
-                verificationConfirmed: true,
-                version: details.version,
-              })
-            }
-          >
-            Save customer link
-          </Button>
-          <h3>Assignment history</h3>
-          <ol>
-            {details.assignmentHistory.map((row, index) => (
-              <li key={index}>
-                {row.action.replace('chat.', '').replaceAll('_', ' ')} ·{' '}
-                {new Date(row.at).toLocaleString()}
-              </li>
-            ))}
-          </ol>
+            </ol>
+          </details>
         </>
       )}
     </aside>

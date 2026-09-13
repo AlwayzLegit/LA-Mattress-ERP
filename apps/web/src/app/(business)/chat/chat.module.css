@@ -753,3 +753,60 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.visitorFacts {
+  display: grid;
+  grid-template-columns: minmax(85px, 1fr) minmax(0, 2fr);
+  gap: 8px 12px;
+  margin: 14px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.visitorFacts dt {
+  color: #65716a;
+}
+.visitorFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #233a2e;
+}
+.detailSection {
+  border-top: 1px solid #dce0df;
+  padding: 12px 0;
+}
+.detailSection summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 28px;
+}
+.detailSection p {
+  line-height: 1.5;
+  color: #65716a;
+}
+.detailSection button {
+  margin: 6px 4px 0 0;
+}
+.followupCard {
+  flex-shrink: 0;
+  margin: 8px 20px;
+  padding: 12px 16px;
+  border: 1px solid #dce0df;
+  border-radius: 10px;
+  background: #f8faf8;
+  font-size: 13px;
+}
+.followupCard[data-pending='true'] {
+  background: #fff9eb;
+  border-color: #e3cc96;
+}
+.followupCard summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 24px;
+}
+.followupCard p {
+  color: #625844;
+  line-height: 1.5;
+  margin: 8px 0;
+}

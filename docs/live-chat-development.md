@@ -320,3 +320,17 @@ appear in the queue preview. Global alerts contain counts only.
 Validation: API build, ERP web typecheck, changed-file web/API lint and all 33
 Postgres chat integration tests pass. Local browser verification covers persistent
 sound and a new unread alert on the dashboard, then navigation to the matching chat.
+
+## Visitor context and follow-up clarity - September 13, 2026
+
+Visitor details now lead with the originating page, shared-store coverage and
+verified customer-link status. Transfer, saved replies, customer linking and
+assignment history are separate expandable sections. The generic default topic
+is omitted. Customer verification requirements and server permissions are unchanged.
+
+Pending visitor-requested follow-ups appear expanded above the message history,
+with name, preferred method, contact and request time. Completion records its time
+and collapses the card; the queue's existing follow-up indicator clears.
+No email, phone call or other outbound message is sent by this action.
+Validated with web typecheck, changed-file lint and the local synthetic follow-up
+request/completion flow in the browser.
