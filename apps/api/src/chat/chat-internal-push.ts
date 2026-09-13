@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { schema, type DrizzleTransaction } from '@jetnine/db';
 
 type Target =
+  | { kind: 'handoff'; conversationId: string; sequence: number }
   | { kind: 'team_message'; teamRoomId: string; sequence: number }
   | { kind: 'help_request' | 'help_message'; helpRequestId: string; sequence: number };
 export async function queueInternalPush(
@@ -49,6 +50,29 @@ export async function internalPushAllowed(
     .from(schema.chatSettings)
     .where(eq(schema.chatSettings.businessId, businessId));
   if ((settings?.configJson as { enabled?: boolean } | undefined)?.enabled === false) return false;
+  if (
+    (settings?.configJson as { notificationsEnabled?: boolean } | undefined)
+      ?.notificationsEnabled === false
+  )
+    return false;
+  if (job.kind === 'handoff' && job.conversationId) {
+    const [conversation] = await tx
+      .select()
+      .from(schema.chatConversations)
+      .where(
+        and(
+          eq(schema.chatConversations.businessId, businessId),
+          eq(schema.chatConversations.id, job.conversationId),
+        ),
+      );
+    return Boolean(
+      conversation &&
+      conversation.assignedMembershipId === member.id &&
+      !conversation.acceptedAt &&
+      conversation.version === job.sequence &&
+      conversation.status === 'open',
+    );
+  }
   if (job.kind === 'team_message' && job.teamRoomId) {
     const [room] = await tx
       .select()

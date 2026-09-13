@@ -6,6 +6,7 @@ import styles from './chat.module.css';
 export function TeamControls() {
   const {
     availability: {
+      policy,
       available,
       setAvailable,
       capacity,
@@ -19,7 +20,7 @@ export function TeamControls() {
   return (
     <div className={styles.teamControls}>
       <Button
-        disabled={busy}
+        disabled={busy || (available && !policy?.allowAway)}
         aria-pressed={available}
         onClick={async () => {
           setBusy(true);
@@ -42,6 +43,9 @@ export function TeamControls() {
       >
         {available ? '● Available for chats' : '○ Away · start taking chats'}
       </Button>
+      {available && !policy?.allowAway && (
+        <small>Available status is required by your administrator.</small>
+      )}
       <details className={styles.settingsMenu}>
         <summary>Availability options</summary>
         <div className={styles.settingsContent}>

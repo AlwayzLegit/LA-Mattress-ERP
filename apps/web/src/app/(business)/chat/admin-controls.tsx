@@ -18,6 +18,7 @@ type Report = {
 };
 export function AdminControls() {
   const [settings, setSettings] = useState<{ config: ChatSettings; version: number } | null>(null);
+  const [members, setMembers] = useState<{ id: string; name: string | null }[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,10 +32,15 @@ export function AdminControls() {
     setBusy(true);
     try {
       const [s, r] = await Promise.all([
-        api<{ config: ChatSettings; version: number }>('/v1/chat/conversations/settings'),
+        api<{
+          config: ChatSettings;
+          version: number;
+          members: { id: string; name: string | null }[];
+        }>('/v1/chat/conversations/settings'),
         api<Report>('/v1/chat/conversations/report'),
       ]);
-      setSettings(s);
+      setSettings({ config: s.config, version: s.version });
+      setMembers(s.members);
       setReport(r);
       setStatus('');
     } catch {
@@ -118,6 +124,57 @@ export function AdminControls() {
             }
           }}
         >
+          <fieldset>
+            <legend>Staff notifications and availability</legend>
+            <p>Owner keeps personal controls. Browser permission must be granted on each device.</p>
+            {(
+              [
+                [
+                  'notificationsEnabled',
+                  'Enable chat sounds, desktop alerts and background pushes',
+                ],
+                ['requireNotifications', 'Require notifications for staff (staff cannot mute)'],
+                ['autoAvailable', 'Make staff available when they sign in'],
+                ['allowAway', 'Allow all staff to choose Away'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key}>
+                <input
+                  type="checkbox"
+                  checked={settings.config[key]}
+                  onChange={(e) => update({ [key]: e.target.checked })}
+                />
+                {label}
+              </label>
+            ))}
+            <p>Individual permissions</p>
+            {members.map((member) => (
+              <div key={member.id}>
+                <strong>{member.name ?? 'Team member'}</strong>
+                {(
+                  [
+                    ['awayAllowedMembers', 'May choose Away'],
+                    ['notificationExemptMembers', 'May mute notifications'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={settings.config[key].includes(member.id)}
+                      onChange={(e) =>
+                        update({
+                          [key]: e.target.checked
+                            ? [...settings.config[key], member.id]
+                            : settings.config[key].filter((id) => id !== member.id),
+                        })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            ))}
+          </fieldset>
           <label>
             <input
               type="checkbox"

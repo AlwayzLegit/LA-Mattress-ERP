@@ -65,7 +65,11 @@ export function ContextPanel({
         headers,
         body: JSON.stringify(body),
       });
-      setStatus('Saved.');
+      setStatus(
+        action === 'transfer'
+          ? 'Chat passed. Your teammate has been alerted and must accept it.'
+          : 'Saved.',
+      );
     } catch {
       setStatus(
         'Not saved. Check your permissions, teammate availability, or refresh the conversation.',
@@ -99,8 +103,8 @@ export function ContextPanel({
                 : 'Not linked to a verified customer'}
             </dd>
           </dl>
-          <details className={styles.detailSection}>
-            <summary>Transfer to a teammate</summary>
+          <details open className={styles.detailSection}>
+            <summary>Pass chat to an available teammate</summary>
             <p>Choose someone available to continue this conversation.</p>
             <label>
               Available teammate
@@ -124,7 +128,7 @@ export function ContextPanel({
                 void save('transfer', { membershipId: member, version: details.version })
               }
             >
-              Transfer chat
+              Pass chat
             </Button>
           </details>
           <details className={styles.detailSection}>

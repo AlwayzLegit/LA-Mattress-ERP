@@ -77,6 +77,9 @@ export default function ChatPage() {
     select,
     sound,
     toggleSound,
+    testHandoffSound,
+    notificationsLocked,
+    notificationsDisabled,
     notifications,
     toggleNotifications,
     notice,
@@ -133,17 +136,31 @@ export default function ChatPage() {
                 : 'Connecting…'}
           </strong>
         </div>
-        <Button aria-pressed={sound} onClick={() => void toggleSound()}>
+        <Button
+          disabled={notificationsDisabled || (sound && notificationsLocked)}
+          aria-pressed={sound}
+          onClick={() => void toggleSound()}
+        >
           {sound ? 'Sound on' : 'Enable sound'}
         </Button>
         <details className={styles.settingsMenu}>
           <summary>Inbox settings</summary>
           <div className={styles.settingsContent}>
             <h2>Notifications & settings</h2>
-            <Button aria-pressed={notifications} onClick={() => void toggleNotifications()}>
+            <Button
+              disabled={notificationsDisabled || (notifications && notificationsLocked)}
+              aria-pressed={notifications}
+              onClick={() => void toggleNotifications()}
+            >
               {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
             </Button>
             <p>Get an alert when a visitor sends a message.</p>
+            <Button disabled={!sound || notificationsDisabled} onClick={testHandoffSound}>
+              Preview pass-chat sound
+            </Button>
+            {notificationsLocked && (
+              <p>Your administrator requires notifications. You cannot mute them here.</p>
+            )}
             <PushControls />
             <AdminControls />
           </div>
@@ -491,7 +508,7 @@ function ConversationPanel({
             aria-controls="visitor-details"
             onClick={() => setShowDetails(!showDetails)}
           >
-            {showDetails ? 'Hide customer & tools' : 'Customer & tools'}
+            {showDetails ? 'Hide customer & tools' : 'Customer & pass chat'}
           </Button>
         </header>
         <VisitorPage activity={visitorActivity} />
@@ -656,7 +673,11 @@ function ConversationPanel({
             Jump to new messages
           </Button>
         )}
-        <VisitorDraft activity={visitorActivity} assigned={Boolean(conversation?.assignedToMe)} typing={Boolean(conversation?.visitorTyping)} />
+        <VisitorDraft
+          activity={visitorActivity}
+          assigned={Boolean(conversation?.assignedToMe)}
+          typing={Boolean(conversation?.visitorTyping)}
+        />
         <div className={styles.composer} data-note={note}>
           {help.suggestion?.conversationId === id && (
             <section ref={suggestionPanel} tabIndex={-1} className={styles.suggestionPreview}>
@@ -795,9 +816,21 @@ function ConversationPanel({
               id="chat-message"
               aria-describedby="erp-chat-keyboard-hint"
               onKeyDown={(event) => {
-                if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                if (
+                  event.key !== 'Enter' ||
+                  event.shiftKey ||
+                  event.nativeEvent.isComposing ||
+                  event.keyCode === 229
+                )
+                  return;
                 event.preventDefault();
-                if (event.repeat || form.formState.isSubmitting || !conversation?.assignedToMe || !form.getValues('body').trim()) return;
+                if (
+                  event.repeat ||
+                  form.formState.isSubmitting ||
+                  !conversation?.assignedToMe ||
+                  !form.getValues('body').trim()
+                )
+                  return;
                 event.currentTarget.form?.requestSubmit();
               }}
               className="input"
@@ -821,7 +854,9 @@ function ConversationPanel({
             />
             {form.formState.errors.body && <p role="alert">{form.formState.errors.body.message}</p>}
             <FormRootError />
-            <small id="erp-chat-keyboard-hint">Enter to {note ? 'save note' : 'send'} · Shift+Enter for a new line</small>
+            <small id="erp-chat-keyboard-hint">
+              Enter to {note ? 'save note' : 'send'} · Shift+Enter for a new line
+            </small>
             <div className={styles.toolbar}>
               <span role="status">{status}</span>
               <Button

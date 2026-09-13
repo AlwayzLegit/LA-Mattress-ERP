@@ -743,6 +743,13 @@
       "when": 1789316619217,
       "tag": "0105_live_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1789333287537,
+      "tag": "0106_chat_handoff_alerts",
+      "breakpoints": true
     }
   ]
 }

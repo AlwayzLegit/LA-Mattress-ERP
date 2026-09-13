@@ -240,6 +240,7 @@ export const chatPushDeliveries = pgTable(
   (t) => ({
     eventKey: uniqueIndex('chat_push_deliveries_event').on(
       t.subscriptionId,
+      t.kind,
       t.conversationId,
       t.sequence,
     ),
@@ -264,7 +265,7 @@ export const chatPushDeliveries = pgTable(
     }).onDelete('cascade'),
     targetCheck: check(
       'chat_push_target',
-      sql`(${t.kind} = 'visitor' and ${t.conversationId} is not null and ${t.helpRequestId} is null and ${t.teamRoomId} is null) or (${t.kind} in ('help_request','help_message') and ${t.conversationId} is null and ${t.helpRequestId} is not null and ${t.teamRoomId} is null) or (${t.kind} = 'team_message' and ${t.conversationId} is null and ${t.helpRequestId} is null and ${t.teamRoomId} is not null)`,
+      sql`(${t.kind} in ('visitor','handoff') and ${t.conversationId} is not null and ${t.helpRequestId} is null and ${t.teamRoomId} is null) or (${t.kind} in ('help_request','help_message') and ${t.conversationId} is null and ${t.helpRequestId} is not null and ${t.teamRoomId} is null) or (${t.kind} = 'team_message' and ${t.conversationId} is null and ${t.helpRequestId} is null and ${t.teamRoomId} is not null)`,
     ),
     due: index('chat_push_deliveries_due').on(t.businessId, t.availableAt),
     subscriptionFk: foreignKey({

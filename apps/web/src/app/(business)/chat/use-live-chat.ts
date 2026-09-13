@@ -3,9 +3,13 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiUrl, api, ApiError } from '@/lib/api';
-import { incomingConversations, type LiveConversation } from './live-state';
+import { incomingConversations, incomingHandoffs, type LiveConversation } from './live-state';
 
-export function useLiveChatEngine() {
+import type { ChatPolicy } from './use-chat-availability';
+
+export function useLiveChatEngine(policy: ChatPolicy | null) {
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
   const pathname = usePathname();
   const router = useRouter();
   const inInbox = useRef(pathname === '/chat');
@@ -30,7 +34,8 @@ export function useLiveChatEngine() {
   const notificationRef = useRef(false);
   const beep = useCallback(() => {
     const context = audio.current;
-    if (!soundRef.current || !context || context.state !== 'running') return;
+    if (!policyRef.current?.enabled || !soundRef.current || !context || context.state !== 'running')
+      return;
     if (!chime.current) return;
     activeChime.current?.stop();
     const source = context.createBufferSource();
@@ -46,6 +51,7 @@ export function useLiveChatEngine() {
   const notifyHelp = useCallback(() => {
     beep();
     if (
+      policyRef.current?.enabled &&
       notificationRef.current &&
       typeof Notification !== 'undefined' &&
       Notification.permission === 'granted' &&
@@ -67,8 +73,20 @@ export function useLiveChatEngine() {
     }
   }, [beep, router]);
   const toggleSound = useCallback(async () => {
+    if (!policyRef.current?.enabled) {
+      setNotice('Notifications are disabled by your administrator.');
+      return;
+    }
     if (loadingSound.current) return;
+    const key = `chat-sound:v1:${policyRef.current.membershipId}`;
     if (soundRef.current) {
+      if (policyRef.current.required) {
+        setNotice('Sound is required by your administrator.');
+        return;
+      }
+      try {
+        localStorage.setItem(key, 'off');
+      } catch {}
       activeChime.current?.stop();
       soundRef.current = false;
       setSound(false);
@@ -87,6 +105,11 @@ export function useLiveChatEngine() {
       }
       soundRef.current = audio.current.state === 'running';
       setSound(soundRef.current);
+      if (soundRef.current) {
+        try {
+          localStorage.setItem(key, 'on');
+        } catch {}
+      }
       setNotice(
         soundRef.current
           ? 'Sound is on. Incoming visitor messages will chime.'
@@ -102,7 +125,15 @@ export function useLiveChatEngine() {
     }
   }, [beep]);
   const toggleNotifications = useCallback(async () => {
+    if (!policyRef.current?.enabled) {
+      setNotice('Notifications are disabled by your administrator.');
+      return;
+    }
     if (notificationRef.current) {
+      if (policyRef.current.required) {
+        setNotice('Notifications are required by your administrator.');
+        return;
+      }
       notificationRef.current = false;
       setNotifications(false);
       return;
@@ -124,6 +155,58 @@ export function useLiveChatEngine() {
       setNotice('This browser could not enable notifications.');
     }
   }, []);
+  useEffect(() => {
+    if (!policy?.enabled) {
+      notificationRef.current = false;
+      setNotifications(false);
+      return;
+    }
+    if (policy.required && typeof Notification !== 'undefined') {
+      notificationRef.current = Notification.permission === 'granted';
+      setNotifications(notificationRef.current);
+    }
+    const resume = () => {
+      if (audio.current?.state === 'suspended') void audio.current.resume().catch(() => {});
+      if (soundRef.current || loadingSound.current) return;
+      let allowed = false;
+      try {
+        allowed = localStorage.getItem(`chat-sound:v1:${policy.membershipId}`) === 'on';
+      } catch {}
+      if (allowed || policy.required) void toggleSound();
+    };
+    try {
+      if (localStorage.getItem(`chat-sound:v1:${policy.membershipId}`) === 'on') resume();
+    } catch {}
+    // Browsers may require a fresh interaction after reload, even after initial permission.
+    document.addEventListener('pointerdown', resume);
+    document.addEventListener('keydown', resume);
+    return () => {
+      document.removeEventListener('pointerdown', resume);
+      document.removeEventListener('keydown', resume);
+    };
+  }, [policy?.membershipId, policy?.enabled, policy?.required, toggleSound]);
+  const handoffSound = useCallback(() => {
+    const context = audio.current;
+    if (!policyRef.current?.enabled || !soundRef.current || !context || context.state !== 'running')
+      return;
+    [660, 880, 660].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const at = context.currentTime + index * 0.2;
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0, at);
+      gain.gain.linearRampToValueAtTime(0.18, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, at + 0.18);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      oscillator.start(at);
+      oscillator.stop(at + 0.19);
+    });
+  }, []);
   const select = useCallback((id: string) => {
     setSelected(id);
     setUnread((old) => old.filter((value) => value !== id));
@@ -131,6 +214,7 @@ export function useLiveChatEngine() {
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_LIVE_CHAT_ENABLED !== 'true') return;
     let previous: Map<string, number> | null = null;
+    let assignments = new Map<string, string | null>();
     let disposed = false;
     let source: EventSource;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -145,6 +229,42 @@ export function useLiveChatEngine() {
         const { conversations: rows } = JSON.parse((event as MessageEvent).data) as {
           conversations: LiveConversation[];
         };
+        const passes = incomingHandoffs(assignments, rows);
+        assignments = new Map(
+          rows.map((row) => [row.id, row.assignedToMe ? (row.assignedAt ?? null) : null]),
+        );
+        if (passes.length) {
+          setUnread((old) => [...new Set([...old, ...passes.map((row) => row.id)])]);
+          setLatest('A chat was passed to you. Open it and accept to respond.');
+          for (const row of passes) {
+            if (!policyRef.current?.enabled || (!soundRef.current && !notificationRef.current))
+              continue;
+            try {
+              const key = `chat-handoff:v1:${row.id}`;
+              if (localStorage.getItem(key) === row.assignedAt) continue;
+              localStorage.setItem(key, row.assignedAt!);
+            } catch {}
+            handoffSound();
+            if (
+              notificationRef.current &&
+              typeof Notification !== 'undefined' &&
+              Notification.permission === 'granted'
+            ) {
+              try {
+                const alert = new Notification('LA Mattress · Chat passed to you', {
+                  body: 'A teammate needs you to take over. Open the chat and accept.',
+                  tag: `handoff-${row.id}`,
+                });
+                alert.onclick = () => {
+                  window.focus();
+                  select(row.id);
+                  router.push('/chat');
+                  alert.close();
+                };
+              } catch {}
+            }
+          }
+        }
         const incoming = incomingConversations(previous, rows);
         previous = new Map(rows.map((row) => [row.id, row.visitorSequence]));
         lastSnapshot = Date.now();
@@ -184,6 +304,7 @@ export function useLiveChatEngine() {
         if (!fresh.length) return;
         beep();
         if (
+          policyRef.current?.enabled &&
           notificationRef.current &&
           Notification.permission === 'granted' &&
           (document.hidden || !document.hasFocus())
@@ -246,7 +367,7 @@ export function useLiveChatEngine() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [beep, select, router]);
+  }, [beep, handoffSound, select, router]);
   useEffect(() => {
     if (pathname !== '/chat') return;
     const oldTitle = document.title;
@@ -265,6 +386,9 @@ export function useLiveChatEngine() {
   );
   return {
     notifyHelp,
+    testHandoffSound: handoffSound,
+    notificationsLocked: Boolean(policy?.enabled && policy.required),
+    notificationsDisabled: !policy?.enabled,
     conversations,
     connection,
     unread,

@@ -123,7 +123,9 @@ export class ChatPushWorker {
           .from(schema.chatSettings)
           .where(eq(schema.chatSettings.businessId, businessId));
         const chatEnabled =
-          (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false;
+          (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false &&
+          (settings?.configJson as { notificationsEnabled?: boolean } | undefined)
+            ?.notificationsEnabled !== false;
         const shared = Boolean(
           member &&
           conversation &&
@@ -209,11 +211,13 @@ export class ChatPushWorker {
         },
         JSON.stringify({
           type:
-            claimed.job.kind === 'visitor'
-              ? 'chat'
-              : claimed.job.kind === 'team_message'
-                ? 'team-chat'
-                : 'chat-help',
+            claimed.job.kind === 'handoff'
+              ? 'chat-handoff'
+              : claimed.job.kind === 'visitor'
+                ? 'chat'
+                : claimed.job.kind === 'team_message'
+                  ? 'team-chat'
+                  : 'chat-help',
           url: '/chat',
           tag: `chat-${claimed.job.conversationId ?? claimed.job.teamRoomId ?? claimed.job.helpRequestId}`,
         }),

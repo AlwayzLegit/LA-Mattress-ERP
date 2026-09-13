@@ -144,7 +144,19 @@ export class ChatService {
         await this.manager(tx, tenant);
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
         const current = await this.settingsIn(tx, tenant.businessId!);
-        if (!parsed?.success) return current;
+        if (!parsed?.success) {
+          const members = await tx
+            .select({ id: schema.memberships.id, name: schema.users.name })
+            .from(schema.memberships)
+            .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+            .where(
+              and(
+                eq(schema.memberships.businessId, tenant.businessId!),
+                eq(schema.memberships.status, 'active'),
+              ),
+            );
+          return { ...current, members };
+        }
         if (current.version !== parsed.data.version)
           throw new ConflictException('Settings changed. Refresh before saving.');
         const version = current.version + 1;
@@ -843,13 +855,16 @@ export class ChatService {
       this.db,
       { businessId: tenant.businessId, userId: tenant.userId },
       async (tx) => {
-        await this.requireStaff(tx, tenant, 'chat.assign');
+        await this.requireStaff(tx, tenant, true);
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
         const row = await this.staffConversation(tx, tenant, id);
         if (row.version !== parsed.data.version)
           throw new ConflictException('Conversation changed. Refresh and retry.');
-        if (row.assignedMembershipId && row.assignedMembershipId !== tenant.membershipId)
-          await this.manager(tx, tenant);
+        if (row.assignedMembershipId !== tenant.membershipId) await this.manager(tx, tenant);
+        if (!['queued', 'open', 'waiting_customer'].includes(row.status))
+          throw new ConflictException('Only active chats can be passed');
+        if (parsed.data.membershipId === tenant.membershipId)
+          throw new ConflictException('Choose another available teammate');
         const target = (await this.eligibleAgents(tx, tenant.businessId!, row.locationId)).find(
           (agent) => agent.id === parsed.data.membershipId,
         );
@@ -882,6 +897,11 @@ export class ChatService {
         await this.audit(tx, tenant, 'chat.transfer', id, {
           from: row.assignedMembershipId,
           to: target.id,
+        });
+        await queueInternalPush(tx, tenant.businessId!, this.environment, [target.id], {
+          kind: 'handoff',
+          conversationId: id,
+          sequence: row.version + 1,
         });
         return { saved: true };
       },
@@ -1763,6 +1783,22 @@ export class ChatService {
     );
   }
 
+  private async notificationPolicy(tx: DrizzleTransaction, tenant: RequestTenantContext) {
+    const member = await this.requireStaff(tx, tenant);
+    const [role] = await tx.select().from(schema.roles).where(eq(schema.roles.id, member.roleId));
+    const owner = role?.name.toLowerCase() === 'owner';
+    const { config } = await this.settingsIn(tx, tenant.businessId!);
+    return {
+      membershipId: member.id,
+      enabled: config.notificationsEnabled,
+      required:
+        !owner &&
+        config.requireNotifications &&
+        !config.notificationExemptMembers.includes(member.id),
+      allowAway: owner || config.allowAway || config.awayAllowedMembers.includes(member.id),
+      autoAvailable: !owner && config.autoAvailable,
+    };
+  }
   async availability(tenant: RequestTenantContext, body?: unknown) {
     const parsed = body === undefined ? null : chatAvailabilitySchema.safeParse(body);
     if (parsed && !parsed.success) throw new BadRequestException('Invalid availability');
@@ -1771,6 +1807,11 @@ export class ChatService {
       { businessId: tenant.businessId, userId: tenant.userId },
       async (tx) => {
         await this.requireStaff(tx, tenant, true);
+        const policy = await this.notificationPolicy(tx, tenant);
+        if (parsed?.success && !parsed.data.available && !policy.allowAway)
+          throw new ForbiddenException(
+            'Your administrator requires Available status. Ask them to allow Away.',
+          );
         if (parsed?.success)
           await tx
             .insert(schema.chatAgents)
@@ -1796,7 +1837,14 @@ export class ChatService {
               eq(schema.chatAgents.membershipId, tenant.membershipId!),
             ),
           );
-        return { available: agent?.available ?? false, capacity: agent?.capacity ?? 5 };
+        return {
+          requestedAvailable: agent?.available ?? false,
+          available: Boolean(
+            agent?.available && agent.heartbeatUntil && agent.heartbeatUntil > new Date(),
+          ),
+          capacity: agent?.capacity ?? 5,
+          policy,
+        };
       },
     );
   }
@@ -1935,7 +1983,9 @@ export class ChatService {
       this.db,
       { businessId: tenant.businessId, userId: tenant.userId },
       async (tx) => {
-        await this.requireStaff(tx, tenant);
+        const policy = await this.notificationPolicy(tx, tenant);
+        if (policy.enabled && policy.required)
+          throw new ForbiddenException('Your administrator requires chat notifications.');
         await tx
           .delete(schema.chatPushSubscriptions)
           .where(
@@ -1966,7 +2016,11 @@ export class ChatService {
         const row = await this.conversation(tx, session.businessId, id, session.id);
         const key = this.draftKey(row);
         const draft = parsed.data.sharedDraft!;
-        if (!draft.consent || !draft.text || !['queued', 'open', 'waiting_customer'].includes(row.status)) {
+        if (
+          !draft.consent ||
+          !draft.text ||
+          !['queued', 'open', 'waiting_customer'].includes(row.status)
+        ) {
           await this.drafts!.del(key);
           return { saved: true };
         }

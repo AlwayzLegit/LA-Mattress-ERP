@@ -136,6 +136,10 @@ self.addEventListener('push', (event) => {
     return;
   }
   const labels = {
+    'chat-handoff': [
+      'LA Mattress · Chat passed to you',
+      'A teammate needs you to take over. Open chat and accept.',
+    ],
     chat: ['LA Mattress · New chat', 'A website visitor is waiting. Open the inbox to reply.'],
     'chat-help': [
       'LA Mattress · Specialist help',

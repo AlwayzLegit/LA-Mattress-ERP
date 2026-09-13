@@ -119,6 +119,12 @@ const chatTime = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/);
 export const chatSettingsSchema = z
   .object({
     enabled: z.boolean().default(true),
+    notificationsEnabled: z.boolean().default(true),
+    requireNotifications: z.boolean().default(true),
+    autoAvailable: z.boolean().default(true),
+    allowAway: z.boolean().default(false),
+    awayAllowedMembers: z.array(z.string().uuid()).max(500).default([]),
+    notificationExemptMembers: z.array(z.string().uuid()).max(500).default([]),
     autoAssign: z.boolean().default(false),
     sharedInbox: z.boolean().default(false),
     hoursEnabled: z.boolean().default(false),

@@ -30,3 +30,15 @@ export function incomingConversations(
   if (!previous) return [];
   return rows.filter((row) => row.visitorSequence > (previous.get(row.id) ?? 0));
 }
+
+/** Pending assignments must alert even when no new visitor message arrives. */
+export function incomingHandoffs(previous: Map<string, string | null>, rows: LiveConversation[]) {
+  return rows.filter(
+    (row) =>
+      row.assignedToMe &&
+      row.status === 'open' &&
+      !row.acceptedAt &&
+      row.assignedAt &&
+      previous.get(row.id) !== row.assignedAt,
+  );
+}

@@ -664,7 +664,27 @@ describe('chat persistence foundation on Postgres', () => {
       tx.select().from(schema.chatHelpRequests),
     );
     expect(otherRows.some((row) => row.id === help!.id)).toBe(false);
+    // Fixture grants Away explicitly; default staff policy now prohibits it.
+    const [awaySettings] = await db
+      .select()
+      .from(schema.chatSettings)
+      .where(eq(schema.chatSettings.businessId, businessId));
+    const awayConfig = chatSettingsSchema.parse(awaySettings?.configJson ?? {});
+    await db
+      .insert(schema.chatSettings)
+      .values({
+        businessId,
+        configJson: { ...awayConfig, awayAllowedMembers: [helper.membershipId!] },
+      })
+      .onConflictDoUpdate({
+        target: schema.chatSettings.businessId,
+        set: { configJson: { ...awayConfig, awayAllowedMembers: [helper.membershipId!] } },
+      });
     await service.availability(helper, { available: false, capacity: 5 });
+    await db
+      .update(schema.chatSettings)
+      .set({ configJson: awayConfig })
+      .where(eq(schema.chatSettings.businessId, businessId));
     await expect(service.requestHelp(staff, id, { ...request, id: randomUUID() })).rejects.toThrow(
       'away or at capacity',
     );
@@ -1778,6 +1798,10 @@ describe('transfer and response targets', () => {
     const target = { ...staff, userId: user!.id, membershipId: membership!.id };
     try {
       await service.availability(target, { available: true, capacity: 1 });
+      await service.subscribePush(target, {
+        endpoint: 'https://fcm.googleapis.com/fcm/send/' + randomUUID(),
+        keys: { p256dh: 'a'.repeat(87), auth: 'b'.repeat(22) },
+      });
       const first = await service.startConversation(auth, randomUUID(), input('Transfer one'));
       const second = await service.startConversation(auth, randomUUID(), input('Transfer two'));
       const context = await service.context(staff, first.conversationId);
@@ -1785,6 +1809,17 @@ describe('transfer and response targets', () => {
         membershipId: membership!.id,
         version: context.version,
       });
+      const sent: string[] = [];
+      const worker = new ChatPushWorker(
+        db,
+        async (_s, payload) => {
+          sent.push(payload);
+        },
+        'staging',
+        () => new Date(Date.now() + 6000),
+      );
+      for (let i = 0; i < 50 && (await worker.runOnce(businessId)); i++) {}
+      expect(sent.some((payload) => JSON.parse(payload).type === 'chat-handoff')).toBe(true);
       await expect(service.acceptAssignment(staff, first.conversationId)).rejects.toThrow(
         'assigned teammate',
       );
@@ -2187,7 +2222,9 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
       expect((await post(share)).status).toBe(200);
       expect((await service.context(winner, id)).sharedDraft?.text).toBe('UNSENT preview only');
       expect((await service.context(loser, id)).sharedDraft).toBeNull();
-      expect((await post({ ...share, sharedDraft: { consent: false, text: '' } })).status).toBe(200);
+      expect((await post({ ...share, sharedDraft: { consent: false, text: '' } })).status).toBe(
+        200,
+      );
       expect((await service.context(winner, id)).sharedDraft).toBeNull();
       await service.sendStaffMessage(winner, id, input('INTERNAL paired note'), 'note');
       const history = await get(`conversationId=${id}&afterSequence=0`);
@@ -2254,3 +2291,74 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
     }
   },
 );
+
+describe('administrator notification policy', () => {
+  it('requires staff alerts and availability, supports individual exceptions, and exempts the owner', async () => {
+    const original = await service.settings(staff);
+    const saved = await service.settings(staff, {
+      version: original.version,
+      config: {
+        ...original.config,
+        requireNotifications: true,
+        notificationsEnabled: true,
+        allowAway: false,
+        autoAvailable: true,
+        awayAllowedMembers: [],
+        notificationExemptMembers: [],
+      },
+    });
+    const [ownerRole] = await db
+      .insert(schema.roles)
+      .values({ businessId, name: 'Owner' })
+      .returning();
+    try {
+      const state = await service.availability(staff);
+      expect(state.policy).toMatchObject({ required: true, allowAway: false, autoAvailable: true });
+      await expect(service.availability(staff, { available: false, capacity: 5 })).rejects.toThrow(
+        'requires Available',
+      );
+      await expect(
+        service.unsubscribePush(staff, { endpoint: 'https://fcm.googleapis.com/fcm/send/test' }),
+      ).rejects.toThrow('requires chat notifications');
+      await service.settings(staff, {
+        version: saved.version,
+        config: {
+          ...saved.config,
+          awayAllowedMembers: [staff.membershipId!],
+          notificationExemptMembers: [staff.membershipId!],
+        },
+      });
+      expect((await service.availability(staff, { available: false, capacity: 5 })).available).toBe(
+        false,
+      );
+      await expect(
+        service.unsubscribePush(staff, { endpoint: 'https://fcm.googleapis.com/fcm/send/test' }),
+      ).resolves.toEqual({ subscribed: false });
+      await db
+        .insert(schema.rolePermissions)
+        .values(
+          ['chat.view_team', 'chat.reply'].map((permission) => ({
+            roleId: ownerRole!.id,
+            permission,
+          })),
+        );
+      await db
+        .update(schema.memberships)
+        .set({ roleId: ownerRole!.id })
+        .where(eq(schema.memberships.id, staff.membershipId!));
+      expect((await service.availability(staff)).policy).toMatchObject({
+        required: false,
+        allowAway: true,
+        autoAvailable: false,
+      });
+    } finally {
+      await db
+        .update(schema.memberships)
+        .set({ roleId: staff.roleId! })
+        .where(eq(schema.memberships.id, staff.membershipId!));
+      const current = await service.settings(staff);
+      await service.settings(staff, { version: current.version, config: original.config });
+      await db.delete(schema.roles).where(eq(schema.roles.id, ownerRole!.id));
+    }
+  });
+});

@@ -300,7 +300,7 @@ export class ChatStaffController {
     return this.chat.context(tenant, id);
   }
   @Post(':id/transfer')
-  @RequirePermission('chat.assign')
+  @RequirePermission('chat.reply')
   transfer(
     @CurrentTenant() tenant: RequestTenantContext,
     @Param('id') id: string,

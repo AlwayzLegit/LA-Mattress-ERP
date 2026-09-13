@@ -6,6 +6,7 @@ import { useTeamChat } from './use-team-chat';
 import { TeamWorkspace, TeamWorkspaceButton } from './team-workspace';
 import { useChatHelp } from './use-chat-help';
 import { useChatAvailability } from './use-chat-availability';
+import { useManagedPush } from './use-managed-push';
 import { useLiveChatEngine } from './use-live-chat';
 import styles from './chat.module.css';
 const ChatContext = createContext<
@@ -22,8 +23,9 @@ export function useLiveChat() {
   return value;
 }
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const engine = useLiveChatEngine();
   const availability = useChatAvailability();
+  const engine = useLiveChatEngine(availability.policy);
+  useManagedPush(availability.policy, engine.notifications);
   const help = useChatHelp(['live', 'reconnecting'].includes(engine.connection), engine.notifyHelp);
   const team = useTeamChat(['live', 'reconnecting'].includes(engine.connection), engine.notifyHelp);
   const chat = { ...engine, availability, help, team };
@@ -66,7 +68,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               <span>{chat.connection === 'live' ? 'Open inbox →' : 'Reconnecting…'}</span>
             </Link>
             <TeamWorkspaceButton />
-            <button aria-pressed={chat.sound} onClick={() => void chat.toggleSound()}>
+            <button
+              disabled={chat.notificationsDisabled || (chat.sound && chat.notificationsLocked)}
+              aria-pressed={chat.sound}
+              onClick={() => void chat.toggleSound()}
+            >
               {chat.sound ? 'Sound on' : 'Enable sound'}
             </button>
             <span role="status" className={styles.screenReaderOnly}>

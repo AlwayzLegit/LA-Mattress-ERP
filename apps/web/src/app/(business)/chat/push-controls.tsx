@@ -1,8 +1,12 @@
 'use client';
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import { useLiveChat } from './chat-provider';
 import { Button } from '@/components/ui';
 export function PushControls() {
+  const {
+    availability: { policy },
+  } = useLiveChat();
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   async function change(enable: boolean) {
@@ -52,7 +56,10 @@ export function PushControls() {
       <Button disabled={busy} onClick={() => void change(true)}>
         Enable background push
       </Button>{' '}
-      <Button disabled={busy} onClick={() => void change(false)}>
+      <Button
+        disabled={busy || Boolean(policy?.enabled && policy.required)}
+        onClick={() => void change(false)}
+      >
         Disable background push
       </Button>
       <p>
