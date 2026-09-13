@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui';
 import styles from './chat.module.css';
 type Details = {
+  sharedDraft?: { text: string; expiresAt: number } | null;
   context: {
     topic?: string;
     pagePath?: string;
@@ -29,6 +30,11 @@ export function ContextPanel({
   onTemplate: (body: string) => void;
 }) {
   const [details, setDetails] = useState<Details | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [member, setMember] = useState('');
@@ -40,6 +46,7 @@ export function ContextPanel({
   const [verified, setVerified] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    setDetails(null);
     void api<Details>(`/v1/chat/conversations/${id}/context`)
       .then((data) => {
         if (!cancelled) {
@@ -63,14 +70,18 @@ export function ContextPanel({
       try {
         const data = await api<Details>(`/v1/chat/conversations/${id}/context`);
         if (!cancelled)
-          setDetails((previous) => (previous ? { ...previous, context: data.context } : previous));
+          setDetails((previous) =>
+            previous
+              ? { ...previous, context: data.context, sharedDraft: data.sharedDraft }
+              : previous,
+          );
       } catch {
         /* Keep the last-seen timestamp visible during interruptions. */
       } finally {
         busy = false;
       }
     };
-    const timer = setInterval(() => void refresh(), 5000);
+    const timer = setInterval(() => void refresh(), 2000);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -100,6 +111,15 @@ export function ContextPanel({
       <p role="status">{status}</p>
       {details && (
         <>
+          {details.sharedDraft && details.sharedDraft.expiresAt > now && (
+            <section aria-label="Visitor shared draft">
+              <h3>Visitor’s unsent text</h3>
+              <small>Shared with permission · still being edited · not a sent message</small>
+              <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                {details.sharedDraft.text}
+              </p>
+            </section>
+          )}
           <dl className={styles.visitorFacts}>
             <dt>Visitor’s latest page</dt>
             <dd>

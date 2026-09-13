@@ -51,6 +51,11 @@ export const chatActivitySchema = z
   .object({
     readSequence: z.number().int().min(0).max(2147483646).optional(),
     typing: z.boolean().optional(),
+    sharedDraft: z
+      .object({ consent: z.boolean(), text: z.string().max(4000) })
+      .strict()
+      .refine((value) => value.consent || value.text === '', 'Draft sharing requires consent')
+      .optional(),
     currentPage: z
       .object({
         path: z

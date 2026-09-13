@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   NotFoundException,
   UnauthorizedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { or, and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -53,6 +54,11 @@ export interface ChatVisitorAuth extends ChatIntegrationAuth {
 type MessageRow = typeof messages.$inferSelect;
 type ConversationRow = typeof conversations.$inferSelect;
 type Actor = { type: 'visitor' | 'staff'; id: string; audience: 'public' | 'internal' };
+export interface ChatDraftStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, expiry: 'EX', seconds: number): Promise<unknown>;
+  del(key: string): Promise<unknown>;
+}
 
 /** Pass the root DB. Each operation owns its RLS transaction and resolves only
  * after commit. HTTP routes are disabled by default through ChatHttpGuard. */
@@ -60,7 +66,29 @@ export class ChatService {
   constructor(
     private readonly db: PostgresJsDatabase,
     private readonly environment: 'staging' | 'production',
+    private readonly drafts: ChatDraftStore | null = null,
   ) {}
+
+  private draftKey(row: ConversationRow) {
+    return `chat:shared-draft:${this.environment}:${row.businessId}:${row.id}`;
+  }
+  private async sharedDraft(row: ConversationRow, tenant: RequestTenantContext) {
+    if (
+      !this.drafts ||
+      row.status !== 'open' ||
+      !row.acceptedAt ||
+      row.assignedMembershipId !== tenant.membershipId
+    )
+      return null;
+    try {
+      const raw = await this.drafts.get(this.draftKey(row));
+      if (!raw) return null;
+      const value = JSON.parse(raw) as { text: string; expiresAt: number };
+      return typeof value.text === 'string' && value.expiresAt > Date.now() ? value : null;
+    } catch {
+      return null;
+    }
+  }
 
   private get team() {
     return new ChatTeamService(
@@ -277,6 +305,7 @@ export class ChatService {
         return {
           locationName: location?.name ?? null,
           context: row.contextJson,
+          sharedDraft: await this.sharedDraft(row, tenant),
           locationId: row.locationId,
           customerId: row.customerId,
           customerVerifiedAt: row.customerVerifiedAt,
@@ -1930,6 +1959,26 @@ export class ChatService {
     this.uuid(id);
     const parsed = chatActivitySchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException('Invalid activity');
+    if (parsed.data.sharedDraft !== undefined) {
+      if (!auth) throw new ForbiddenException('Only visitors can share drafts');
+      if (!this.drafts) throw new ServiceUnavailableException('Draft sharing is unavailable');
+      return this.visitor(auth, async (tx, session) => {
+        const row = await this.conversation(tx, session.businessId, id, session.id);
+        const key = this.draftKey(row);
+        const draft = parsed.data.sharedDraft!;
+        if (!draft.consent || !draft.text || !['queued', 'open'].includes(row.status)) {
+          await this.drafts!.del(key);
+          return { saved: true };
+        }
+        await this.drafts!.set(
+          key,
+          JSON.stringify({ text: draft.text, expiresAt: Date.now() + 6000 }),
+          'EX',
+          6,
+        );
+        return { saved: true };
+      });
+    }
     if (tenant && parsed.data.currentPage !== undefined)
       throw new BadRequestException('Only visitors can report their current page');
     const update = async (tx: DrizzleTransaction, row: ConversationRow, staff: boolean) => {

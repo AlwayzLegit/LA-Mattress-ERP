@@ -28,7 +28,19 @@ if (
   throw new Error('Chat tests require a local disposable jetnine_chat database');
 const connection = postgres(url, { max: 8, prepare: false });
 const db = drizzle(connection);
-const service = new ChatService(db, 'staging');
+const draftCache = new Map<string, { value: string; until: number }>();
+const service = new ChatService(db, 'staging', {
+  async get(key) {
+    const row = draftCache.get(key);
+    return row && row.until > Date.now() ? row.value : null;
+  },
+  async set(key, value, _expiry, seconds) {
+    draftCache.set(key, { value, until: Date.now() + seconds * 1000 });
+  },
+  async del(key) {
+    draftCache.delete(key);
+  },
+});
 const dbRoot = join(__dirname, '../../../packages/db');
 const secret = () => randomBytes(32).toString('base64url');
 const input = (body = 'Which mattress would you suggest?') => ({
@@ -2141,6 +2153,32 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
       expect(claims.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
       const winner = claims[0]!.status === 'fulfilled' ? staff : second;
       const loser = winner === staff ? second : staff;
+      const share = {
+        operation: 'activity',
+        conversationId: id,
+        sharedDraft: { consent: true, text: 'UNSENT preview only' },
+      };
+      expect(
+        (await post({ ...share, sharedDraft: { consent: false, text: 'Not consented' } })).status,
+      ).toBe(400);
+      expect((await post(share)).status).toBe(200);
+      expect((await service.context(winner, id)).sharedDraft?.text).toBe('UNSENT preview only');
+      expect((await service.context(loser, id)).sharedDraft).toBeNull();
+      expect(await (await get(`conversationId=${id}&afterSequence=0`)).text()).not.toContain(
+        'UNSENT preview only',
+      );
+      await expect(
+        service.activity(winner, null, id, { sharedDraft: share.sharedDraft }),
+      ).rejects.toThrow();
+      const key = `chat:shared-draft:staging:${businessId}:${id}`;
+      expect(draftCache.get(key)!.until - Date.now()).toBeLessThanOrEqual(6000);
+      draftCache.get(key)!.until = 0;
+      expect((await service.context(winner, id)).sharedDraft).toBeNull();
+      expect((await post(share)).status).toBe(200);
+      expect((await post({ ...share, sharedDraft: { consent: false, text: '' } })).status).toBe(
+        200,
+      );
+      expect((await service.context(winner, id)).sharedDraft).toBeNull();
       await expect(service.sendStaffMessage(loser, id, input('Wrong owner'))).rejects.toThrow();
       const recommendation =
         'https://www.mattressstoreslosangeles.com/products/test-mattress#variant=123';
