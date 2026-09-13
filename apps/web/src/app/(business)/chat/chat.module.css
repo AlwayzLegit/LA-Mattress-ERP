@@ -1531,3 +1531,19 @@
 .conversation { overflow-y: auto; }
 .heading, .pageStrip, .workflow, .composer { flex-shrink: 0; }
 @media (max-width: 760px) { .layout { height: auto; } .teamDock { flex-wrap: wrap; } }
+
+.availableTeam {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: var(--surface);
+}
+.availableTeamHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.availableTeamHeading h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; }
+.availableTeamHeading h2 > span { font-family: var(--font-mono); color: var(--muted); }
+.availableTeamHeading small, .availableTeam p { color: var(--muted); font-size: 12px; }
+.availableTeam p { margin: 8px 0 0; }
+.availableTeamList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 10px 0 0; list-style: none; }
+.availableTeamList li { display: flex; align-items: center; gap: 7px; padding: 6px 10px; max-width: 100%; border: 1px solid var(--status-fulfilled-border); border-radius: 6px; background: var(--status-fulfilled-bg); color: var(--status-fulfilled-fg); font-size: 12px; overflow-wrap: anywhere; }
+.availablePersonDot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; }

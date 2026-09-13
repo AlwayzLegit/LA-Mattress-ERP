@@ -6,6 +6,7 @@ import { api, ApiError } from '@/lib/api';
 import { Form, FormRootError, useZodForm } from '@/components/form/form';
 import { Button, PageHeader } from '@/components/ui';
 import styles from './chat.module.css';
+import { AvailableTeam } from './available-team';
 import { AdminControls } from './admin-controls';
 import { TeamWorkspaceButton } from './team-workspace';
 import { AskForHelp, TeamHelp } from './team-help';
@@ -170,6 +171,7 @@ export default function ChatPage() {
         <TeamWorkspaceButton />
         <TeamHelp />
       </div>
+      <AvailableTeam />
       <div className={styles.inboxStatus}>
         <strong>
           {waitingCount
