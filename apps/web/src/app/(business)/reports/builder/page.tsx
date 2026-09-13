@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
@@ -9,17 +9,24 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  // The builder's own `ColumnDef` below is a report's output column.
+  type ColumnDef as ListColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
   FormGrid,
   Input,
+  type ListColumns,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface DictionaryMeta {
@@ -79,14 +86,117 @@ interface RunResult {
   warnings: string[];
 }
 
+interface ArchiveRow {
+  id: string;
+  reportName: string;
+  runSource: string;
+  rowCount: number;
+  createdAt: string;
+}
+type ResultRow = RunResult['rows'][number];
+
 const OPERATORS = ['EQ', 'NE', 'LT', 'GT', 'LE', 'GE', 'TR', 'FL'];
+
+function fmt(v: string | number | boolean | null, type: string): string {
+  if (v == null) return '';
+  if (type === 'money' && typeof v === 'number') return (v / 100).toFixed(2);
+  return String(v);
+}
+const isNumeric = (type: string) => type === 'money' || type === 'number';
+
+const ARCHIVE_COLUMNS: ListColumnDef<ArchiveRow>[] = [
+  {
+    id: 'report',
+    label: 'Report',
+    sortValue: (a) => a.reportName,
+    render: (a) => a.reportName,
+  },
+  {
+    id: 'source',
+    label: 'Source',
+    sortValue: (a) => a.runSource,
+    render: (a) => (a.runSource === 'eod' ? 'Scheduled' : 'On demand'),
+  },
+  { id: 'rows', label: 'Rows', num: true, sortValue: (a) => a.rowCount, render: (a) => a.rowCount },
+  {
+    id: 'archived',
+    label: 'Archived',
+    sortValue: (a) => a.createdAt,
+    render: (a) => new Date(a.createdAt).toLocaleString(),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (a) => (
+      <Button
+        size="sm"
+        onClick={() =>
+          void downloadFile(
+            `/v1/report-builder/archives/${a.id}?format=csv`,
+            `${a.reportName.replace(/[^A-Za-z0-9_-]+/g, '-')}-archive.csv`,
+          ).catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
+        }
+      >
+        CSV
+      </Button>
+    ),
+  },
+];
+
+/**
+ * A totals row's cells in the header's order: the label spans the leading
+ * columns that carry no total, each total sits under its own column and
+ * the rest stay blank, so a moved column keeps its total under it.
+ */
+function TotalCells<Row>({
+  list,
+  label,
+  totals,
+}: {
+  list: ListColumns<Row>;
+  label: ReactNode;
+  totals: Record<string, ReactNode>;
+}) {
+  const firstTotal = list.ordered.findIndex((c) => c.id in totals);
+  const lead = firstTotal < 0 ? list.ordered.length : firstTotal;
+  let placed = lead > 0;
+  return (
+    <>
+      {lead > 0 && <td colSpan={lead}>{label}</td>}
+      {list.ordered.slice(lead).map((c) => {
+        if (c.id in totals) {
+          return (
+            <td key={c.id} className={c.num ? 'num' : undefined}>
+              {totals[c.id]}
+            </td>
+          );
+        }
+        if (!placed) {
+          placed = true;
+          return <td key={c.id}>{label}</td>;
+        }
+        return <td key={c.id} />;
+      })}
+    </>
+  );
+}
+
+/** The run result's totals for one row of groups / grand totals, keyed by column. */
+function totalsFor(result: RunResult, totals: Record<string, number>): Record<string, ReactNode> {
+  return Object.fromEntries(
+    result.columns
+      .filter((c) => c.name in totals)
+      .map((c) => [c.name, fmt(totals[c.name] ?? null, c.type)]),
+  );
+}
 
 export default function ReportBuilderPage() {
   const [sources, setSources] = useState<SourceMeta[] | null>(null);
   const [reports, setReports] = useState<ReportListRow[] | null>(null);
-  const [archives, setArchives] = useState<
-    { id: string; reportName: string; runSource: string; rowCount: number; createdAt: string }[]
-  >([]);
+  const [archives, setArchives] = useState<ArchiveRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'edit' | 'run'>('list');
 
@@ -314,18 +424,76 @@ export default function ReportBuilderPage() {
     }
   }
 
-  function fmt(v: string | number | boolean | null, type: string): string {
-    if (v == null) return '';
-    if (type === 'money' && typeof v === 'number') return (v / 100).toFixed(2);
-    return String(v);
-  }
-
   const dictOptions = selectableDicts.map((d) => (
     <option key={d.name} value={d.name}>
       {d.name}
     </option>
   ));
-  const isNumeric = (type: string) => type === 'money' || type === 'number';
+
+  // Built inline: the actions cell needs the run / edit / clone callbacks.
+  const reportColumns: ListColumnDef<ReportListRow>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (r) => r.name,
+      render: (r) => (
+        <>
+          {r.name}
+          {r.systemOwned ? <span className="muted"> · system</span> : null}
+          {r.description ? <div className="muted">{r.description}</div> : null}
+        </>
+      ),
+    },
+    { id: 'source', label: 'Source', sortValue: (r) => r.sourceId, render: (r) => r.sourceId },
+    { id: 'access', label: 'Access', sortValue: (r) => r.access, render: (r) => r.access },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <>
+          <Button size="sm" variant="primary" onClick={() => void openRunner(r)}>
+            Run
+          </Button>
+          {r.canEdit && !r.systemOwned ? (
+            <Button size="sm" onClick={() => void startEdit(r)}>
+              Edit
+            </Button>
+          ) : null}
+          <Button size="sm" onClick={() => void clone(r)}>
+            Clone
+          </Button>
+        </>
+      ),
+    },
+  ];
+  const reportCols = useListColumns('reports-builder', reportColumns, reports);
+  const archiveCols = useListColumns('reports-builder-archives', ARCHIVE_COLUMNS, archives);
+  // The result's columns come from the report definition, so the saved
+  // order is kept per report.
+  const resultColumns = useMemo<ListColumnDef<ResultRow>[]>(
+    () =>
+      (result?.columns ?? []).map((c) => ({
+        id: c.name,
+        label: (
+          <>
+            {c.heading}
+            {c.masked ? ' 🔒' : ''}
+          </>
+        ),
+        num: isNumeric(c.type),
+        sortValue: (r) => r[c.name] ?? null,
+        render: (r) => fmt(r[c.name] ?? null, c.type),
+      })),
+    [result],
+  );
+  const resultCols = useListColumns(
+    `reports-builder-result-${runReport?.id ?? 'none'}`,
+    resultColumns,
+    result?.rows ?? null,
+  );
 
   return (
     <div>
@@ -358,40 +526,17 @@ export default function ReportBuilderPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Source</th>
-                      <th>Access</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={reportCols} testIdPrefix="reports-builder" />
                   </thead>
                   <tbody>
-                    {reports.map((r) => (
+                    {reportCols.sorted.map((r) => (
                       <tr key={r.id}>
-                        <td>
-                          {r.name}
-                          {r.systemOwned ? <span className="muted"> · system</span> : null}
-                          {r.description ? <div className="muted">{r.description}</div> : null}
-                        </td>
-                        <td>{r.sourceId}</td>
-                        <td>{r.access}</td>
-                        <td className="actions">
-                          <Button size="sm" variant="primary" onClick={() => void openRunner(r)}>
-                            Run
-                          </Button>
-                          {r.canEdit && !r.systemOwned ? (
-                            <Button size="sm" onClick={() => void startEdit(r)}>
-                              Edit
-                            </Button>
-                          ) : null}
-                          <Button size="sm" onClick={() => void clone(r)}>
-                            Clone
-                          </Button>
-                        </td>
+                        <ColumnCells list={reportCols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={reportCols} />
               </TableWrap>
             </Card>
           )
@@ -402,40 +547,17 @@ export default function ReportBuilderPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Report</th>
-                    <th>Source</th>
-                    <th className="num">Rows</th>
-                    <th>Archived</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={archiveCols} testIdPrefix="reports-builder-archives" />
                 </thead>
                 <tbody>
-                  {archives.map((a) => (
+                  {archiveCols.sorted.map((a) => (
                     <tr key={a.id}>
-                      <td>{a.reportName}</td>
-                      <td>{a.runSource === 'eod' ? 'Scheduled' : 'On demand'}</td>
-                      <td className="num">{a.rowCount}</td>
-                      <td>{new Date(a.createdAt).toLocaleString()}</td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            void downloadFile(
-                              `/v1/report-builder/archives/${a.id}?format=csv`,
-                              `${a.reportName.replace(/[^A-Za-z0-9_-]+/g, '-')}-archive.csv`,
-                            ).catch((err: unknown) =>
-                              toast.error(err instanceof Error ? err.message : String(err)),
-                            )
-                          }
-                        >
-                          CSV
-                        </Button>
-                      </td>
+                      <ColumnCells list={archiveCols} row={a} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={archiveCols} />
             </TableWrap>
           </Card>
         ) : null}
@@ -920,58 +1042,40 @@ export default function ReportBuilderPage() {
                   <TableWrap>
                     <table className="table">
                       <thead>
-                        <tr>
-                          {result.columns.map((c) => (
-                            <th key={c.name} className={isNumeric(c.type) ? 'num' : undefined}>
-                              {c.heading}
-                              {c.masked ? ' 🔒' : ''}
-                            </th>
-                          ))}
-                        </tr>
+                        <ColumnHeadRow list={resultCols} testIdPrefix="reports-builder-result" />
                       </thead>
                       <tbody>
                         {result.rows.length === 0 && result.groups.length === 0 && (
-                          <TableEmpty colSpan={Math.max(1, result.columns.length)}>
+                          <TableEmpty colSpan={Math.max(1, resultCols.ordered.length)}>
                             No rows matched.
                           </TableEmpty>
                         )}
-                        {result.rows.map((r, i) => (
+                        {resultCols.sorted.map((r, i) => (
                           <tr key={i}>
-                            {result.columns.map((c) => (
-                              <td key={c.name} className={isNumeric(c.type) ? 'num' : undefined}>
-                                {fmt(r[c.name] ?? null, c.type)}
-                              </td>
-                            ))}
+                            <ColumnCells list={resultCols} row={r} />
                           </tr>
                         ))}
                         {result.groups.map((g, i) => (
                           <tr key={`g${i}`} className="font-medium">
-                            {result.columns.map((c, j) => (
-                              <td key={c.name} className={isNumeric(c.type) ? 'num' : undefined}>
-                                {j === 0
-                                  ? `TOTAL ${String(g.key ?? '')}`
-                                  : c.name in g.totals
-                                    ? fmt(g.totals[c.name]!, c.type)
-                                    : ''}
-                              </td>
-                            ))}
+                            <TotalCells
+                              list={resultCols}
+                              label={`TOTAL ${String(g.key ?? '')}`}
+                              totals={totalsFor(result, g.totals)}
+                            />
                           </tr>
                         ))}
                         {Object.keys(result.grandTotals).length > 0 ? (
                           <tr className="font-semibold">
-                            {result.columns.map((c, j) => (
-                              <td key={c.name} className={isNumeric(c.type) ? 'num' : undefined}>
-                                {j === 0
-                                  ? 'GRAND TOTAL'
-                                  : c.name in result.grandTotals
-                                    ? fmt(result.grandTotals[c.name]!, c.type)
-                                    : ''}
-                              </td>
-                            ))}
+                            <TotalCells
+                              list={resultCols}
+                              label="GRAND TOTAL"
+                              totals={totalsFor(result, result.grandTotals)}
+                            />
                           </tr>
                         ) : null}
                       </tbody>
                     </table>
+                    <ResetColumns list={resultCols} />
                   </TableWrap>
                 </Stack>
               </Card>

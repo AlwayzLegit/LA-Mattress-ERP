@@ -6,14 +6,19 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -54,6 +59,50 @@ interface MemberRow {
   email: string;
   name: string | null;
 }
+
+const ORDER_COLUMNS: ColumnDef<OrderRow>[] = [
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (o) => o.number,
+    render: (o) => <Link href={`/orders/${o.id}`}>{o.number}</Link>,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (o) => o.status,
+    render: (o) => <StatusBadge status={o.status} />,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (o) => o.totalCents,
+    render: (o) => <Money cents={o.totalCents} />,
+  },
+];
+
+const SALE_COLUMNS: ColumnDef<SaleRow>[] = [
+  {
+    id: 'sale',
+    label: 'Sale',
+    sortValue: (s) => s.number,
+    render: (s) => s.number,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (s) => s.status,
+    render: (s) => <StatusBadge status={s.status} />,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (s) => s.totalCents,
+    render: (s) => <Money cents={s.totalCents} />,
+  },
+];
 
 /**
  * Salesperson activity (Sales Views Phase 4): one grid of written
@@ -127,6 +176,67 @@ export default function SalespeoplePage() {
     }
   }
 
+  // Built inline: the actions cell needs `members` and `drill`.
+  const summaryColumns: ColumnDef<SummaryRow>[] = [
+    {
+      id: 'salesperson',
+      label: 'Salesperson',
+      sortValue: (r) => r.label,
+      render: (r) => r.label,
+    },
+    {
+      id: 'documents',
+      label: 'Documents',
+      num: true,
+      sortValue: (r) => r.documentCount,
+      render: (r) => r.documentCount,
+    },
+    {
+      id: 'merchandise',
+      label: 'Merchandise',
+      num: true,
+      sortValue: (r) => r.merchandiseCents,
+      render: (r) => <Money cents={r.merchandiseCents} />,
+    },
+    {
+      id: 'totalWritten',
+      label: 'Total written',
+      num: true,
+      sortValue: (r) => r.totalCents,
+      render: (r) => <Money cents={r.totalCents} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => {
+        const member = members.find((m) => m.userId === r.key);
+        return (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => void drill(r)}>
+              Documents
+            </Button>
+            {member ? (
+              <LinkButton
+                size="sm"
+                variant="ghost"
+                href={`/salespeople/${member.membershipId}/activity`}
+                data-testid="salesperson-activity"
+              >
+                View activity
+              </LinkButton>
+            ) : null}
+          </>
+        );
+      },
+    },
+  ];
+  const cols = useListColumns('salespeople', summaryColumns, summary?.rows ?? null);
+  const orderCols = useListColumns('salespeople-orders', ORDER_COLUMNS, orders);
+  const saleCols = useListColumns('salespeople-sales', SALE_COLUMNS, sales);
+
   return (
     <div>
       <PageHeader
@@ -156,50 +266,20 @@ export default function SalespeoplePage() {
             <TableWrap>
               <table className="table" data-testid="salespeople-table">
                 <thead>
-                  <tr>
-                    <th>Salesperson</th>
-                    <th className="num">Documents</th>
-                    <th className="num">Merchandise</th>
-                    <th className="num">Total written</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="salespeople" />
                 </thead>
                 <tbody>
                   {summary.rows.length === 0 && (
-                    <TableEmpty colSpan={5}>Nothing in this window.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>Nothing in this window.</TableEmpty>
                   )}
-                  {summary.rows.map((r) => {
-                    const member = members.find((m) => m.userId === r.key);
-                    return (
-                      <tr key={r.key || '(none)'}>
-                        <td>{r.label}</td>
-                        <td className="num">{r.documentCount}</td>
-                        <td className="num">
-                          <Money cents={r.merchandiseCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={r.totalCents} />
-                        </td>
-                        <td className="actions">
-                          <Button size="sm" variant="ghost" onClick={() => void drill(r)}>
-                            Documents
-                          </Button>
-                          {member ? (
-                            <LinkButton
-                              size="sm"
-                              variant="ghost"
-                              href={`/salespeople/${member.membershipId}/activity`}
-                              data-testid="salesperson-activity"
-                            >
-                              View activity
-                            </LinkButton>
-                          ) : null}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {cols.sorted.map((r) => (
+                    <tr key={r.key || '(none)'}>
+                      <ColumnCells list={cols} row={r} />
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           )}
         </Card>
@@ -215,31 +295,22 @@ export default function SalespeoplePage() {
                   <TableWrap>
                     <table className="table">
                       <thead>
-                        <tr>
-                          <th>Order</th>
-                          <th>Status</th>
-                          <th className="num">Total</th>
-                        </tr>
+                        <ColumnHeadRow list={orderCols} testIdPrefix="salespeople-orders" />
                       </thead>
                       <tbody>
                         {orders.length === 0 && (
-                          <TableEmpty colSpan={3}>Nothing in this window.</TableEmpty>
+                          <TableEmpty colSpan={orderCols.ordered.length}>
+                            Nothing in this window.
+                          </TableEmpty>
                         )}
-                        {orders.map((o) => (
+                        {orderCols.sorted.map((o) => (
                           <tr key={o.id}>
-                            <td>
-                              <Link href={`/orders/${o.id}`}>{o.number}</Link>
-                            </td>
-                            <td>
-                              <StatusBadge status={o.status} />
-                            </td>
-                            <td className="num">
-                              <Money cents={o.totalCents} />
-                            </td>
+                            <ColumnCells list={orderCols} row={o} />
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    <ResetColumns list={orderCols} />
                   </TableWrap>
                 </div>
                 <div>
@@ -247,29 +318,22 @@ export default function SalespeoplePage() {
                   <TableWrap>
                     <table className="table">
                       <thead>
-                        <tr>
-                          <th>Sale</th>
-                          <th>Status</th>
-                          <th className="num">Total</th>
-                        </tr>
+                        <ColumnHeadRow list={saleCols} testIdPrefix="salespeople-sales" />
                       </thead>
                       <tbody>
                         {sales.length === 0 && (
-                          <TableEmpty colSpan={3}>Nothing in this window.</TableEmpty>
+                          <TableEmpty colSpan={saleCols.ordered.length}>
+                            Nothing in this window.
+                          </TableEmpty>
                         )}
-                        {sales.map((sl) => (
+                        {saleCols.sorted.map((sl) => (
                           <tr key={sl.id}>
-                            <td>{sl.number}</td>
-                            <td>
-                              <StatusBadge status={sl.status} />
-                            </td>
-                            <td className="num">
-                              <Money cents={sl.totalCents} />
-                            </td>
+                            <ColumnCells list={saleCols} row={sl} />
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    <ResetColumns list={saleCols} />
                   </TableWrap>
                 </div>
               </div>

@@ -8,14 +8,19 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
@@ -53,6 +58,86 @@ interface NamedRow {
   name: string;
 }
 
+const MERCH_COLUMNS: ColumnDef<MerchRow>[] = [
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (r) => r.productName,
+    render: (r) => (
+      <>
+        {r.productName}
+        {r.variantName && <span className="muted"> · {r.variantName}</span>}
+        {r.sku && <div className="muted">{r.sku}</div>}
+      </>
+    ),
+  },
+  {
+    id: 'vendor',
+    label: 'Vendor',
+    sortValue: (r) => r.vendorName,
+    render: (r) => r.vendorName ?? '—',
+  },
+  {
+    id: 'onHand',
+    label: 'On hand',
+    num: true,
+    sortValue: (r) => r.onHand,
+    render: (r) => r.onHand,
+  },
+  {
+    id: 'reserved',
+    label: 'Rsvd',
+    num: true,
+    sortValue: (r) => r.reserved,
+    render: (r) => r.reserved,
+  },
+  {
+    id: 'floor',
+    label: 'Floor',
+    num: true,
+    sortValue: (r) => r.floorSample,
+    render: (r) => r.floorSample,
+  },
+  {
+    id: 'available',
+    label: 'Avail',
+    num: true,
+    sortValue: (r) => r.netAvailable,
+    render: (r) => r.netAvailable,
+  },
+  { id: 'asIs', label: 'As-Is', num: true, sortValue: (r) => r.asIsQty, render: (r) => r.asIsQty },
+  {
+    id: 'onOrder',
+    label: 'On order',
+    num: true,
+    sortValue: (r) => r.onOrder,
+    render: (r) => r.onOrder,
+  },
+  { id: 'mtd', label: 'MTD', num: true, sortValue: (r) => r.soldMtd, render: (r) => r.soldMtd },
+  { id: 'ytd', label: 'YTD', num: true, sortValue: (r) => r.soldYtd, render: (r) => r.soldYtd },
+  {
+    id: 'cost',
+    label: 'Cost',
+    num: true,
+    sortValue: (r) => r.costCents,
+    render: (r) => (r.costCents != null ? <Money cents={r.costCents} /> : '—'),
+  },
+  {
+    id: 'price',
+    label: 'Price',
+    num: true,
+    sortValue: (r) => r.priceCents,
+    render: (r) => <Money cents={r.priceCents} />,
+  },
+  {
+    id: 'markup',
+    label: 'Markup',
+    num: true,
+    sortValue: (r) => r.markupPct,
+    render: (r) => (r.markupPct != null ? `${r.markupPct}%` : '—'),
+  },
+];
+
 /**
  * The buyer's report: stock position, inbound supply, as-is holdings,
  * and sales velocity per variant, with replacement cost and markup.
@@ -69,6 +154,7 @@ export default function MerchandisingPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const cols = useListColumns('reports-merchandising', MERCH_COLUMNS, report?.rows ?? null);
 
   function query(): string {
     const p = new URLSearchParams();
@@ -202,53 +288,22 @@ export default function MerchandisingPage() {
               <TableWrap>
                 <table className="table" data-testid="merch-table">
                   <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>Vendor</th>
-                      <th className="num">On hand</th>
-                      <th className="num">Rsvd</th>
-                      <th className="num">Floor</th>
-                      <th className="num">Avail</th>
-                      <th className="num">As-Is</th>
-                      <th className="num">On order</th>
-                      <th className="num">MTD</th>
-                      <th className="num">YTD</th>
-                      <th className="num">Cost</th>
-                      <th className="num">Price</th>
-                      <th className="num">Markup</th>
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="reports-merchandising" />
                   </thead>
                   <tbody>
                     {report.rows.length === 0 && (
-                      <TableEmpty colSpan={13}>No rows match the filters.</TableEmpty>
+                      <TableEmpty colSpan={cols.ordered.length}>
+                        No rows match the filters.
+                      </TableEmpty>
                     )}
-                    {report.rows.map((r) => (
+                    {cols.sorted.map((r) => (
                       <tr key={r.variantId}>
-                        <td>
-                          {r.productName}
-                          {r.variantName && <span className="muted"> · {r.variantName}</span>}
-                          {r.sku && <div className="muted">{r.sku}</div>}
-                        </td>
-                        <td>{r.vendorName ?? '—'}</td>
-                        <td className="num">{r.onHand}</td>
-                        <td className="num">{r.reserved}</td>
-                        <td className="num">{r.floorSample}</td>
-                        <td className="num">{r.netAvailable}</td>
-                        <td className="num">{r.asIsQty}</td>
-                        <td className="num">{r.onOrder}</td>
-                        <td className="num">{r.soldMtd}</td>
-                        <td className="num">{r.soldYtd}</td>
-                        <td className="num">
-                          {r.costCents != null ? <Money cents={r.costCents} /> : '—'}
-                        </td>
-                        <td className="num">
-                          <Money cents={r.priceCents} />
-                        </td>
-                        <td className="num">{r.markupPct != null ? `${r.markupPct}%` : '—'}</td>
+                        <ColumnCells list={cols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
             </Stack>
           )}
