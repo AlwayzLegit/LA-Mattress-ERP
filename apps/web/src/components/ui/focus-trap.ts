@@ -12,6 +12,14 @@ export function focusables(root: HTMLElement): HTMLElement[] {
 }
 
 /**
+ * Open traps, innermost last. Only the top of the stack handles keys and
+ * focus, so a dialog opened over another (the security override over a
+ * stock adjustment) never fights the one beneath it — and Escape closes
+ * the top one only.
+ */
+const stack: HTMLElement[] = [];
+
+/**
  * Shared dialog / slide-over semantics: on open, remember the opener and
  * move focus inside (to `initialFocus`, else the first control, else the
  * panel); Tab and Shift+Tab cycle inside; Escape calls `onClose`; on close,
@@ -40,6 +48,8 @@ export function useFocusTrap(
     const root = ref.current;
     if (!root) return;
     openerRef.current = document.activeElement as HTMLElement | null;
+    stack.push(root);
+    const onTop = () => stack[stack.length - 1] === root;
 
     const target = initialFocus?.current ?? focusables(root)[0] ?? root;
     if (target === root && !root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
@@ -47,6 +57,7 @@ export function useFocusTrap(
     const raf = requestAnimationFrame(() => target.focus({ preventScroll: true }));
 
     const onKey = (e: KeyboardEvent) => {
+      if (!onTop()) return;
       if (e.key === 'Escape') {
         if (onCloseRef.current) {
           e.stopPropagation();
@@ -76,6 +87,7 @@ export function useFocusTrap(
     };
     // If focus escapes (a click on the backdrop), pull it back.
     const onFocusIn = (e: FocusEvent) => {
+      if (!onTop()) return;
       if (!root.contains(e.target as Node)) {
         (focusables(root)[0] ?? root).focus();
       }
@@ -86,6 +98,8 @@ export function useFocusTrap(
       cancelAnimationFrame(raf);
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('focusin', onFocusIn);
+      const i = stack.lastIndexOf(root);
+      if (i >= 0) stack.splice(i, 1);
       const opener = openerRef.current;
       if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
     };

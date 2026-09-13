@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Alert, LinkButton } from '@/components/ui';
+import { Alert, Button, LinkButton } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { ConfirmDialog } from '@/components/shell/confirm-dialog';
 import { api } from '@/lib/api';
@@ -202,6 +202,7 @@ const MUTED_CELL: CSSProperties = { color: 'var(--text2)' };
 export default function OperationsDashboardView({ userName }: { userName: string }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [feed, setFeed] = useState<FeedRow[] | null>(null);
   const [feedTotal, setFeedTotal] = useState(0);
   // Thresholds ride on the /feed response — the summary stays cheap.
@@ -242,6 +243,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
   useEffect(() => {
     if (!rangeReady) return;
     const seq = ++summarySeq.current;
+    setError(null);
     void api<Summary>(`/v1/dashboard/operations?start=${range.start}&end=${range.end}`)
       .then((s) => {
         if (summarySeq.current !== seq) return;
@@ -251,7 +253,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
         if (summarySeq.current !== seq) return;
         setError(err instanceof Error ? err.message : String(err));
       });
-  }, [rangeReady, range.start, range.end]);
+  }, [rangeReady, range.start, range.end, reloadKey]);
 
   useEffect(() => {
     if (!spReady) return;
@@ -329,7 +331,7 @@ export default function OperationsDashboardView({ userName }: { userName: string
         <h1 className="page-title">Operations</h1>
         <div style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 3 }}>
           {pageSub}
-          <span style={{ marginLeft: 8, color: 'var(--faint)' }}>· {userName}</span>
+          <span style={{ marginLeft: 8, color: 'var(--muted)' }}>· {userName}</span>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} data-noprint="true">
@@ -346,7 +348,16 @@ export default function OperationsDashboardView({ userName }: { userName: string
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
         {header}
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => setReloadKey((n) => n + 1)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </div>
     );
   }

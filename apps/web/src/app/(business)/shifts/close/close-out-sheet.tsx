@@ -405,7 +405,7 @@ export default function CloseOutSheet({
                 {data.drawers.length === 0 && (
                   <tr>
                     <td colSpan={5} className="sub" style={{ padding: '18px var(--pad)' }}>
-                      No drawer was opened.
+                      No drawer opened at {data.location.name} on this day.
                     </td>
                   </tr>
                 )}

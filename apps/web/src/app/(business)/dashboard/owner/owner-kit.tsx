@@ -184,7 +184,7 @@ export function ShimmerRows({ rows = 5, colSpan }: { rows?: number; colSpan?: nu
     return (
       <>
         {widths.map((w, i) => (
-          <tr key={i}>
+          <tr key={i} aria-busy="true">
             <td colSpan={colSpan}>
               <div className="shimmer" style={{ height: 14, width: w }} />
             </td>
@@ -194,7 +194,12 @@ export function ShimmerRows({ rows = 5, colSpan }: { rows?: number; colSpan?: nu
     );
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 'var(--pad)' }}>
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="Loading"
+      style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 'var(--pad)' }}
+    >
       {widths.map((w, i) => (
         <div key={i} className="shimmer" style={{ height: 14, width: w }} />
       ))}

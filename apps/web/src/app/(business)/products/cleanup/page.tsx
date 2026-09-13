@@ -490,6 +490,7 @@ export default function ShopifyCleanupPage() {
           <>
             <select
               className="input"
+              aria-label="Replacement product for this line"
               value={isSku ? 'sku:' : c.target}
               onChange={(e) =>
                 setChoice(l.lineId, {
@@ -509,6 +510,7 @@ export default function ShopifyCleanupPage() {
             {isSku && (
               <input
                 className="input mt-1"
+                aria-label="STORIS SKU of the replacement"
                 placeholder="STORIS SKU"
                 value={c.target.slice(4)}
                 onChange={(e) => setChoice(l.lineId, { target: `sku:${e.target.value}` })}
@@ -615,6 +617,7 @@ export default function ShopifyCleanupPage() {
         return (
           <select
             className="input"
+            aria-label="What to do with this product"
             value={productOn[p.id] ?? ''}
             onChange={(e) =>
               setProductOn((prev) => ({

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '@/components/ui';
 
 /**
  * The one dialog chrome every A20 action shares: overlay, panel, sticky
@@ -24,24 +25,26 @@ export function ActionDialog({
   wide?: boolean;
   testId?: string;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Escape, the focus trap and the return of focus to the opener come
+  // from the shared hook (Phase 12), the same as the kit's Dialog.
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useFocusTrap(panel, { onClose });
   return (
     <div className="overlay overlay-center" onMouseDown={onClose} data-testid={testId}>
       <div
+        ref={panel}
         className="dialog"
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         style={{ maxWidth: wide ? 960 : 640 }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="dialog-head">
-          <h3 style={{ flex: 1 }}>{title}</h3>
+          <h3 id={titleId} style={{ flex: 1 }}>
+            {title}
+          </h3>
           <button
             type="button"
             className="icon-btn"

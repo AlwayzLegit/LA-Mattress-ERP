@@ -24,6 +24,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 
@@ -201,6 +202,7 @@ export default function SalesPage() {
           <Input
             autoFocus
             name="q"
+            aria-label="Find a sale by invoice number or customer name"
             placeholder="Invoice # (scan a receipt) or customer name"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -251,6 +253,7 @@ export default function SalesPage() {
                   )}
                   {cols.sorted.map((s) => (
                     <tr
+                      {...rowKeys}
                       key={s.id}
                       onClick={() => router.push(`/sales/${s.id}`)}
                       className="cursor-pointer"

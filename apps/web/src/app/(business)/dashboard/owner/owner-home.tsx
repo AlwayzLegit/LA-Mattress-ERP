@@ -51,6 +51,7 @@ interface OwnerData {
     storeCount: number;
     avgTicketCents: number;
     lastWeek: { date: string; writtenCents: number };
+    yesterdayWrittenCents: number;
     lastMonth: { date: string; writtenCents: number };
     collectedCents: number;
     collectedLastWeekCents: number;
@@ -344,6 +345,11 @@ export default function OwnerHome({ userName, email }: { userName: string; email
             ) : (
               <div className="dh-value" data-testid="dh-written">
                 {t ? usdWhole(t.writtenCents) : '—'}
+              </div>
+            )}
+            {t && t.writtenCents === 0 && !loading && (
+              <div className="dh-base" data-testid="dh-written-empty">
+                Nothing written yet today. Yesterday: {usdWhole(t.yesterdayWrittenCents)}.
               </div>
             )}
             <div className="dh-baselines">

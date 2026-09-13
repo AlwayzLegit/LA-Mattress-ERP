@@ -323,7 +323,7 @@ export function CashPickupsQueue({
                         ? 'var(--status-risk-fg)'
                         : s.pendingCents
                           ? 'var(--text)'
-                          : 'var(--faint)',
+                          : 'var(--muted)',
                   }}
                 >
                   {usdWhole(s.pendingCents)}

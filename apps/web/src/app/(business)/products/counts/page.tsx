@@ -27,6 +27,7 @@ import {
   StatusBadge,
   TableEmpty,
   TableWrap,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 
@@ -200,6 +201,7 @@ export default function PhysicalCountsPage() {
                   )}
                   {cols.sorted.map((c) => (
                     <tr
+                      {...rowKeys}
                       key={c.id}
                       className="cursor-pointer"
                       onClick={() => router.push(`/products/counts/${c.id}`)}

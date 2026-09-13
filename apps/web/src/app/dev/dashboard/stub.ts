@@ -510,6 +510,7 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
           ),
           lastWeek: { date: lastWeekDay, writtenCents: Math.round(todayWritten / 1.14) },
           lastMonth: { date: lastMonthDay, writtenCents: Math.round(todayWritten / 1.06) },
+          yesterdayWrittenCents: Math.round(todayWritten * 1.12),
           collectedCents: payments
             .filter((p) => p.day === today)
             .reduce((n, p) => n + p.amountCents, 0),

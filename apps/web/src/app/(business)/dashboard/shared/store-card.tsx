@@ -145,7 +145,7 @@ export function StoreCard({
                       {!empty && <span className="tender-count"> · {t.count}</span>}
                     </span>
                     <span />
-                    <span className="mono" style={{ color: empty ? 'var(--faint)' : undefined }}>
+                    <span className="mono" style={{ color: empty ? 'var(--muted)' : undefined }}>
                       {empty ? '—' : usdWhole(t.cents)}
                     </span>
                   </button>
@@ -191,7 +191,7 @@ function Fig({
       <span className="sc-fig-label">{label}</span>
       <span
         className={`sc-fig-value mono${strong ? ' is-strong' : ''}`}
-        style={{ color: danger ? 'var(--status-risk-fg)' : muted ? 'var(--faint)' : undefined }}
+        style={{ color: danger ? 'var(--status-risk-fg)' : muted ? 'var(--muted)' : undefined }}
       >
         {value}
       </span>

@@ -343,7 +343,18 @@ function DeliveriesBoard() {
         </div>
       </header>
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && (
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => setTick((n) => n + 1)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
       {overDays.length > 0 && (
         <div className="db-banner" role="status" data-testid="db-over-banner">
           <span className="db-banner-glyph" aria-hidden>
@@ -417,7 +428,7 @@ function DeliveriesBoard() {
                   {mode === 'week' ? fmtShort(d) : fmtShort(d)}
                 </Link>
                 <span className={`db-cap is-${tone}`} data-testid="db-cap">
-                  {booked === 0 && mode === 'month' ? '—' : `${booked} / ${cap}`}
+                  {booked === 0 && mode === 'month' ? 'No truck' : `${booked} / ${cap}`}
                 </span>
               </div>
               <div className="db-bar" aria-hidden>

@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Select } from '@/components/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Select, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
   EmptyRow,
@@ -332,7 +332,7 @@ function TruckCard({ truck, allMode }: { truck: Truck; allMode: boolean }) {
                   gap: 8,
                   alignItems: 'center',
                   fontSize: 12,
-                  color: done ? 'var(--faint)' : undefined,
+                  color: done ? 'var(--muted)' : undefined,
                 }}
               >
                 <span className="mono" style={{ color: 'var(--muted)' }}>
@@ -370,7 +370,11 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
   const [loadout, setLoadout] = useState<Loadout | null>(null);
   const [picklist, setPicklist] = useState<Picklist | null>(null);
 
+  // The store the last request asked for — Retry re-asks for it even when
+  // the request that failed was a store switch.
+  const attempted = useRef<string | null>(null);
   const load = useCallback(async (loc: string | null) => {
+    attempted.current = loc;
     setError(null);
     try {
       // No selection = the combined view; the server defaults the same way.
@@ -394,14 +398,23 @@ export default function WarehouseDashboardView({ userName }: { userName: string 
     void load(null);
   }, [load]);
 
-  const who = <span style={{ marginLeft: 8, color: 'var(--faint)' }}>· {userName}</span>;
+  const who = <span style={{ marginLeft: 8, color: 'var(--muted)' }}>· {userName}</span>;
 
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
         <PageHead title="Warehouse" sub={who} />
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => void load(attempted.current)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </div>
     );
   }

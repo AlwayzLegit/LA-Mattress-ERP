@@ -142,7 +142,7 @@ export function SerialsPanel({
               <tbody>
                 {data && data.rows.length === 0 && (
                   <TableEmpty colSpan={cols.ordered.length}>
-                    No pieces on hand at this location.
+                    No serials recorded for this product.
                   </TableEmpty>
                 )}
                 {cols.sorted.map((r) => (

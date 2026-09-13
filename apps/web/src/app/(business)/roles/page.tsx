@@ -20,6 +20,7 @@ import {
   Stack,
   TableEmpty,
   TableWrap,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -173,6 +174,7 @@ export default function RolesPage() {
                   )}
                   {cols.sorted.map((r) => (
                     <tr
+                      {...rowKeys}
                       key={r.id}
                       className="cursor-pointer"
                       onClick={() => router.push(`/roles/${r.id}`)}

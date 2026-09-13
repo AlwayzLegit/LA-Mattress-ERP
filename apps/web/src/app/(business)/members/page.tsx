@@ -25,6 +25,7 @@ import {
   StatusBadge,
   TableEmpty,
   TableWrap,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -345,6 +346,7 @@ export default function MembersPage() {
                   )}
                   {cols.sorted.map((m) => (
                     <tr
+                      {...rowKeys}
                       key={m.membershipId}
                       className="cursor-pointer"
                       onClick={() => router.push(`/members/${m.membershipId}`)}

@@ -19,6 +19,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 
@@ -137,6 +138,7 @@ export default function SalespersonActivityLookupPage() {
                 )}
                 {cols.sorted.map((m) => (
                   <tr
+                    {...rowKeys}
                     key={m.membershipId}
                     data-testid="sp-lookup-hit"
                     onClick={() => router.push(`/salespeople/${m.membershipId}/activity`)}

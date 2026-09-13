@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, useRef } from 'react';
 import { api } from '@/lib/api';
 import {
   Alert,
@@ -13,6 +13,8 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  useFocusTrap,
+  rowKeys,
 } from '@/components/ui';
 
 /**
@@ -88,25 +90,24 @@ export function CustomerPicker({
     }
   }
 
+  // Focus stays inside and returns to the opener (Phase 12).
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, { onClose: onCancel });
+
   return (
-    // Modal chrome: no shared overlay primitive exists yet, so the
-    // backdrop/panel positioning stays inline (structural, not styling).
+    // Modal chrome: the backdrop/panel positioning stays inline (structural,
+    // not styling); the focus trap is the shared hook.
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40"
       onClick={onCancel}
     >
       <div
+        ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label="Attach customer"
         className="w-[min(480px,92vw)]"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation();
-            onCancel();
-          }
-        }}
       >
         <Card
           title="Attach customer"
@@ -176,7 +177,12 @@ export function CustomerPicker({
                       </TableEmpty>
                     )}
                     {rows.map((c) => (
-                      <tr key={c.id} onClick={() => onPick(c)} className="cursor-pointer">
+                      <tr
+                        {...rowKeys}
+                        key={c.id}
+                        onClick={() => onPick(c)}
+                        className="cursor-pointer"
+                      >
                         <td>
                           <strong>{customerDisplayName(c)}</strong>
                         </td>

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react';
-import { Alert, LinkButton, Select } from '@/components/ui';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { Alert, LinkButton, Select, rowKeys, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
   EmptyRow,
@@ -228,7 +228,11 @@ export default function ManagerDashboardView({ userName }: { userName: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function load(loc: string | null) {
+  // The store the user last asked for — Retry re-asks for it, not the
+  // default-store fallback and not the store that last loaded.
+  const attempted = useRef<string | null>(null);
+  async function load(loc: string | null, isFallback = false) {
+    if (!isFallback) attempted.current = loc;
     setError(null);
     try {
       const qs = loc ? `?locationId=${loc}` : '';
@@ -237,7 +241,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       setLocationId(d.location.id);
     } catch (err) {
       if (loc) {
-        void load(null);
+        void load(null, true);
         return;
       }
       setError(err instanceof Error ? err.message : String(err));
@@ -293,7 +297,16 @@ export default function ManagerDashboardView({ userName }: { userName: string })
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <TimeClockStrip />
         {header}
-        <Alert tone="error">{error}</Alert>
+        <Alert
+          tone="error"
+          action={
+            <Button size="sm" onClick={() => void load(attempted.current)}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
       </div>
     );
   }
@@ -405,7 +418,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
                   .join(' · ')}
               </strong>
             ) : (
-              <span className="dh-base">every promise is on track</span>
+              <span className="dh-base">Nothing to call about today.</span>
             )}
           </div>
           <span className="dh-side-link">Open the queue →</span>
@@ -666,7 +679,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
               .join(' · '),
             title: `${r.deliveryState.replace(/_/g, ' ')}${r.driverName ? ` · driver ${r.driverName}` : ''}`,
             d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
-            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
+            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--muted)',
           }))}
         />
 
@@ -756,7 +769,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
               .filter(Boolean)
               .join(' · '),
             d: r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—',
-            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--faint)',
+            dColor: r.balanceDueCents > 0 ? 'var(--danger)' : 'var(--muted)',
           }))}
         />
 
@@ -914,6 +927,7 @@ function OpsPanel({
           ) : (
             rows.map((r) => (
               <tr
+                {...rowKeys}
                 key={r.key}
                 className="is-clickable"
                 title={r.title}
@@ -980,7 +994,7 @@ function Leaderboard({
               fontSize: 12.5,
             }}
           >
-            <span className="mono" style={{ color: 'var(--faint)', fontSize: 11 }}>
+            <span className="mono" style={{ color: 'var(--muted)', fontSize: 11 }}>
               {String(i + 1).padStart(2, '0')}
             </span>
             <span
@@ -1117,6 +1131,7 @@ function QueueTable({
             const late = !!r.requestedDate && r.requestedDate < today;
             return (
               <tr
+                {...rowKeys}
                 key={r.id}
                 className="is-clickable"
                 onClick={(e) => rowClick(e, () => onOpen(r.id))}
@@ -1155,7 +1170,7 @@ function QueueTable({
                   className="num"
                   style={{
                     fontWeight: r.balanceDueCents > 0 ? 600 : 400,
-                    color: r.balanceDueCents > 0 ? 'var(--text)' : 'var(--faint)',
+                    color: r.balanceDueCents > 0 ? 'var(--text)' : 'var(--muted)',
                   }}
                 >
                   {r.balanceDueCents > 0 ? usdWhole(r.balanceDueCents) : '—'}

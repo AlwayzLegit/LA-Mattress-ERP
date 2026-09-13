@@ -75,3 +75,21 @@ export function SortHeader({
     </th>
   );
 }
+
+/**
+ * Keyboard access for a clickable `<tr>` that has no anchor of its own
+ * (Phase 12): spread onto the row so Tab reaches it and Enter / Space run
+ * its onClick. A nested control keeps its own keys — the row only acts
+ * when the row itself is the target.
+ */
+export const rowKeys = {
+  role: 'link' as const,
+  tabIndex: 0,
+  onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.currentTarget.click();
+    }
+  },
+};

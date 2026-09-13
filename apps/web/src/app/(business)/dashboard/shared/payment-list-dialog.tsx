@@ -1,7 +1,9 @@
 'use client';
 
+import { useFocusTrap, rowKeys } from '@/components/ui';
+
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { cardBrandLabel } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { ShimmerRows, usdWhole } from '../owner/owner-kit';
@@ -79,13 +81,9 @@ export function PaymentListDialog({
       .catch(() => setFailed(true));
   }, [locationId, method, period]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Escape, the focus trap and the return of focus come from the shared hook.
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, { onClose });
 
   const open = (kind: 'order' | 'sale' | 'service', id: string) => {
     onClose();
@@ -95,6 +93,7 @@ export function PaymentListDialog({
   return (
     <div className="overlay overlay-center" onClick={onClose} data-noprint="true">
       <div
+        ref={panel}
         role="dialog"
         aria-modal
         aria-label={`${meta.label} payments · ${locationName}`}
@@ -155,6 +154,7 @@ export function PaymentListDialog({
             <tbody>
               {data.rows.map((r) => (
                 <tr
+                  {...rowKeys}
                   key={r.paymentId}
                   className="is-clickable"
                   onClick={() => open(r.docKind, r.docId)}

@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DateRangePicker } from '@/components/date-range-picker';
 import { formatRange } from '@/lib/date-range';
 import {
@@ -75,6 +75,14 @@ function tzShort(tz: string): string {
 export function StoreScope() {
   const f = useDashboardFilters();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   const all = f.storeIds == null;
   const selected = new Set(f.storeIds ?? f.stores.map((s) => s.id));
   const groups: { label: string; stores: StoreOption[] }[] = [

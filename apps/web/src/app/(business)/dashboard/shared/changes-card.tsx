@@ -1,5 +1,7 @@
 'use client';
 
+import { rowKeys } from '@/components/ui';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -222,6 +224,7 @@ export function ChangesCard({
                 const cls = r.moneyRelated ? (seen ? ' is-seen' : ' is-unseen') : '';
                 return (
                   <tr
+                    {...rowKeys}
                     key={r.id}
                     className={`is-clickable${cls}`}
                     onClick={() => router.push(`/orders/${r.orderId}`)}
@@ -252,12 +255,12 @@ export function ChangesCard({
                           )}
                         </label>
                       ) : (
-                        <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>no money</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>no money</span>
                       )}
                     </td>
                     <td>
                       <div className="mono">{relTime(r.occurredAt)}</div>
-                      <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
                         {dayShort(r.occurredAt)}
                       </div>
                     </td>
@@ -294,7 +297,7 @@ export function ChangesCard({
                           fontWeight: 600,
                           color:
                             r.impactCents == null
-                              ? 'var(--faint)'
+                              ? 'var(--muted)'
                               : r.impactCents < 0
                                 ? 'var(--danger)'
                                 : r.impactCents > 0
@@ -304,7 +307,7 @@ export function ChangesCard({
                       >
                         {r.impactCents == null ? '—' : usdSigned(r.impactCents)}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--faint)' }}>{impactKind(r)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{impactKind(r)}</div>
                     </td>
                     <td style={{ paddingRight: 'var(--pad)' }}>
                       <div>{r.authorName}</div>

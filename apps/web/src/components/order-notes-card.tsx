@@ -12,6 +12,8 @@ import {
   FormActions,
   LoadingRows,
   Stack,
+  formatKeys,
+  usePlatform,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -31,6 +33,7 @@ interface OrderNote {
  * Append-only by design — what was said stays said.
  */
 export function OrderNotesCard({ orderId }: { orderId: string }) {
+  const platform = usePlatform();
   const [notes, setNotes] = useState<OrderNote[] | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -165,7 +168,11 @@ export function OrderNotesCard({ orderId }: { orderId: string }) {
             </fieldset>
           )}
           <FormActions
-            start={<span>Saved with your name and the time. Ctrl/⌘+Enter to save.</span>}
+            start={
+              <span>
+                Saved with your name and the time. {formatKeys('mod+enter', platform)} to save.
+              </span>
+            }
           >
             <Button
               type="submit"

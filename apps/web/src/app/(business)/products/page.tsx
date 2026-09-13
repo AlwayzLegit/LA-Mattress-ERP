@@ -25,6 +25,7 @@ import {
   LoadingRows,
   Select,
   StatusBadge,
+  rowKeys,
   useListColumns,
 } from '@/components/ui';
 
@@ -841,7 +842,16 @@ export default function ProductsPage() {
         <div className="pb-sheet">
           {error && (
             <div style={{ padding: 12 }}>
-              <Alert tone="error">{error}</Alert>
+              <Alert
+                tone="error"
+                action={
+                  <Button size="sm" onClick={() => setTick((n) => n + 1)}>
+                    Retry
+                  </Button>
+                }
+              >
+                {error}
+              </Alert>
             </div>
           )}
           {!rows && !error && (
@@ -857,6 +867,7 @@ export default function ProductsPage() {
               <tbody>
                 {rows.map((p) => (
                   <tr
+                    {...rowKeys}
                     key={p.id}
                     data-testid="product-row"
                     className={p.isActive ? undefined : 'is-inactive'}
