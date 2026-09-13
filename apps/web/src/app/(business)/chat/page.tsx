@@ -125,68 +125,6 @@ export default function ChatPage() {
         title="Live chat"
         sub="Talk with website visitors and keep the conversation together."
       />
-      <div className={styles.inboxBar}>
-        <TeamControls />
-        <div className={styles.connection} data-state={connection} role="status">
-          <span className={styles.dot} />
-          <strong>
-            {connection === 'live'
-              ? 'Live'
-              : connection === 'denied'
-                ? 'Access required'
-                : 'Connecting…'}
-          </strong>
-        </div>
-        <Button
-          disabled={notificationsDisabled || (sound && notificationsLocked)}
-          aria-pressed={sound}
-          onClick={() => void toggleSound()}
-        >
-          {sound ? 'Sound on' : 'Enable sound'}
-        </Button>
-        <details className={styles.settingsMenu}>
-          <summary>Inbox settings</summary>
-          <div className={styles.settingsContent}>
-            <h2>Notifications & settings</h2>
-            <Button
-              disabled={notificationsDisabled || (notifications && notificationsLocked)}
-              aria-pressed={notifications}
-              onClick={() => void toggleNotifications()}
-            >
-              {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
-            </Button>
-            <p>Get an alert when a visitor sends a message.</p>
-            <Button disabled={!sound || notificationsDisabled} onClick={testHandoffSound}>
-              Preview pass-chat sound
-            </Button>
-            {notificationsLocked && (
-              <p>Your administrator requires notifications. You cannot mute them here.</p>
-            )}
-            <PushControls />
-            <AdminControls />
-          </div>
-        </details>
-      </div>
-      <div className={styles.teamDock}>
-        <TeamWorkspaceButton />
-        <TeamHelp />
-      </div>
-      <AvailableTeam />
-      <div className={styles.inboxStatus}>
-        <strong>
-          {waitingCount
-            ? waitingCount + ' waiting for a teammate'
-            : unread.length
-              ? unread.length + ' unread'
-              : 'No unread messages'}
-        </strong>
-        <span role="status">{notice || latest || 'New chats appear here automatically.'}</span>
-      </div>
-      {connection === 'reconnecting' && (
-        <p role="alert" className={styles.error}>
-          Connection interrupted. Reconnecting automatically. Your messages will catch up.
-        </p>
-      )}
       <div className={styles.layout}>
         <aside className={styles.queue} aria-label="Conversation queue">
           <div className={styles.queueHeading}>
@@ -323,6 +261,68 @@ export default function ChatPage() {
           </section>
         )}
       </div>
+      <div className={styles.inboxBar}>
+        <TeamControls />
+        <div className={styles.connection} data-state={connection} role="status">
+          <span className={styles.dot} />
+          <strong>
+            {connection === 'live'
+              ? 'Live'
+              : connection === 'denied'
+                ? 'Access required'
+                : 'Connecting…'}
+          </strong>
+        </div>
+        <Button
+          disabled={notificationsDisabled || (sound && notificationsLocked)}
+          aria-pressed={sound}
+          onClick={() => void toggleSound()}
+        >
+          {sound ? 'Sound on' : 'Enable sound'}
+        </Button>
+        <details className={styles.settingsMenu}>
+          <summary>Inbox settings</summary>
+          <div className={styles.settingsContent}>
+            <h2>Notifications & settings</h2>
+            <Button
+              disabled={notificationsDisabled || (notifications && notificationsLocked)}
+              aria-pressed={notifications}
+              onClick={() => void toggleNotifications()}
+            >
+              {notifications ? 'Desktop alerts on' : 'Enable desktop alerts'}
+            </Button>
+            <p>Get an alert when a visitor sends a message.</p>
+            <Button disabled={!sound || notificationsDisabled} onClick={testHandoffSound}>
+              Preview pass-chat sound
+            </Button>
+            {notificationsLocked && (
+              <p>Your administrator requires notifications. You cannot mute them here.</p>
+            )}
+            <PushControls />
+            <AdminControls />
+          </div>
+        </details>
+      </div>
+      <div className={styles.teamDock}>
+        <TeamWorkspaceButton />
+        <TeamHelp />
+      </div>
+      <AvailableTeam />
+      <div className={styles.inboxStatus}>
+        <strong>
+          {waitingCount
+            ? waitingCount + ' waiting for a teammate'
+            : unread.length
+              ? unread.length + ' unread'
+              : 'No unread messages'}
+        </strong>
+        <span role="status">{notice || latest || 'New chats appear here automatically.'}</span>
+      </div>
+      {connection === 'reconnecting' && (
+        <p role="alert" className={styles.error}>
+          Connection interrupted. Reconnecting automatically. Your messages will catch up.
+        </p>
+      )}
     </div>
   );
 }
