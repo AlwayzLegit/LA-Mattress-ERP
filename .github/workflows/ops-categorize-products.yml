@@ -8,7 +8,10 @@ name: Ops — categorize products
 #
 # Order: validate (prints the exact plan, writes nothing) → commit.
 # The script renames the STORIS code categories in place, creates the
-# subcategories and moves every SKU in the file; a second commit is a no-op.
+# subcategories, moves every SKU in the file and prunes every other
+# category once it is empty (the GROUP-code categories the pre-#134 import
+# made, connector product types); a stray category still holding products
+# the file does not name is listed and left. A second commit is a no-op.
 #
 # Needs the RENDER_API_KEY repository secret (same one deploy-api.yml uses).
 

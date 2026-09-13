@@ -15,7 +15,7 @@ export const LOCS = [
 const CATS = [
   { id: 'c-matt', parentId: null, name: 'Mattresses', position: 0 },
   { id: 'c-hyb', parentId: 'c-matt', name: 'Hybrid', position: 0 },
-  { id: 'c-mf', parentId: 'c-matt', name: 'Memory foam', position: 1 },
+  { id: 'c-mf', parentId: 'c-matt', name: 'Memory Foam', position: 1 },
   { id: 'c-inn', parentId: 'c-matt', name: 'Innerspring', position: 2 },
   { id: 'c-base', parentId: null, name: 'Bases', position: 1 },
   { id: 'c-acc', parentId: null, name: 'Accessories', position: 2 },
@@ -99,7 +99,7 @@ export const PRODUCTS: Fx[] = [
     sku: 'TP-PA-Q',
     name: 'Tempur-Pedic ProAdapt — Queen',
     cat: 'c-mf',
-    catPath: 'Mattresses › Memory foam',
+    catPath: 'Mattresses › Memory Foam',
     vendor: 'Tempur Sealy',
     model: 'TP-PA-Q',
     brand: 'Tempur-Pedic',

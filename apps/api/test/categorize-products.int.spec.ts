@@ -108,6 +108,32 @@ beforeAll(async () => {
   businessId = biz!.id;
   const summary = await importProducts();
   expect(summary.committed).toBe(ROWS);
+
+  // What production accumulated before the mapping: the pre-#134 import
+  // made a category per STORIS GROUP code, and connector syncs add product
+  // types. CAKING holds a file SKU (it empties and goes); "Bed in a Box"
+  // holds a product the file does not name (it stays, reported).
+  const [caking] = await db
+    .insert(schema.categories)
+    .values({ businessId, name: 'CAKING', position: 90 })
+    .returning();
+  await db
+    .update(schema.products)
+    .set({ categoryId: caking!.id })
+    .where(and(eq(schema.products.businessId, businessId), eq(schema.products.sku, '7703-6/7')));
+  // STORIS carried the As-Is siblings as their own products; the export
+  // and the file never name them.
+  await db.insert(schema.products).values([
+    { businessId, sku: '7703-6/6-AS', name: 'E KING MICAH FIRM AS-IS', categoryId: caking!.id },
+    { businessId, sku: '10203261-PROMO-AS', name: 'TEMPUR PROMO AS-IS', categoryId: caking!.id },
+  ]);
+  const [bib] = await db
+    .insert(schema.categories)
+    .values({ businessId, name: 'Bed in a Box', position: 91 })
+    .returning();
+  await db
+    .insert(schema.products)
+    .values({ businessId, sku: 'BIB-NEW', name: 'New bed in a box', categoryId: bib!.id });
 }, 300_000);
 
 afterAll(async () => {
@@ -140,11 +166,16 @@ describe('product-categories.csv (A22.1)', () => {
     });
     expect(s.matched).toBe(ROWS);
     expect(s.unmatchedSkus).toEqual([]);
-    expect(s.unlistedSkus).toEqual([]);
+    expect([...s.unlistedSkus].sort()).toEqual(['10203261-PROMO-AS', '7703-6/6-AS', 'BIB-NEW']);
+    expect(s.derived).toBe(2);
     // NONINV and RF both map to Services & Fees: NONINV is renamed, RF
     // empties into it and goes.
     expect(s.renamed).toHaveLength(10);
     expect(s.deletedLegacy).toEqual(['RF']);
+    // The GROUP-code category empties once its SKU moves and goes; the
+    // connector one still holds a product the file does not name.
+    expect(s.deletedStray).toEqual(['CAKING']);
+    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
     expect(s.created.length).toBeGreaterThan(30);
     expect(s.assigned + s.unchanged).toBe(ROWS);
     // Rolled back: the code categories are still there, nothing new.
@@ -190,6 +221,15 @@ describe('product-categories.csv (A22.1)', () => {
     expect(mattressKids).toEqual(['Hybrid', 'Innerspring', 'Latex', 'Memory Foam']);
 
     expect(await pathOf('7703-6/6')).toBe('Mattresses › Innerspring'); // Eastman House Micah Firm
+    expect(await pathOf('7703-6/7')).toBe('Mattresses › Innerspring'); // out of the CAKING stray
+    expect(await pathOf('7703-6/6-AS')).toBe('Mattresses › Innerspring'); // with its base product
+    expect(await pathOf('10203261-PROMO-AS')).toBe(await pathOf('10203261'));
+    expect(s.derived).toBe(2);
+    expect(await root('CAKING')).toBeNull();
+    expect(await root('Bed in a Box')).not.toBeNull();
+    expect(await pathOf('BIB-NEW')).toBe('Bed in a Box');
+    expect(s.deletedStray).toEqual(['CAKING']);
+    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
     expect(await pathOf('10746131')).toBe('Mattresses › Hybrid'); // TEMPUR-Adapt 2.0 Medium Hybrid
     expect(await pathOf('10745130')).toBe('Mattresses › Memory Foam'); // TEMPUR-Adapt 2.0 Medium
     expect(await pathOf('LOLUFM-1010')).toBe('Mattresses › Latex'); // Diamond Lucille Latex Firm
@@ -233,9 +273,12 @@ describe('product-categories.csv (A22.1)', () => {
     });
     expect(s.assigned).toBe(0);
     expect(s.unchanged).toBe(ROWS);
+    expect(s.derived).toBe(0);
     expect(s.created).toEqual([]);
     expect(s.renamed).toEqual([]);
     expect(s.deletedLegacy).toEqual([]);
+    expect(s.deletedStray).toEqual([]);
+    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
   }, 60_000);
 
   it('re-importing products.csv keeps the finer categories and creates no code category', async () => {
@@ -310,8 +353,36 @@ describe('product-categories.csv (A22.1)', () => {
     });
     expect(s.matched).toBe(1);
     expect(s.unmatchedSkus).toEqual(['NOT-A-SKU']);
-    expect(s.unlistedSkus).toHaveLength(ROWS - 1);
+    expect(s.unlistedSkus).toHaveLength(ROWS + 2); // 1947 file SKUs + BIB-NEW + two As-Is
     expect(s.unchanged).toBe(1);
+    // A partial file names one branch, so an empty category anywhere else
+    // reads as stray to the prune; prune: false leaves it for a full file.
+    const [empty] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Empty Stray', position: 99 })
+      .returning();
+    try {
+      const pruned = await runCategorizeProducts({
+        databaseUrl: TEST_DB_URL,
+        businessSlug: SLUG,
+        file,
+        mode: 'validate',
+        log,
+      });
+      expect(pruned.deletedStray).toEqual(['Empty Stray']);
+      const kept = await runCategorizeProducts({
+        databaseUrl: TEST_DB_URL,
+        businessSlug: SLUG,
+        file,
+        mode: 'validate',
+        prune: false,
+        log,
+      });
+      expect(kept.deletedStray).toEqual([]);
+      expect(kept.deletedLegacy).toEqual([]);
+    } finally {
+      await db.delete(schema.categories).where(eq(schema.categories.id, empty!.id));
+    }
   });
 });
 

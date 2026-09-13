@@ -5673,3 +5673,29 @@ the leaf id. Now one helper (`catalog/category-tree.ts`: `pathOf`, `treeIds`,
   web `categories.test.ts` (2); int specs extended — reports (path + root filter + CSV),
   replenish (root filter, path on lines), order-actions (path), competitions (base counts,
   remotes do not), orders (protector raises no recycling exception).
+
+### Checkpoint — 2026-09-13 (Products: the category picker is the tree, the old names go)
+
+Owner (screenshot of the Products category filter listing ADJBAS, ADJUST, Adjustable Base,
+Adjustable Beds, BED, Bed in a Box, BEDFRA, CAKING, CKADJ, …): "fix in products the
+categories and get rid of the old ones." Two causes. The _Ops — categorize products_
+workflow had **never been run** on production (0 runs), so the STORIS code categories
+were still there; and before #134 the catalog import took `GROUP` as the category, so an
+earlier run left one category per STORIS group code (CAKING, CKADJ, EKSHEE, DINE, …),
+with connector product types ("Bed in a Box", "Adjustable Base") on top. A validate run
+against production (2026-09-13 11:47 UTC, rolled back) confirmed the mapping applies
+cleanly: 1,948/1,948 SKUs matched, 8 code categories renamed, 35 subcategories created,
+MATT and RF fold into the "Mattresses" / "Services & Fees" roots that already existed;
+732 products the file does not name, ~500 of them the `-AS` As-Is siblings STORIS
+carried as their own products.
+`ops/categorize-products.ts` now also (3b) files every `<SKU>-AS` / `<SKU>-PROMO-AS`
+product with its base product, and (4) **prunes** every category the file does not name
+once it holds no products and no children, deepest first — a stray still holding
+products the file does not name is listed as `strayKept` and left for the next mapping;
+`prune: false` for partial files. Spec: `categorize-products.int.spec.ts` seeds a
+CAKING group category holding a file SKU and two As-Is siblings (all move, CAKING goes)
+and a "Bed in a Box" holding an unlisted product (stays, reported); a partial-file run
+with pruning off deletes nothing.
+**Ops (done in-session once deployed):** run the workflow `validate`, read `strayKept`,
+then `commit`; any category the commit leaves behind names products the file does not
+know — map those in a follow-up file.
