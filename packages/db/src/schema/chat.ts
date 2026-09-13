@@ -340,3 +340,77 @@ export const chatHelpMessages = pgTable(
     kindCheck: check('chat_help_message_kind', sql`${t.kind} in ('message','suggestion')`),
   }),
 );
+
+export const chatTeamRooms = pgTable(
+  'chat_team_rooms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    key: text('key').notNull(),
+    kind: text('kind').notNull(),
+    locationId: uuid('location_id'),
+    memberA: uuid('member_a'),
+    memberB: uuid('member_b'),
+    lastSequence: integer('last_sequence').notNull().default(0),
+    revision: integer('revision').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tenantKey: uniqueIndex('chat_team_room_tenant').on(t.businessId, t.id),
+    roomKey: uniqueIndex('chat_team_room_key').on(t.businessId, t.key),
+    kindCheck: check(
+      'chat_team_room_kind',
+      sql`(${t.kind} = 'helpdesk' and ${t.locationId} is null and ${t.memberA} is null and ${t.memberB} is null) or (${t.kind} = 'store' and ${t.locationId} is not null and ${t.memberA} is null and ${t.memberB} is null) or (${t.kind} = 'direct' and ${t.locationId} is null and ${t.memberA} is not null and ${t.memberB} is not null and ${t.memberA} < ${t.memberB})`,
+    ),
+  }),
+);
+export const chatTeamMessages = pgTable(
+  'chat_team_messages',
+  {
+    id: uuid('id').primaryKey(),
+    businessId: businessId(),
+    roomId: uuid('room_id').notNull(),
+    senderId: uuid('sender_id').notNull(),
+    body: text('body').notNull(),
+    sequence: integer('sequence').notNull(),
+    replyToId: uuid('reply_to_id'),
+    mentionId: uuid('mention_id'),
+    question: boolean('question').notNull().default(false),
+    urgent: boolean('urgent').notNull().default(false),
+    status: text('status').notNull().default('open'),
+    assignedId: uuid('assigned_id'),
+    saved: boolean('saved').notNull().default(false),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    roomFk: foreignKey({
+      columns: [t.businessId, t.roomId],
+      foreignColumns: [chatTeamRooms.businessId, chatTeamRooms.id],
+    }).onDelete('cascade'),
+    sequenceKey: uniqueIndex('chat_team_message_sequence').on(t.businessId, t.roomId, t.sequence),
+    bodyCheck: check('chat_team_message_body', sql`length(btrim(${t.body})) between 1 and 4000`),
+    stateCheck: check(
+      'chat_team_message_state',
+      sql`${t.status} in ('open','claimed','resolved') and (not ${t.urgent} or ${t.question})`,
+    ),
+  }),
+);
+export const chatTeamActivity = pgTable(
+  'chat_team_activity',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    roomId: uuid('room_id').notNull(),
+    membershipId: uuid('membership_id').notNull(),
+    readSequence: integer('read_sequence').notNull().default(0),
+    typingUntil: timestamp('typing_until', { withTimezone: true }),
+  },
+  (t) => ({
+    roomFk: foreignKey({
+      columns: [t.businessId, t.roomId],
+      foreignColumns: [chatTeamRooms.businessId, chatTeamRooms.id],
+    }).onDelete('cascade'),
+    memberKey: uniqueIndex('chat_team_activity_member').on(t.businessId, t.roomId, t.membershipId),
+  }),
+);

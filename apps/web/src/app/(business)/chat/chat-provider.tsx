@@ -2,6 +2,8 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTeamChat } from './use-team-chat';
+import { TeamWorkspace, TeamWorkspaceButton } from './team-workspace';
 import { useChatHelp } from './use-chat-help';
 import { useChatAvailability } from './use-chat-availability';
 import { useLiveChatEngine } from './use-live-chat';
@@ -10,6 +12,7 @@ const ChatContext = createContext<
   | (ReturnType<typeof useLiveChatEngine> & {
       availability: ReturnType<typeof useChatAvailability>;
       help: ReturnType<typeof useChatHelp>;
+      team: ReturnType<typeof useTeamChat>;
     })
   | null
 >(null);
@@ -22,7 +25,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const engine = useLiveChatEngine();
   const availability = useChatAvailability();
   const help = useChatHelp(['live', 'reconnecting'].includes(engine.connection), engine.notifyHelp);
-  const chat = { ...engine, availability, help };
+  const team = useTeamChat(['live', 'reconnecting'].includes(engine.connection), engine.notifyHelp);
+  const chat = { ...engine, availability, help, team };
   const pathname = usePathname();
   const waiting = chat.conversations.filter(
     (row) => !row.assignedMembershipId && ['queued', 'open'].includes(row.status),
@@ -31,6 +35,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatContext.Provider value={chat}>
       {children}
+      <TeamWorkspace />
       {pathname !== '/chat' &&
         chat.connection !== 'denied' &&
         (chat.connection === 'live' || chat.conversations.length > 0) && (
@@ -44,20 +49,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }}
             >
               <strong>
-                {help.requests.some(
-                  (row) =>
-                    row.unread > 0 ||
-                    (row.incoming && ['requested', 'accepted'].includes(row.status)),
-                )
-                  ? 'Team help needs attention'
-                  : count
-                    ? `${count} unread chat${count === 1 ? '' : 's'}`
-                    : waiting.length
-                      ? `${waiting.length} waiting for help`
-                      : 'Chat inbox'}
+                {team.unread
+                  ? `${team.unread} unread team message${team.unread === 1 ? '' : 's'}`
+                  : help.requests.some(
+                        (row) =>
+                          row.unread > 0 ||
+                          (row.incoming && ['requested', 'accepted'].includes(row.status)),
+                      )
+                    ? 'Team help needs attention'
+                    : count
+                      ? `${count} unread chat${count === 1 ? '' : 's'}`
+                      : waiting.length
+                        ? `${waiting.length} waiting for help`
+                        : 'Chat inbox'}
               </strong>
               <span>{chat.connection === 'live' ? 'Open inbox →' : 'Reconnecting…'}</span>
             </Link>
+            <TeamWorkspaceButton />
             <button aria-pressed={chat.sound} onClick={() => void chat.toggleSound()}>
               {chat.sound ? 'Sound on' : 'Enable sound'}
             </button>

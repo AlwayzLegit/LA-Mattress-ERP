@@ -2,6 +2,9 @@ import { Controller, Get } from '@nestjs/common';
 import { z } from 'zod';
 import {
   CHAT_CONTRACT_VERSION,
+  chatTeamRoomSchema,
+  chatTeamMessageSchema,
+  chatTeamActionSchema,
   chatHelpMessageSchema,
   chatHelpActivitySchema,
   chatHelpRequestSchema,
@@ -81,6 +84,65 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/conversations/team/directory': {
+      get: read(
+        'Chat specialists only. Authorized help desk/store/direct rooms with unread, mention and open/urgent question counts. Active chat staff directory; no customer records.',
+      ),
+    },
+    '/v1/chat/conversations/team/rooms': {
+      post: mutation(
+        staffSecurity,
+        'Open the shared help desk, a permitted store channel, or a two-person direct conversation. Unique keys deduplicate concurrent opens.',
+        z.toJSONSchema(chatTeamRoomSchema),
+      ),
+    },
+    '/v1/chat/conversations/team/rooms/{id}/history': {
+      parameters: [
+        historyParameters[0],
+        { name: 'beforeSequence', in: 'query', schema: { type: 'integer', minimum: 1 } },
+        {
+          name: 'filter',
+          in: 'query',
+          schema: { type: 'string', enum: ['all', 'open', 'saved'], default: 'all' },
+        },
+      ],
+      get: read(
+        'Latest 100 scoped messages, with older-page cursor, current question states, saved answers, participants and typing. Direct messages remain participant-only even for managers.',
+      ),
+    },
+    '/v1/chat/conversations/team/rooms/{id}/messages': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Commit an internal message or shared help desk question. Optional urgent flag, scoped mention and reply target. Stable retry id; never publishes to visitors.',
+        z.toJSONSchema(chatTeamMessageSchema),
+      ),
+    },
+    '/v1/chat/conversations/team/rooms/{id}/messages/{messageId}': {
+      parameters: [
+        historyParameters[0],
+        {
+          name: 'messageId',
+          in: 'path',
+          required: true,
+          schema: { type: 'string', format: 'uuid' },
+        },
+      ],
+      post: mutation(
+        staffSecurity,
+        'Versioned first-person claim, release, resolve, reopen, save or unsave. Claimant/requester/manager action gates; saved answers stay in the original room.',
+        z.toJSONSchema(chatTeamActionSchema),
+      ),
+    },
+    '/v1/chat/conversations/team/rooms/{id}/activity': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Monotonic capped read cursor and typing heartbeat for an authorized room member.',
+        z.toJSONSchema(chatHelpActivitySchema),
+      ),
+    },
+
     '/v1/chat/conversations/help/{id}/discussion': {
       parameters: historyParameters,
       get: read(

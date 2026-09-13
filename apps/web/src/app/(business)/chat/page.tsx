@@ -7,6 +7,7 @@ import { Form, FormRootError, useZodForm } from '@/components/form/form';
 import { Button, PageHeader } from '@/components/ui';
 import styles from './chat.module.css';
 import { AdminControls } from './admin-controls';
+import { TeamWorkspaceButton } from './team-workspace';
 import { AskForHelp, TeamHelp } from './team-help';
 import { SalesHandoff } from './sales-handoff';
 import { ContextPanel } from './context-panel';
@@ -147,6 +148,7 @@ export default function ChatPage() {
           </div>
         </details>
       </div>
+      <TeamWorkspaceButton />
       <TeamHelp />
       <div className={styles.inboxStatus}>
         <strong>

@@ -427,3 +427,45 @@ the team-help attention alert on the dashboard.
 Local implementation only. Production rollout, authenticated live design comparison,
 upstream reconciliation, and physical desktop push delivery checks remain separate.
 Phase 3 (team channels, direct messages and shared help desk) is not implemented.
+
+## Team workspace Phase 3 - September 13, 2026
+
+Migration 0108 adds tenant-isolated team rooms, messages, and per-member activity.
+The shared help desk is available to active chat specialists across the business.
+Store channels use current ERP location scopes (shared visitor assignment does not
+bypass channel scopes). Direct rooms are keyed by the two membership ids; neither
+team-wide chat access nor chat.manage grants a third party access to a direct room.
+An inactive or permission-revoked teammate cannot receive new direct messages.
+
+Specialists can post help questions, mark them urgent, mention an eligible teammate,
+and reply to a message. The first claim wins under a transaction lock and version
+check. The claimant or manager can release a question; the requester, claimant or
+manager can resolve it; the requester or manager can reopen it. This affects only
+the team question, never customer-chat ownership. Urgency is a visible escalation
+flag, not an automatic SLA timer or external notification workflow.
+
+Authors or authorized chat managers may save a message as a reusable answer within
+that same room. Saved-answer filtering and 'Use in draft' preserve the original
+visibility and require an explicit send. Direct/store answers never automatically
+become business-wide knowledge. Unsaved drafts survive channel switching and closing
+the workspace during the current page session; reloading clears these in-memory drafts.
+
+The ERP-wide provider checks room unread/mention counts every five seconds. Open
+rooms refresh every three seconds, including claim/resolution changes and typing.
+Typing expires after six seconds. The visible latest-message view advances a capped,
+monotonic read cursor; saved/open-question filters and older pages do not silently
+mark the full conversation read. History uses 100-message pages with an older cursor.
+Alerts reuse the existing opted-in chime/desktop notification settings while ERP is
+open. This phase does not add closed-browser team push, external messaging, automatic
+routing of urgent questions, attachments, or customer-visible team messages.
+
+Validation: shared/db/API builds, web typecheck, changed-file API/web lint, formatting,
+and migration drift checks passed. The 35-test Postgres suite covers store and direct
+privacy, tenant RLS, fresh permission checks, concurrent room/message deduplication,
+first-person claims, invalid transitions, scoped mentions/replies/saved answers,
+monotonic reads, typing, and older-message pagination. Browser-tested an urgent
+question, helper claim and saved answer, resolution, saved-answer filtering/reuse,
+store and direct messages, preservation of an unsent draft across channels, and
+an unread direct-message alert while working on the ERP dashboard.
+
+Local only. No production accounts, permissions, deployments or integrations changed.

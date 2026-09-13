@@ -76,7 +76,7 @@ DO $$
 DECLARE
   t text;
   tenant_tables text[] := ARRAY[
-    'chat_integrations', 'chat_sessions', 'chat_conversations', 'chat_messages', 'chat_outbox', 'chat_push_subscriptions', 'chat_push_deliveries', 'chat_agents', 'chat_settings', 'chat_help_requests', 'chat_help_messages',
+    'chat_integrations', 'chat_sessions', 'chat_conversations', 'chat_messages', 'chat_outbox', 'chat_push_subscriptions', 'chat_push_deliveries', 'chat_agents', 'chat_settings', 'chat_help_requests', 'chat_help_messages', 'chat_team_rooms', 'chat_team_messages', 'chat_team_activity',
     'locations',
     'memberships',
     'roles',

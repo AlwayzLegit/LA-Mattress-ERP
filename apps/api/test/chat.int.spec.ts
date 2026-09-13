@@ -124,6 +124,244 @@ afterAll(async () => {
 });
 
 describe('chat persistence foundation on Postgres', () => {
+  it('isolates team rooms, atomically claims shared questions, and keeps saved answers scoped', async () => {
+    const locations = await db
+      .insert(schema.locations)
+      .values([
+        { businessId, name: 'Team store A', timezone: 'America/Los_Angeles' },
+        { businessId, name: 'Team store B', timezone: 'America/Los_Angeles' },
+      ])
+      .returning();
+    const [role] = await db
+      .insert(schema.roles)
+      .values({ businessId, name: 'Team collaboration tester' })
+      .returning();
+    await db.insert(schema.rolePermissions).values(
+      ['chat.reply', 'chat.view_assigned'].map((permission) => ({
+        roleId: role!.id,
+        permission,
+      })),
+    );
+    const users = await db
+      .insert(schema.users)
+      .values(
+        ['A', 'B'].map((name) => ({ name: 'Team ' + name, email: randomUUID() + '@example.test' })),
+      )
+      .returning();
+    const members = await db
+      .insert(schema.memberships)
+      .values(
+        users.map((user) => ({
+          businessId,
+          userId: user.id,
+          roleId: role!.id,
+          status: 'active',
+          dataScope: 'store',
+        })),
+      )
+      .returning();
+    for (let index = 0; index < 2; index++)
+      await db
+        .insert(schema.membershipLocationScopes)
+        .values({ businessId, membershipId: members[index]!.id, locationId: locations[index]!.id });
+    const [alpha, beta] = members.map((member, index) => ({
+      ...staff,
+      userId: users[index]!.id,
+      membershipId: member.id,
+      roleId: role!.id,
+      roleName: role!.name,
+      dataScope: 'store' as const,
+      permissions: new Set(['chat.view_assigned', 'chat.reply']),
+      scopeLocationIds: [locations[index]!.id],
+    }));
+    try {
+      const [desk, duplicateDesk] = await Promise.all([
+        service.openTeamRoom(staff, { kind: 'helpdesk' }),
+        service.openTeamRoom(alpha!, { kind: 'helpdesk' }),
+      ]);
+      expect(desk.id).toBe(duplicateDesk.id);
+      const storeA = await service.openTeamRoom(alpha!, {
+        kind: 'store',
+        locationId: locations[0]!.id,
+      });
+      expect(
+        (await service.openTeamRoom(staff, { kind: 'store', locationId: locations[0]!.id })).id,
+      ).toBe(storeA.id);
+      await expect(
+        service.openTeamRoom(beta!, { kind: 'store', locationId: locations[0]!.id }),
+      ).rejects.toThrow('access');
+      await expect(service.teamHistory(beta!, storeA.id)).rejects.toThrow('not found');
+      await expect(service.teamActivity(beta!, storeA.id, { typing: true })).rejects.toThrow();
+      expect((await service.teamDirectory(beta!)).rooms.some((room) => room.id === storeA.id)).toBe(
+        false,
+      );
+      const [direct, reverse] = await Promise.all([
+        service.openTeamRoom(alpha!, { kind: 'direct', memberId: beta!.membershipId }),
+        service.openTeamRoom(beta!, { kind: 'direct', memberId: alpha!.membershipId }),
+      ]);
+      expect(direct.id).toBe(reverse.id);
+      await expect(service.teamHistory(staff, direct.id)).rejects.toThrow('not found');
+      const payload = {
+        id: randomUUID(),
+        body: 'Private direct team message',
+        mentionId: beta!.membershipId,
+      };
+      const [first, retry] = await Promise.all([
+        service.sendTeamMessage(alpha!, direct.id, payload),
+        service.sendTeamMessage(alpha!, direct.id, payload),
+      ]);
+      expect(first!.id).toBe(retry!.id);
+      await expect(
+        service.sendTeamMessage(alpha!, direct.id, { ...payload, body: 'Conflicting retry' }),
+      ).rejects.toThrow('retry');
+      await expect(
+        service.sendTeamMessage(beta!, storeA.id, { id: randomUUID(), body: 'Unauthorized' }),
+      ).rejects.toThrow();
+      await expect(
+        service.sendTeamMessage(alpha!, storeA.id, {
+          id: randomUUID(),
+          body: 'Wrong mention',
+          mentionId: beta!.membershipId,
+        }),
+      ).rejects.toThrow('Mention');
+      await expect(
+        service.sendTeamMessage(alpha!, storeA.id, {
+          id: randomUUID(),
+          body: 'Wrong room reply',
+          replyToId: first!.id,
+        }),
+      ).rejects.toThrow('Reply target');
+      await expect(
+        service.sendTeamMessage(alpha!, direct.id, {
+          id: randomUUID(),
+          body: 'Invalid question',
+          question: true,
+        }),
+      ).rejects.toThrow('help desk');
+      const unread = (await service.teamDirectory(beta!)).rooms.find(
+        (room) => room.id === direct.id,
+      )!;
+      expect(unread.unread).toBe(1);
+      expect(unread.mentioned).toBe(1);
+      await service.teamActivity(beta!, direct.id, { readSequence: 999 });
+      await service.teamActivity(beta!, direct.id, { readSequence: 0 });
+      expect(
+        (await service.teamDirectory(beta!)).rooms.find((room) => room.id === direct.id)!.unread,
+      ).toBe(0);
+      await service.teamActivity(alpha!, direct.id, { typing: true });
+      expect((await service.teamHistory(beta!, direct.id)).typing).toContain('Team A');
+      await service.teamActivity(alpha!, direct.id, { typing: false });
+      expect((await service.teamHistory(beta!, direct.id)).typing).toEqual([]);
+      await db.insert(schema.chatTeamMessages).values(
+        Array.from({ length: 101 }, (_, index) => ({
+          id: randomUUID(),
+          businessId,
+          roomId: direct.id,
+          senderId: alpha!.membershipId!,
+          body: 'Older internal history ' + index,
+          sequence: index + 2,
+        })),
+      );
+      await db
+        .update(schema.chatTeamRooms)
+        .set({ lastSequence: 102 })
+        .where(eq(schema.chatTeamRooms.id, direct.id));
+      const newest = await service.teamHistory(beta!, direct.id);
+      expect(newest.data).toHaveLength(100);
+      expect(newest.hasMore).toBe(true);
+      expect(newest.data[0]!.sequence).toBe(3);
+      expect(newest.data.at(-1)!.sequence).toBe(102);
+      const older = await service.teamHistory(beta!, direct.id, {
+        beforeSequence: newest.nextBefore,
+      });
+      expect(older.data.map((message) => message.sequence)).toEqual([1, 2]);
+      expect(older.hasMore).toBe(false);
+
+      const question = await service.sendTeamMessage(staff, desk.id, {
+        id: randomUUID(),
+        body: 'Urgent synthetic stock question',
+        question: true,
+        urgent: true,
+      });
+      const claims = await Promise.allSettled([
+        service.teamMessageAction(alpha!, desk.id, question!.id, { action: 'claim', version: 1 }),
+        service.teamMessageAction(beta!, desk.id, question!.id, { action: 'claim', version: 1 }),
+      ]);
+      expect(claims.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const current = (await service.teamHistory(staff, desk.id, { filter: 'open' })).data.find(
+        (message) => message.id === question!.id,
+      )!;
+      expect(current.status).toBe('claimed');
+      expect(current.version).toBe(2);
+      const winner = current.assignedId === alpha!.membershipId ? alpha! : beta!;
+      const loser = current.assignedId === alpha!.membershipId ? beta! : alpha!;
+      await expect(
+        service.teamMessageAction(loser, desk.id, current.id, { action: 'release', version: 2 }),
+      ).rejects.toThrow();
+      await expect(
+        service.teamMessageAction(loser, desk.id, current.id, { action: 'resolve', version: 2 }),
+      ).rejects.toThrow();
+      const answer = await service.sendTeamMessage(winner, desk.id, {
+        id: randomUUID(),
+        body: 'Reusable internal test answer',
+        replyToId: current.id,
+      });
+      await expect(
+        service.teamMessageAction(loser, desk.id, answer!.id, { action: 'save', version: 1 }),
+      ).rejects.toThrow('author');
+      await service.teamMessageAction(winner, desk.id, answer!.id, { action: 'save', version: 1 });
+      const saved = await service.teamHistory(loser, desk.id, { filter: 'saved' });
+      expect(saved.data.map((message) => message.body)).toContain('Reusable internal test answer');
+      expect(JSON.stringify(saved)).not.toContain('Private direct team message');
+      await service.teamMessageAction(alpha!, direct.id, first!.id, { action: 'save', version: 1 });
+      await expect(
+        service.teamMessageAction(staff, direct.id, first!.id, { action: 'unsave', version: 2 }),
+      ).rejects.toThrow('not found');
+      await service.teamMessageAction(winner, desk.id, current.id, {
+        action: 'resolve',
+        version: 2,
+      });
+      expect((await service.teamHistory(staff, desk.id, { filter: 'open' })).data).toEqual([]);
+      expect(
+        (await service.teamDirectory(staff)).rooms.find((room) => room.id === desk.id)!.urgent,
+      ).toBe(0);
+      await service.teamMessageAction(staff, desk.id, current.id, { action: 'reopen', version: 3 });
+      expect(
+        (await service.teamDirectory(staff)).rooms.find((room) => room.id === desk.id)!.open,
+      ).toBe(1);
+      const isolated = await withDrizzleTenantContext(db, { businessId: otherBusinessId }, (tx) =>
+        tx.select().from(schema.chatTeamMessages),
+      );
+      expect(isolated.some((message) => message.id === first!.id)).toBe(false);
+      const visitor = await service.startConversation(
+        auth,
+        randomUUID(),
+        input('Public visitor privacy check'),
+      );
+      expect(
+        JSON.stringify(await service.visitorHistory(auth, visitor.conversationId)),
+      ).not.toContain('Private direct team message');
+      expect(
+        JSON.stringify(await service.visitorHistory(auth, visitor.conversationId)),
+      ).not.toContain('Reusable internal test answer');
+      await db
+        .update(schema.chatConversations)
+        .set({ status: 'resolved' })
+        .where(eq(schema.chatConversations.id, visitor.conversationId));
+      await db
+        .update(schema.memberships)
+        .set({ status: 'inactive' })
+        .where(eq(schema.memberships.id, alpha!.membershipId!));
+      await expect(service.teamHistory(alpha!, direct.id)).rejects.toThrow('Active');
+      await expect(
+        service.sendTeamMessage(beta!, direct.id, { id: randomUUID(), body: 'After deactivation' }),
+      ).rejects.toThrow('no longer');
+    } finally {
+      for (const member of members)
+        await db.delete(schema.memberships).where(eq(schema.memberships.id, member.id));
+      for (const user of users) await db.delete(schema.users).where(eq(schema.users.id, user.id));
+    }
+  });
   it('keeps help private, preserves ownership, and restricts request transitions to participants', async () => {
     const [user] = await db
       .insert(schema.users)

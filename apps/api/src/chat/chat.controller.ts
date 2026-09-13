@@ -157,6 +157,55 @@ export class ChatStaffController {
     @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
+  @Get('team/directory')
+  @RequirePermission('chat.reply')
+  @Header('Cache-Control', 'no-store')
+  teamDirectory(@CurrentTenant() tenant: RequestTenantContext) {
+    return this.chat.teamDirectory(tenant);
+  }
+  @Post('team/rooms')
+  @RequirePermission('chat.reply')
+  openTeamRoom(@CurrentTenant() tenant: RequestTenantContext, @Body() body: unknown) {
+    return this.chat.openTeamRoom(tenant, body);
+  }
+  @Get('team/rooms/:id/history')
+  @RequirePermission('chat.reply')
+  @Header('Cache-Control', 'no-store')
+  teamHistory(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ) {
+    return this.chat.teamHistory(tenant, id, query);
+  }
+  @Post('team/rooms/:id/messages')
+  @RequirePermission('chat.reply')
+  sendTeamMessage(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.sendTeamMessage(tenant, id, body);
+  }
+  @Post('team/rooms/:id/messages/:messageId')
+  @RequirePermission('chat.reply')
+  teamMessageAction(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.teamMessageAction(tenant, id, messageId, body);
+  }
+  @Post('team/rooms/:id/activity')
+  @RequirePermission('chat.reply')
+  teamActivity(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.teamActivity(tenant, id, body);
+  }
   @Get('help/:id/discussion')
   @RequirePermission('chat.reply')
   @Header('Cache-Control', 'no-store')

@@ -190,3 +190,32 @@ export const chatHelpActivitySchema = z
     typing: z.boolean().optional(),
   })
   .strict();
+
+export const chatTeamRoomSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('helpdesk') }).strict(),
+  z.object({ kind: z.literal('store'), locationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal('direct'), memberId: z.string().uuid() }).strict(),
+]);
+export const chatTeamMessageSchema = z
+  .object({
+    id: z.string().uuid(),
+    body: z.string().trim().min(1).max(4000),
+    replyToId: z.string().uuid().optional(),
+    mentionId: z.string().uuid().optional(),
+    question: z.boolean().default(false),
+    urgent: z.boolean().default(false),
+  })
+  .strict();
+export const chatTeamActionSchema = z
+  .object({
+    action: z.enum(['claim', 'release', 'resolve', 'reopen', 'save', 'unsave']),
+    version: z.number().int().positive(),
+  })
+  .strict();
+
+export const chatTeamHistorySchema = z
+  .object({
+    beforeSequence: z.coerce.number().int().positive().optional(),
+    filter: z.enum(['all', 'open', 'saved']).default('all'),
+  })
+  .strict();

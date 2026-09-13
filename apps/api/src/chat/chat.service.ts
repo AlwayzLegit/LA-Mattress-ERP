@@ -29,6 +29,7 @@ import {
   type VisitorChatMessage,
 } from '@jetnine/shared';
 import { z } from 'zod';
+import { ChatTeamService } from './chat-team.service';
 import { withinChatHours } from './chat-policy';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -60,6 +61,27 @@ export class ChatService {
     private readonly environment: 'staging' | 'production',
   ) {}
 
+  private get team() {
+    return new ChatTeamService(this.db, (tx, tenant) => this.requireStaff(tx, tenant, true));
+  }
+  teamDirectory(tenant: RequestTenantContext) {
+    return this.team.directory(tenant);
+  }
+  openTeamRoom(tenant: RequestTenantContext, body: unknown) {
+    return this.team.open(tenant, body);
+  }
+  teamHistory(tenant: RequestTenantContext, id: string, query: unknown = {}) {
+    return this.team.history(tenant, id, query);
+  }
+  sendTeamMessage(tenant: RequestTenantContext, id: string, body: unknown) {
+    return this.team.send(tenant, id, body);
+  }
+  teamMessageAction(tenant: RequestTenantContext, id: string, messageId: string, body: unknown) {
+    return this.team.action(tenant, id, messageId, body);
+  }
+  teamActivity(tenant: RequestTenantContext, id: string, body: unknown) {
+    return this.team.activity(tenant, id, body);
+  }
   private async settingsIn(tx: DrizzleTransaction, businessId: string) {
     const [row] = await tx
       .select()
