@@ -6,15 +6,15 @@ Prepared September 13, 2026. **ERP release update:** use `codex/chat-erp-release
 
 - Visitor chat, shared incoming queue, first-person acceptance, specialist help, private discussions, and team channels are implemented.
 - The consolidated migration 0105 includes background push for help invitations and unread internal messages. Existing visitor push remains supported.
-- 36 API integration tests and 8 service-worker tests pass, including privacy, read suppression, revoked access, store scopes, stale ownership, retries, and subscription cleanup.
+- 37 API integration tests and 8 service-worker tests pass, including privacy, read suppression, revoked access, store scopes, stale ownership, retries, and subscription cleanup.
 - Database/API builds and both Next.js production builds pass. Builds used isolated source copies; storefront data was fixtures and tracking was disabled.
 - Existing warnings remain outside this chat change: ERP Sentry/OpenTelemetry bundling and unrelated lint; storefront edge/static configuration and local inventory fixture counts.
 
 ## 1. Prepare the actual release branches
 
-Fetch and reconcile each current upstream project before merging the local chat commits. The ERP release branch is `codex/chat-erp-release` (reconciled through `f884801`); the storefront branch is `codex/live-chat-storefront`. Review only the intended chat changes against the current projects. Do not deploy the entire historical storefront snapshot over newer upstream work.
+Fetch and reconcile each current upstream project before merging the local chat commits. The ERP release branch is `codex/chat-erp-release` (reconciled through `f884801`); the storefront release branch is `codex/chat-storefront-release` (reconciled through `2dadf08`, with widget phases 1 and 2 included). Review only the intended chat changes against the current projects. Do not deploy the entire historical storefront snapshot over newer upstream work.
 
-Check the current authenticated ERP design with an authorized test account. Local chat uses the retrieved upstream design tokens/fonts, but authenticated live comparison is still pending. Re-run builds and scoped tests after upstream reconciliation.
+The authenticated ERP design was compared with the release shell during preparation. Local chat uses the upstream design tokens/fonts. Re-run builds and scoped tests after any further upstream reconciliation.
 
 ## 2. Create an isolated staging pilot
 
@@ -30,7 +30,7 @@ Create a chat integration for the staging business with its staging environment,
 - `LIVE_CHAT_ERP_URL` = staging API URL
 - `LIVE_CHAT_INTEGRATION_ID` and server-only `LIVE_CHAT_INTEGRATION_SECRET`
 
-Use the normal staging storefront catalog configuration. The fixture build is not evidence of a working live catalog integration.
+Use the normal staging storefront catalog configuration. The fixture build is not evidence of a working live catalog integration. Ordinary Vercel Preview deployments are read-only in this storefront; a connected pilot requires an isolated staging application environment with staging services. Preserve the fixture/review guards and do not connect a writable pilot to production data.
 
 For background push, API and push worker need `CHAT_PUSH_ENABLED=true`, `CHAT_VAPID_PUBLIC_KEY`, `CHAT_VAPID_PRIVATE_KEY`, and `CHAT_VAPID_SUBJECT`. Workers also need the correct `CHAT_BUSINESS_ID`, database and environment. Keep the VAPID private key server-side and stable across releases.
 
@@ -65,4 +65,6 @@ Only after staging passes, repeat the setup with production-specific URLs, crede
 
 If problems occur, turn off the storefront widget and disable chat API/push gates as appropriate; stop affected workers. Preserve data and diagnose before replaying failed work. Do not downgrade to a worker that assumes every delivery has a visitor conversation after internal push jobs exist. Prefer a forward fix or the matching compatible release; schema rollback requires a separately reviewed data plan.
 
-Outstanding: upstream reconciliation, staging resources/credentials and staff, authenticated live-design comparison, physical push/provider verification, and production rollout approval. None of these external steps were performed by the local readiness work.
+The paired release test loads the actual storefront adapter and calls this release's visitor HTTP controller against the isolated release database. It verifies session isolation, start retry, concurrent acceptance, ownership, private-note exclusion, streamed replies, recommendation variant links, consented follow-up capture, rating, and the storefront kill switch. Set `CHAT_STOREFRONT_ROOT` to the absolute storefront release checkout to include it in `test/chat.int.spec.ts`; otherwise it skips. Staff actions use the real service; Redis is stubbed for this test.
+
+Outstanding: refreshing upstream before merge, staging resources/credentials and staff, real catalog and hosted streaming checks, physical push/provider verification, backup/restore validation, and production rollout approval. No staging or production deployment was performed by the local readiness work.

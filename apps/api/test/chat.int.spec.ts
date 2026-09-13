@@ -1950,3 +1950,225 @@ describe('shared inbox across stores', () => {
     }
   });
 });
+
+// Optional paired-repository gate: uses the real website adapter against this release's HTTP API.
+it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
+  'connects the storefront release adapter to the ERP release over HTTP',
+  async () => {
+    const { createRequire } = await import('node:module');
+    const { readFileSync } = await import('node:fs');
+    const { ConfigService } = await import('@nestjs/config');
+    const { ChatVisitorController } = await import('../src/chat/chat.controller');
+    const { ChatHttpGuard } = await import('../src/chat/chat-http.guard');
+    const root = process.env.CHAT_STOREFRONT_ROOT!;
+    const requireSite = createRequire(join(root, 'package.json'));
+    const ts = requireSite('typescript');
+    const { NextRequest } = requireSite('next/server');
+    const previous = { ...process.env };
+    const load = (file: string, dependencies: Record<string, unknown>) => {
+      const exports = {};
+      const code = ts.transpileModule(readFileSync(join(root, file), 'utf8'), {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+          esModuleInterop: true,
+        },
+      }).outputText;
+      new Function('require', 'exports', code)(
+        (name: string) => dependencies[name] ?? requireSite(name),
+        exports,
+      );
+      return exports;
+    };
+    const config = new ConfigService({ CHAT_ENABLED: 'true', CHAT_ENVIRONMENT: 'staging' });
+    const module = await Test.createTestingModule({
+      controllers: [ChatVisitorController],
+      providers: [
+        ChatHttpGuard,
+        { provide: ChatService, useValue: service },
+        { provide: ConfigService, useValue: config },
+        { provide: REDIS, useValue: { eval: async () => 1 } },
+      ],
+    }).compile();
+    const app = module.createNestApplication({ logger: false });
+    let secondUserId: string | undefined;
+    try {
+      await app.listen(0, '127.0.0.1');
+      Object.assign(process.env, {
+        NODE_ENV: 'test',
+        LIVE_CHAT_ENABLED: 'true',
+        LIVE_CHAT_ERP_URL: await app.getUrl(),
+        LIVE_CHAT_SITE_ORIGIN: 'https://paired-shop.test',
+        LIVE_CHAT_INTEGRATION_ID: auth.integrationId,
+        LIVE_CHAT_INTEGRATION_SECRET: auth.credential,
+        NEXT_PUBLIC_STOREFRONT_MODE: '',
+        NEXT_PUBLIC_STOREFRONT_REVIEW: '',
+      });
+      const mode = load('lib/storefront-mode.ts', {});
+      const adapter = load('lib/chat/live-chat-server.ts', { '../storefront-mode': mode }) as {
+        liveChatRequest: (request: Request) => Promise<Response>;
+      };
+      let cookie = '';
+      const post = (data: object, extra: Record<string, string> = {}) =>
+        adapter.liveChatRequest(
+          new NextRequest('https://paired-shop.test/api/live-chat', {
+            method: 'POST',
+            headers: {
+              origin: 'https://paired-shop.test',
+              'content-type': 'application/json',
+              'x-live-chat': '1',
+              cookie,
+              ...extra,
+            },
+            body: JSON.stringify(data),
+          }),
+        );
+      const get = (query: string, signal?: AbortSignal, visitorCookie = cookie) =>
+        adapter.liveChatRequest(
+          new NextRequest(`https://paired-shop.test/api/live-chat?${query}`, {
+            headers: { cookie: visitorCookie },
+            signal,
+          }),
+        );
+      const session = await post({ operation: 'session' });
+      expect(session.status).toBe(200);
+      expect(await session.json()).toEqual({ ready: true });
+      expect(session.headers.get('set-cookie')).toContain('HttpOnly');
+      cookie = session.headers.get('set-cookie')!.split(';')[0]!;
+
+      await db
+        .insert(schema.rolePermissions)
+        .values(
+          ['chat.assign', 'chat.manage'].map((permission) => ({
+            roleId: staff.roleId!,
+            permission,
+          })),
+        )
+        .onConflictDoNothing();
+      staff.permissions.add('chat.assign');
+      staff.permissions.add('chat.manage');
+      const settings = await service.settings(staff);
+      await service.settings(staff, {
+        version: settings.version,
+        config: {
+          ...settings.config,
+          enabled: true,
+          sharedInbox: true,
+          autoAssign: false,
+          hoursEnabled: false,
+        },
+      });
+      const payload = {
+        operation: 'start',
+        clientConversationId: randomUUID(),
+        ...input('Paired release question'),
+        context: { topic: 'mattress', locationId: null, pagePath: '/products/test-mattress' },
+      };
+      const started = await post(payload);
+      expect(started.status).toBe(200);
+      const first = await started.json();
+      const id = first.conversationId;
+      const retry = await post(payload);
+      expect((await retry.json()).message.id).toBe(first.message.id);
+      const context = await service.context(staff, id);
+      expect(context.context).toMatchObject(payload.context);
+      expect(
+        (
+          await post(
+            { ...payload, clientConversationId: randomUUID() },
+            { origin: 'https://untrusted.test' },
+          )
+        ).status,
+      ).toBe(403);
+
+      const [secondUser] = await db
+        .insert(schema.users)
+        .values({ email: `paired-${randomUUID()}@example.test` })
+        .returning();
+      secondUserId = secondUser!.id;
+      const [secondMember] = await db
+        .insert(schema.memberships)
+        .values({ businessId, userId: secondUserId, roleId: staff.roleId!, status: 'active' })
+        .returning();
+      const second = { ...staff, userId: secondUserId, membershipId: secondMember!.id };
+      const [beforeClaim] = await db
+        .select()
+        .from(schema.chatConversations)
+        .where(eq(schema.chatConversations.id, id));
+      const claims = await Promise.allSettled(
+        [staff, second].map((person) =>
+          service.workflow(person, id, { action: 'claim', version: beforeClaim!.version }),
+        ),
+      );
+      expect(claims.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const winner = claims[0]!.status === 'fulfilled' ? staff : second;
+      const loser = winner === staff ? second : staff;
+      await expect(service.sendStaffMessage(loser, id, input('Wrong owner'))).rejects.toThrow();
+      const recommendation =
+        'https://www.mattressstoreslosangeles.com/products/test-mattress#variant=123';
+      const reply = await service.sendStaffMessage(winner, id, input(recommendation));
+      await service.sendStaffMessage(winner, id, input('INTERNAL paired note'), 'note');
+      const history = await get(`conversationId=${id}&afterSequence=0`);
+      expect(history.status).toBe(200);
+      const historyText = await history.text();
+      expect(historyText).toContain(recommendation);
+      expect(historyText).not.toContain('INTERNAL paired note');
+      const tools = load('lib/chat/shopping-context.ts', {}) as {
+        productReferences: (body: string, origin: string) => unknown[];
+      };
+      expect(tools.productReferences(recommendation, 'https://paired-shop.test')).toEqual([
+        { handle: 'test-mattress', variant: '123', href: '/products/test-mattress#variant=123' },
+      ]);
+
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), 8000);
+      try {
+        const stream = await get(
+          `operation=live&conversationId=${id}&afterSequence=${reply.sequence}`,
+          abort.signal,
+        );
+        expect(stream.status).toBe(200);
+        expect(stream.headers.get('content-type')).toContain('text/event-stream');
+        await service.sendStaffMessage(winner, id, input('Fresh paired stream reply'));
+        const reader = stream.body!.getReader();
+        let received = '';
+        while (!received.includes('Fresh paired stream reply')) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          received += new TextDecoder().decode(chunk.value);
+        }
+        expect(received).toContain('Fresh paired stream reply');
+        expect(received).not.toContain('INTERNAL paired note');
+      } finally {
+        clearTimeout(timer);
+        abort.abort();
+      }
+      const followup = {
+        operation: 'followup',
+        conversationId: id,
+        name: 'Paired local test',
+        method: 'email',
+        contact: 'paired@example.test',
+        consent: true,
+      };
+      expect((await post({ ...followup, consent: false })).status).toBe(400);
+      expect((await post(followup)).status).toBe(200);
+      expect(JSON.stringify(await service.followup(winner, id))).toContain('paired@example.test');
+      const originalCookie = cookie;
+      cookie = '';
+      const other = await post({ operation: 'session' });
+      const otherCookie = other.headers.get('set-cookie')!.split(';')[0]!;
+      expect((await get(`conversationId=${id}`, undefined, otherCookie)).status).toBe(404);
+      cookie = originalCookie;
+      expect((await post({ operation: 'end', conversationId: id })).status).toBe(200);
+      expect((await post({ operation: 'rating', conversationId: id, rating: 5 })).status).toBe(200);
+      process.env.LIVE_CHAT_ENABLED = 'false';
+      expect((await get(`conversationId=${id}`)).status).toBe(503);
+    } finally {
+      await app.close();
+      if (secondUserId) await db.delete(schema.users).where(eq(schema.users.id, secondUserId));
+      for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+      Object.assign(process.env, previous);
+    }
+  },
+);
