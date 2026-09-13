@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { Button } from '@/components/ui';
+import { PassChatButton } from './available-team';
 import { useLiveChat } from './chat-provider';
 import type { TeamPerson } from './use-team-chat';
 import styles from './chat.module.css';
@@ -120,6 +121,9 @@ export function TeamWorkspace() {
         </div>
         <Button onClick={() => team.setOpen(false)}>Close workspace</Button>
       </header>
+      {team.directTarget?.roomId === team.roomId && (
+        <PassChatButton memberId={team.directTarget.id} name={team.directTarget.name} />
+      )}
       <div className={styles.workspaceGrid}>
         <nav className={styles.teamRoomList} aria-label="Team conversations">
           <Button disabled={busy} onClick={() => void openRoom({ kind: 'helpdesk' })}>

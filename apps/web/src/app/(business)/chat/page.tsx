@@ -10,8 +10,7 @@ import { ChatArchive } from './chat-archive';
 import { AvailableTeam } from './available-team';
 import { AdminControls } from './admin-controls';
 import { TeamWorkspaceButton } from './team-workspace';
-import { AskForHelp, TeamHelp } from './team-help';
-import { SalesHandoff } from './sales-handoff';
+import { TeamHelp } from './team-help';
 import { ContextPanel } from './context-panel';
 import { useVisitorActivity, VisitorPage, VisitorDraft } from './visitor-activity';
 import { TeamControls } from './team-controls';
@@ -126,6 +125,7 @@ export default function ChatPage() {
         title="Live chat"
         sub="Talk with website visitors and keep the conversation together."
       />
+      <AvailableTeam />
       <div className={styles.layout}>
         <aside className={styles.queue} aria-label="Conversation queue">
           <div className={styles.queueHeading}>
@@ -183,7 +183,11 @@ export default function ChatPage() {
             </p>
           )}
           {visible.map((conversation) => (
-            <div key={conversation.id} className={styles.queueCard}>
+            <div
+              key={conversation.id}
+              className={styles.queueCard}
+              data-visitor-away={conversation.visitorOnline === false}
+            >
               <button
                 className={styles.item}
                 aria-pressed={selected === conversation.id}
@@ -202,13 +206,24 @@ export default function ChatPage() {
                 {unread.includes(conversation.id) && (
                   <span className={styles.badge}>● New message</span>
                 )}
-                <small>
+                <small
+                  className={conversation.assignedMembershipId ? styles.agentBadge : undefined}
+                >
                   {conversation.assignedToMe
-                    ? 'Assigned to you'
+                    ? `${conversation.assignedName || 'You'}`
                     : conversation.assignedMembershipId
-                      ? `With ${conversation.assignedName || 'a teammate'}`
+                      ? `${conversation.assignedName || 'Teammate'}`
                       : 'Unassigned'}
                 </small>
+                {!conversation.assignedMembershipId &&
+                  conversation.status === 'queued' &&
+                  conversation.assignedAt &&
+                  !conversation.acceptedAt && (
+                    <span className={styles.badge}>Takeover requested</span>
+                  )}
+                {conversation.visitorOnline === false && (
+                  <span className={styles.visitorAway}>Visitor away</span>
+                )}
                 {conversation.overdue && (
                   <span className={styles.badge} data-tone="risk">
                     ▲ Reply overdue
@@ -222,17 +237,12 @@ export default function ChatPage() {
                 <p className={styles.messagePreview}>
                   {conversation.preview || 'Open conversation to view messages'}
                 </p>
-                {conversation.visitorName && <small>Name provided by visitor</small>}
                 <span>
                   {conversation.awaitingSince &&
                   !['resolved', 'spam', 'snoozed'].includes(conversation.status)
                     ? `Waiting ${Math.max(0, Math.floor((now - new Date(conversation.awaitingSince).getTime()) / 60000))} min for a reply`
                     : (statusLabels[conversation.status] ?? conversation.status)}
                 </span>
-                <small>
-                  #{conversation.id.slice(0, 8)} ·{' '}
-                  {new Date(conversation.updatedAt).toLocaleDateString()}
-                </small>
               </button>
               {!conversation.assignedMembershipId &&
                 ['queued', 'open'].includes(conversation.status) && (
@@ -308,7 +318,6 @@ export default function ChatPage() {
         <TeamWorkspaceButton />
         <TeamHelp />
       </div>
-      <AvailableTeam />
       <div className={styles.inboxStatus}>
         <strong>
           {waitingCount
@@ -611,9 +620,6 @@ function ConversationPanel({
             </div>
           </details>
         </div>
-        {conversation?.assignedToMe && !['resolved', 'spam'].includes(conversation.status) && (
-          <AskForHelp id={id} />
-        )}
         <FollowupPanel id={id} version={conversation?.version} />
         {error && (
           <p role="alert" className={styles.error}>
@@ -738,51 +744,6 @@ function ConversationPanel({
               Private note
             </Button>
           </div>
-          <SalesHandoff
-            id={id}
-            enabled={Boolean(conversation?.assignedToMe)}
-            onSaved={() => refresh.current()}
-          />
-          {!note && (
-            <label className={styles.quickReply}>
-              Saved reply
-              <select
-                className="input"
-                value=""
-                disabled={form.formState.isSubmitting || !conversation?.assignedToMe}
-                onChange={(event) => {
-                  if (event.target.value)
-                    form.setValue('body', event.target.value, { shouldDirty: true });
-                }}
-              >
-                <option value="">Choose a reply to edit...</option>
-                <option value="Hi! Thanks for reaching out to LA Mattress. How can I help?">
-                  Welcome
-                </option>
-                <option value="What mattress size and comfort level are you looking for?">
-                  Mattress preferences
-                </option>
-                <option value="Which showroom would you like to visit, and what day works for you?">
-                  Showroom visit
-                </option>
-                <option value="Do you have a budget range in mind? I can use that to help narrow down the options.">
-                  Budget
-                </option>
-                <option value="When are you hoping to have your new mattress?">
-                  Purchase timing
-                </option>
-                <option value="Which mattresses are you considering, and what matters most to you when comparing them?">
-                  Compare options
-                </option>
-                <option value="What would be most helpful next: comparing a few options, planning a showroom visit, or checking delivery details?">
-                  Agree on next step
-                </option>
-                <option value="Thank you for your patience. I am checking that for you.">
-                  Checking details
-                </option>
-              </select>
-            </label>
-          )}
           <Form
             form={form}
             onSubmit={async ({ body }) => {

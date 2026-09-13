@@ -24,6 +24,11 @@ export function useTeamChat(enabled: boolean, notify: () => void) {
   const [directory, setDirectory] = useState<Directory | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const [directTarget, setDirectTarget] = useState<{
+    id: string;
+    name: string;
+    roomId: string;
+  } | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const active = useRef(enabled);
   active.current = enabled;
@@ -80,6 +85,8 @@ export function useTeamChat(enabled: boolean, notify: () => void) {
     };
   }, [enabled, refresh]);
   return {
+    directTarget,
+    setDirectTarget,
     directory,
     error,
     open,

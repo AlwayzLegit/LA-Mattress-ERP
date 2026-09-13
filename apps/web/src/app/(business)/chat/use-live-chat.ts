@@ -215,6 +215,7 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
     if (process.env.NEXT_PUBLIC_LIVE_CHAT_ENABLED !== 'true') return;
     let previous: Map<string, number> | null = null;
     let assignments = new Map<string, string | null>();
+    let myAssignments = new Set<string>();
     let disposed = false;
     let revoked = false;
     let lastConnect = Date.now();
@@ -236,13 +237,14 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
         const { conversations: rows } = JSON.parse((event as MessageEvent).data) as {
           conversations: LiveConversation[];
         };
-        const passes = incomingHandoffs(assignments, rows);
-        assignments = new Map(
-          rows.map((row) => [row.id, row.assignedToMe ? (row.assignedAt ?? null) : null]),
+        const passes = incomingHandoffs(assignments, rows).filter(
+          (row) => row.assignedToMe || !myAssignments.has(row.id),
         );
+        myAssignments = new Set(rows.filter((row) => row.assignedToMe).map((row) => row.id));
+        assignments = new Map(rows.map((row) => [row.id, row.assignedAt ?? null]));
         if (passes.length) {
           setUnread((old) => [...new Set([...old, ...passes.map((row) => row.id)])]);
-          setLatest('A chat was passed to you. Open it and accept to respond.');
+          setLatest('A teammate needs a handoff. Open the chat and accept to take over.');
           for (const row of passes) {
             if (!policyRef.current?.enabled || (!soundRef.current && !notificationRef.current))
               continue;
@@ -258,10 +260,15 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
               Notification.permission === 'granted'
             ) {
               try {
-                const alert = new Notification('LA Mattress · Chat passed to you', {
-                  body: 'A teammate needs you to take over. Open the chat and accept.',
-                  tag: `handoff-${row.id}`,
-                });
+                const alert = new Notification(
+                  row.assignedToMe
+                    ? 'LA Mattress · Chat passed to you'
+                    : 'LA Mattress · Takeover requested',
+                  {
+                    body: 'A teammate needs you to take over. Open the chat and accept.',
+                    tag: `handoff-${row.id}`,
+                  },
+                );
                 alert.onclick = () => {
                   window.focus();
                   select(row.id);

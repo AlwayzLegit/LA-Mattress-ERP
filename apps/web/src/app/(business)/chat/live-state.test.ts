@@ -52,3 +52,19 @@ describe('handoff alerts', () => {
     ).toEqual([]);
   });
 });
+
+it('alerts available staff once when an existing chat is passed back to the team', () => {
+  const queued = {
+    ...row('pass', 3),
+    status: 'queued',
+    assignedMembershipId: null,
+    acceptedAt: null,
+    assignedAt: '2026-09-13T14:00:00Z',
+    canTakeOver: true,
+  };
+  const previous = new Map([['pass', '2026-09-13T13:00:00Z']]);
+  expect(incomingHandoffs(previous, [queued])).toEqual([queued]);
+  expect(incomingHandoffs(previous, [{ ...queued, canTakeOver: false }])).toEqual([]);
+  expect(incomingHandoffs(new Map(), [queued])).toEqual([]);
+  expect(incomingHandoffs(new Map([['pass', queued.assignedAt]]), [queued])).toEqual([]);
+});

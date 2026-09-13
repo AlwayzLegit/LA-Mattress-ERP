@@ -103,47 +103,6 @@ export function ContextPanel({
                 : 'Not linked to a verified customer'}
             </dd>
           </dl>
-          <details open className={styles.detailSection}>
-            <summary>Pass chat to an available teammate</summary>
-            <p>Choose someone available to continue this conversation.</p>
-            <label>
-              Available teammate
-              <select value={member} onChange={(e) => setMember(e.target.value)}>
-                <option value="">Choose teammate</option>
-                {details.agents.map((agent) => (
-                  <option
-                    key={agent.id}
-                    value={agent.id}
-                    disabled={!agent.available || agent.workload >= agent.capacity}
-                  >
-                    {agent.name} ({agent.workload}/{agent.capacity})
-                    {!agent.available ? ' · away' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              disabled={busy || !member}
-              onClick={() =>
-                void save('transfer', { membershipId: member, version: details.version })
-              }
-            >
-              Pass chat
-            </Button>
-          </details>
-          <details className={styles.detailSection}>
-            <summary>Team saved replies</summary>
-            <p>Choose a reply, then edit it before sending.</p>
-            {details.templates.length ? (
-              details.templates.map((template, index) => (
-                <Button key={index} onClick={() => onTemplate(template.body)}>
-                  {template.title}
-                </Button>
-              ))
-            ) : (
-              <p>A manager can add replies in chat administration.</p>
-            )}
-          </details>
           <details className={styles.detailSection}>
             <summary>Link an existing customer</summary>
             <p>

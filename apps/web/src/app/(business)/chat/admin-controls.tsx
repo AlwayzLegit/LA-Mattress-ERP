@@ -304,59 +304,6 @@ export function AdminControls() {
               onChange={(e) => update({ acceptanceMinutes: Number(e.target.value) })}
             />
           </label>
-          <fieldset>
-            <legend>Saved replies</legend>
-            {settings.config.templates.map((template, index) => (
-              <div key={index}>
-                <input
-                  aria-label={`Reply ${index + 1} title`}
-                  value={template.title}
-                  maxLength={80}
-                  onChange={(e) =>
-                    update({
-                      templates: settings.config.templates.map((row, i) =>
-                        i === index ? { ...row, title: e.target.value } : row,
-                      ),
-                    })
-                  }
-                />
-                <textarea
-                  aria-label={`Reply ${index + 1} text`}
-                  value={template.body}
-                  maxLength={4000}
-                  onChange={(e) =>
-                    update({
-                      templates: settings.config.templates.map((row, i) =>
-                        i === index ? { ...row, body: e.target.value } : row,
-                      ),
-                    })
-                  }
-                />
-                <Button
-                  type="button"
-                  onClick={() =>
-                    update({ templates: settings.config.templates.filter((_, i) => i !== index) })
-                  }
-                >
-                  Remove reply
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              disabled={settings.config.templates.length >= 50}
-              onClick={() =>
-                update({
-                  templates: [
-                    ...settings.config.templates,
-                    { title: 'New reply', body: 'Hello! How can we help?' },
-                  ],
-                })
-              }
-            >
-              Add saved reply
-            </Button>
-          </fieldset>
           <label>
             Retention days for resolved/spam chats (blank keeps history)
             <input

@@ -16,6 +16,8 @@ export type LiveConversation = {
   visitorReadSequence?: number;
   staffReadSequence?: number;
   visitorTyping?: boolean;
+  visitorOnline?: boolean | null;
+  canTakeOver?: boolean;
   status: string;
   updatedAt: string;
   lastSequence: number;
@@ -35,8 +37,11 @@ export function incomingConversations(
 export function incomingHandoffs(previous: Map<string, string | null>, rows: LiveConversation[]) {
   return rows.filter(
     (row) =>
-      row.assignedToMe &&
-      row.status === 'open' &&
+      ((row.assignedToMe && row.status === 'open') ||
+        (!row.assignedMembershipId &&
+          row.status === 'queued' &&
+          row.canTakeOver &&
+          previous.has(row.id))) &&
       !row.acceptedAt &&
       row.assignedAt &&
       previous.get(row.id) !== row.assignedAt,

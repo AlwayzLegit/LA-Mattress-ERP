@@ -1727,6 +1727,10 @@ export class ChatService {
             assignedToMe: sql<boolean>`${conversations.assignedMembershipId} = ${tenant.membershipId}`,
             visitorReadSequence: conversations.visitorReadSequence,
             staffReadSequence: conversations.staffReadSequence,
+            canTakeOver: sql<boolean>`exists(select 1 from chat_agents ca where ca.business_id = "chat_conversations"."business_id" and ca.membership_id = ${tenant.membershipId} and ca.available = true and ca.heartbeat_until > now())`,
+            visitorOnline: sql<
+              boolean | null
+            >`case when ${conversations.contextJson}->>'visitorSeenAt' is null then null else (${conversations.contextJson}->>'visitorSeenAt')::timestamptz > now() - interval '45 seconds' end`,
             visitorTyping: sql<boolean>`coalesce(${conversations.visitorTypingUntil} > now(), false)`,
             status: conversations.status,
             updatedAt: conversations.updatedAt,
@@ -2140,6 +2144,7 @@ export class ChatService {
                   ...(typeof row.contextJson === 'object' && row.contextJson !== null
                     ? row.contextJson
                     : {}),
+                  visitorSeenAt: new Date().toISOString(),
                   currentPage: parsed.data.currentPage
                     ? { ...parsed.data.currentPage, seenAt: new Date().toISOString() }
                     : null,
@@ -2244,7 +2249,14 @@ export class ChatService {
                   status: 'open',
                 }
               : {}),
-            ...(action === 'release' ? { assignedMembershipId: null, status: 'queued' } : {}),
+            ...(action === 'release'
+              ? {
+                  assignedMembershipId: null,
+                  status: 'queued',
+                  assignedAt: new Date(),
+                  acceptedAt: null,
+                }
+              : {}),
             ...(action === 'resolve'
               ? { status: 'resolved', resolvedAt: new Date(), awaitingSince: null }
               : {}),

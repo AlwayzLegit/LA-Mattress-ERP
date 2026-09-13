@@ -1566,3 +1566,48 @@
 .archiveTranscript time { display: block; font-size: 11px; color: var(--muted); }
 .archiveTranscript article p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
 @media (max-width: 760px) { .archiveGrid { grid-template-columns: minmax(0,1fr); } }
+
+/* Compact operator workspace. Keep team coordination above the inbox. */
+.root { gap: 10px; }
+.layout { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); height: max(630px, calc(100dvh - 235px)); }
+.availableTeam { padding: 10px 12px; }
+.availableTeamHeading { align-items: center; }
+.availableTeamList { margin-top: 6px; gap: 6px; }
+.availableTeamList li { padding: 0; border: 0; background: transparent; }
+.availableTeamList button, .item .agentBadge { display: inline-flex; align-items: center; gap: 6px; width: fit-content; border: 1px solid var(--status-fulfilled-border); border-radius: 5px; color: var(--status-fulfilled-fg); background: var(--status-fulfilled-bg); padding: 3px 7px; font-size: 11px; font-weight: 600; }
+.availableTeamList button { cursor: pointer; min-height: 30px; }
+.availableTeamList button:disabled { opacity: .8; cursor: default; }
+.availableTeamList button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.passControl { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.passControl small { font-size: 11px; color: var(--muted); }
+.queue { padding-top: 10px; overflow: auto; }
+.queueHeading h2 { font-size: 14px; margin-bottom: 6px; }
+.queueTabs { margin-bottom: 8px; gap: 2px; }
+.queueTabs button { padding: 5px 6px; font-size: 11px; }
+.queue > input, .queue > select { min-height: 30px; font-size: 12px; margin-bottom: 7px; }
+.queue > label { font-size: 10px; }
+.queueNotice { padding: 5px 10px; font-size: 11px; }
+.queueCard .item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 10px 12px; margin: 0; }
+.itemTop { width: 100%; gap: 4px; }
+.itemTop strong { font-size: 12px; }
+.itemTop time { font-size: 10px; white-space: nowrap; }
+.item .badge, .item .visitorAway { font-size: 10px; line-height: 1.3; padding: 2px 5px; border-radius: 4px; }
+.item .messagePreview { width: 100%; margin: 2px 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 12px; line-height: 1.4; }
+.item > span:not(.badge):not(.visitorAway) { font-size: 10px; }
+.queueCard[data-visitor-away='true'], .queueCard[data-visitor-away='true'] .item { background: var(--surface-2); }
+.queueCard[data-visitor-away='true'] .item[aria-pressed='true'] { background: #e8e9eb; box-shadow: inset 3px 0 var(--accent); }
+.item .visitorAway { background: #e2e4e7; color: #505862; border: 1px solid #ccd0d6; }
+.acceptQueue { padding: 5px 12px; font-size: 11px; }
+.heading { padding: 12px 16px 8px; }
+.heading h2 { font-size: 16px; }
+.history { padding: 14px 16px; gap: 10px; }
+.message { padding: 9px 12px; }
+.message p { margin-top: 4px; line-height: 1.5; }
+.composer { padding: 12px 16px; }
+.modes { margin-bottom: 8px; }
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .queue { max-height: 340px; }
+  .availableTeamHeading { gap: 8px; }
+  .conversation { height: max(620px, 80dvh); }
+}

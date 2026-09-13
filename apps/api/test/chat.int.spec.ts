@@ -1286,7 +1286,22 @@ describe('chat workflow, activity and push', () => {
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const updated = (await service.staffLiveSnapshot(staff)).find((r) => r.id === row.id)!;
     expect(updated.assignedToMe).toBe(true);
-    await service.workflow(staff, row.id, { action: 'resolve', version: updated.version });
+    const released = await service.workflow(staff, row.id, {
+      action: 'release',
+      version: updated.version,
+    });
+    const offered = (await service.staffLiveSnapshot(staff)).find((r) => r.id === row.id)!;
+    expect(offered).toMatchObject({
+      status: 'queued',
+      assignedMembershipId: null,
+      acceptedAt: null,
+    });
+    expect(offered.assignedAt).toBeTruthy();
+    const reclaimed = await service.workflow(staff, row.id, {
+      action: 'claim',
+      version: released.version,
+    });
+    await service.workflow(staff, row.id, { action: 'resolve', version: reclaimed.version });
     expect((await service.staffLiveSnapshot(staff)).find((r) => r.id === row.id)?.status).toBe(
       'resolved',
     );
@@ -2125,6 +2140,9 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
         currentPage: { path: '/products/test-mattress', title: 'Test mattress' },
       };
       expect((await post(pageActivity)).status).toBe(200);
+      expect((await service.staffLiveSnapshot(staff)).find((r) => r.id === id)?.visitorOnline).toBe(
+        true,
+      );
       expect((await service.context(staff, id)).context).toMatchObject({
         ...payload.context,
         currentPage: {
