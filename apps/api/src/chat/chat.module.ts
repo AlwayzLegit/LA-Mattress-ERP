@@ -9,11 +9,17 @@ import { ChatService } from './chat.service';
 import { ChatHttpGuard } from './chat-http.guard';
 import { ChatStaffController, ChatVisitorController } from './chat.controller';
 import { ChatOpenApiController } from './chat-openapi';
+import { ChatBackground, createChatBackground } from './chat-background';
 @Module({
   imports: [TenancyModule],
   controllers: [ChatStaffController, ChatVisitorController, ChatOpenApiController],
   providers: [
     ChatHttpGuard,
+    {
+      provide: ChatBackground,
+      inject: [ROOT_DRIZZLE, ChatService],
+      useFactory: (db: PostgresJsDatabase, chat: ChatService) => createChatBackground(db, chat, process.env),
+    },
     {
       provide: ChatService,
       inject: [ROOT_DRIZZLE, ConfigService, REDIS],

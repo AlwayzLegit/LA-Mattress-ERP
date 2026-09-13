@@ -68,3 +68,11 @@ If problems occur, turn off the storefront widget and disable chat API/push gate
 The paired release test loads the actual storefront adapter and calls this release's visitor HTTP controller against the isolated release database. It verifies session isolation, start retry, concurrent acceptance, ownership, private-note exclusion, streamed replies, recommendation variant links, consented follow-up capture, rating, and the storefront kill switch. Set `CHAT_STOREFRONT_ROOT` to the absolute storefront release checkout to include it in `test/chat.int.spec.ts`; otherwise it skips. Staff actions use the real service; Redis is stubbed for this test.
 
 Outstanding: refreshing upstream before merge, staging resources/credentials and staff, real catalog and hosted streaming checks, physical push/provider verification, backup/restore validation, and production rollout approval. No staging or production deployment was performed by the local readiness work.
+
+## Launch using the existing API service
+
+Set `CHAT_EMBEDDED_WORKERS=true` on the API to run delivery, maintenance and (when `CHAT_PUSH_ENABLED=true`) push jobs inside the API process. This mode defaults off. Do not also start dedicated chat workers for this launch configuration. It shares the existing database pool, limits each job to one in-flight invocation, waits between jobs, and retries unexpected failures after five seconds. Database-backed delivery leases remain recoverable after a crash. SIGTERM/SIGINT shutdown hooks drain active jobs before closing the pool.
+
+Required API configuration: `CHAT_ENABLED=true`, `CHAT_ENVIRONMENT=production`, `CHAT_BUSINESS_ID`, `ABLY_API_KEY`, and the previously documented origins/integration settings. Push additionally needs VAPID public/private keys and subject. Configure secrets in hosting settings, never in source. No separate paid staging or worker services are required by this mode.
+
+Local lifecycle tests cover error recovery, independent job progress, non-overlap, shutdown draining and disabled defaults. This is not a production capacity certification: monitor API latency, memory, database connections and oldest pending delivery jobs during a staffed launch. API availability now also controls background job availability. Split out workers later if resource pressure or delivery lag warrants it.

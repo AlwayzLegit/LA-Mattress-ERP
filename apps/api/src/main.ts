@@ -15,6 +15,7 @@ async function bootstrap() {
     rawBody: true,
   });
   app.useLogger(app.get(Logger));
+  app.enableShutdownHooks();
   // STORIS import CSVs arrive as JSON body text; the express default of
   // 100kb would reject any real export file.
   app.useBodyParser('json', { limit: '25mb' });
