@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Mail, PackageCheck, Printer, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,6 +26,7 @@ import {
   StatusBadge,
   TableWrap,
   Toolbar,
+  useFocusTrap,
 } from '@/components/ui';
 
 interface PoLine {
@@ -636,11 +637,20 @@ function DeleteDraftDialog({
   const [typed, setTyped] = useState('');
   const armed = typed.trim().toUpperCase() === po.number.toUpperCase();
   const linked = po.lines.reduce((n, l) => n + l.linkedOrders.length, 0);
+  // Escape closes, focus stays inside and returns to the opener (Phase 12).
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, {
+    onClose: () => {
+      if (!busy) onCancel();
+    },
+  });
 
   return (
     <div
+      ref={panel}
       role="dialog"
       aria-modal
+      aria-label={`Delete draft ${po.number}`}
       data-testid="delete-po-dialog"
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4"
       onClick={(e) => {

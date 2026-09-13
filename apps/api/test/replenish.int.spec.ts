@@ -35,6 +35,7 @@ let storeId = '';
 let helixId = '';
 let tempurId = '';
 let variantAId = '';
+let mattressesId = '';
 let variantBId = '';
 let variantCId = '';
 let so1LineId = '';
@@ -129,6 +130,20 @@ async function seed(): Promise<void> {
 
     // A: Helix by preferred vendor; B: Tempur by brand name, carton of 6,
     // safety 20 / pack 12; C: no vendor anywhere.
+    // A22.1 tree: A is filed on "Mattresses › Hybrid", B on "Pillows".
+    const [mattresses] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Mattresses', position: 0 })
+      .returning({ id: schema.categories.id });
+    mattressesId = mattresses!.id;
+    const [hybrid] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Hybrid', parentId: mattressesId, position: 1 })
+      .returning({ id: schema.categories.id });
+    const [pillows] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Pillows', position: 1 })
+      .returning({ id: schema.categories.id });
     const [pA] = await db
       .insert(schema.products)
       .values({
@@ -136,6 +151,7 @@ async function seed(): Promise<void> {
         sku: 'HEXMIC_FP-7680',
         name: 'E KING MIDNIGHT-LUXE',
         collectionId: collection!.id,
+        categoryId: hybrid!.id,
       })
       .returning({ id: schema.products.id });
     const [vA] = await db
@@ -157,6 +173,7 @@ async function seed(): Promise<void> {
         sku: 'TP-PILLOW',
         name: 'QUEEN CLOUD PILLOW',
         brandId: brand!.id,
+        categoryId: pillows!.id,
         purchaseCartonQty: 6,
       })
       .returning({ id: schema.products.id });
@@ -447,6 +464,14 @@ describe('Allocated order replenishment', () => {
     expect(tempur.groups.map((g) => g.vendorName)).toEqual(['Tempur']);
     const text = await run({ mode: 'allocated_order', q: 'orphan' });
     expect(text.groups.map((g) => g.vendorName)).toEqual([null]);
+    // A22.1: the root category keeps the products filed on its
+    // subcategories, and every line reads its full path.
+    const byRoot = await run({ mode: 'allocated_order', categoryId: mattressesId });
+    expect(byRoot.groups.map((g) => g.vendorName)).toEqual(['Helix']);
+    expect(lineOf(byRoot, 'Helix', variantAId)).toMatchObject({
+      categoryName: 'Hybrid',
+      categoryPath: 'Mattresses › Hybrid',
+    });
     await as(ownerCookie)
       .post('/v1/purchasing/replenish/run')
       .send({ mode: 'allocated_order', deliveryStatuses: ['bogus'] })

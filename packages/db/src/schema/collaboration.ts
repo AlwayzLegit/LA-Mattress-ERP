@@ -69,9 +69,11 @@ export const memberNotifications = pgTable(
     actorMembershipId: uuid('actor_membership_id').references(() => memberships.id, {
       onDelete: 'set null',
     }),
-    orderId: uuid('order_id')
-      .notNull()
-      .references(() => orders.id, { onDelete: 'cascade' }),
+    /**
+     * Null for notices that are not about an order — a competition
+     * overtake (redesign Phase 11). Every task / note notice keeps its order.
+     */
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id').references(() => orderTasks.id, { onDelete: 'cascade' }),
     noteId: uuid('note_id').references(() => orderNotes.id, { onDelete: 'cascade' }),
     kind: text('kind').notNull(),

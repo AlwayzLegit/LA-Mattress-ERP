@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
-import { Alert, Button, Field, Input, KeyValue, TableWrap } from '@/components/ui';
+import { Alert, Button, Field, Input, KeyValue, LoadingRows, TableWrap } from '@/components/ui';
 import { ActionDialog, errorText, money } from './dialog';
 import { LinePicker } from './line-picker';
 import type {
@@ -52,7 +52,7 @@ export function TaxInfoDialog({ order, onClose }: { order: ActionOrder; onClose:
   return (
     <ActionDialog title={`Order Tax Information — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
-      {!data && !error && <p className="muted">Loading…</p>}
+      {!data && !error && <LoadingRows rows={4} what="This order" />}
       {data && (
         <>
           <KeyValue
@@ -111,7 +111,7 @@ export function CostedLinesDialog({ order, onClose }: { order: ActionOrder; onCl
   return (
     <ActionDialog title={`Costed lines — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
-      {!data && !error && <p className="muted">Loading…</p>}
+      {!data && !error && <LoadingRows rows={4} what="This order" />}
       {data && (
         <>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'end' }}>
@@ -205,7 +205,7 @@ export function CommissionTableDialog({
   return (
     <ActionDialog title={`Price / Spiff / Commission — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
-      {!data && !error && <p className="muted">Loading…</p>}
+      {!data && !error && <LoadingRows rows={4} what="This order" />}
       {data && (
         <>
           {data.salespeople.length === 0 ? (
@@ -307,7 +307,7 @@ export function LinkedDocsDialog({
   return (
     <ActionDialog title={`${title} — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
-      {!data && !error && <p className="muted">Loading…</p>}
+      {!data && !error && <LoadingRows rows={4} what="This order" />}
       {data && (
         <>
           {focus !== 'transfers' &&

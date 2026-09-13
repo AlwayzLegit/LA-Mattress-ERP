@@ -7,15 +7,21 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
   FormGrid,
   Input,
+  type ListColumns,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -118,6 +124,67 @@ export default function TaxClassesPage() {
     }
   }
 
+  // Built inline: the actions cell needs `expanded`, `setEditing` and `destroy`.
+  const columns: ColumnDef<TaxClass>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (r) => r.name,
+      render: (r) => (
+        <>
+          <strong>{r.name}</strong>
+          {r.description && <div className="muted">{r.description}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'rate',
+      label: 'Rate',
+      num: true,
+      sortValue: (r) => r.rateBps,
+      render: (r) => `${(r.rateBps / 100).toFixed(2)}%`,
+    },
+    {
+      id: 'default',
+      label: 'Default',
+      sortValue: (r) => r.isDefault,
+      render: (r) => (r.isDefault ? <span className="badge badge-brand">yes</span> : '—'),
+    },
+    {
+      id: 'products',
+      label: 'Products',
+      num: true,
+      sortValue: (r) => r.productCount,
+      render: (r) => r.productCount,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+            aria-expanded={expanded === r.id}
+          >
+            {expanded === r.id ? 'Hide overrides' : 'Per-location'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(r.id)}>
+            Edit
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => destroy(r)}>
+            Delete
+          </Button>
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('settings-tax-classes', columns, rows);
+
   return (
     <div>
       <PageHeader
@@ -181,22 +248,15 @@ export default function TaxClassesPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th className="num">Rate</th>
-                    <th>Default</th>
-                    <th className="num">Products</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="settings-tax-classes" />
                 </thead>
                 <tbody>
-                  {rows.map((r) =>
+                  {cols.sorted.map((r) =>
                     editing === r.id ? (
                       <EditRow
                         key={r.id}
                         row={r}
+                        list={cols}
                         onSave={(patch) => save(r.id, patch)}
                         onCancel={() => setEditing(null)}
                       />
@@ -204,16 +264,15 @@ export default function TaxClassesPage() {
                       <FragmentRow
                         key={r.id}
                         row={r}
+                        list={cols}
                         locations={locations}
                         expanded={expanded === r.id}
-                        onToggleExpand={() => setExpanded(expanded === r.id ? null : r.id)}
-                        onEdit={() => setEditing(r.id)}
-                        onDelete={() => destroy(r)}
                       />
                     ),
                   )}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}
@@ -224,44 +283,23 @@ export default function TaxClassesPage() {
 
 function FragmentRow({
   row,
+  list,
   locations,
   expanded,
-  onToggleExpand,
-  onEdit,
-  onDelete,
 }: {
   row: TaxClass;
+  list: ListColumns<TaxClass>;
   locations: LocationRow[];
   expanded: boolean;
-  onToggleExpand: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
 }) {
   return (
     <>
       <tr>
-        <td>
-          <strong>{row.name}</strong>
-          {row.description && <div className="muted">{row.description}</div>}
-        </td>
-        <td className="num">{(row.rateBps / 100).toFixed(2)}%</td>
-        <td>{row.isDefault ? <span className="badge badge-brand">yes</span> : '—'}</td>
-        <td className="num">{row.productCount}</td>
-        <td className="actions">
-          <Button size="sm" variant="ghost" onClick={onToggleExpand} aria-expanded={expanded}>
-            {expanded ? 'Hide overrides' : 'Per-location'}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button size="sm" variant="danger" onClick={onDelete}>
-            Delete
-          </Button>
-        </td>
+        <ColumnCells list={list} row={row} />
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={5} className="bg-[var(--surface-muted)] p-3">
+          <td colSpan={list.ordered.length} className="bg-[var(--surface-muted)] p-3">
             <OverridesPanel taxClass={row} locations={locations} />
           </td>
         </tr>
@@ -395,12 +433,18 @@ function OverridesPanel({ taxClass, locations }: { taxClass: TaxClass; locations
   );
 }
 
+/**
+ * The inline editor row renders its inputs under whichever column order the
+ * header is in, so a moved Rate column still lines up with its field.
+ */
 function EditRow({
   row,
+  list,
   onSave,
   onCancel,
 }: {
   row: TaxClass;
+  list: ListColumns<TaxClass>;
   onSave: (patch: Partial<TaxClass> & { rateBps?: number }) => void;
   onCancel: () => void;
 }) {
@@ -408,54 +452,76 @@ function EditRow({
   const [rate, setRate] = useState((row.rateBps / 100).toFixed(2));
   const [isDefault, setIsDefault] = useState(row.isDefault);
 
+  const cell = (id: string) => {
+    switch (id) {
+      case 'name':
+        return (
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label="Name"
+            className="w-full"
+          />
+        );
+      case 'rate':
+        return (
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            value={rate}
+            onChange={(e) => setRate(e.target.value)}
+            aria-label="Rate (%)"
+            className="w-24"
+          />
+        );
+      case 'default':
+        return (
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(e) => setIsDefault(e.target.checked)}
+            aria-label="Default class"
+          />
+        );
+      case 'products':
+        return row.productCount;
+      case 'actions':
+        return (
+          <>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() =>
+                onSave({
+                  name,
+                  rateBps: Math.round(Number(rate) * 100),
+                  isDefault,
+                })
+              }
+            >
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <tr>
-      <td>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-label="Name"
-          className="w-full"
-        />
-      </td>
-      <td className="num">
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
-          value={rate}
-          onChange={(e) => setRate(e.target.value)}
-          aria-label="Rate (%)"
-          className="w-24"
-        />
-      </td>
-      <td>
-        <input
-          type="checkbox"
-          checked={isDefault}
-          onChange={(e) => setIsDefault(e.target.checked)}
-          aria-label="Default class"
-        />
-      </td>
-      <td className="num">{row.productCount}</td>
-      <td className="actions">
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={() =>
-            onSave({
-              name,
-              rateBps: Math.round(Number(rate) * 100),
-              isDefault,
-            })
-          }
+      {list.ordered.map((c) => (
+        <td
+          key={c.id}
+          className={[c.num && 'num', c.className].filter(Boolean).join(' ') || undefined}
         >
-          Save
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-      </td>
+          {cell(c.id)}
+        </td>
+      ))}
     </tr>
   );
 }

@@ -50,6 +50,21 @@ export interface LocationStockRow extends StockTotals {
   locationActive: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
+  /** The store's own minimum on hand (inventory_levels.reorder_point), null = none set. */
+  reorderPoint: number | null;
+}
+
+/** One store's cell in the products browser (redesign Phase 7, README §3.3). */
+export interface StoreCell {
+  onHand: number;
+  reserved: number;
+  floorSample: number;
+  /** on hand − reserved − floor, floored at zero. */
+  available: number;
+  /** The store's minimum, null when none is set. */
+  min: number | null;
+  /** Units on open order lines sourced here that are still waiting for stock. */
+  demand: number;
 }
 
 export const EMPTY_TOTALS: StockTotals = {
@@ -290,6 +305,7 @@ export async function loadProductStockByLocation(
       locationId: schema.inventoryLevels.locationId,
       storageBinId: schema.inventoryLevels.storageBinId,
       storageBinCode: schema.storageBins.code,
+      reorderPoint: schema.inventoryLevels.reorderPoint,
     })
     .from(schema.inventoryLevels)
     .leftJoin(schema.storageBins, eq(schema.storageBins.id, schema.inventoryLevels.storageBinId))
@@ -334,9 +350,94 @@ export async function loadProductStockByLocation(
         locationActive: l.isActive,
         storageBinId: bin?.storageBinId ?? null,
         storageBinCode: bin?.storageBinCode ?? null,
+        reorderPoint: bin?.reorderPoint ?? null,
         ...t,
       });
     }
   }
   return { totals: finish(totals), byLocation };
+}
+
+/**
+ * The browser's store columns (redesign Phase 7): per product, per
+ * location — available (on hand − reserved − floor), the store minimum,
+ * and the open-order demand still waiting there. "A zero is a zero, not
+ * a missing row": locations with no level row simply do not appear and
+ * the caller renders 0.
+ */
+export async function loadProductStoreCells(
+  db: PostgresJsDatabase,
+  businessId: string,
+  productIds: string[],
+): Promise<Map<string, Record<string, StoreCell>>> {
+  const out = new Map<string, Record<string, StoreCell>>();
+  if (productIds.length === 0) return out;
+  const levels = await db
+    .select({
+      productId: schema.productVariants.productId,
+      locationId: schema.inventoryLevels.locationId,
+      onHand: sql<number>`sum(${schema.inventoryLevels.onHand})::int`,
+      reserved: sql<number>`sum(${schema.inventoryLevels.reserved})::int`,
+      floorSample: sql<number>`sum(${schema.inventoryLevels.floorSample})::int`,
+      available: sql<number>`sum(greatest(0, ${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}))::int`,
+      min: sql<number | null>`max(${schema.inventoryLevels.reorderPoint})::int`,
+    })
+    .from(schema.inventoryLevels)
+    .innerJoin(
+      schema.productVariants,
+      eq(schema.productVariants.id, schema.inventoryLevels.variantId),
+    )
+    .where(
+      and(
+        eq(schema.inventoryLevels.businessId, businessId),
+        inArray(schema.productVariants.productId, productIds),
+      ),
+    )
+    .groupBy(schema.productVariants.productId, schema.inventoryLevels.locationId);
+  const cell = (pid: string, loc: string): StoreCell => {
+    const row = out.get(pid) ?? {};
+    const c = row[loc] ?? {
+      onHand: 0,
+      reserved: 0,
+      floorSample: 0,
+      available: 0,
+      min: null,
+      demand: 0,
+    };
+    row[loc] = c;
+    out.set(pid, row);
+    return c;
+  };
+  for (const l of levels) {
+    const c = cell(l.productId, l.locationId);
+    c.onHand = l.onHand;
+    c.reserved = l.reserved;
+    c.floorSample = l.floorSample;
+    c.available = l.available;
+    c.min = l.min;
+  }
+  const at = sql`coalesce(${schema.orderLines.sourceLocationId}, ${schema.orders.stockLocationId}, ${schema.orders.locationId})`;
+  const demand = await db
+    .select({
+      productId: schema.productVariants.productId,
+      locationId: sql<string>`${at}`,
+      units: sql<number>`sum(greatest(0, ${schema.orderLines.quantity} - ${schema.orderLines.qtyReserved} - ${schema.orderLines.qtyFulfilled}))::int`,
+    })
+    .from(schema.orderLines)
+    .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+    .innerJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderLines.variantId))
+    .where(
+      and(
+        eq(schema.orders.businessId, businessId),
+        inArray(schema.orders.status, [...OPEN_ORDER_STATUSES]),
+        eq(schema.orderLines.lineType, 'stock'),
+        inArray(schema.productVariants.productId, productIds),
+      ),
+    )
+    .groupBy(schema.productVariants.productId, at);
+  for (const d of demand) {
+    if (!d.locationId || d.units <= 0) continue;
+    cell(d.productId, d.locationId).demand = d.units;
+  }
+  return out;
 }

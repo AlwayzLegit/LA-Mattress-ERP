@@ -1,54 +1,6 @@
-/* Chat adopts the September 12 ERP redesign tokens.
-   Source: upstream globals.css 414afb64fcabea61ffa7058b418927c43176bce4.
-   Scoped here so the older local preview shell remains independent. */
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 400 600;
-  font-display: swap;
-  src: url('/fonts/public-sans-latin.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 500 700;
-  font-display: swap;
-  src: url('/fonts/archivo-latin.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
-}
+/* Inherit the current ERP design tokens and self-hosted fonts from globals.css. */
 .root,
 .globalAlert {
-  --bg: #f6f5f2;
-  --surface: #fff;
-  --surface-2: #efeeea;
-  --border: #dcd9d2;
-  --border-strong: #bdb9b0;
-  --text: #1c1b18;
-  --text-2: #4a4843;
-  --muted: #6f6c65;
-  --accent: #1e3a5f;
-  --accent-soft: #e7edf5;
-  --accent-ink: #16304f;
-  --status-waiting-fg: #8a5a00;
-  --status-waiting-bg: #fbf1dc;
-  --status-waiting-border: #f0d9a6;
-  --status-fulfilled-fg: #1a6e43;
-  --status-fulfilled-bg: #e3f2e9;
-  --status-fulfilled-border: #bfe0cc;
-  --status-risk-fg: #b3261e;
-  --status-risk-bg: #fbe7e5;
-  --radius-card: 5px;
-  --radius-chip: 3px;
-  --radius-input: 3px;
-  --font-text: 'Public Sans', system-ui, sans-serif;
-  --font-display: 'Archivo', 'Public Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
   font-family: var(--font-text);
   font-size: 13px;
   line-height: 1.5;

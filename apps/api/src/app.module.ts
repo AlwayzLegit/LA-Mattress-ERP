@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
-import { randomUUID } from 'node:crypto';
 import { TerminusModule } from '@nestjs/terminus';
 import { AdminModule } from './admin/admin.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AppController } from './app.controller';
 import { AuditModule } from './audit/audit.module';
 import { AuthGuard } from './auth/auth.guard';
+import { AllExceptionsFilter } from './logging/all-exceptions.filter';
+import { pinoHttpOptions } from './logging/pino-http.options';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { BusinessModule } from './business/business.module';
@@ -50,6 +51,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
 import { GeoModule } from './geo/geo.module';
 import { CashierModule } from './cashier/cashier.module';
 import { CloseoutModule } from './closeout/closeout.module';
+import { CompetitionsModule } from './competitions/competitions.module';
 import { JobsModule } from './jobs/jobs.module';
 import { GlModule } from './gl/gl.module';
 import { TransfersModule } from './transfers/transfers.module';
@@ -58,39 +60,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
-        genReqId: (req, res) => {
-          const incoming = req.headers['x-request-id'];
-          const id = typeof incoming === 'string' && incoming.length > 0 ? incoming : randomUUID();
-          res.setHeader('x-request-id', id);
-          return id;
-        },
-        customProps: (req) => ({ requestId: req.id }),
-        redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            'res.headers["set-cookie"]',
-            'req.headers["x-chat-session"]',
-            'req.body.body',
-            'req.body.message',
-            'req.headers["x-api-key"]',
-            'req.body.password',
-            'req.body.token',
-          ],
-          censor: '[redacted]',
-        },
-        transport:
-          process.env.NODE_ENV === 'production'
-            ? undefined
-            : {
-                target: 'pino-pretty',
-                options: { singleLine: true, translateTime: 'SYS:HH:MM:ss.l' },
-              },
-      },
-    }),
+    LoggerModule.forRoot({ pinoHttp: pinoHttpOptions() }),
+
     TerminusModule,
     DatabaseModule,
     ChatModule,
@@ -117,6 +88,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     GeoModule,
     CashierModule,
     CloseoutModule,
+    CompetitionsModule,
     JobsModule,
     SalesModule,
     OrdersModule,
@@ -149,6 +121,9 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     // business picker) don't 412 when the user hasn't selected a business
     // yet.
     { provide: APP_GUARD, useClass: AuthGuard },
+    // Hands pino-http the thrown object on unexpected errors so the request
+    // line carries the real cause (see logging/pino-http.options.ts).
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })
 export class AppModule {}

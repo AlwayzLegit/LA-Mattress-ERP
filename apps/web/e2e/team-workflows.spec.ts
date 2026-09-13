@@ -149,7 +149,7 @@ test('assign work, complete it as the owner, and persist personal note read stat
     await teammate.getByRole('button', { name: 'Completed', exact: true }).click();
     await expect(task).toContainText('Done');
 
-    await page.goto(`/orders/${orderId}`);
+    await page.goto(`/orders/${orderId}/full`);
     const notes = page.getByTestId('order-notes-card');
     await notes
       .getByLabel('New note', { exact: true })

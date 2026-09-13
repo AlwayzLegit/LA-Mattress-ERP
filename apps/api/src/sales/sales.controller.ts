@@ -14,7 +14,18 @@ import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import {
+  FIRMNESS_LEVELS,
+  MATTRESS_SIZES,
+  isCardBrand,
+  isCardMethod,
+  isFinancingMethod,
+  isFinancingTerm,
+  normalizeFirmness,
+  normalizeSize,
+} from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -52,6 +63,10 @@ interface LookupRow {
 
 interface PaymentInput {
   method?: 'cash' | 'card' | 'gift_card' | 'financing' | 'external_card' | 'check';
+  /** For card tenders: 'visa' | 'mastercard' | 'amex' | 'discover' | 'jcb' | 'diners' | 'other'. */
+  cardBrand?: string;
+  /** For financing tenders: the promo term signed — 6 | 12 | 15 | 18 | 24 | 36 | 48. */
+  financingMonths?: number;
   /** For 'financing': which provider approved it (Synchrony, Acima, …). */
   financingProvider?: string;
   /** For 'financing': the provider's approval/application reference. */
@@ -176,29 +191,19 @@ interface SaleDetail extends Omit<SaleListRow, 'customerName'> {
 }
 
 /**
- * Mattress size and firmness, read off the catalog (owner ask
- * 2026-09-01: filter the Add Product popup by size and firmness). Most
- * of the catalog came from Shopify with the size and firmness inside the
- * product name, so the classifier looks at the variant's attributes
- * first and the product + variant names second. Order matters: "Twin XL"
- * before "Twin", "Cal King" before "King", "Medium Firm" before both
- * "Medium" and "Firm".
+ * Mattress size and firmness (owner ask 2026-09-01, A22.2): the popup
+ * filters on the variant's own `size` / `firmness` columns — set by the
+ * import from the STORIS group code and by the product page — and only
+ * falls back to reading the names for a variant that has neither (a
+ * hand-built product nobody has filed yet). Order in the fallback
+ * matters: "Twin XL" before "Twin", "Cal King" before "King", "Medium
+ * Firm" before both "Medium" and "Firm".
  */
-export const MATTRESS_SIZES = [
-  'Twin',
-  'Twin XL',
-  'Full',
-  'Queen',
-  'King',
-  'Cal King',
-  'Split King',
-  'Split Cal King',
-] as const;
-export const FIRMNESS_LEVELS = ['Plush', 'Medium', 'Medium Firm', 'Firm', 'Extra Firm'] as const;
+export { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 
 const NAME_HAY = sql`(coalesce(${schema.productVariants.attributesJson}->>'size', '') || ' ' || coalesce(${schema.productVariants.attributesJson}->>'firmness', '') || ' ' || coalesce(${schema.products.name}, '') || ' ' || coalesce(${schema.productVariants.name}, ''))`;
 
-const SIZE_EXPR = sql`CASE
+const SIZE_FROM_NAME = sql`CASE
   WHEN ${NAME_HAY} ~* '\\m(split\\s+cal(ifornia)?\\.?\\s+king)\\M' THEN 'Split Cal King'
   WHEN ${NAME_HAY} ~* '\\m(split\\s+king)\\M' THEN 'Split King'
   WHEN ${NAME_HAY} ~* '\\m(cal(ifornia)?\\.?\\s+king)\\M' THEN 'Cal King'
@@ -209,13 +214,16 @@ const SIZE_EXPR = sql`CASE
   WHEN ${NAME_HAY} ~* '\\mtwin\\M' THEN 'Twin'
   ELSE NULL END`;
 
-const FIRMNESS_EXPR = sql`CASE
+const FIRMNESS_FROM_NAME = sql`CASE
   WHEN ${NAME_HAY} ~* '\\m(extra\\s+firm|x-?firm|ultra\\s+firm)\\M' THEN 'Extra Firm'
   WHEN ${NAME_HAY} ~* '\\m(medium\\s+firm|med\\.?\\s+firm|luxury\\s+firm|cushion\\s+firm|plush\\s+firm)\\M' THEN 'Medium Firm'
   WHEN ${NAME_HAY} ~* '\\mfirm\\M' THEN 'Firm'
   WHEN ${NAME_HAY} ~* '\\m(medium|med\\.?)\\M' THEN 'Medium'
   WHEN ${NAME_HAY} ~* '\\m(plush|soft|ultra\\s+plush)\\M' THEN 'Plush'
   ELSE NULL END`;
+
+const SIZE_EXPR = sql`coalesce(${schema.productVariants.size}, ${SIZE_FROM_NAME})`;
+const FIRMNESS_EXPR = sql`coalesce(${schema.productVariants.firmness}, ${FIRMNESS_FROM_NAME})`;
 
 @TenantScoped()
 @Controller('v1')
@@ -237,6 +245,28 @@ export class SalesController {
    * (so a scan auto-resolves), then falls back to product name / SKU
    * substring search. Returns active variants only.
    */
+  /**
+   * Redesign Phase 5: the Add Product footer reads "Showing N of 1,948" —
+   * the denominator is the sellable catalog (active variants of active
+   * products), independent of the current filters.
+   */
+  @Get('pos/catalog-count')
+  @RequirePermission('pos.access')
+  async catalogCount(@CurrentTenant() tenant: RequestTenantContext): Promise<{ total: number }> {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.productVariants)
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .where(
+        and(
+          eq(schema.products.businessId, tenant.businessId!),
+          eq(schema.productVariants.isActive, true),
+          eq(schema.products.isActive, true),
+        ),
+      );
+    return { total: row?.n ?? 0 };
+  }
+
   /**
    * New Sale product popup (PLAN-POS-OPERATIONS §4): searchable, vendor-
    * filterable results carrying live stock at the selling location plus
@@ -269,6 +299,8 @@ export class SalesController {
       size: string | null;
       /** Canonical firmness read off the name/attributes, or null. */
       firmness: string | null;
+      /** Catalog category path ("Mattresses › Hybrid"); the register keys the add-on chips on its root. */
+      categoryPath: string | null;
       availableHere: number;
       availableTotal: number;
       atpDate: string | null;
@@ -285,9 +317,18 @@ export class SalesController {
     const limit = clampLimit(limitStr, 30);
     const filters = [eq(schema.productVariants.isActive, true), eq(schema.products.isActive, true)];
     if (query) {
-      filters.push(
-        sql`(${schema.products.name} ILIKE ${'%' + query + '%'} OR ${schema.productVariants.name} ILIKE ${'%' + query + '%'} OR ${schema.productVariants.sku} ILIKE ${'%' + query + '%'})`,
-      );
+      // A22.2: every word must appear somewhere on the row — product
+      // name, variant name, SKU, size, firmness or brand — in any order,
+      // so "queen bamboo sheets" and "micah firm king" both land.
+      const hay = sql`(coalesce(${schema.products.name}, '') || ' ' || coalesce(${schema.productVariants.name}, '') || ' ' || coalesce(${schema.productVariants.sku}, '') || ' ' || coalesce(${schema.productVariants.size}, '') || ' ' || coalesce(${schema.productVariants.firmness}, '') || ' ' || coalesce(${schema.brands.name}, ''))`;
+      for (const word of query.split(/\s+/).filter(Boolean)) {
+        const canonical = normalizeSize(word);
+        filters.push(
+          canonical
+            ? sql`(${hay} ILIKE ${'%' + word + '%'} OR ${SIZE_EXPR} = ${canonical})`
+            : sql`${hay} ILIKE ${'%' + word + '%'}`,
+        );
+      }
     }
     // Vendor (owner ask 2026-09-01): imported catalogs rarely carry a
     // preferred vendor on the variant, so the filter also accepts the
@@ -299,15 +340,13 @@ export class SalesController {
     // names — so Shopify-shaped "Queen Helix Dusk 12\" Medium Firm …"
     // products filter as well as hand-built ones.
     if (size) {
-      const canonical = MATTRESS_SIZES.find((x) => x.toLowerCase() === size.trim().toLowerCase());
+      const canonical = normalizeSize(size);
       if (!canonical)
         throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
       filters.push(sql`${SIZE_EXPR} = ${canonical}`);
     }
     if (firmness) {
-      const canonical = FIRMNESS_LEVELS.find(
-        (x) => x.toLowerCase() === firmness.trim().toLowerCase(),
-      );
+      const canonical = normalizeFirmness(firmness);
       if (!canonical) {
         throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
       }
@@ -333,6 +372,7 @@ export class SalesController {
         vendorName: schema.vendors.name,
         size: sql<string | null>`${SIZE_EXPR}`,
         firmness: sql<string | null>`${FIRMNESS_EXPR}`,
+        categoryId: schema.products.categoryId,
         taxRateBps: sql<number | null>`coalesce(
           ${
             locationId
@@ -397,7 +437,14 @@ export class SalesController {
       for (const r of pos) if (r.variantId && r.expectedAt) atp.set(r.variantId, r.expectedAt);
     }
 
-    return rows.map((r) => ({ ...r, atpDate: atp.get(r.variantId) ?? null }));
+    // A22.1: the category is a tree and most sleep surfaces sit on a
+    // subcategory; the register wants the whole path to read the root.
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+    return rows.map(({ categoryId, ...r }) => ({
+      ...r,
+      categoryPath: categoryIndex.pathOf(categoryId),
+      atpDate: atp.get(r.variantId) ?? null,
+    }));
   }
 
   @Get('pos/lookup')
@@ -907,6 +954,26 @@ export class SalesController {
       if (p.method === 'financing' && !p.financingProvider) {
         throw new BadRequestException('financing payments need financingProvider');
       }
+      if (p.cardBrand !== undefined) {
+        if (!isCardMethod(p.method!)) {
+          throw new BadRequestException('cardBrand only applies to card payments');
+        }
+        if (!isCardBrand(p.cardBrand)) {
+          throw new BadRequestException(
+            'cardBrand must be one of: visa, mastercard, amex, discover, jcb, diners, other',
+          );
+        }
+      }
+      if (p.financingMonths !== undefined) {
+        if (!isFinancingMethod(p.method!)) {
+          throw new BadRequestException('financingMonths only applies to financing payments');
+        }
+        if (!Number.isInteger(p.financingMonths) || !isFinancingTerm(p.financingMonths)) {
+          throw new BadRequestException(
+            'financingMonths must be one of: 6, 12, 15, 18, 24, 36, 48',
+          );
+        }
+      }
       if (
         typeof p.amountCents !== 'number' ||
         !Number.isInteger(p.amountCents) ||
@@ -1086,6 +1153,8 @@ export class SalesController {
             processorRef: gcId ?? charge?.paymentIntentId ?? p.processorRef ?? null,
             financingProvider: p.method === 'financing' ? (p.financingProvider ?? null) : null,
             financingRef: p.method === 'financing' ? (p.financingRef ?? null) : null,
+            cardBrand: isCardMethod(p.method!) ? (p.cardBrand ?? null) : null,
+            financingMonths: isFinancingMethod(p.method!) ? (p.financingMonths ?? null) : null,
             status: 'succeeded',
           };
         }),

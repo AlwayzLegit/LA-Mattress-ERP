@@ -1,14 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useApiStatus } from '@/lib/api-status';
 import { pendingCount, readActiveBusinessId } from '@/lib/offline';
 
 /**
- * Sidebar footer: whether the register can reach the API and whether any
- * offline sales are still queued. Polls the queue every 15s; the
- * browser's online/offline events flip the label immediately.
+ * Sidebar footer (canvas 3a/3d/3e): a dot and a sentence. Green "Synced ·
+ * 9:41 AM"; amber "Connecting…" before the first answer; red "Offline ·
+ * retrying" when the API cannot be reached or sales are queued locally.
+ * Polls the offline queue every 15s; the browser's online/offline events
+ * and the API status flip it immediately.
  */
-export function SyncStatus() {
+export function SyncStatus({ connecting = false }: { connecting?: boolean }) {
+  const apiStatus = useApiStatus();
   const [online, setOnline] = useState(true);
   const [queued, setQueued] = useState(0);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
@@ -43,42 +47,26 @@ export function SyncStatus() {
     };
   }, []);
 
-  const bad = !online || queued > 0;
-  const label = !online
-    ? 'Offline — sales queue locally'
-    : queued > 0
-      ? `${queued} sale${queued === 1 ? '' : 's'} waiting to sync`
-      : 'All systems synced';
+  const down = !online || apiStatus.down;
+  const tone: 'ok' | 'warn' | 'bad' = down ? 'bad' : connecting || queued > 0 ? 'warn' : 'ok';
   const time = checkedAt
     ? checkedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : '';
+  const label = !online
+    ? 'Offline · sales queue locally'
+    : apiStatus.down
+      ? 'Offline · retrying'
+      : queued > 0
+        ? `${queued} sale${queued === 1 ? '' : 's'} waiting to sync`
+        : connecting
+          ? 'Connecting…'
+          : time
+            ? `Synced · ${time}`
+            : 'Synced';
   return (
-    <div
-      data-testid="sync-status"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 8px',
-        borderRadius: 6,
-        background: bad ? 'var(--danger-soft)' : 'var(--surface2)',
-        fontSize: 11.5,
-        color: 'var(--text2)',
-      }}
-    >
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: bad ? 'var(--danger)' : 'var(--accent)',
-          flex: 'none',
-        }}
-      />
-      <span style={{ flex: 1 }}>{label}</span>
-      <span className="mono" style={{ color: 'var(--muted)' }}>
-        {time}
-      </span>
+    <div data-testid="sync-status" className={`sync sync-${tone}`} role="status">
+      <span className="sync-dot" aria-hidden />
+      <span className="sync-label">{label}</span>
     </div>
   );
 }

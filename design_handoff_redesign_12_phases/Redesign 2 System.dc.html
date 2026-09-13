@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600&family=Instrument+Sans:wght@500;600;700&family=Fira+Code:wght@400;500&family=Albert+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=Red+Hat+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#e9e7e2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f} @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65">LA MATTRESS ERP · REDESIGN</span><h1 style="margin:0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">Phase 2 — Design system</h1><span style="font-size:13px;color:#6f6c65">One token set. Two densities. Every later artboard uses only what is on this page.</span></div>
+
+  <!-- 2a Type candidates -->
+  <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+    <sc-for list="{{ pairings }}" as="p" hint-placeholder-count="3">
+      <div id="{{ p.id }}" style="width:464px;background:#fff;border:1px solid {{ p.border }};padding:28px 32px;position:relative;box-shadow:{{ p.shadow }}">
+        <a href="#{{ p.id }}" style="position:absolute;top:12px;right:12px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#f6f5f2;text-decoration:none;color:#6f6c65">{{ p.id }}</a>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em">TYPE CANDIDATE {{ p.n }} · {{ p.verdict }}</div>
+        <div style="font-family:{{ p.display }};font-size:44px;font-weight:600;letter-spacing:-.02em;line-height:1;margin-top:14px;font-variant-numeric:tabular-nums">$18,960<span style="font-size:18px;color:#6f6c65;font-weight:500;margin-left:10px">+12% vs last Wed</span></div>
+        <div style="font-family:{{ p.text }};font-size:14px;line-height:1.5;margin-top:14px;color:#4a4843">Cloud Comfort Mattress, Queen · Delivery Sep 6 · Balance due at door. Take a payment, print the ticket, hand it over.</div>
+        <div style="display:flex;gap:16px;margin-top:12px;font-family:{{ p.mono }};font-size:13px;color:#1c1b18"><span>SO-10437</span><span>CCM-Q</span><span style="font-variant-numeric:tabular-nums">$1,299.00</span><span style="color:#6f6c65">14:00–17:00</span></div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid #efeeea;font-size:12.5px;color:#4a4843;line-height:1.5"><strong style="color:#1c1b18">{{ p.textName }}</strong> text · <strong style="color:#1c1b18">{{ p.displayName }}</strong> numbers &amp; headings · <strong style="color:#1c1b18">{{ p.monoName }}</strong> SKUs, order numbers, money<br>{{ p.note }}</div>
+      </div>
+    </sc-for>
+    <div style="width:440px;background:#fff;border:1px solid #dcd9d2;padding:22px 26px;font-size:13.5px;line-height:1.55;color:#4a4843">
+      <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:8px">Type decision</div>
+      <p style="margin:0 0 10px"><strong style="color:#1c1b18">Ive</strong> wanted one family doing everything (candidate 2, Manrope, is closest to that). <strong style="color:#1c1b18">Chaudhri</strong> argued the register needs a number that reads from two metres, which is a condensed-leaning display cut, not a text face at a bigger size. Archivo's tabular figures hold a column at 13px and a total at 44px without re-kerning. <strong style="color:#1c1b18">Forstall</strong> ruled out Space Grotesk (candidate 3) because its lowercase g and a slow down reading a customer's name at speed. Winner: <strong style="color:#1c1b18">candidate 1</strong>. Public Sans is a government-issue workhorse — dull on purpose. JetBrains Mono's slashed zero settles 0/O in SKUs.</p>
+      <p style="margin:0"><strong style="color:#1c1b18">Later:</strong> a licensed grotesk (Söhne or similar) would replace Public Sans if the owner buys one; the scale below does not change.</p>
+    </div>
+  </div>
+
+  <!-- 2b Tokens -->
+  <div id="2d" style="width:1440px;min-width:1440px;flex:none;background:#fff;border:1px solid #dcd9d2;padding:40px 56px;position:relative;display:grid;grid-template-columns:1fr 1fr 1fr;gap:36px 48px">
+    <a href="#2d" style="position:absolute;top:16px;left:16px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#f6f5f2;text-decoration:none;color:#6f6c65">2d</a>
+    <div style="grid-column:1 / -1"><h2 style="margin:0;font-family:'Archivo',sans-serif;font-size:24px;font-weight:600;letter-spacing:-.01em">Tokens</h2><div style="font-size:13px;color:#6f6c65;margin-top:4px">Neutral ramp with a warm (paper) bias, one accent, six statuses that read without colour. Values are literal; nothing is computed.</div></div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">TYPE SCALE · PUBLIC SANS / ARCHIVO / JETBRAINS MONO</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ type }}" as="t" hint-placeholder-count="8"><div style="display:grid;grid-template-columns:150px 1fr;align-items:baseline;gap:12px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65">{{ t.token }}</span><span style="font-family:{{ t.family }};font-size:{{ t.size }};font-weight:{{ t.weight }};line-height:{{ t.lh }};letter-spacing:{{ t.ls }};font-variant-numeric:tabular-nums;white-space:nowrap">{{ t.sample }}</span></div></sc-for>
+      </div>
+    </div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">NEUTRAL RAMP · WARM BIAS</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ neutrals }}" as="c" hint-placeholder-count="9"><div style="display:grid;grid-template-columns:36px 130px 1fr;align-items:center;gap:12px;font-size:12.5px"><span style="width:36px;height:26px;background:{{ c.hex }};border:1px solid #dcd9d2"></span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65">{{ c.token }}</span><span style="color:#4a4843">{{ c.hex }} · {{ c.use }}</span></div></sc-for>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin:18px 0 10px">ACCENT · ONE</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ accents }}" as="c" hint-placeholder-count="3"><div style="display:grid;grid-template-columns:36px 130px 1fr;align-items:center;gap:12px;font-size:12.5px"><span style="width:36px;height:26px;background:{{ c.hex }};border:1px solid #dcd9d2"></span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65">{{ c.token }}</span><span style="color:#4a4843">{{ c.hex }} · {{ c.use }}</span></div></sc-for>
+      </div>
+    </div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">STATUS · COLOUR + GLYPH + WORD, ALWAYS TOGETHER</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ statuses }}" as="s" hint-placeholder-count="6"><div style="display:grid;grid-template-columns:170px 1fr;align-items:center;gap:12px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border:1px solid {{ s.border }};background:{{ s.bg }};color:{{ s.fg }};font-weight:600;font-size:12px;width:fit-content;text-decoration:{{ s.deco }}"><span style="font-family:'JetBrains Mono',monospace;font-size:11px">{{ s.glyph }}</span>{{ s.label }}</span><span style="color:#4a4843">{{ s.fg }} on {{ s.bg }} · {{ s.ratio }} · {{ s.when }}</span></div></sc-for>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin:18px 0 10px">SPACING · RADIUS · DENSITY</div>
+      <div style="font-size:12.5px;color:#4a4843;line-height:1.7"><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">space</span> 4 · 8 · 12 · 16 · 24 · 32 · 48<br><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">radius</span> 3 (chip, input) · 5 (button, card) · 0 (tables, sheets)<br><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">management</span> row 36px · text 13px · control 30px<br><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">register</span> row 44px · text 14px · control 38px · hit target ≥ 44px<br><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">focus</span> 2px #1e3a5f outline, 2px offset, never removed<br><span style="font-family:'JetBrains Mono',monospace;color:#1c1b18">motion</span> 120ms ease-out for state (add line, chip change, slide-over); 0ms under prefers-reduced-motion; nothing loops</div>
+    </div>
+  </div>
+
+  <!-- 2e Components -->
+  <div id="2e" style="width:1440px;min-width:1440px;flex:none;background:#fff;border:1px solid #dcd9d2;padding:40px 56px;position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:32px 40px">
+    <a href="#2e" style="position:absolute;top:16px;left:16px;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#f6f5f2;text-decoration:none;color:#6f6c65">2e</a>
+    <div style="grid-column:1 / -1"><h2 style="margin:0;font-family:'Archivo',sans-serif;font-size:24px;font-weight:600;letter-spacing:-.01em">Components</h2><div style="font-size:13px;color:#6f6c65;margin-top:4px">Management density shown; register variants are the same parts at 44px rows and 38px controls.</div></div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">BUTTONS · FOUR TIERS, DESTRUCTIVE IS NEVER FILLED BESIDE PRIMARY</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button style="height:30px;padding:0 12px;border:1px solid #1e3a5f;border-radius:5px;background:#1e3a5f;color:#fff;font:600 13px 'Public Sans',sans-serif">Take payment</button>
+        <button style="height:30px;padding:0 12px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;color:#1c1b18;font:500 13px 'Public Sans',sans-serif">Save draft</button>
+        <button style="height:30px;padding:0 10px;border:1px solid transparent;border-radius:5px;background:transparent;color:#1e3a5f;font:500 13px 'Public Sans',sans-serif">Print</button>
+        <button style="height:30px;padding:0 12px;border:1px solid #b3261e;border-radius:5px;background:#fff;color:#b3261e;font:600 13px 'Public Sans',sans-serif">Cancel order</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <button style="height:30px;padding:0 12px;border:1px solid #1e3a5f;border-radius:5px;background:#1e3a5f;color:#fff;font:600 13px 'Public Sans',sans-serif;outline:2px solid #1e3a5f;outline-offset:2px">Focused</button>
+        <button style="height:30px;padding:0 12px;border:1px solid #dcd9d2;border-radius:5px;background:#f6f5f2;color:#9b978e;font:500 13px 'Public Sans',sans-serif">Disabled</button>
+        <button style="height:30px;padding:0 12px;border:1px solid #1e3a5f;border-radius:5px;background:#1e3a5f;color:#fff;font:600 13px 'Public Sans',sans-serif;display:inline-flex;align-items:center;gap:8px">Take payment <kbd style="font:500 11px 'JetBrains Mono',monospace;padding:1px 5px;border:1px solid rgba(255,255,255,.4);border-radius:3px;color:rgba(255,255,255,.85)">F8</kbd></button>
+      </div>
+      <p style="margin:10px 0 0;font-size:12px;color:#6f6c65;line-height:1.5">Destructive is an outlined red tier, never filled, never the default focus, and never adjacent to primary — the audit found Cancel and Complete at equal weight.</p>
+
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin:22px 0 10px">FORM FIELD · LABEL ALWAYS VISIBLE</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4a4843;font-weight:500">Customer phone<input value="(818) 555-0142" style="height:30px;padding:0 9px;border:1px solid #dcd9d2;border-radius:3px;font:400 13px 'JetBrains Mono',monospace;color:#1c1b18;background:#fff"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4a4843;font-weight:500">Store<select style="height:30px;padding:0 6px;border:1px solid #dcd9d2;border-radius:3px;font:400 13px 'Public Sans',sans-serif;color:#1c1b18;background:#fff"><option>Glendale — this store</option><option>Koreatown</option></select></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#b3261e;font-weight:500">Email<input value="omar@" style="height:30px;padding:0 9px;border:1px solid #b3261e;border-radius:3px;font:400 13px 'Public Sans',sans-serif;color:#1c1b18;background:#fff"><span style="font-weight:400">Needs a domain — e.g. omar@gmail.com</span></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4a4843;font-weight:500">Price<input value="1,299.00" style="height:30px;padding:0 9px;border:1px solid #dcd9d2;border-radius:3px;font:400 13px 'JetBrains Mono',monospace;color:#1c1b18;background:#fff;text-align:right"><span style="font-weight:400;color:#6f6c65">Inline edit, no approval</span></label>
+      </div>
+    </div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">TABLE ROW · MANAGEMENT 36PX / REGISTER 44PX · EVERY ROW IS A LINK</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#6f6c65"><th style="padding:0 8px 6px 0;border-bottom:1px solid #dcd9d2;font-weight:600">Order</th><th style="padding:0 8px 6px;border-bottom:1px solid #dcd9d2;font-weight:600">Customer</th><th style="padding:0 8px 6px;border-bottom:1px solid #dcd9d2;font-weight:600">Status</th><th style="padding:0 0 6px 8px;border-bottom:1px solid #dcd9d2;font-weight:600;text-align:right">Balance</th></tr></thead>
+      <tbody>
+        <tr style="height:36px"><td style="padding:0 8px 0 0;border-bottom:1px solid #efeeea"><a href="#2e" style="font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;text-decoration:none">SO-10437</a></td><td style="padding:0 8px;border-bottom:1px solid #efeeea">Omar Haddad</td><td style="padding:0 8px;border-bottom:1px solid #efeeea"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 6px;border:1px solid #c9dcf2;background:#e5eef9;color:#1f5fa8;font-weight:600;font-size:11.5px"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px">◷</span>Scheduled</span></td><td style="padding:0 0 0 8px;border-bottom:1px solid #efeeea;text-align:right;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums">$1,240.00</td></tr>
+        <tr style="height:36px;background:#f6f5f2"><td style="padding:0 8px 0 0;border-bottom:1px solid #efeeea"><a href="#2e" style="font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;text-decoration:none;outline:2px solid #1e3a5f;outline-offset:2px">SO-10412</a></td><td style="padding:0 8px;border-bottom:1px solid #efeeea">Karen Liu</td><td style="padding:0 8px;border-bottom:1px solid #efeeea"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 6px;border:1px solid #f0d9a6;background:#fbf1dc;color:#8a5a00;font-weight:600;font-size:11.5px"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px">◔</span>Waiting on stock</span></td><td style="padding:0 0 0 8px;border-bottom:1px solid #efeeea;text-align:right;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums">$0.00</td></tr>
+        <tr style="height:44px"><td style="padding:0 8px 0 0;border-bottom:1px solid #efeeea"><a href="#2e" style="font-family:'JetBrains Mono',monospace;font-size:13.5px;font-weight:500;text-decoration:none">SO-10398</a></td><td style="padding:0 8px;border-bottom:1px solid #efeeea;font-size:14px">Dana Wu</td><td style="padding:0 8px;border-bottom:1px solid #efeeea"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px 3px 7px;border:1px solid #f0c4c0;background:#fbe7e5;color:#b3261e;font-weight:600;font-size:12px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px">▲</span>At risk</span></td><td style="padding:0 0 0 8px;border-bottom:1px solid #efeeea;text-align:right;font-family:'JetBrains Mono',monospace;font-size:14px;font-variant-numeric:tabular-nums">$2,199.00</td></tr>
+      </tbody></table>
+      <p style="margin:8px 0 0;font-size:12px;color:#6f6c65;line-height:1.5">Row 2 shows hover + keyboard focus on the link. Row 3 is register density. The whole row is clickable via the anchor's ::after overlay; the anchor is what the keyboard lands on.</p>
+
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin:22px 0 10px">TOAST · SHORTCUT CHIP (PLATFORM-AWARE) · SKELETON</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #dcd9d2;border-left:3px solid #1a6e43;background:#fff;box-shadow:0 4px 14px rgba(28,27,24,.08);font-size:13px;width:fit-content"><span style="font-family:'JetBrains Mono',monospace;color:#1a6e43">✓</span><span><strong>SO-10437</strong> saved · payment $500.00 recorded</span><a href="#2e" style="margin-left:8px;font-weight:500;text-decoration:none">Undo</a></div>
+        <div style="display:flex;gap:16px;align-items:center;font-size:13px;color:#4a4843"><span>Search <kbd style="font:500 11px 'JetBrains Mono',monospace;padding:1px 6px;border:1px solid #dcd9d2;border-radius:3px;background:#f6f5f2;color:#1c1b18">⌘K</kbd> <span style="color:#9b978e">Mac</span></span><span>Search <kbd style="font:500 11px 'JetBrains Mono',monospace;padding:1px 6px;border:1px solid #dcd9d2;border-radius:3px;background:#f6f5f2;color:#1c1b18">Ctrl K</kbd> <span style="color:#9b978e">Windows register</span></span></div>
+        <div style="display:flex;flex-direction:column;gap:8px;width:100%">{{ skeleton }}</div>
+      </div>
+    </div>
+
+    <div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin-bottom:10px">DIALOG · TRAPS FOCUS · ESC CLOSES · TITLE IS THE QUESTION</div>
+      <div style="border:1px solid #dcd9d2;border-radius:5px;background:#fff;box-shadow:0 12px 40px rgba(28,27,24,.14);padding:18px 20px;max-width:380px">
+        <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:16px">Cancel SO-10437?</div>
+        <p style="margin:6px 0 0;font-size:13px;color:#4a4843;line-height:1.5">The $500.00 deposit becomes store credit for Omar Haddad. Two reserved units return to Warehouse stock. This is written to the change history.</p>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4a4843;font-weight:500;margin-top:12px">Reason<select style="height:30px;padding:0 6px;border:1px solid #dcd9d2;border-radius:3px;font:400 13px 'Public Sans',sans-serif;color:#1c1b18;background:#fff"><option>Customer changed mind</option><option>Duplicate order</option><option>Could not fulfil</option></select></label>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button style="height:30px;padding:0 12px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;color:#1c1b18;font:500 13px 'Public Sans',sans-serif">Keep order</button><button style="height:30px;padding:0 12px;border:1px solid #b3261e;border-radius:5px;background:#fff;color:#b3261e;font:600 13px 'Public Sans',sans-serif">Cancel order</button></div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f6c65;letter-spacing:.04em;margin:22px 0 10px">EMPTY · ERROR WITH RETRY · SLIDE-OVER HEADER</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="border:1px dashed #dcd9d2;padding:18px;text-align:center;font-size:13px;color:#4a4843"><div style="font-weight:600;color:#1c1b18">No deliveries on Sunday Sep 7</div><div style="margin-top:2px">Drop a card here, or <a href="#2e">schedule one</a>.</div></div>
+        <div style="border:1px solid #f0c4c0;border-left:3px solid #b3261e;padding:12px 14px;font-size:13px;display:flex;gap:12px;align-items:flex-start;background:#fff"><span style="font-family:'JetBrains Mono',monospace;color:#b3261e">▲</span><div><div style="font-weight:600">The register could not reach the server</div><div style="color:#4a4843;margin-top:2px">Your draft is kept on this machine. Retry in a moment, or keep writing — items will save when the connection is back.</div><button style="margin-top:8px;height:28px;padding:0 10px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;font:500 12.5px 'Public Sans',sans-serif">Retry</button></div></div>
+        <div style="border:1px solid #dcd9d2;border-radius:5px 5px 0 0;background:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:-8px 0 24px rgba(28,27,24,.08)"><span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:500">SO-10437</span><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 6px;border:1px solid #c9dcf2;background:#e5eef9;color:#1f5fa8;font-weight:600;font-size:11.5px"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px">◷</span>Scheduled</span><span style="font-size:12.5px;color:#6f6c65">Omar Haddad · Glendale · written Sep 2 by Priya</span><button style="margin-left:auto;width:28px;height:28px;border:1px solid #dcd9d2;border-radius:5px;background:#fff;font-size:14px" aria-label="Close">×</button></div>
+      </div>
+    </div>
+
+    <div style="grid-column:1 / -1;border-top:1px solid #dcd9d2;padding-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:13.5px;line-height:1.55;color:#4a4843">
+      <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">Design notes</div><p style="margin:0 0 10px"><strong style="color:#1c1b18">Ive</strong> argued for radius 0 everywhere — "a tool, not a toy". <strong style="color:#1c1b18">Matas</strong> countered that a 5px button radius is what tells a finger it is a button in a sea of table cells, and that a 3px input radius separates a field from a cell in the same row. Jobs kept both radii and struck the 9px card radius the current design uses: cards inside cards was on the avoid list, and a sheet with a hairline does the same job.</p><p style="margin:0 0 10px"><strong style="color:#1c1b18">Chaudhri</strong> wanted status chips to be filled solid so they read at register distance. <strong style="color:#1c1b18">Ive</strong>: six solid chips in a table is a bag of sweets. Settled on tinted fill with a 1px border of the same hue and a 600-weight word; the glyph carries the state for anyone who cannot see the hue. Contrast checked: every fg/bg pair clears 4.5:1 (ratios in the token table).</p><p style="margin:0"><strong style="color:#1c1b18">Forstall</strong> insisted the error state name where the draft is and what happens next. The audit's "Loading…" was a state nobody wrote. Every skeleton has a 4-second timeout that becomes the error component with Retry.</p></div>
+      <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">What we removed</div><ul style="margin:0;padding-left:18px"><li>The 9px card radius and the card-in-card pattern.</li><li>Grey "pill" status with dot — replaced by chip with glyph + word.</li><li>A filled destructive button. Destructive is outlined only.</li><li>Icon-only buttons except Close (×) which carries an aria-label.</li><li>Purple, gradients, and a second accent. One navy.</li><li>Font-size 11px anywhere text is read (11px remains only for uppercase column labels at .05em tracking).</li></ul></div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const pairings = [
+      ['2a', 1, "'Public Sans',sans-serif", "'Archivo',sans-serif", "'JetBrains Mono',monospace", 'Public Sans', 'Archivo', 'JetBrains Mono', 'WINNER', 'Tabular figures at every size; condensed-leaning display reads from two metres. Dull text face on purpose.', true],
+      ['2b', 2, "'Manrope',sans-serif", "'Instrument Sans',sans-serif", "'Fira Code',monospace", 'Manrope', 'Instrument Sans', 'Fira Code', 'RUNNER-UP', 'Friendlier; numbers lose weight above 32px, and Manrope\'s wide set costs a column at 1280.', false],
+      ['2c', 3, "'Albert Sans',sans-serif", "'Space Grotesk',sans-serif", "'Red Hat Mono',monospace", 'Albert Sans', 'Space Grotesk', 'Red Hat Mono', 'REJECTED', 'Space Grotesk\'s quirky a/g slow name-reading at speed; too much personality for a register.', false],
+    ].map(([id, n, text, display, mono, textName, displayName, monoName, verdict, note, win]) => ({ id, n: String(n), text, display, mono, textName, displayName, monoName, verdict, note, border: win ? '#1e3a5f' : '#dcd9d2', shadow: win ? '0 0 0 3px #e7edf5' : 'none' }));
+    const type = [
+      ['display-xl', "'Archivo',sans-serif", '44px', 600, 1, '-.02em', '$18,960'],
+      ['display-l', "'Archivo',sans-serif", '28px', 600, 1.1, '-.015em', '14 / 15 stops'],
+      ['heading', "'Archivo',sans-serif", '18px', 600, 1.2, '-.01em', 'Cancel SO-10437?'],
+      ['title', "'Public Sans',sans-serif", '15px', 600, 1.3, '0', 'Items · 4 lines'],
+      ['body', "'Public Sans',sans-serif", '13px', 400, 1.5, '0', 'Balance due at door.'],
+      ['body-register', "'Public Sans',sans-serif", '14px', 400, 1.5, '0', 'Cloud Comfort Mattress, Queen'],
+      ['label', "'Public Sans',sans-serif", '11px', 600, 1.2, '.05em', 'INVENTORY FROM'],
+      ['mono', "'JetBrains Mono',monospace", '13px', 400, 1.4, '0', 'SO-10437 · CCM-Q · $1,299.00'],
+    ].map(([token, family, size, weight, lh, ls, sample]) => ({ token, family, size, weight: String(weight), lh: String(lh), ls, sample }));
+    const neutrals = [['bg', '#f6f5f2', 'app background'], ['surface', '#ffffff', 'sheets, rows'], ['surface-2', '#efeeea', 'hover, zebra, disabled'], ['border', '#dcd9d2', 'hairlines'], ['border-strong', '#bdb9b0', 'inputs on hover'], ['text', '#1c1b18', 'primary · 15.6:1 on surface'], ['text-2', '#4a4843', 'secondary · 8.6:1'], ['muted', '#6f6c65', 'labels · 5.1:1'], ['faint', '#9b978e', 'decoration only, never text']].map(([token, hex, use]) => ({ token, hex, use }));
+    const accents = [['accent', '#1e3a5f', 'primary button, links, focus ring · 10.4:1 on surface'], ['accent-soft', '#e7edf5', 'selected row, today cell'], ['accent-ink', '#16304f', 'hover on links']].map(([token, hex, use]) => ({ token, hex, use }));
+    const statuses = [
+      ['○', 'Draft', '#6f6c65', '#efeeea', '#dcd9d2', 'none', '4.8:1', 'nothing reserved, editable'],
+      ['◔', 'Waiting on stock', '#8a5a00', '#fbf1dc', '#f0d9a6', 'none', '5.6:1', 'at least one line short or on PO'],
+      ['◷', 'Scheduled', '#1f5fa8', '#e5eef9', '#c9dcf2', 'none', '5.3:1', 'delivery date set, fully reserved'],
+      ['✓', 'Fulfilled', '#1a6e43', '#e3f2e9', '#bfe0cc', 'none', '5.4:1', 'delivered, picked up, or taken'],
+      ['✕', 'Cancelled', '#6f6c65', '#efeeea', '#dcd9d2', 'line-through', '4.8:1', 'word struck; never hidden from lists'],
+      ['▲', 'At risk', '#b3261e', '#fbe7e5', '#f0c4c0', 'none', '5.9:1', 'promise date inside lead time, not reserved'],
+    ].map(([glyph, label, fg, bg, border, deco, ratio, when]) => ({ glyph, label, fg, bg, border, deco, ratio, when }));
+    const skeleton = React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } }, [180, 320, 260].map((w, i) => React.createElement('div', { key: i, style: { height: 12, width: w, borderRadius: 3, background: 'linear-gradient(90deg,#efeeea 25%,#f6f5f2 50%,#efeeea 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s linear infinite' } })), React.createElement('div', { key: 't', style: { fontSize: 12, color: '#6f6c65' } }, 'Skeleton becomes the error component after 4s.'));
+    return { pairings, type, neutrals, accents, statuses, skeleton };
+  }
+}
+</script>
+</body>
+</html>

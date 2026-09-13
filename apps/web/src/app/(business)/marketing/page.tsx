@@ -7,18 +7,23 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -188,6 +193,138 @@ export default function MarketingPage() {
     setSegTagIds((cur) => (cur.includes(id) ? cur.filter((t) => t !== id) : [...cur, id]));
   }
 
+  const filterText = (s: Segment) => {
+    const tagNames = (s.filterJson.tagIds ?? [])
+      .map((id) => tags.find((t) => t.id === id)?.name ?? '?')
+      .join(', ');
+    return `${tagNames || 'All customers'}${
+      s.filterJson.sinceDays ? ` · last ${s.filterJson.sinceDays}d` : ''
+    }`;
+  };
+  const segmentColumns: ColumnDef<Segment>[] = [
+    { id: 'name', label: 'Name', sortValue: (s) => s.name, render: (s) => s.name },
+    {
+      id: 'filter',
+      label: 'Filter',
+      cellClassName: () => 'muted',
+      sortValue: filterText,
+      render: filterText,
+    },
+    {
+      id: 'members',
+      label: 'Members',
+      num: true,
+      sortValue: (s) => previews[s.id]?.count ?? null,
+      render: (s) => {
+        const p = previews[s.id];
+        return p ? (
+          <strong>{p.count}</strong>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => void previewSegment(s.id)}>
+            <Users size={13} aria-hidden /> Count
+          </Button>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (s) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void deleteSegment(s.id)}
+          aria-label="Delete segment"
+        >
+          <Trash2 size={14} aria-hidden />
+        </Button>
+      ),
+    },
+  ];
+  const segmentCols = useListColumns('marketing-segments', segmentColumns, segments);
+
+  const campaignColumns: ColumnDef<Campaign>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (c) => c.name,
+      render: (c) => (
+        <>
+          {c.name}
+          <span className="muted block text-xs">{c.subject}</span>
+        </>
+      ),
+    },
+    {
+      id: 'segment',
+      label: 'Segment',
+      sortValue: (c) => c.segmentName,
+      render: (c) => c.segmentName,
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (c) => c.status,
+      render: (c) => (
+        <>
+          <StatusBadge status={c.status} />
+          {c.sentAt && (
+            <span className="muted block text-xs">{new Date(c.sentAt).toLocaleString()}</span>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'recipients',
+      label: 'Recipients',
+      num: true,
+      sortValue: (c) => c.recipientCount,
+      render: (c) => c.recipientCount ?? '—',
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (c) =>
+        c.status === 'draft' &&
+        (armedSendId === c.id ? (
+          <span className="inline-flex flex-wrap items-center justify-end gap-2 whitespace-normal">
+            <span className="text-xs font-semibold text-[var(--danger)]">
+              Emails everyone in “{c.segmentName}” — can’t be undone.
+            </span>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={busy}
+              onClick={() => void sendCampaign(c)}
+              data-testid={`send-${c.name}`}
+            >
+              <Send size={13} aria-hidden /> Really send
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setArmedSendId(null)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy}
+            onClick={() => void sendCampaign(c)}
+            data-testid={`send-${c.name}`}
+          >
+            <Send size={13} aria-hidden /> Send
+          </Button>
+        )),
+    },
+  ];
+  const campaignCols = useListColumns('marketing-campaigns', campaignColumns, campaigns);
+
   return (
     <div>
       <PageHeader
@@ -260,57 +397,22 @@ export default function MarketingPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Filter</th>
-                      <th className="num">Members</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={segmentCols} testIdPrefix="marketing-segments" />
                   </thead>
                   <tbody>
                     {segments.length === 0 && (
-                      <TableEmpty colSpan={4}>No segments yet — create one above.</TableEmpty>
+                      <TableEmpty colSpan={segmentCols.ordered.length}>
+                        No segments yet — create one above.
+                      </TableEmpty>
                     )}
-                    {segments.map((s) => {
-                      const p = previews[s.id];
-                      const tagNames = (s.filterJson.tagIds ?? [])
-                        .map((id) => tags.find((t) => t.id === id)?.name ?? '?')
-                        .join(', ');
-                      return (
-                        <tr key={s.id} data-testid={`segment-row-${s.name}`}>
-                          <td>{s.name}</td>
-                          <td className="muted">
-                            {tagNames || 'All customers'}
-                            {s.filterJson.sinceDays ? ` · last ${s.filterJson.sinceDays}d` : ''}
-                          </td>
-                          <td className="num">
-                            {p ? (
-                              <strong>{p.count}</strong>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => void previewSegment(s.id)}
-                              >
-                                <Users size={13} aria-hidden /> Count
-                              </Button>
-                            )}
-                          </td>
-                          <td className="actions">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => void deleteSegment(s.id)}
-                              aria-label="Delete segment"
-                            >
-                              <Trash2 size={14} aria-hidden />
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {segmentCols.sorted.map((s) => (
+                      <tr key={s.id} data-testid={`segment-row-${s.name}`}>
+                        <ColumnCells list={segmentCols} row={s} />
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
+                <ResetColumns list={segmentCols} />
               </TableWrap>
             )}
           </Card>
@@ -378,75 +480,22 @@ export default function MarketingPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Segment</th>
-                      <th>Status</th>
-                      <th className="num">Recipients</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={campaignCols} testIdPrefix="marketing-campaigns" />
                   </thead>
                   <tbody>
                     {campaigns.length === 0 && (
-                      <TableEmpty colSpan={5}>No campaigns yet — save a draft above.</TableEmpty>
+                      <TableEmpty colSpan={campaignCols.ordered.length}>
+                        No campaigns yet — save a draft above.
+                      </TableEmpty>
                     )}
-                    {campaigns.map((c) => (
+                    {campaignCols.sorted.map((c) => (
                       <tr key={c.id} data-testid={`campaign-row-${c.name}`}>
-                        <td>
-                          {c.name}
-                          <span className="muted block text-xs">{c.subject}</span>
-                        </td>
-                        <td>{c.segmentName}</td>
-                        <td>
-                          <StatusBadge status={c.status} />
-                          {c.sentAt && (
-                            <span className="muted block text-xs">
-                              {new Date(c.sentAt).toLocaleString()}
-                            </span>
-                          )}
-                        </td>
-                        <td className="num">{c.recipientCount ?? '—'}</td>
-                        <td className="actions">
-                          {c.status === 'draft' &&
-                            (armedSendId === c.id ? (
-                              <span className="inline-flex flex-wrap items-center justify-end gap-2 whitespace-normal">
-                                <span className="text-xs font-semibold text-[var(--danger)]">
-                                  Emails everyone in “{c.segmentName}” — can’t be undone.
-                                </span>
-                                <Button
-                                  variant="danger"
-                                  size="sm"
-                                  disabled={busy}
-                                  onClick={() => void sendCampaign(c)}
-                                  data-testid={`send-${c.name}`}
-                                >
-                                  <Send size={13} aria-hidden /> Really send
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={busy}
-                                  onClick={() => setArmedSendId(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </span>
-                            ) : (
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                disabled={busy}
-                                onClick={() => void sendCampaign(c)}
-                                data-testid={`send-${c.name}`}
-                              >
-                                <Send size={13} aria-hidden /> Send
-                              </Button>
-                            ))}
-                        </td>
+                        <ColumnCells list={campaignCols} row={c} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={campaignCols} />
               </TableWrap>
             )}
           </Card>

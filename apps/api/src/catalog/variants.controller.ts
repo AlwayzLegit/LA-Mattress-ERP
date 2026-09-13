@@ -17,10 +17,11 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { buildPage, clampLimit, decodeCursor, type PageResponse } from '../common/pagination';
+import { FIRMNESS_LEVELS, MATTRESS_SIZES, normalizeFirmness, normalizeSize } from '@jetnine/shared';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
-import { validateVariants } from './products.controller';
+import { deriveVariantSizing, validateVariants } from './products.controller';
 
 interface UpdateVariantBody {
   sku?: string | null;
@@ -29,6 +30,9 @@ interface UpdateVariantBody {
   costCents?: number | null;
   barcode?: string | null;
   attributesJson?: Record<string, unknown> | null;
+  /** A22.2: canonical size / firmness (any spelling accepted), null to clear. */
+  size?: string | null;
+  firmness?: string | null;
   isActive?: boolean;
 }
 
@@ -202,11 +206,19 @@ export class VariantsController {
       costCents?: number | null;
       barcode?: string | null;
       attributesJson?: Record<string, unknown> | null;
+      size?: string | null;
+      firmness?: string | null;
     },
   ) {
     if (typeof body.priceCents !== 'number') {
       throw new BadRequestException('priceCents is required');
     }
+    const [product] = await this.db
+      .select({ name: schema.products.name })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    if (!product) throw new NotFoundException('Product not found');
     validateVariants([
       {
         priceCents: body.priceCents,
@@ -224,6 +236,7 @@ export class VariantsController {
         costCents: body.costCents ?? null,
         barcode: body.barcode ?? null,
         attributesJson: (body.attributesJson ?? null) as never,
+        ...deriveVariantSizing(body, product.name),
       })
       .returning();
     if (!variant) throw new BadRequestException('failed to create variant');
@@ -270,6 +283,29 @@ export class VariantsController {
       update.attributesJson = body.attributesJson as never;
       before.attributesJson = existing.attributesJson;
       after.attributesJson = body.attributesJson;
+    }
+    if (body.size !== undefined) {
+      const size = body.size === null || body.size === '' ? null : normalizeSize(body.size);
+      if (body.size && !size) {
+        throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
+      }
+      if (size !== existing.size) {
+        update.size = size;
+        before.size = existing.size;
+        after.size = size;
+      }
+    }
+    if (body.firmness !== undefined) {
+      const firmness =
+        body.firmness === null || body.firmness === '' ? null : normalizeFirmness(body.firmness);
+      if (body.firmness && !firmness) {
+        throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
+      }
+      if (firmness !== existing.firmness) {
+        update.firmness = firmness;
+        before.firmness = existing.firmness;
+        after.firmness = firmness;
+      }
     }
 
     if (Object.keys(after).length === 0) return { updated: true };

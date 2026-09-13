@@ -4,20 +4,26 @@ import Link from 'next/link';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { categoryList, categoryOptions } from '@/lib/categories';
 import { Money } from '@/components/money';
 import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
+  ResetColumns,
   Select,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -61,6 +67,7 @@ interface Line {
   sku: string | null;
   vendorSku: string | null;
   categoryName: string | null;
+  categoryPath: string | null;
   collectionName: string | null;
   costCents: number | null;
   locationId: string | null;
@@ -87,6 +94,8 @@ interface Group {
   lines: Line[];
   totals: { lines: number; totalQty: number; costCents: number };
 }
+/** A line with its vendor group and the session-only Total qty override applied. */
+type EffectiveLine = Line & { effectiveQty: number; vendorId: string | null };
 interface Result {
   generatedAt: string;
   mode: ReplenishMode;
@@ -143,8 +152,8 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
-      api<{ flat: RefOption[] } | RefOption[]>('/v1/categories')
-        .then((r) => setCategories(Array.isArray(r) ? r : r.flat))
+      api<Parameters<typeof categoryList>[0]>('/v1/categories')
+        .then((r) => setCategories(categoryOptions(categoryList(r))))
         .catch(() => setCategories([]));
       api<RefOption[]>('/v1/collections')
         .then(setCollections)
@@ -236,8 +245,9 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
   const effective = useMemo(() => {
     if (!result) return null;
     return result.groups.map((g) => {
-      const lines = g.lines.map((l) => ({
+      const lines: EffectiveLine[] = g.lines.map((l) => ({
         ...l,
+        vendorId: g.vendorId,
         effectiveQty: overrides[rowKey(l)] ?? l.totalQty,
       }));
       const totalQty = lines.reduce((s, l) => s + l.effectiveQty, 0);
@@ -255,6 +265,158 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
     else next.add(key);
     return next;
   };
+
+  // One column set for every vendor card: the lines sort as one list and
+  // each card takes its own vendor's slice of the sorted order.
+  const allLines = useMemo(() => (effective ?? []).flatMap((g) => g.lines), [effective]);
+  const lineColumns: ColumnDef<EffectiveLine>[] = [
+    {
+      id: 'product',
+      label: 'Product',
+      sortValue: (l) => l.productName,
+      render: (l) => {
+        const key = rowKey(l);
+        const open = expanded.has(key);
+        return (
+          <>
+            <Link href={`/products/${l.productId}`}>{l.productName}</Link>
+            {l.variantName ? ` — ${l.variantName}` : ''}
+            {l.sku ? (
+              <div className="muted text-xs">
+                <code>{l.sku}</code>
+              </div>
+            ) : null}
+            {l.orders.length > 0 && (
+              <button
+                type="button"
+                className="btn-link text-xs"
+                onClick={() => setExpanded((prev) => toggle(prev, key))}
+              >
+                {open ? 'Hide' : 'Show'} {l.orders.length} order
+                {l.orders.length === 1 ? '' : 's'}
+              </button>
+            )}
+          </>
+        );
+      },
+    },
+    {
+      id: 'vendorModel',
+      label: 'Vendor model',
+      sortValue: (l) => l.vendorSku,
+      render: (l) => l.vendorSku ?? '—',
+    },
+    {
+      id: 'category',
+      label: 'Category',
+      sortValue: (l) => l.categoryPath ?? l.categoryName,
+      render: (l) => l.categoryPath ?? l.categoryName ?? '—',
+    },
+    {
+      id: 'location',
+      label: 'Location',
+      sortValue: (l) => l.locationName ?? 'All',
+      render: (l) => l.locationName ?? 'All',
+    },
+    {
+      id: 'onHand',
+      label: 'On hand',
+      num: true,
+      sortValue: (l) => l.onHand,
+      render: (l) => l.onHand,
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved',
+      num: true,
+      sortValue: (l) => l.reserved,
+      render: (l) => l.reserved,
+    },
+    {
+      id: 'available',
+      label: 'Available',
+      num: true,
+      sortValue: (l) => l.available,
+      render: (l) => l.available,
+    },
+    {
+      id: 'netPo',
+      label: 'Net PO',
+      num: true,
+      sortValue: (l) => l.netOnPo,
+      render: (l) => l.netOnPo,
+    },
+    {
+      id: 'demand',
+      label: mode === 'allocated_order' ? 'Orders need' : 'Threshold',
+      num: true,
+      sortValue: (l) => l.demand,
+      render: (l) => (
+        <>
+          {l.demand}
+          {mode === 'stock_level' && l.reorderQty ? (
+            <div className="muted text-xs">pack {l.reorderQty}</div>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      id: 'need',
+      label: 'Need',
+      num: true,
+      sortValue: (l) => l.orderQty,
+      render: (l) => l.orderQty,
+    },
+    {
+      id: 'carton',
+      label: 'Carton',
+      num: true,
+      title: 'Units per purchase carton',
+      sortValue: (l) => l.cartonQty,
+      render: (l) => l.cartonQty,
+    },
+    {
+      id: 'cartons',
+      label: 'Cartons',
+      num: true,
+      sortValue: (l) => l.cartons,
+      render: (l) => l.cartons,
+    },
+    {
+      id: 'totalQty',
+      label: 'Total qty',
+      num: true,
+      sortValue: (l) => l.effectiveQty,
+      render: (l) => {
+        const key = rowKey(l);
+        return (
+          <Input
+            type="number"
+            min={0}
+            className="w-20 text-right"
+            aria-label={`Total quantity for ${l.productName}`}
+            value={String(l.effectiveQty)}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setOverrides((o) => ({
+                ...o,
+                [key]: Number.isInteger(n) && n >= 0 ? n : 0,
+              }));
+            }}
+            data-testid="replenish-total-qty"
+          />
+        );
+      },
+    },
+    {
+      id: 'cost',
+      label: 'Cost',
+      num: true,
+      sortValue: (l) => l.effectiveQty * (l.costCents ?? 0),
+      render: (l) => <Money cents={l.effectiveQty * (l.costCents ?? 0)} />,
+    },
+  ];
+  const cols = useListColumns('replenishment-lines', lineColumns, allLines);
 
   return (
     <Stack>
@@ -453,109 +615,41 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>Vendor model</th>
-                      <th>Location</th>
-                      <th className="num">On hand</th>
-                      <th className="num">Reserved</th>
-                      <th className="num">Available</th>
-                      <th className="num">Net PO</th>
-                      <th className="num">
-                        {mode === 'allocated_order' ? 'Orders need' : 'Threshold'}
-                      </th>
-                      <th className="num">Need</th>
-                      <th className="num" title="Units per purchase carton">
-                        Carton
-                      </th>
-                      <th className="num">Cartons</th>
-                      <th className="num">Total qty</th>
-                      <th className="num">Cost</th>
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="replenishment-lines" />
                   </thead>
                   <tbody>
-                    {g.lines.map((l) => {
-                      const key = rowKey(l);
-                      const open = expanded.has(key);
-                      return (
-                        <Fragment key={key}>
-                          <tr data-testid="replenish-line">
-                            <td>
-                              <Link href={`/products/${l.productId}`}>{l.productName}</Link>
-                              {l.variantName ? ` — ${l.variantName}` : ''}
-                              {l.sku ? (
-                                <div className="muted text-xs">
-                                  <code>{l.sku}</code>
-                                </div>
-                              ) : null}
-                              {l.orders.length > 0 && (
-                                <button
-                                  type="button"
-                                  className="btn-link text-xs"
-                                  onClick={() => setExpanded((prev) => toggle(prev, key))}
-                                >
-                                  {open ? 'Hide' : 'Show'} {l.orders.length} order
-                                  {l.orders.length === 1 ? '' : 's'}
-                                </button>
-                              )}
-                            </td>
-                            <td>{l.vendorSku ?? '—'}</td>
-                            <td>{l.locationName ?? 'All'}</td>
-                            <td className="num">{l.onHand}</td>
-                            <td className="num">{l.reserved}</td>
-                            <td className="num">{l.available}</td>
-                            <td className="num">{l.netOnPo}</td>
-                            <td className="num">
-                              {l.demand}
-                              {mode === 'stock_level' && l.reorderQty ? (
-                                <div className="muted text-xs">pack {l.reorderQty}</div>
-                              ) : null}
-                            </td>
-                            <td className="num">{l.orderQty}</td>
-                            <td className="num">{l.cartonQty}</td>
-                            <td className="num">{l.cartons}</td>
-                            <td className="num">
-                              <Input
-                                type="number"
-                                min={0}
-                                className="w-20 text-right"
-                                aria-label={`Total quantity for ${l.productName}`}
-                                value={String(l.effectiveQty)}
-                                onChange={(e) => {
-                                  const n = Number(e.target.value);
-                                  setOverrides((o) => ({
-                                    ...o,
-                                    [key]: Number.isInteger(n) && n >= 0 ? n : 0,
-                                  }));
-                                }}
-                                data-testid="replenish-total-qty"
-                              />
-                            </td>
-                            <td className="num">
-                              <Money cents={l.effectiveQty * (l.costCents ?? 0)} />
-                            </td>
-                          </tr>
-                          {open && (
-                            <tr className="muted">
-                              <td />
-                              <td colSpan={12}>
-                                {l.orders.map((o) => (
-                                  <div key={o.lineId}>
-                                    <Link href={`/orders/${o.orderId}`}>{o.orderNumber}</Link>
-                                    {o.customerName ? ` · ${o.customerName}` : ''} · needs{' '}
-                                    {o.shortfall} of {o.quantity}
-                                    {o.fillBy ? ` · by ${o.fillBy}` : ''}
-                                    {o.deliveryStatus ? ` · ${o.deliveryStatus}` : ''}
-                                  </div>
-                                ))}
-                              </td>
+                    {cols.sorted
+                      .filter((l) => l.vendorId === g.vendorId)
+                      .map((l) => {
+                        const key = rowKey(l);
+                        const open = expanded.has(key);
+                        return (
+                          <Fragment key={key}>
+                            <tr data-testid="replenish-line">
+                              <ColumnCells list={cols} row={l} />
                             </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
+                            {open && (
+                              <tr className="muted">
+                                <td />
+                                <td colSpan={cols.ordered.length - 1}>
+                                  {l.orders.map((o) => (
+                                    <div key={o.lineId}>
+                                      <Link href={`/orders/${o.orderId}`}>{o.orderNumber}</Link>
+                                      {o.customerName ? ` · ${o.customerName}` : ''} · needs{' '}
+                                      {o.shortfall} of {o.quantity}
+                                      {o.fillBy ? ` · by ${o.fillBy}` : ''}
+                                      {o.deliveryStatus ? ` · ${o.deliveryStatus}` : ''}
+                                    </div>
+                                  ))}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
             </Card>
           ))}

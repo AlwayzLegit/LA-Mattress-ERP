@@ -7,6 +7,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -14,9 +17,11 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -106,6 +111,64 @@ export default function ApiKeysPage() {
     if (!filter) return allScopes;
     return allScopes.filter((s) => s.includes(filter.toLowerCase()));
   }, [allScopes, filter]);
+
+  // Built inline: the Revoke cell needs `revoke`.
+  const columns: ColumnDef<KeyRow>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (r) => r.name,
+      render: (r) => (
+        <>
+          <strong>{r.name}</strong>
+          {r.revokedAt && <span className="badge badge-danger ml-1.5">revoked</span>}
+          {r.notes && <div className="muted">{r.notes}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'prefix',
+      label: 'Prefix',
+      sortValue: (r) => r.keyPrefix,
+      render: (r) => (
+        <>
+          <code>{r.keyPrefix}…</code>
+          <div className="muted">{r.livemode}</div>
+        </>
+      ),
+    },
+    {
+      id: 'scopes',
+      label: 'Scopes',
+      sortValue: (r) => r.scopes.join(', '),
+      render: (r) => <code className="break-words">{r.scopes.join(', ')}</code>,
+    },
+    {
+      id: 'lastUsed',
+      label: 'Last used',
+      sortValue: (r) => r.lastUsedAt,
+      render: (r) =>
+        r.lastUsedAt ? (
+          new Date(r.lastUsedAt).toLocaleString()
+        ) : (
+          <span className="muted">never</span>
+        ),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) =>
+        !r.revokedAt && (
+          <Button size="sm" variant="danger" onClick={() => revoke(r)}>
+            Revoke
+          </Button>
+        ),
+    },
+  ];
+  const cols = useListColumns('settings-api-keys', columns, rows);
 
   return (
     <div>
@@ -210,49 +273,17 @@ export default function ApiKeysPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Prefix</th>
-                    <th>Scopes</th>
-                    <th>Last used</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="settings-api-keys" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td>
-                        <strong>{r.name}</strong>
-                        {r.revokedAt && <span className="badge badge-danger ml-1.5">revoked</span>}
-                        {r.notes && <div className="muted">{r.notes}</div>}
-                      </td>
-                      <td>
-                        <code>{r.keyPrefix}…</code>
-                        <div className="muted">{r.livemode}</div>
-                      </td>
-                      <td>
-                        <code className="break-words">{r.scopes.join(', ')}</code>
-                      </td>
-                      <td>
-                        {r.lastUsedAt ? (
-                          new Date(r.lastUsedAt).toLocaleString()
-                        ) : (
-                          <span className="muted">never</span>
-                        )}
-                      </td>
-                      <td className="actions">
-                        {!r.revokedAt && (
-                          <Button size="sm" variant="danger" onClick={() => revoke(r)}>
-                            Revoke
-                          </Button>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

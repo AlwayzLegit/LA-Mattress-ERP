@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Alert,
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -18,30 +21,48 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Stack,
   StatGrid,
   StatTile,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { autofillFormFromZip, type ZipHit } from '@/lib/zip-lookup';
 import { downloadFile } from '@/lib/download';
 import { Money } from '@/components/money';
 
+interface OpenOrderRow {
+  id: string;
+  number: string;
+  status: string;
+  totalCents: number;
+  paidCents: number;
+  balanceCents: number;
+  requestedDate: string | null;
+}
 interface CustomerSummary {
   lifetime: { documents: number; totalCents: number };
   ytd: { documents: number; totalCents: number };
-  openOrders: {
-    id: string;
-    number: string;
-    status: string;
-    totalCents: number;
-    paidCents: number;
-    balanceCents: number;
-    requestedDate: string | null;
-  }[];
+  openOrders: OpenOrderRow[];
+}
+interface CreditEntry {
+  id: string;
+  deltaCents: number;
+  reason: string | null;
+  createdAt: string;
+}
+interface DupeRow {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  email: string | null;
+  matchedBy: string;
+  docCount: number;
 }
 
 interface SaleSummary {
@@ -145,6 +166,128 @@ function historyFacts(o: HistoryOrder): string {
     .join(' · ');
 }
 
+const OPEN_ORDER_COLUMNS: ColumnDef<OpenOrderRow>[] = [
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (o) => o.number,
+    render: (o) => <Link href={`/orders/${o.id}`}>{o.number}</Link>,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (o) => o.status,
+    render: (o) => <StatusBadge status={o.status} />,
+  },
+  {
+    id: 'requested',
+    label: 'Requested',
+    sortValue: (o) => o.requestedDate,
+    render: (o) => o.requestedDate ?? '—',
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (o) => o.totalCents,
+    render: (o) => <Money cents={o.totalCents} />,
+  },
+  {
+    id: 'paid',
+    label: 'Paid',
+    num: true,
+    sortValue: (o) => o.paidCents,
+    render: (o) => <Money cents={o.paidCents} />,
+  },
+  {
+    id: 'balance',
+    label: 'Balance',
+    num: true,
+    sortValue: (o) => o.balanceCents,
+    render: (o) => (
+      <strong>
+        <Money cents={o.balanceCents} />
+      </strong>
+    ),
+  },
+];
+
+const CREDIT_COLUMNS: ColumnDef<CreditEntry>[] = [
+  {
+    id: 'date',
+    label: 'Date',
+    sortValue: (e) => e.createdAt,
+    render: (e) => new Date(e.createdAt).toLocaleDateString(),
+  },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    cellClassName: (e) => (e.deltaCents > 0 ? 'text-success' : 'text-danger'),
+    sortValue: (e) => e.deltaCents,
+    render: (e) => (
+      <>
+        {e.deltaCents > 0 ? '+' : ''}
+        <Money cents={e.deltaCents} />
+      </>
+    ),
+  },
+  {
+    id: 'reason',
+    label: 'Reason',
+    sortValue: (e) => e.reason,
+    render: (e) => e.reason ?? <span className="muted">—</span>,
+  },
+];
+
+const HISTORY_LINE_COLUMNS: ColumnDef<HistoryLine>[] = [
+  { id: 'item', label: 'Item', sortValue: (l) => l.description, render: (l) => l.description },
+  { id: 'qty', label: 'Qty', num: true, sortValue: (l) => l.quantity, render: (l) => l.quantity },
+  {
+    id: 'unitPrice',
+    label: 'Unit price',
+    num: true,
+    sortValue: (l) => l.unitPriceCents,
+    render: (l) => <Money cents={l.unitPriceCents} />,
+  },
+  {
+    id: 'lineTotal',
+    label: 'Line total',
+    num: true,
+    sortValue: (l) => l.totalCents + l.taxCents,
+    render: (l) => <Money cents={l.totalCents + l.taxCents} />,
+  },
+  {
+    id: 'state',
+    label: 'State',
+    cellClassName: () => 'muted',
+    sortValue: (l) => lineStateLabel(l),
+    render: (l) => lineStateLabel(l),
+  },
+];
+
+/** One purchase's lines; its own component so each card gets the hook. */
+function HistoryLines({ lines }: { lines: HistoryLine[] }) {
+  const cols = useListColumns('customer-history-lines', HISTORY_LINE_COLUMNS, lines);
+  return (
+    <TableWrap>
+      <table className="table table-dense">
+        <thead>
+          <ColumnHeadRow list={cols} testIdPrefix="customer-history-lines" />
+        </thead>
+        <tbody>
+          {cols.sorted.map((l) => (
+            <tr key={l.id}>
+              <ColumnCells list={cols} row={l} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <ResetColumns list={cols} />
+    </TableWrap>
+  );
+}
+
 export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -160,39 +303,87 @@ export default function CustomerDetailPage() {
   const zipMemo = (prefix: 'd' | 'b') => zipMemos.current[prefix];
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [credit, setCredit] = useState<{
-    balanceCents: number;
-    entries: { id: string; deltaCents: number; reason: string | null; createdAt: string }[];
-  } | null>(null);
+  const [credit, setCredit] = useState<{ balanceCents: number; entries: CreditEntry[] } | null>(
+    null,
+  );
   const [history, setHistory] = useState<HistoryOrder[] | null>(null);
-  const [dupes, setDupes] = useState<
-    {
-      id: string;
-      firstName: string | null;
-      lastName: string | null;
-      phone: string | null;
-      email: string | null;
-      matchedBy: string;
-      docCount: number;
-    }[]
-  >([]);
+  const [dupes, setDupes] = useState<DupeRow[]>([]);
   const [merging, setMerging] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Inline: the merge button needs `merging` and `mergeDupe` from this scope.
+  const dupeColumns: ColumnDef<DupeRow>[] = [
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortValue: (d) => [d.firstName, d.lastName].filter(Boolean).join(' '),
+      render: (d) => (
+        <Link href={`/customers/${d.id}`}>
+          <strong>{[d.firstName, d.lastName].filter(Boolean).join(' ') || 'unnamed'}</strong>
+        </Link>
+      ),
+    },
+    {
+      id: 'contact',
+      label: 'Contact',
+      sortValue: (d) => [d.phone, d.email].filter(Boolean).join(' · '),
+      render: (d) =>
+        [d.phone, d.email].filter(Boolean).join(' · ') || (
+          <span className="muted">no contact info</span>
+        ),
+    },
+    {
+      id: 'matchedBy',
+      label: 'Matched by',
+      sortValue: (d) => d.matchedBy,
+      render: (d) => `same ${d.matchedBy}`,
+    },
+    {
+      id: 'documents',
+      label: 'Documents',
+      num: true,
+      sortValue: (d) => d.docCount,
+      render: (d) => d.docCount,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (d) => (
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={merging}
+          data-testid={`merge-${d.id}`}
+          onClick={() => void mergeDupe(d.id)}
+        >
+          {merging ? 'Merging…' : 'Merge into this record'}
+        </Button>
+      ),
+    },
+  ];
+  const dupeCols = useListColumns('customer-matches', dupeColumns, dupes);
+  const creditRows = useMemo(() => credit?.entries.slice(0, 10) ?? null, [credit]);
+  const creditCols = useListColumns('customer-store-credit', CREDIT_COLUMNS, creditRows);
+  const orderCols = useListColumns(
+    'customer-orders',
+    OPEN_ORDER_COLUMNS,
+    summary?.openOrders ?? null,
+  );
 
   async function load() {
     setError(null);
     try {
       setC(await api<Customer>(`/v1/customers/${id}`));
-      void api<{
-        balanceCents: number;
-        entries: { id: string; deltaCents: number; reason: string | null; createdAt: string }[];
-      }>(`/v1/customers/${id}/store-credit`)
+      void api<{ balanceCents: number; entries: CreditEntry[] }>(`/v1/customers/${id}/store-credit`)
         .then(setCredit)
         .catch(() => setCredit(null));
       void api<HistoryOrder[]>(`/v1/customers/${id}/order-history?limit=25`)
         .then(setHistory)
         .catch(() => setHistory(null));
-      void api<typeof dupes>(`/v1/customers/${id}/duplicates`)
+      void api<DupeRow[]>(`/v1/customers/${id}/duplicates`)
         .then(setDupes)
         .catch(() => setDupes([]));
     } catch (err) {
@@ -510,48 +701,17 @@ export default function CustomerDetailPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Contact</th>
-                    <th>Matched by</th>
-                    <th className="num">Documents</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={dupeCols} testIdPrefix="customer-matches" />
                 </thead>
                 <tbody>
-                  {dupes.map((d) => (
+                  {dupeCols.sorted.map((d) => (
                     <tr key={d.id}>
-                      <td>
-                        <Link href={`/customers/${d.id}`}>
-                          <strong>
-                            {[d.firstName, d.lastName].filter(Boolean).join(' ') || 'unnamed'}
-                          </strong>
-                        </Link>
-                      </td>
-                      <td>
-                        {[d.phone, d.email].filter(Boolean).join(' · ') || (
-                          <span className="muted">no contact info</span>
-                        )}
-                      </td>
-                      <td>same {d.matchedBy}</td>
-                      <td className="num">{d.docCount}</td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={merging}
-                          data-testid={`merge-${d.id}`}
-                          onClick={() => void mergeDupe(d.id)}
-                        >
-                          {merging ? 'Merging…' : 'Merge into this record'}
-                        </Button>
-                      </td>
+                      <ColumnCells list={dupeCols} row={d} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={dupeCols} />
             </TableWrap>
           </Card>
         )}
@@ -572,27 +732,17 @@ export default function CustomerDetailPage() {
                 <TableWrap>
                   <table className="table table-dense">
                     <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th className="num">Amount</th>
-                        <th>Reason</th>
-                      </tr>
+                      <ColumnHeadRow list={creditCols} testIdPrefix="customer-store-credit" />
                     </thead>
                     <tbody>
-                      {credit.entries.slice(0, 10).map((e) => (
+                      {creditCols.sorted.map((e) => (
                         <tr key={e.id}>
-                          <td>{new Date(e.createdAt).toLocaleDateString()}</td>
-                          <td
-                            className={`num ${e.deltaCents > 0 ? 'text-success' : 'text-danger'}`}
-                          >
-                            {e.deltaCents > 0 ? '+' : ''}
-                            <Money cents={e.deltaCents} />
-                          </td>
-                          <td>{e.reason ?? <span className="muted">—</span>}</td>
+                          <ColumnCells list={creditCols} row={e} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={creditCols} />
                 </TableWrap>
               )}
             </Stack>
@@ -618,40 +768,17 @@ export default function CustomerDetailPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Status</th>
-                    <th>Requested</th>
-                    <th className="num">Total</th>
-                    <th className="num">Paid</th>
-                    <th className="num">Balance</th>
-                  </tr>
+                  <ColumnHeadRow list={orderCols} testIdPrefix="customer-orders" />
                 </thead>
                 <tbody>
-                  {summary.openOrders.map((o) => (
+                  {orderCols.sorted.map((o) => (
                     <tr key={o.id}>
-                      <td>
-                        <Link href={`/orders/${o.id}`}>{o.number}</Link>
-                      </td>
-                      <td>
-                        <StatusBadge status={o.status} />
-                      </td>
-                      <td>{o.requestedDate ?? '—'}</td>
-                      <td className="num">
-                        <Money cents={o.totalCents} />
-                      </td>
-                      <td className="num">
-                        <Money cents={o.paidCents} />
-                      </td>
-                      <td className="num">
-                        <strong>
-                          <Money cents={o.balanceCents} />
-                        </strong>
-                      </td>
+                      <ColumnCells list={orderCols} row={o} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={orderCols} />
             </TableWrap>
           </Card>
         )}
@@ -706,36 +833,7 @@ export default function CustomerDetailPage() {
                   </>
                 }
               >
-                {o.lines.length > 0 && (
-                  <TableWrap>
-                    <table className="table table-dense">
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th className="num">Qty</th>
-                          <th className="num">Unit price</th>
-                          <th className="num">Line total</th>
-                          <th>State</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {o.lines.map((l) => (
-                          <tr key={l.id}>
-                            <td>{l.description}</td>
-                            <td className="num">{l.quantity}</td>
-                            <td className="num">
-                              <Money cents={l.unitPriceCents} />
-                            </td>
-                            <td className="num">
-                              <Money cents={l.totalCents + l.taxCents} />
-                            </td>
-                            <td className="muted">{lineStateLabel(l)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </TableWrap>
-                )}
+                {o.lines.length > 0 && <HistoryLines lines={o.lines} />}
               </Card>
             ))
           )}

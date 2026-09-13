@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -80,6 +81,10 @@ export interface CashPaymentRow {
   paidAt: Date;
   /** 'deposit' | 'paid in full' | 'balance on delivery' | 'installment' */
   kind: string;
+  /** Card tenders: 'visa' | 'mastercard' | … recorded at the register. */
+  cardBrand: string | null;
+  /** Financing tenders: the promo term signed (months). */
+  financingMonths: number | null;
   salespersonName: string | null;
   amountCents: number;
   receipt: PickupReceipt | null;
@@ -378,6 +383,8 @@ export class StoreDashboardController {
         paymentId: schema.payments.id,
         method: schema.payments.method,
         kind: schema.payments.kind,
+        cardBrand: schema.payments.cardBrand,
+        financingMonths: schema.payments.financingMonths,
         amountCents: schema.payments.amountCents,
         paidAt: schema.payments.createdAt,
         locationId: locationExpr,
@@ -478,6 +485,8 @@ export class StoreDashboardController {
         soldAt,
         paidAt: r.paidAt,
         kind: paymentKindLabel(r.kind, r.amountCents, r.orderId ? r.orderTotalCents : null),
+        cardBrand: r.cardBrand,
+        financingMonths: r.financingMonths,
         salespersonMembershipId,
         salespersonName: salespersonMembershipId
           ? (members.get(salespersonMembershipId)?.name ?? null)
@@ -852,6 +861,20 @@ export class StoreDashboardController {
     const businessId = tenant.businessId!;
     const p = await this.cashPayment(tenant, businessId, paymentId);
     if (!p.receipt) return;
+    // Redesign Phase 9: a receipt written by a posted pickup is part of
+    // that pickup's ledger (`cash_pickup_items`); the tick cannot be
+    // undone on its own or the slip and the drawer would disagree.
+    const [item] = await this.db
+      .select({ number: schema.cashPickups.number })
+      .from(schema.cashPickupItems)
+      .innerJoin(schema.cashPickups, eq(schema.cashPickups.id, schema.cashPickupItems.pickupId))
+      .where(eq(schema.cashPickupItems.paymentId, paymentId))
+      .limit(1);
+    if (item) {
+      throw new ConflictException(
+        `${p.docNumber} was carried out on pickup ${item.number} — a posted pickup cannot be unticked`,
+      );
+    }
     await this.db
       .delete(schema.cashPickupReceipts)
       .where(

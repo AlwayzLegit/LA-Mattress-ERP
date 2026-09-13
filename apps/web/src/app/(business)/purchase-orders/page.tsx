@@ -12,16 +12,21 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 interface PoRow {
@@ -60,6 +65,74 @@ export default function PurchaseOrdersPage() {
   const [showDeleted, setShowDeleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { rows } = list;
+  const poColumns: ColumnDef<PoRow>[] = [
+    {
+      id: 'number',
+      label: 'PO',
+      sortValue: (p) => p.number,
+      render: (p) => (
+        <>
+          <code>{p.number}</code>
+          {p.deletedAt && (
+            <div className="muted">
+              deleted {new Date(p.deletedAt).toLocaleString()}
+              {p.deletedByEmail ? ` by ${p.deletedByEmail}` : ''}
+            </div>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'vendor',
+      label: 'Vendor',
+      sortValue: (p) => p.vendorName,
+      render: (p) => p.vendorName ?? '—',
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (p) => p.status,
+      render: (p) => <StatusBadge status={p.status} />,
+    },
+    {
+      id: 'subtotal',
+      label: 'Subtotal',
+      num: true,
+      sortValue: (p) => p.subtotalCents,
+      render: (p) => <Money cents={p.subtotalCents} />,
+    },
+    {
+      id: 'created',
+      label: 'Created',
+      sortValue: (p) => p.createdAt,
+      render: (p) => new Date(p.createdAt).toLocaleDateString(),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (p) => (
+        <>
+          {p.deletedAt && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void restore(p)}
+              data-testid={`restore-${p.number}`}
+            >
+              Restore
+            </Button>
+          )}
+          <LinkButton size="sm" variant="secondary" href={`/purchase-orders/${p.id}`}>
+            Open
+          </LinkButton>
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('purchase-orders', poColumns, rows);
 
   // Vendor door (owner 2026-09-02): /purchase-orders?vendorId=…&vendor=Name
   // from the vendors page's "on PO" count.
@@ -282,65 +355,26 @@ export default function PurchaseOrdersPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>PO</th>
-                      <th>Vendor</th>
-                      <th>Status</th>
-                      <th className="num">Subtotal</th>
-                      <th>Created</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="purchase-orders" />
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
-                      <TableEmpty colSpan={6}>No purchase orders match these filters.</TableEmpty>
+                      <TableEmpty colSpan={cols.ordered.length}>
+                        No purchase orders match these filters.
+                      </TableEmpty>
                     )}
-                    {rows.map((p) => (
+                    {cols.sorted.map((p) => (
                       <tr
                         key={p.id}
                         data-testid={p.deletedAt ? 'po-row-deleted' : 'po-row'}
                         style={p.deletedAt ? { opacity: 0.55 } : undefined}
                       >
-                        <td>
-                          <code>{p.number}</code>
-                          {p.deletedAt && (
-                            <div className="muted">
-                              deleted {new Date(p.deletedAt).toLocaleString()}
-                              {p.deletedByEmail ? ` by ${p.deletedByEmail}` : ''}
-                            </div>
-                          )}
-                        </td>
-                        <td>{p.vendorName ?? '—'}</td>
-                        <td>
-                          <StatusBadge status={p.status} />
-                        </td>
-                        <td className="num">
-                          <Money cents={p.subtotalCents} />
-                        </td>
-                        <td>{new Date(p.createdAt).toLocaleDateString()}</td>
-                        <td className="actions">
-                          {p.deletedAt && (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => void restore(p)}
-                              data-testid={`restore-${p.number}`}
-                            >
-                              Restore
-                            </Button>
-                          )}
-                          <LinkButton
-                            size="sm"
-                            variant="secondary"
-                            href={`/purchase-orders/${p.id}`}
-                          >
-                            Open
-                          </LinkButton>
-                        </td>
+                        <ColumnCells list={cols} row={p} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
               <LoadMore state={list} noun="purchase orders" />
             </Card>

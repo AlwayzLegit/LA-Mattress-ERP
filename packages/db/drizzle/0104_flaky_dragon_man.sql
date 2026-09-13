@@ -1,1 +1,0 @@
-ALTER TABLE "chat_conversations" ADD COLUMN "location_id" uuid;

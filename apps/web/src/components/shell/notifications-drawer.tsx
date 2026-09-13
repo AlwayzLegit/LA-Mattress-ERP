@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { Button, SlideOver } from '@/components/ui';
 
 /**
  * Order-change notifications (the owner feed from /v1/notifications).
@@ -103,130 +104,24 @@ export function NotificationsDrawer({
 }) {
   const count = rows?.length ?? 0;
   return (
-    <div className="overlay" onClick={onClose}>
-      <aside
-        className="drawer"
-        role="dialog"
-        aria-modal
-        aria-label="Order changes"
-        data-testid="notifications-drawer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '14px 18px',
-            borderBottom: '1px solid var(--border)',
-          }}
-        >
+    <SlideOver
+      title="Order changes"
+      width={440}
+      testId="notifications-drawer"
+      onClose={onClose}
+      meta={
+        <>
+          <span>{count} recent</span>
           {onBack && (
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Back to my inbox"
-              onClick={onBack}
-            >
-              ←
-            </button>
+            <Button size="sm" variant="ghost" onClick={onBack}>
+              ← My inbox
+            </Button>
           )}
-          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Order changes</h2>
-          <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--muted)' }}>{count} recent</span>
-          <button
-            type="button"
-            className="icon-btn"
-            style={{ marginLeft: 'auto' }}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div style={{ overflow: 'auto', flex: 1 }}>
-          {rows == null && (
-            <div style={{ padding: 18, color: 'var(--muted)', fontSize: 12.5 }}>
-              Order changes are not available to your role.
-            </div>
-          )}
-          {rows && rows.length === 0 && (
-            <div style={{ padding: 18, color: 'var(--muted)', fontSize: 12.5 }}>
-              No order changes recorded yet.
-            </div>
-          )}
-          {rows?.map((n) => {
-            const tone = toneOf(n.action);
-            const dot =
-              tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--info)';
-            const body = (
-              <>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: dot,
-                      flex: 'none',
-                    }}
-                  />
-                  <span style={{ fontWeight: 500 }}>{n.label}</span>
-                  <span className="mono" style={{ color: 'var(--text2)' }}>
-                    {n.orderNumber ?? ''}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' }}
-                  >
-                    {ago(n.createdAt)}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, paddingLeft: 14 }}>
-                  {[detailOf(n), n.actorName ?? n.actorEmail ?? 'system']
-                    .filter(Boolean)
-                    .join(' · ')}
-                </div>
-              </>
-            );
-            const style: React.CSSProperties = {
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: '10px 18px',
-              border: 0,
-              borderBottom: '1px solid var(--border)',
-              background: 'transparent',
-              color: 'inherit',
-              textDecoration: 'none',
-            };
-            return n.orderId ? (
-              <Link
-                key={n.id}
-                href={`/orders/${n.orderId}`}
-                onClick={onClose}
-                style={style}
-                className="hover:bg-surface-2"
-              >
-                {body}
-              </Link>
-            ) : (
-              <div key={n.id} style={style}>
-                {body}
-              </div>
-            );
-          })}
-        </div>
-        <div
-          style={{
-            padding: '12px 18px',
-            borderTop: '1px solid var(--border)',
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-          }}
-        >
-          <button
-            type="button"
-            className="btn btn-secondary"
+        </>
+      }
+      foot={
+        <>
+          <Button
             onClick={() => {
               onMarkRead();
               onClose();
@@ -234,12 +129,84 @@ export function NotificationsDrawer({
             }}
           >
             Mark all read
-          </button>
+          </Button>
           <Link href="/audit" onClick={onClose} style={{ marginLeft: 'auto', fontSize: 12.5 }}>
             Audit log →
           </Link>
-        </div>
-      </aside>
-    </div>
+        </>
+      }
+    >
+      <div style={{ margin: '-16px' }}>
+        {rows == null && (
+          <div style={{ padding: 18, color: 'var(--muted)', fontSize: 12.5 }}>
+            Order changes are not available to your role.
+          </div>
+        )}
+        {rows && rows.length === 0 && (
+          <div style={{ padding: 18, color: 'var(--muted)', fontSize: 12.5 }}>
+            No order changes recorded yet.
+          </div>
+        )}
+        {rows?.map((n) => {
+          const tone = toneOf(n.action);
+          const dot =
+            tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--info)';
+          const body = (
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: dot,
+                    flex: 'none',
+                  }}
+                />
+                <span style={{ fontWeight: 500 }}>{n.label}</span>
+                <span className="mono" style={{ color: 'var(--text2)' }}>
+                  {n.orderNumber ?? ''}
+                </span>
+                <span
+                  className="mono"
+                  style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted)' }}
+                >
+                  {ago(n.createdAt)}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, paddingLeft: 14 }}>
+                {[detailOf(n), n.actorName ?? n.actorEmail ?? 'system'].filter(Boolean).join(' · ')}
+              </div>
+            </>
+          );
+          const style: React.CSSProperties = {
+            display: 'block',
+            width: '100%',
+            textAlign: 'left',
+            padding: '10px 18px',
+            border: 0,
+            borderBottom: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'inherit',
+            textDecoration: 'none',
+          };
+          return n.orderId ? (
+            <Link
+              key={n.id}
+              href={`/orders/${n.orderId}`}
+              onClick={onClose}
+              style={style}
+              className="hover:bg-surface-2"
+            >
+              {body}
+            </Link>
+          ) : (
+            <div key={n.id} style={style}>
+              {body}
+            </div>
+          );
+        })}
+      </div>
+    </SlideOver>
   );
 }

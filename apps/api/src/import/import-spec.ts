@@ -97,6 +97,14 @@ export const ENTITY_SPECS: EntitySpec[] = [
         type: 'string',
         headers: ['GROUP', 'PRODUCT_GROUP', 'SIZE_GROUP', 'STORIS_GROUP'],
       },
+      // A22.2: an explicit size / firmness column wins; otherwise the
+      // importer reads them off the group code and the description.
+      { name: 'size', type: 'string', headers: ['SIZE', 'MATTRESS_SIZE', 'BED_SIZE'] },
+      {
+        name: 'firmness',
+        type: 'string',
+        headers: ['FIRMNESS', 'COMFORT', 'COMFORT_LEVEL', 'FEEL'],
+      },
       {
         // Optional by decision D12: STORIS exports carry cost only and the
         // merchant prices at the register. Absent → new variants land at 0

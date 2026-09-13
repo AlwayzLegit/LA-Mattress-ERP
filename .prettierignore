@@ -21,3 +21,6 @@ docs/erp-selling-location
 docs/erp-transfers
 docs/erp/*.md
 docs/handoffs
+
+# Redesign hand-off: design references (HTML prototypes, canvases, spec), not source
+design_handoff_redesign_12_phases

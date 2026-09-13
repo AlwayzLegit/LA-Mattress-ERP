@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>body{margin:0;background:#e9e7e2;font-family:'Public Sans',system-ui,sans-serif;color:#1c1b18;-webkit-font-smoothing:antialiased} a{color:#1e3a5f} a:hover{color:#16304f}</style>
+</helmet>
+<section style="padding:48px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6f6c65">LA MATTRESS ERP · REDESIGN</span><h1 style="margin:0;font-family:'Archivo',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em">Phase 6 — Products, stock and cross-store visibility</h1><span style="font-size:13px;color:#6f6c65">Live prototype (<a href="Proto Products.dc.html">Proto Products.dc.html</a>). Drag a column header to move it; click to sort.</span></div>
+  <div style="width:1440px;min-width:1440px;flex:none;background:#fff;border:1px solid #dcd9d2;padding:24px 32px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px;font-size:13.5px;line-height:1.55;color:#4a4843">
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">The user and the question</div><p style="margin:0">A salesperson with a customer asking "do you have it", and a warehouse lead deciding what to move. <em>"Who has this, anywhere, right now?"</em> The audit found the browser could only answer one location at a time. Now one row per SKU carries one column per store plus a company total, and a zero is a zero, not a missing row.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">What we kept from the shipped browser</div><p style="margin:0">The owner asked for drag-to-reorder and click-to-sort columns; both survive with the location columns treated as ordinary columns (drag Glendale next to Product if that is how you read it; the order is remembered per browser). Advanced search stays a disclosure. The four-tab strip (Products · Stock by location · Counts · Receive) stays; Receive is built out below. The product page keeps every activity tab but leads with the location grid and ATP.</p></div>
+    <div><div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18;margin-bottom:6px">Design notes</div><p style="margin:0 0 8px"><strong style="color:#1c1b18">Ive vs Forstall on the column count:</strong> Ive wanted six store columns collapsed to one "Company" number with a hover. Forstall: the question is <em>where</em>, and a hover is a click. Jobs: six numbers in a row read faster than one number and a tooltip; the store columns stay, tinted navy in the header so they read as one block.</p><p style="margin:0 0 8px"><strong style="color:#1c1b18">Chaudhri on colour:</strong> a zero with open demand is red; a positive number below the store minimum is amber; a plain zero is grey. The footer says so in words — status never by colour alone.</p><p style="margin:0"><strong style="color:#1c1b18">Later:</strong> a Cost column for financial roles; a sticky first column when the table exceeds 1440.</p></div>
+  </div>
+  <sc-for list="{{ boards }}" as="b" hint-placeholder-count="4">
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <div id="{{ b.id }}" style="position:relative;width:1440px;min-width:1440px;flex:none;height:900px;border:1px solid #dcd9d2;overflow:hidden;background:#f6f5f2">
+        <a href="#{{ b.id }}" style="position:absolute;top:8px;right:8px;z-index:30;font-family:'JetBrains Mono',monospace;font-size:11px;padding:2px 7px;border:1px solid #dcd9d2;background:#fff;text-decoration:none;color:#6f6c65">{{ b.id }}</a>
+        <dc-import name="Proto Products" scene="{{ b.scene }}" hint-size="1440px,900px"></dc-import>
+      </div>
+      <div style="width:440px;background:#fff;border:1px solid #dcd9d2;padding:22px 26px;font-size:13.5px;line-height:1.55;color:#4a4843">
+        <div style="font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:#1c1b18">{{ b.title }}</div>
+        <div style="font-size:12px;color:#6f6c65;margin:2px 0 10px">first question: <em>{{ b.q }}</em></div>
+        <sc-for list="{{ b.notes }}" as="n" hint-placeholder-count="2"><p style="margin:0 0 10px">{{ n }}</p></sc-for>
+        <div style="font-weight:600;color:#1c1b18;margin-top:12px">What we removed</div>
+        <ul style="margin:4px 0 0;padding-left:18px"><sc-for list="{{ b.removed }}" as="r" hint-placeholder-count="2"><li>{{ r }}</li></sc-for></ul>
+      </div>
+    </div>
+  </sc-for>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return { boards: [
+      { id: '6a', scene: 'browser', title: 'Browser with location columns', q: 'Who has this, anywhere, right now?', notes: ['One row per SKU. Six store columns show <em>available</em> (on hand minus reserved), then Company, On PO and ATP. Purple Hybrid 3 King shows zeros across the board with 4 on PO — the row that used to be missing. Cloud Comfort Queen shows La Brea at 0 in grey (no demand) and the Warehouse at 4 in amber (below its minimum of 4 after reservations).', 'Headers are draggable with a visible grip; the drop target shows a navy left rule; Reset columns appears only when the order differs from the default. Sort is a real button with aria-sort. The stock filter has the three questions a person actually asks: anywhere, short somewhere, out everywhere.'], removed: ['The Location select that scoped the whole table to one store.', 'Sales-margin cost from the default column set (financial roles can add it).', 'The Delete button on every row — delete lives on the product page.'] },
+      { id: '6b', scene: 'product', title: 'Product page — location grid first', q: 'When can I promise this, and from where?', notes: ['The header is the identity line; the first thing under it is "Where it is": on hand, reserved, floor, available, on PO, ATP and the store minimum for every location, plus a plain-English "Next promise" per row (Today · Sep 5 via PO-4471 · Transfer from Warehouse · Special order). The company total is in the section header so the number a salesperson quotes is never computed in their head.', 'Activity tabs follow, with counts in the tab so an empty tab announces itself. The Adjustable base example shows a Warehouse row at 6 available, 2 reserved.'], removed: ['A hero image block.', 'Basics form above the fold — editing moves behind Edit product.', 'The reorder-automation table from the first screen (it is under Purchase orders).'] },
+      { id: '6c', scene: 'adjust', title: 'Stock adjustment dialog — reviewed', q: 'What will the number be after I post this, and will it hurt an order?', notes: ['The shipped dialog had the right fields; the review adds the arithmetic in plain sight (now → change → after) and a guard: if After drops below the reserved count at that location, a red note says an order goes at risk and to reassign the reservation first. Count corrections over 2 units require a note. On hand cannot go negative — the button disables and the note says the largest allowed change.', 'Forstall wanted a manager PIN for anything over 5 units; Jobs deferred it to "later" because every adjustment is already audited by name and appears on the owner\'s Inventory adjustments report.'], removed: ['Free-text reason (coded reasons only).', 'A separate quantity field for "set to" — change is always a delta so the audit reads as a movement.'] },
+      { id: '6d', scene: 'receive', title: 'Receive — against PO-4471', q: 'What came in, does it match the PO, and which orders can ship now?', notes: ['Pick the PO, enter what came off the truck per line, mark damaged units (they go to As-Is with a coded reason), and the rail totals the receipt: units in, damaged, still open on the PO, and — the number the warehouse actually cares about — how many waiting orders this unblocks. Blind count hides the expected column for an honest count.', 'The line shows which sales orders are waiting on it (SO-10437, SO-10425), so the receiver knows what to stage first.'], removed: ['Ad-hoc receiving as the default (it is a secondary button and requires a reason).', 'A separate "post" confirmation dialog — the rail is the confirmation.'] },
+    ] };
+  }
+}
+</script>
+</body>
+</html>

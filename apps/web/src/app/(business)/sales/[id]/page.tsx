@@ -12,6 +12,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
@@ -19,10 +22,12 @@ import {
   KeyValue,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface SaleLine {
@@ -64,6 +69,33 @@ interface Sale {
   refunds: Refund[];
 }
 
+const REFUND_COLUMNS: ColumnDef<Refund>[] = [
+  {
+    id: 'when',
+    label: 'When',
+    className: 'nowrap',
+    sortValue: (r) => r.createdAt,
+    render: (r) => new Date(r.createdAt).toLocaleString(),
+  },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    sortValue: (r) => r.amountCents,
+    render: (r) => (
+      <strong>
+        <Money cents={r.amountCents} />
+      </strong>
+    ),
+  },
+  {
+    id: 'reason',
+    label: 'Reason',
+    sortValue: (r) => r.reason,
+    render: (r) => r.reason ?? <span className="muted">—</span>,
+  },
+];
+
 export default function SaleDetailPage() {
   const params = useParams<{ id: string }>();
   const id = (params?.id ?? '') as string;
@@ -73,6 +105,7 @@ export default function SaleDetailPage() {
   const [refundQty, setRefundQty] = useState<Record<string, number>>({});
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const refundCols = useListColumns('sale-refunds', REFUND_COLUMNS, sale?.refunds ?? null);
 
   async function load() {
     try {
@@ -305,26 +338,17 @@ export default function SaleDetailPage() {
               <TableWrap>
                 <table className="table table-dense">
                   <thead>
-                    <tr>
-                      <th>When</th>
-                      <th className="num">Amount</th>
-                      <th>Reason</th>
-                    </tr>
+                    <ColumnHeadRow list={refundCols} testIdPrefix="sale-refunds" />
                   </thead>
                   <tbody>
-                    {sale.refunds.map((r) => (
+                    {refundCols.sorted.map((r) => (
                       <tr key={r.id}>
-                        <td className="nowrap">{new Date(r.createdAt).toLocaleString()}</td>
-                        <td className="num">
-                          <strong>
-                            <Money cents={r.amountCents} />
-                          </strong>
-                        </td>
-                        <td>{r.reason ?? <span className="muted">—</span>}</td>
+                        <ColumnCells list={refundCols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={refundCols} />
               </TableWrap>
             </Card>
           )}

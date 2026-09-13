@@ -6,15 +6,20 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Input,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -28,8 +33,32 @@ interface CustomerRow {
   createdAt: string;
 }
 
+const CUSTOMER_COLUMNS: ColumnDef<CustomerRow>[] = [
+  {
+    id: 'name',
+    label: 'Name',
+    sortValue: (c) => displayName(c),
+    render: (c) => <strong>{displayName(c) || <span className="muted">—</span>}</strong>,
+  },
+  { id: 'email', label: 'Email', sortValue: (c) => c.email, render: (c) => c.email ?? '—' },
+  { id: 'phone', label: 'Phone', sortValue: (c) => c.phone, render: (c) => c.phone ?? '—' },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (c) => (
+      <LinkButton size="sm" href={`/customers/${c.id}`}>
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function CustomersPage() {
   const [rows, setRows] = useState<CustomerRow[] | null>(null);
+  const cols = useListColumns('customers', CUSTOMER_COLUMNS, rows);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [q, setQ] = useState('');
@@ -146,35 +175,22 @@ export default function CustomersPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="customers" />
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <TableEmpty colSpan={4}>No customers match &ldquo;{q}&rdquo;.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>
+                      No customers match &ldquo;{q}&rdquo;.
+                    </TableEmpty>
                   )}
-                  {rows.map((c) => (
+                  {cols.sorted.map((c) => (
                     <tr key={c.id}>
-                      <td>
-                        <strong>{displayName(c) || <span className="muted">—</span>}</strong>
-                      </td>
-                      <td>{c.email ?? '—'}</td>
-                      <td>{c.phone ?? '—'}</td>
-                      <td className="actions">
-                        <LinkButton size="sm" href={`/customers/${c.id}`}>
-                          Open
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={c} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

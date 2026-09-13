@@ -13,6 +13,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
@@ -21,10 +24,12 @@ import {
   LoadingRows,
   EmptyState,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -149,6 +154,132 @@ function RunCard({
 
   const showActionsColumn = closing || run.status !== 'completed';
 
+  // The stop sequence IS the run, so these columns move but never sort.
+  const actionsColumn: ColumnDef<DeliveryDetail> = {
+    id: 'actions',
+    label: closing ? 'Outcome' : '',
+    srLabel: closing ? undefined : 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (s) => {
+      const open = !CLOSED_STOP.includes(s.status);
+      return (
+        <>
+          {closing && open && (
+            <span className="inline-flex flex-wrap items-center justify-end gap-2">
+              <Select
+                value={outcomes[s.id]?.outcome ?? ''}
+                data-testid="stop-outcome"
+                aria-label="Outcome"
+                onChange={(e) =>
+                  setOutcomes((prev) => ({
+                    ...prev,
+                    [s.id]: {
+                      ...prev[s.id],
+                      outcome: e.target.value as 'delivered' | 'failed',
+                    },
+                  }))
+                }
+                className="w-32"
+              >
+                <option value="">Outcome…</option>
+                <option value="delivered">Delivered</option>
+                <option value="failed">Failed</option>
+              </Select>
+              {outcomes[s.id]?.outcome === 'failed' && (
+                <>
+                  {failureCodes.length > 0 ? (
+                    <Select
+                      value={outcomes[s.id]?.reasonCodeId ?? ''}
+                      aria-label="Failure reason"
+                      onChange={(e) =>
+                        setOutcomes((prev) => ({
+                          ...prev,
+                          [s.id]: { ...prev[s.id]!, reasonCodeId: e.target.value },
+                        }))
+                      }
+                      className="w-40"
+                    >
+                      <option value="">Why…</option>
+                      {failureCodes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code} — {c.description}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      placeholder="Why?"
+                      aria-label="Failure reason"
+                      value={outcomes[s.id]?.reason ?? ''}
+                      onChange={(e) =>
+                        setOutcomes((prev) => ({
+                          ...prev,
+                          [s.id]: { ...prev[s.id]!, reason: e.target.value },
+                        }))
+                      }
+                      className="w-36"
+                    />
+                  )}
+                  <Input
+                    type="date"
+                    title="Reschedule to"
+                    aria-label="Reschedule to"
+                    value={outcomes[s.id]?.rescheduleDate ?? ''}
+                    onChange={(e) =>
+                      setOutcomes((prev) => ({
+                        ...prev,
+                        [s.id]: { ...prev[s.id]!, rescheduleDate: e.target.value },
+                      }))
+                    }
+                    className="w-36"
+                  />
+                </>
+              )}
+            </span>
+          )}
+          {run.status !== 'completed' && !closing && open && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              data-testid="pull-off-run"
+              onClick={() => setRemovingStopId(s.id)}
+            >
+              Pull off run
+            </Button>
+          )}
+        </>
+      );
+    },
+  };
+  const stopColumns: ColumnDef<DeliveryDetail>[] = [
+    {
+      id: 'position',
+      label: '#',
+      num: true,
+      render: (s, i) => <strong>{s.routePosition ?? i + 1}</strong>,
+    },
+    {
+      id: 'stop',
+      label: 'Stop',
+      render: (s) => (
+        <>
+          {s.orderNumber} · {s.customerName ?? '—'}
+        </>
+      ),
+    },
+    { id: 'status', label: 'Status', render: (s) => <StatusBadge status={s.status} /> },
+    {
+      id: 'collect',
+      label: 'Collect',
+      num: true,
+      render: (s) => (s.balanceDueCents > 0 ? <Money cents={s.balanceDueCents} /> : '—'),
+    },
+    ...(showActionsColumn ? [actionsColumn] : []),
+  ];
+  const stopCols = useListColumns('deliveries-dispatch-runs', stopColumns, run.stops);
+
   return (
     <Card
       data-testid="run-card"
@@ -207,124 +338,17 @@ function RunCard({
         <TableWrap>
           <table className="table table-dense">
             <thead>
-              <tr>
-                <th className="num">#</th>
-                <th>Stop</th>
-                <th>Status</th>
-                <th className="num">Collect</th>
-                {showActionsColumn && <th className="actions">{closing ? 'Outcome' : ''}</th>}
-              </tr>
+              <ColumnHeadRow list={stopCols} testIdPrefix="deliveries-dispatch-runs" />
             </thead>
             <tbody>
-              {run.stops.map((s, i) => {
-                const open = !CLOSED_STOP.includes(s.status);
-                return (
-                  <tr key={s.id}>
-                    <td className="num">
-                      <strong>{s.routePosition ?? i + 1}</strong>
-                    </td>
-                    <td>
-                      {s.orderNumber} · {s.customerName ?? '—'}
-                    </td>
-                    <td>
-                      <StatusBadge status={s.status} />
-                    </td>
-                    <td className="num">
-                      {s.balanceDueCents > 0 ? <Money cents={s.balanceDueCents} /> : '—'}
-                    </td>
-                    {showActionsColumn && (
-                      <td className="actions">
-                        {closing && open && (
-                          <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                            <Select
-                              value={outcomes[s.id]?.outcome ?? ''}
-                              data-testid="stop-outcome"
-                              aria-label="Outcome"
-                              onChange={(e) =>
-                                setOutcomes((prev) => ({
-                                  ...prev,
-                                  [s.id]: {
-                                    ...prev[s.id],
-                                    outcome: e.target.value as 'delivered' | 'failed',
-                                  },
-                                }))
-                              }
-                              className="w-32"
-                            >
-                              <option value="">Outcome…</option>
-                              <option value="delivered">Delivered</option>
-                              <option value="failed">Failed</option>
-                            </Select>
-                            {outcomes[s.id]?.outcome === 'failed' && (
-                              <>
-                                {failureCodes.length > 0 ? (
-                                  <Select
-                                    value={outcomes[s.id]?.reasonCodeId ?? ''}
-                                    aria-label="Failure reason"
-                                    onChange={(e) =>
-                                      setOutcomes((prev) => ({
-                                        ...prev,
-                                        [s.id]: { ...prev[s.id]!, reasonCodeId: e.target.value },
-                                      }))
-                                    }
-                                    className="w-40"
-                                  >
-                                    <option value="">Why…</option>
-                                    {failureCodes.map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.code} — {c.description}
-                                      </option>
-                                    ))}
-                                  </Select>
-                                ) : (
-                                  <Input
-                                    placeholder="Why?"
-                                    aria-label="Failure reason"
-                                    value={outcomes[s.id]?.reason ?? ''}
-                                    onChange={(e) =>
-                                      setOutcomes((prev) => ({
-                                        ...prev,
-                                        [s.id]: { ...prev[s.id]!, reason: e.target.value },
-                                      }))
-                                    }
-                                    className="w-36"
-                                  />
-                                )}
-                                <Input
-                                  type="date"
-                                  title="Reschedule to"
-                                  aria-label="Reschedule to"
-                                  value={outcomes[s.id]?.rescheduleDate ?? ''}
-                                  onChange={(e) =>
-                                    setOutcomes((prev) => ({
-                                      ...prev,
-                                      [s.id]: { ...prev[s.id]!, rescheduleDate: e.target.value },
-                                    }))
-                                  }
-                                  className="w-36"
-                                />
-                              </>
-                            )}
-                          </span>
-                        )}
-                        {run.status !== 'completed' && !closing && open && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={busy}
-                            data-testid="pull-off-run"
-                            onClick={() => setRemovingStopId(s.id)}
-                          >
-                            Pull off run
-                          </Button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+              {run.stops.map((s, i) => (
+                <tr key={s.id}>
+                  <ColumnCells list={stopCols} row={s} index={i} />
+                </tr>
+              ))}
             </tbody>
           </table>
+          <ResetColumns list={stopCols} />
         </TableWrap>
 
         {closing && (
@@ -435,6 +459,105 @@ function DispatchInner() {
     }
   }
 
+  // Stop and Route are edited in place, so the cells need `patch`.
+  const stopColumns: ColumnDef<DeliveryDetail>[] = [
+    {
+      id: 'stop',
+      label: 'Stop',
+      sortValue: (r) => r.routePosition,
+      render: (r) => (
+        <Input
+          type="number"
+          min={1}
+          aria-label="Stop number"
+          defaultValue={r.routePosition ?? ''}
+          disabled={!(r.status === 'scheduled' || r.status === 'loaded')}
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isInteger(v) && v > 0 && v !== r.routePosition) {
+              void patch(r.id, { routePosition: v });
+            }
+          }}
+          className="w-16"
+        />
+      ),
+    },
+    {
+      id: 'route',
+      label: 'Route',
+      sortValue: (r) => r.route,
+      render: (r) => (
+        <Input
+          defaultValue={r.route ?? ''}
+          placeholder="—"
+          aria-label="Route"
+          disabled={!(r.status === 'scheduled' || r.status === 'loaded')}
+          data-testid="route-input"
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v !== (r.route ?? '')) void patch(r.id, { route: v || null });
+          }}
+          className="w-28"
+        />
+      ),
+    },
+    {
+      id: 'order',
+      label: 'Order #',
+      className: 'nowrap',
+      sortValue: (r) => r.orderNumber,
+      render: (r) => <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>,
+    },
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortValue: (r) => r.customerName,
+      render: (r) => r.customerName ?? '—',
+    },
+    {
+      id: 'address',
+      label: 'Address',
+      sortValue: (r) =>
+        [r.addressLine1, r.addressCity, r.addressPostalCode].filter(Boolean).join(', ') || null,
+      render: (r) => (
+        <>
+          {[r.addressLine1, r.addressCity, r.addressPostalCode].filter(Boolean).join(', ') || '—'}
+          {r.addressPhone && <div className="muted">{r.addressPhone}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'window',
+      label: 'Window',
+      className: 'nowrap',
+      sortValue: (r) => r.windowStart,
+      render: (r) =>
+        r.windowStart && r.windowEnd
+          ? `${r.windowStart.slice(0, 5)}–${r.windowEnd.slice(0, 5)}`
+          : '—',
+    },
+    {
+      id: 'items',
+      label: 'Items',
+      sortValue: (r) => r.lines.map((l) => `${l.quantity}× ${l.description}`).join(', '),
+      render: (r) => r.lines.map((l) => `${l.quantity}× ${l.description}`).join(', '),
+    },
+    {
+      id: 'collect',
+      label: 'Collect',
+      num: true,
+      sortValue: (r) => r.balanceDueCents,
+      render: (r) => (r.balanceDueCents > 0 ? <Money cents={r.balanceDueCents} /> : '—'),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+  ];
+  const cols = useListColumns('deliveries-dispatch-stops', stopColumns, rows);
+
   const day = capacity?.days[0];
   const atCap = day && capacity && day.booked >= capacity.cap;
   const unassigned = (rows ?? []).filter(
@@ -534,80 +657,17 @@ function DispatchInner() {
             <TableWrap>
               <table className="table" data-testid="dispatch-table">
                 <thead>
-                  <tr>
-                    <th>Stop</th>
-                    <th>Route</th>
-                    <th>Order #</th>
-                    <th>Customer</th>
-                    <th>Address</th>
-                    <th>Window</th>
-                    <th>Items</th>
-                    <th className="num">Collect</th>
-                    <th>Status</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="deliveries-dispatch-stops" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => {
-                    const editable = r.status === 'scheduled' || r.status === 'loaded';
-                    return (
-                      <tr key={r.id} data-testid="dispatch-row">
-                        <td>
-                          <Input
-                            type="number"
-                            min={1}
-                            aria-label="Stop number"
-                            defaultValue={r.routePosition ?? ''}
-                            disabled={!editable}
-                            onBlur={(e) => {
-                              const v = Number(e.target.value);
-                              if (Number.isInteger(v) && v > 0 && v !== r.routePosition) {
-                                void patch(r.id, { routePosition: v });
-                              }
-                            }}
-                            className="w-16"
-                          />
-                        </td>
-                        <td>
-                          <Input
-                            defaultValue={r.route ?? ''}
-                            placeholder="—"
-                            aria-label="Route"
-                            disabled={!editable}
-                            data-testid="route-input"
-                            onBlur={(e) => {
-                              const v = e.target.value.trim();
-                              if (v !== (r.route ?? '')) void patch(r.id, { route: v || null });
-                            }}
-                            className="w-28"
-                          />
-                        </td>
-                        <td className="nowrap">
-                          <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>
-                        </td>
-                        <td>{r.customerName ?? '—'}</td>
-                        <td>
-                          {[r.addressLine1, r.addressCity, r.addressPostalCode]
-                            .filter(Boolean)
-                            .join(', ') || '—'}
-                          {r.addressPhone && <div className="muted">{r.addressPhone}</div>}
-                        </td>
-                        <td className="nowrap">
-                          {r.windowStart && r.windowEnd
-                            ? `${r.windowStart.slice(0, 5)}–${r.windowEnd.slice(0, 5)}`
-                            : '—'}
-                        </td>
-                        <td>{r.lines.map((l) => `${l.quantity}× ${l.description}`).join(', ')}</td>
-                        <td className="num">
-                          {r.balanceDueCents > 0 ? <Money cents={r.balanceDueCents} /> : '—'}
-                        </td>
-                        <td>
-                          <StatusBadge status={r.status} />
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {cols.sorted.map((r) => (
+                    <tr key={r.id} data-testid="dispatch-row">
+                      <ColumnCells list={cols} row={r} />
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

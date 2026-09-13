@@ -7,6 +7,20 @@
 
 **Sprint state:** Build track COMPLETE through Day 9 + UI overhaul + integrations + five post-checkpoint batches — checkpoint 5 merged to main 2026-08-25 (PR #29, squash `138ba82`) and live on staging (`596b8d4`). Remaining build items (rehearsal #2 = sales history + customers from the STORIS invoice register, Day 10 final import) are blocked on that export; all other unchecked items are **Ops**. Old stores 06/08/09 are out of migration scope (final). · **Rehearsal imports done:** 1/2 (products + inventory, real data, PASS) · **Recon gates passed:** gates 1–2 on the real product/inventory export; 3–5 need the invoice/customer export
 
+> **Redesign programme (2026-09-12):** the dashboard & register redesign runs alongside
+> this tracker as 12 phases — spec in `design_handoff_redesign_12_phases/README.md`, plan in
+> `CLAUDE_CODE_PROMPT.md` beside it, per-phase log in `PHASE_NOTES.md`. Phase 1 (tokens and
+> fonts) merged 2026-09-12 (PR #162); Phase 2 (component kit) merged
+> 2026-09-12 (PR #163); Phase 3 (shell) PR #164; Phase 4 (New Sale layout, lines,
+> sourcing) PR #165; Phase 5 (Add Product dialog + payments) PR #166; Phase 6 (Orders book
+> and slide-over) PR #167; Phase 7 (Products browser, product page, adjust, receive) merged
+> 2026-09-12 (PR #168); Phase 8 (Deliveries board + day sheet) merged 2026-09-12 (PR #169);
+> Phase 9 (Owner + Manager dashboards, cash pickups) merged 2026-09-12 (PR #170); Phase 10
+> (Operations, Warehouse, Z-report) merged 2026-09-12 (PR #171); Phase 11 (Sales competitions)
+> merged 2026-09-12 (PR #172); Phase 12 (Accessibility pass, states, polish, cleanup) in
+> review — the programme's consolidated Later list and the README §5 answers are in
+> `PHASE_NOTES.md` under Phase 12.
+
 ---
 
 ## Day 1 — Order spine + extraction kickoff
@@ -5227,7 +5241,8 @@ Phase 1 (this branch):
       info; payment terminal — _2026-09-10: `orders/[id]/actions/` (menu +
       dialogs), Order details card, ⋯ per line, `?scope=order` invoice;
       phase-2/3 items stay on the menu and say so instead of hiding._
-- [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
+- [x] Tests (int spec for the new endpoints), docs, CI green, merge —
+      _2026-09-12: box ticked late — PR #154 merged 2026-09-10 23:50Z._
       _2026-09-10: `order-actions.int.spec.ts` (5; CI db
       `jetnine_order_actions`); `orders.int.spec.ts` (101),
       `order-detail-extras` (4) and `customers` (16) still green; PR #154.
@@ -5469,6 +5484,249 @@ sends the return salesperson the API already accepts (slice 6).
   Postgres refused new clients (`sorry, too many clients already`) at 64
   integration specs. `DatabaseModule` now ends the pool in
   `onApplicationShutdown`; the full suite peaks at 10 connections.
+- 2026-09-11 (A22.1, owner ask "categorize all of the products for advanced
+  search"): `docs/imports/2026-09-11/product-categories.csv` files all 1,948
+  STORIS SKUs into a 10 × 35 retail tree (PLAN §12.19 D44–D46; sources and
+  inferred rows in `product-categories.md`). `ops/categorize-products.ts` +
+  workflow _Ops — categorize products_ apply it (validate → commit; renames
+  MATT/ADJUST/… in place, RF folds into Services & Fees). Browser: category
+  filter includes subcategories, rows show `categoryPath`, picker reads
+  "Mattresses › Hybrid"; re-imports never coarsen. Tests:
+  `categorize-products.int.spec.ts` (7; CI db `jetnine_categorize`) +
+  nested-category case in `catalog.int.spec.ts`.
+  **Ops:** after deploy run the workflow with mode `validate`, read the plan,
+  then `commit` (file `docs/imports/2026-09-11/product-categories.csv`,
+  expect_rows 1948).
+- 2026-09-12 (A22.2, owner ask "proper size wiring"): size and firmness are
+  variant columns (`product_variants.size/firmness`, migration `0099` with a
+  backfill from attributes → STORIS group code → name, search vector
+  regenerated). Shared vocabulary + parsers in `@jetnine/shared`
+  (`MATTRESS_SIZES`, `FIRMNESS_LEVELS`, `normalizeSize`,
+  `sizeFromGroupCode`, `sizeFromText`, `firmnessFromText`). Import, product
+  create, variant PATCH set them; register popup filters on the columns and
+  matches search words in any order; browser has Size / Firmness criteria +
+  columns and `GET /v1/products/facets` for the pickers (PLAN §12.20
+  D47–D49). Tests: shared `catalog.test.ts`, `product-filters` (13),
+  `catalog` (+3), `categorize-products` (+2: every sized group code filed,
+  SQL backfill == importer on all 1,948 rows). Migration `0099` runs on
+  deploy — no ops step.
+
+### Checkpoint — 2026-09-11 (Modern invoice: Invoice / Sales Order + Exchange Order)
+
+Owner asked to modernize the invoices the stores print; six questions settled it:
+modern clean layout, logo + brand accent, Letter laser output only, Invoice +
+Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment).
+
+- API: `GET /v1/orders/:id/document` → `business.accentColor` (Settings → Branding,
+  null until set). `orders.int.spec.ts` +1.
+- Web: `InvoiceDoc` rewritten — accent header rule + title, Amount due / Credit due /
+  Paid in full callout, header-note notice bar, Sold to / Ship to / Order details
+  cards, clean line grid (item + model · brand + comment), payments + totals card
+  with the due row filled in the accent, footer note + printed stamp. `@page letter`,
+  `print-color-adjust: exact`, repeating grid header, rows don't split. Readable
+  text on any accent (luminance).
+- Owner review (same day): 1-inch margins all round; default accent is the LA
+  Mattress logo navy `#0f2057` (from the logo SVG on the store site); the header
+  prints the selling store's full address, never its name, and the Store cell is
+  gone.
+- Owner (same day): each payment prints the register's reference — a bare last 4
+  as "•••• 4242", approval / check numbers as entered. `processorRef` was already
+  in the document payload; `orders.int.spec.ts` +1 proves the round trip.
+- Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
+  JSX for web component tests).
+
+### Checkpoint — 2026-09-12 (Cost column: "hidden" vs no cost on file)
+
+HANDOFF §5 cosmetic: the product screens printed "hidden" both when the viewer lacks
+`products.cost.view` and when the cost is genuinely null. `/v1/business/members/me` now
+carries `canSeeCost` (super-admin or `products.cost.view`), the acting-store snapshot
+exposes it, and the Products browser, product page (Sales margin cost field + variants
+table), General panel cost figures and Sales history cost column say **hidden** only
+without access and **—** for a missing cost. The browser's cost column now follows the
+permission instead of guessing from whether any row carried a cost. Tests:
+`business.int.spec.ts` (owner true) and `cashier.int.spec.ts` (cashier false).
+Also this session: HANDOFF §4a marked closed (email went live 2026-08-27 — the brief
+predated it) and a dated update block added at its top; PR #154's box ticked.
+
+### Checkpoint — 2026-09-12 (Sidebar: all groups open)
+
+Owner ask: "make the sidebar all open not collapsible." README §2 line amended
+(struck + dated), `PHASE_NOTES.md` amendment logged. Sidebar groups are static
+headings with every link visible; no toggle, no remembered open group, no `userKey`
+prop. CSS: `.nav-group-btn` / `.nav-chev` replaced by `.nav-group-head`.
+
+### Checkpoint — 2026-09-12 (Owner dashboard: "Cash on hand is unavailable")
+
+Live: `GET /v1/dashboard/cash-pickups/queue` returns 500 for the owner's business on every
+call since Phase 9 went live (Render logs: `Failed query: select "payments"…` from
+`pendingCash`), so every store card shows "Cash on hand is unavailable right now". One
+other identity got 200 at 17:03Z. Postgres logged no ERROR for the app role, and the API
+logger dropped the wrapped driver error, so the cause is not yet in evidence. Shipped:
+pino `errWithCause` serializer so the next failure logs the Postgres message and code;
+`nav-counts` returns 403 instead of a TypeError when RLS hides the business row (12
+such 500s 21:52–22:03Z). Read-only production query blocked in-session — owner to allow
+or run. Root cause still open.
+
+### Checkpoint — 2026-09-12 (Register: add-on chips on real products, new-customer form)
+
+Owner: "the recycle removal declined foundation are not showing up" + the new-customer
+form overflowing its card. The chips were keyed on a name regex (/mattress|base|…/) that no
+STORIS name matches ("E KING MICAH FIRM"). They now follow the catalog category
+(`lib/pos-addons.ts`: Mattresses, Adjustable Bases, Foundations & Box Springs; name
+fallback only without a category, accessories excluded) — `/v1/pos/product-search` and
+`GET /v1/orders/:id` lines carry `categoryName` so picked and resumed lines both know.
+Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the 316px
+rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
+specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
+the rail with nothing overflowing.
+_2026-09-13 follow-up (owner: "we recently had all of the product categories sorted out"):_
+the A22.1 categorize run files almost every sleep surface on a subcategory (Innerspring,
+Hybrid, Memory Foam, Latex, Adjustable Bed Bases, Standard / Low Profile, Bunkie Board),
+so a rule keyed on the leaf name still missed nearly every real product. The endpoints
+now carry `categoryPath` ("Mattresses › Hybrid") and the rule reads the root; Base
+Accessories & Parts stay off. `pos-addons.test.ts` covers the real subcategories; the
+orders int spec proves the path on search and on a resumed order.
+
+### Checkpoint — 2026-09-13 (Cash on hand: root cause found and fixed)
+
+The new `cause` logging (PR #174) caught it on the first owner load after deploy:
+`ERR_INVALID_ARG_TYPE — The "string" argument must be of type string … Received an
+instance of Date`. Not Postgres at all: `pendingCash` bound the 60-day floor as a raw
+`Date` inside a `sql` template, and Drizzle's postgres-js driver passes timestamptz params
+through untouched, so the driver tried to `Buffer.byteLength` a Date. Every owner load
+failed; the one 200 was a store-scoped member with no stores (early return). Fix: bind
+`floor.toISOString()::timestamptz`. `store-dashboard.int.spec.ts` gains two queue tests
+that 500 on the old code (nothing had exercised the endpoint). The two other raw
+`${cutoff}` templates (closeout, orders auto-release) bind date strings and are fine.
+
+### Checkpoint — 2026-09-13 (Products-style columns on every list)
+
+Owner: "similar to how we have it inside of Products — do the same for the remaining that
+have a list." Shared primitive `components/ui/columns.tsx` (`useListColumns`,
+`ColumnHeadRow`, `ColumnCells`, `ResetColumns`; order per browser under
+`jetnine.columns.<screen>`, client-side sort unless the screen sorts through the API).
+Converted by hand: Orders (server sort), Customers, At risk, Returns, Exchanges, Transfers,
+Purchase orders; Products migrated onto the primitive (saved order carried over from the
+old key). Then every other list screen — 80 lists across Products sub-pages and activity
+panels, Deliveries, Manifests, Replenishment, GL, Marketing, customer / salesperson /
+gift-card / GL-account / sale / service detail lists, Salespeople, Reports (index, builder,
+written sales, transfers by location, merchandising, cash drawer balancing) and Settings
+(API keys, sessions, webhooks, discounts, tax classes). README §3.3 amended,
+`PHASE_NOTES.md` amendment. Tests: `columns.test.ts` (4); Chromium on `/dev/orders` and
+`/dev/products`: sort click, drag, persistence, reset; then a logged-in Chromium sweep of
+all 48 list routes against a seeded local stack (no page errors, headers carry
+`<screen>-col-<id>` / `<screen>-sort-<id>` test ids, first sort click sets `aria-sort`).
+That sweep caught a pre-existing crash: Reports → Merchandising read `/v1/categories` as
+an array-or-`{data}` while it returns `{ flat, tree }`, so the filter lookup was
+`undefined` and the page threw on `.map` — fixed in the same PR.
+Main's E2E job was red from #175 (the no-money completion gate and card-brand rule)
+until #177 realigned the four order-writer tests; this branch carries #177's version.
+
+### Checkpoint — 2026-09-13 (Competition strip: people only, everyone listed)
+
+Owner: "We don't need by store, only people… put all managers in there even with 0 sales
+not just top 2." The Stores race is retired end to end (toggle, prizes, store winner
+column, banner and sheet lines, `?scope`, the `races` / `prizeStoreCents` settings — a
+stored value is ignored). The competitor pool is every active member whose role can log a
+lead (`competitions.leads.log`: Manager, Cashier by default — the Owner role is off the
+board entirely, pinned row and ledger sales included, owner ask the same day), seeded onto every card
+at zero from day one; ranked rows first, then the unranked (no sales for a $ race or
+Least Exchanges, nothing at all for a count race) in name order with `rank: null`, "—"
+for a $ value and "no sales yet". The strip lists everyone expanded and the top three
+collapsed; the leaderboard lists everyone. README §3.6 and PHASE_NOTES Phase 11 amended.
+Tests: `competitions.int.spec.ts` (new DB `jetnine_competitions`): every lead-logging
+member is on every card, Operations is not, the seller ranks first, the zero-sales manager
+sits under them unranked, and Stores is gone from the board and the sheet.
+
+### Checkpoint — 2026-09-13 (Category tree wired through every surface)
+
+Owner: "This is the category — find all fields that need them and replace with these,
+make sure they are wired correctly throughout the ERP" (`docs/imports/2026-09-11/
+product-categories.csv`, the 10 × 35 tree from A22.1). The product browser, picker and
+register already read the tree; every other surface still read the leaf name or matched
+the leaf id. Now one helper (`catalog/category-tree.ts`: `pathOf`, `treeIds`,
+`lineageOf`, `rootNameOf`, plus `categoryPathSql` / `joinCategoryPath` for SQL) feeds:
+
+- **Reports**: Sales by category carries `categoryPath` ("Mattresses › Hybrid", the CSV
+  too); Merchandising rows carry the path, its category filter keeps the subcategories,
+  and the table gains a Category column; the report builder's Products CATEGORY
+  dictionary is the path.
+- **Replenishment**: the Replenish panel's category filter keeps subcategories, its lines
+  carry the path and show a Category column; the sales-rate engine resolves vendor
+  category exceptions on the lineage (a rule on "Mattresses" reaches "Mattresses ›
+  Hybrid", the nearest ancestor with a value wins) for both the grid and the PO expected
+  date, and the category sort criterion orders by path.
+- **Orders**: the line Product Benefit read returns the path; the CA recycling-fee
+  exception (G6) keys on the category root (Mattresses, Foundations & Box Springs,
+  Adjustable Bed Bases; accessories and protectors excluded, description fallback only
+  without a category) — `orders/recycling-fee.ts`, mirroring the register's chip rule.
+- **Competitions**: Most Adjustable Beds counts units filed under "Adjustable Bases"
+  minus "Base Accessories & Parts" (a remote named "adjustable" no longer counts); the
+  lead dialog's wanted-category list is the Mattresses subcategories (+ Latex, "Memory
+  Foam" spelling) plus base / specific product, accepted case-insensitively.
+- **Product detail** (edit form and General panel) shows the path; the list's Category
+  sort orders by path; the three category pickers share `lib/categories.ts`
+  (`categoryOptions`, tree order, path labels).
+- **Business templates** snapshot a product's category path and apply it path-first
+  (name as the legacy fallback).
+  Tests: `category-tree.spec.ts` (3), `recycling-fee.spec.ts` (3), engine lineage case,
+  web `categories.test.ts` (2); int specs extended — reports (path + root filter + CSV),
+  replenish (root filter, path on lines), order-actions (path), competitions (base counts,
+  remotes do not), orders (protector raises no recycling exception).
+
+### Checkpoint — 2026-09-13 (Products: the category picker is the tree, the old names go)
+
+Owner (screenshot of the Products category filter listing ADJBAS, ADJUST, Adjustable Base,
+Adjustable Beds, BED, Bed in a Box, BEDFRA, CAKING, CKADJ, …): "fix in products the
+categories and get rid of the old ones." Two causes. The _Ops — categorize products_
+workflow had **never been run** on production (0 runs), so the STORIS code categories
+were still there; and before #134 the catalog import took `GROUP` as the category, so an
+earlier run left one category per STORIS group code (CAKING, CKADJ, EKSHEE, DINE, …),
+with connector product types ("Bed in a Box", "Adjustable Base") on top. A validate run
+against production (2026-09-13 11:47 UTC, rolled back) confirmed the mapping applies
+cleanly: 1,948/1,948 SKUs matched, 8 code categories renamed, 35 subcategories created,
+MATT and RF fold into the "Mattresses" / "Services & Fees" roots that already existed;
+732 products the file does not name, ~500 of them the `-AS` As-Is siblings STORIS
+carried as their own products.
+`ops/categorize-products.ts` now also (3b) files every `<SKU>-AS` / `<SKU>-PROMO-AS`
+product with its base product, and (4) **prunes** every category the file does not name
+once it holds no products and no children, deepest first — a stray still holding
+products the file does not name is listed as `strayKept` and left for the next mapping;
+`prune: false` for partial files. Spec: `categorize-products.int.spec.ts` seeds a
+CAKING group category holding a file SKU and two As-Is siblings (all move, CAKING goes)
+and a "Bed in a Box" holding an unlisted product (stays, reported); a partial-file run
+with pruning off deletes nothing.
+The validate run on the deployed build (#182, 12:15 UTC) then showed 50 strays still
+holding ~370 unlisted products — STORIS GROUP codes (QUFND 20, HBOARD 24, PILLOW 42,
+ADJBAS 25, QUEEN 21, …) and connector product types ("Hybrid Mattress" 9, "Latex
+Mattress" 9, "Foundations" 10, …). Step 3c (`ops/stray-categories.ts`, `classifyStray`)
+now reads those names: every GROUP code resolves to the branch the export's own SKUs in
+that group landed on (read off the products.csv × product-categories.csv join, ≥ 85%
+agreement or the root), refined by the same description words the build script uses
+(HYBRID / LATEX / MEMORY; BB / LP / 9"; ENCASEMENT; PILLOW), plus the connector names.
+A stray the tree cannot read is still `strayKept`. Unit spec `stray-categories.spec.ts`
+(3); int spec seeds QUFND, QUEEN and "Hybrid Mattress" strays (all empty and go) next to
+an unreadable "Gizmos" (stays, reported).
+**Applied to production 2026-09-13 12:46 UTC** (workflow run 4, `commit`, after a clean
+validate on run 3): 1,948/1,948 SKUs filed, 364 As-Is siblings filed with their base
+product, 339 products moved out of stray categories, 8 code categories renamed, 35
+subcategories created, 3 legacy (MATT, RF, PILLOW) + 76 stray categories deleted,
+0 strays kept. The Products category picker now lists only the 10 × 35 tree.
+
+### Checkpoint — 2026-09-13 (Add Product: From defaults to the warehouse for everyone)
+
+Owner (screenshot of Add Product opening on "From Koreatown — this store"): "when in sales you
+go to add a product make sure for everyone from warehouse is default." The Phase 4 rule
+already prefers the business default source, then the single warehouse, then the store — but
+on production nothing was typed `warehouse` (0066 added the column with default `store` and
+no backfill) and no default source was set, so every store fell through to itself. Migration
+`0104_warehouse_source_default` marks the location named Warehouse per tenant and sets
+`ops.defaultSourceLocationId` where exactly one warehouse exists and no default is
+configured (idempotent; a configured default is never overwritten). Tests:
+`packages/db/test/warehouse-default.test.ts` (3) replays the migration over a plain tenant, a
+two-warehouse tenant and a configured one. PHASE_NOTES Phase 4 amended. Take-with lines keep
+sourcing from the order's Store (HANDOFF §3, locked).
+
 
 ### Checkpoint — 2026-09-11 (live chat: persistence foundation, local only)
 
@@ -5553,3 +5811,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] **Chat team workspace Phase 3 (2026-09-13):** Shared help desk with urgency/claim/resolve, scoped store channels, private direct messages, mentions/typing/unread alerts and room-scoped saved answers. Migration 0108; 35 integration tests, builds/typecheck/lint and local browser flows verified. No production deployment or real staff permission changes; internal alerts require ERP open.
 
 - [x] **Internal chat background push / local production readiness (2026-09-13):** Transactional help/team notifications, fresh permission/scope/read-state checks, generic service-worker previews and existing delivery retries. Migration 0109; 36 API tests, 8 service-worker tests, DB/API builds, both Next.js production builds and migration drift check pass. Physical push, staging credentials, upstream reconciliation and authenticated live-design comparison remain rollout gates. See docs/live-chat-deployment.md.
+
+- [x] **ERP chat release reconciliation (2026-09-13):** Separate `codex/chat-erp-release` branch incorporates upstream f884801, current shell/acting-store provider and inherited global design. Preserves upstream migration history through 0104 and consolidates undeployed chat schema into 0105_live_chat. Fixes raw-header logging regression. Shared/db/API and ERP production builds, 36 chat API + 3 logging + 10 navigation/push tests, migration drift check and authenticated live-design review passed. Draft review/staging rollout follows; no production changes. See docs/erp-chat-release.md.

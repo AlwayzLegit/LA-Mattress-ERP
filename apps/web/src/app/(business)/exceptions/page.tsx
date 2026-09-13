@@ -13,14 +13,19 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -63,6 +68,33 @@ const TYPE_LABELS: Record<string, string> = {
   write_off: 'Write-off',
   vendor_credit_write_off: 'Vendor credit given up',
 };
+
+const DIGEST_COLUMNS: ColumnDef<DigestRow>[] = [
+  {
+    id: 'associate',
+    label: 'Associate',
+    sortValue: (d) => d.actorEmail,
+    render: (d) => d.actorEmail ?? 'system',
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (d) => d.total,
+    render: (d) => <strong>{d.total}</strong>,
+  },
+  {
+    id: 'breakdown',
+    label: 'Breakdown',
+    render: (d) => (
+      <span className="muted">
+        {Object.entries(d.byType)
+          .map(([t, n]) => `${TYPE_LABELS[t] ?? t.replace(/_/g, ' ')} ×${n}`)
+          .join(' · ')}
+      </span>
+    ),
+  },
+];
 
 export default function ExceptionsPage() {
   const [openOnly, setOpenOnly] = useState(true);
@@ -114,6 +146,74 @@ export default function ExceptionsPage() {
     }
   }
 
+  // The acknowledge cell needs `ack` and the busy flag, so the register's
+  // columns are built here; the digest's are static.
+  const columns: ColumnDef<ExceptionRow>[] = [
+    {
+      id: 'when',
+      label: 'When',
+      className: 'nowrap',
+      sortValue: (r) => r.createdAt,
+      render: (r) => new Date(r.createdAt).toLocaleString(),
+    },
+    {
+      id: 'type',
+      label: 'Type',
+      sortValue: (r) => TYPE_LABELS[r.type] ?? r.type,
+      render: (r) => TYPE_LABELS[r.type] ?? r.type.replace(/_/g, ' '),
+    },
+    {
+      id: 'who',
+      label: 'Who',
+      sortValue: (r) => r.actorEmail,
+      render: (r) => r.actorEmail ?? 'system',
+    },
+    {
+      id: 'order',
+      label: 'Order',
+      className: 'nowrap',
+      sortValue: (r) => r.orderNumber,
+      render: (r) =>
+        r.orderId && r.orderNumber ? (
+          <Link href={`/orders/${r.orderId}`} data-testid="exception-order">
+            {r.orderNumber}
+          </Link>
+        ) : (
+          '—'
+        ),
+    },
+    { id: 'what', label: 'What', sortValue: (r) => r.summary, render: (r) => r.summary },
+    {
+      id: 'severity',
+      label: 'Severity',
+      sortValue: (r) => r.severity,
+      render: (r) => <StatusBadge status={r.severity} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) =>
+        r.acknowledgedAt ? (
+          <span className="muted">ack&apos;d by {r.acknowledgedByEmail ?? '—'}</span>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            data-testid="ack-exception"
+            onClick={() => void ack(r.id)}
+          >
+            Acknowledge
+          </Button>
+        ),
+    },
+  ];
+  const cols = useListColumns('exceptions-register', columns, rows);
+  const digestCols = useListColumns('exceptions-digest', DIGEST_COLUMNS, digest);
+
   return (
     <div>
       <PageHeader
@@ -160,56 +260,17 @@ export default function ExceptionsPage() {
                 <TableWrap>
                   <table className="table" data-testid="exceptions-table">
                     <thead>
-                      <tr>
-                        <th>When</th>
-                        <th>Type</th>
-                        <th>Who</th>
-                        <th>Order</th>
-                        <th>What</th>
-                        <th>Severity</th>
-                        <th className="actions" />
-                      </tr>
+                      <ColumnHeadRow list={cols} testIdPrefix="exceptions" />
                     </thead>
                     <tbody>
-                      {rows.map((r) => (
+                      {cols.sorted.map((r) => (
                         <tr key={r.id} data-testid="exception-row">
-                          <td className="nowrap">{new Date(r.createdAt).toLocaleString()}</td>
-                          <td>{TYPE_LABELS[r.type] ?? r.type.replace(/_/g, ' ')}</td>
-                          <td>{r.actorEmail ?? 'system'}</td>
-                          <td className="nowrap">
-                            {r.orderId && r.orderNumber ? (
-                              <Link href={`/orders/${r.orderId}`} data-testid="exception-order">
-                                {r.orderNumber}
-                              </Link>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
-                          <td>{r.summary}</td>
-                          <td>
-                            <StatusBadge status={r.severity} />
-                          </td>
-                          <td className="actions">
-                            {r.acknowledgedAt ? (
-                              <span className="muted">
-                                ack&apos;d by {r.acknowledgedByEmail ?? '—'}
-                              </span>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={busy}
-                                data-testid="ack-exception"
-                                onClick={() => void ack(r.id)}
-                              >
-                                Acknowledge
-                              </Button>
-                            )}
-                          </td>
+                          <ColumnCells list={cols} row={r} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={cols} />
                 </TableWrap>
                 <LoadMore state={list} noun="exceptions" />
               </Card>
@@ -238,28 +299,17 @@ export default function ExceptionsPage() {
                 <TableWrap>
                   <table className="table" data-testid="exceptions-digest">
                     <thead>
-                      <tr>
-                        <th>Associate</th>
-                        <th className="num">Total</th>
-                        <th>Breakdown</th>
-                      </tr>
+                      <ColumnHeadRow list={digestCols} testIdPrefix="exceptions-digest" />
                     </thead>
                     <tbody>
-                      {digest.map((d) => (
+                      {digestCols.sorted.map((d) => (
                         <tr key={d.actorUserId ?? 'system'}>
-                          <td>{d.actorEmail ?? 'system'}</td>
-                          <td className="num">
-                            <strong>{d.total}</strong>
-                          </td>
-                          <td className="muted">
-                            {Object.entries(d.byType)
-                              .map(([t, n]) => `${TYPE_LABELS[t] ?? t.replace(/_/g, ' ')} ×${n}`)
-                              .join(' · ')}
-                          </td>
+                          <ColumnCells list={digestCols} row={d} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={digestCols} />
                 </TableWrap>
               )}
             </Card>

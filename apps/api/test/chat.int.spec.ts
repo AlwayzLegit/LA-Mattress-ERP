@@ -23,7 +23,7 @@ const url =
 const parsedUrl = new URL(url);
 if (
   !['localhost', '127.0.0.1'].includes(parsedUrl.hostname) ||
-  parsedUrl.pathname !== '/jetnine_chat'
+  !['/jetnine_chat', '/jetnine_chat_release'].includes(parsedUrl.pathname)
 )
   throw new Error('Chat tests require a local disposable jetnine_chat database');
 const connection = postgres(url, { max: 8, prepare: false });

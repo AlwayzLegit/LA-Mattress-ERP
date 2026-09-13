@@ -6,6 +6,8 @@
 // web app, so the value is empty string by default and every call goes
 // out as a relative URL. Setting NEXT_PUBLIC_API_URL is still supported
 // for local dev pointing at a separate API server.
+import { isOutageStatus, noteFailure, noteSuccess } from './api-status';
+
 export const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 /**
@@ -32,14 +34,26 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiUrl}${path}`, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}${path}`, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    // A network failure (not an HTTP error): the server is unreachable or
+    // the request was aborted. Only the former is an outage.
+    if (!(err instanceof DOMException && err.name === 'AbortError')) {
+      noteFailure(err instanceof Error ? err.message : 'network error');
+    }
+    throw err;
+  }
+  if (isOutageStatus(res.status)) noteFailure(`${res.status} ${res.statusText}`);
+  else noteSuccess();
   if (!res.ok) {
     const text = await res.text();
     let message = `${res.status} ${res.statusText}`;

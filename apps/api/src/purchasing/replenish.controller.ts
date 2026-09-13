@@ -9,6 +9,7 @@ import {
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { AuditService } from '../audit/audit.service';
 import {
   CurrentTenant,
@@ -123,6 +124,8 @@ export interface ReplenishLine extends StockCell {
   sku: string | null;
   vendorSku: string | null;
   categoryName: string | null;
+  /** Full path ("Mattresses › Hybrid"); categoryName is the leaf. */
+  categoryPath: string | null;
   collectionName: string | null;
   costCents: number | null;
   locationId: string | null;
@@ -450,10 +453,13 @@ export class ReplenishController {
     const variantIds = [...new Set(positions.map((x) => x.variantId))];
     const meta = await this.loadMeta(businessId, variantIds);
     const vendorOf = await this.vendorResolver(businessId);
+    // A22.1: categories nest — "Mattresses" keeps every subcategory.
+    const categoryIndex = await loadCategoryIndex(this.db, businessId);
+    const categoryIds = p.categoryId ? new Set(categoryIndex.treeIds(p.categoryId)) : null;
     const keep = new Set<string>();
     for (const m of meta.values()) {
       if (!m.variantActive || !m.productActive) continue;
-      if (p.categoryId && m.categoryId !== p.categoryId) continue;
+      if (categoryIds && (!m.categoryId || !categoryIds.has(m.categoryId))) continue;
       if (p.collectionId && m.collectionId !== p.collectionId) continue;
       if (p.q) {
         const hay = `${m.sku ?? ''} ${m.vendorSku ?? ''} ${m.productName} ${m.variantName ?? ''}`;
@@ -505,6 +511,7 @@ export class ReplenishController {
         sku: m.sku,
         vendorSku: m.vendorSku,
         categoryName: m.categoryName,
+        categoryPath: categoryIndex.pathOf(m.categoryId),
         collectionName: m.collectionName,
         costCents: m.costCents,
         locationId: pos.locationId,

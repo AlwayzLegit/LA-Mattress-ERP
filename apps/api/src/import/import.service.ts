@@ -1,7 +1,15 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import {
+  firmnessFromText,
+  normalizeFirmness,
+  normalizeSize,
+  sizeFromGroupCode,
+  sizeFromText,
+} from '@jetnine/shared';
+import { LEGACY_CATEGORY_NAMES } from './legacy-categories';
 import { DRIZZLE } from '../database/database.module';
 import {
   defaultMapping,
@@ -692,6 +700,22 @@ export class ImportService {
     }
   }
 
+  /** True when `id` sits anywhere below `ancestorId` in the category tree. */
+  private async isCategoryUnder(id: string, ancestorId: string): Promise<boolean> {
+    let cursor: string | null = id;
+    for (let hops = 0; cursor && hops < 8; hops += 1) {
+      const rows: { parentId: string | null }[] = await this.db
+        .select({ parentId: schema.categories.parentId })
+        .from(schema.categories)
+        .where(eq(schema.categories.id, cursor))
+        .limit(1);
+      const parentId: string | null = rows[0]?.parentId ?? null;
+      if (parentId === ancestorId) return true;
+      cursor = parentId;
+    }
+    return false;
+  }
+
   private async refFor(businessId: string, entity: string, legacyId: string) {
     const [ref] = await this.db
       .select({ jetnineId: schema.legacyRefs.jetnineId })
@@ -859,11 +883,31 @@ export class ImportService {
           .limit(1);
         if (existing) categoryCache.set(key, existing.id);
         else {
-          const [created] = await this.db
-            .insert(schema.categories)
-            .values({ businessId, name: n.category })
-            .returning({ id: schema.categories.id });
-          categoryCache.set(key, created!.id);
+          // A22.1: the STORIS CATG codes were renamed to their retail names
+          // by the categorize-products run; a code with no category of its
+          // own name lands on that root instead of re-creating "MATT".
+          const alias = LEGACY_CATEGORY_NAMES[n.category.toUpperCase()];
+          const [aliased] = alias
+            ? await this.db
+                .select({ id: schema.categories.id })
+                .from(schema.categories)
+                .where(
+                  and(
+                    eq(schema.categories.businessId, businessId),
+                    isNull(schema.categories.parentId),
+                    sql`lower(${schema.categories.name}) = ${alias.toLowerCase()}`,
+                  ),
+                )
+                .limit(1)
+            : [];
+          if (aliased) categoryCache.set(key, aliased.id);
+          else {
+            const [created] = await this.db
+              .insert(schema.categories)
+              .values({ businessId, name: n.category })
+              .returning({ id: schema.categories.id });
+            categoryCache.set(key, created!.id);
+          }
         }
       }
       categoryId = categoryCache.get(key)!;
@@ -878,6 +922,20 @@ export class ImportService {
         .where(and(eq(schema.products.businessId, businessId), eq(schema.products.sku, sku)))
         .limit(1);
       productId = bySku?.id ?? null;
+    }
+    // A22.1: an import never coarsens a category. A product already filed
+    // under a subcategory of the one the file names (Mattresses › Hybrid
+    // when the file says MATT) keeps the finer one.
+    if (productId && categoryId) {
+      const [current] = await this.db
+        .select({ categoryId: schema.products.categoryId })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+      const cur = current?.categoryId ?? null;
+      if (cur && cur !== categoryId && (await this.isCategoryUnder(cur, categoryId))) {
+        categoryId = cur;
+      }
     }
     const productValues = {
       sku,
@@ -942,6 +1000,18 @@ export class ImportService {
           : {};
       variantValues.attributesJson = { ...prior, group: n.group.trim() } as never;
     }
+    // A22.2: size and firmness — the file's own column when it has one,
+    // else the STORIS group code, else the description. A value already on
+    // the variant is never cleared by a file that says nothing.
+    const size =
+      normalizeSize(typeof n.size === 'string' ? n.size : null) ??
+      sizeFromGroupCode(typeof n.group === 'string' ? n.group : null) ??
+      sizeFromText(n.name as string);
+    if (size) variantValues.size = size;
+    const firmness =
+      normalizeFirmness(typeof n.firmness === 'string' ? n.firmness : null) ??
+      firmnessFromText(n.name as string);
+    if (firmness) variantValues.firmness = firmness;
     variantValues.isActive = true;
     if (variant) {
       await this.db

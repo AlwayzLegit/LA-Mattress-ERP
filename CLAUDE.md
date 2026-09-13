@@ -14,6 +14,10 @@ GHL-style platform layer). Turborepo + pnpm monorepo, Node 22.
    decisions D1–D10, data model, module/endpoint/UI surfaces, migration pipeline, schedule.
 4. **`PLAN.md`** — the original locked architecture (tenancy, stack, conventions §10,
    permission model). Decisions in these docs are **locked**: change the doc first, then the code.
+5. **`design_handoff_redesign_12_phases/README.md`** + **`PHASE_NOTES.md`** — the
+   dashboard & register redesign (12 phases, `CLAUDE_CODE_PROMPT.md` in the same folder
+   is the phase plan). Tokens, type, densities and copy there are final; `PHASE_NOTES.md`
+   logs what each phase shipped and assumed.
 
 `README.md` is a per-epic status log of Phases 0–2. Note its "Deployment (Phase 2.21 —
 Vercel-only)" section is outdated: the API now deploys as a Docker service on Render

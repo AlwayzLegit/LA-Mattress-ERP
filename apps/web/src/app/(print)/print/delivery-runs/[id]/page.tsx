@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { TableWrap } from '@/components/ui';
+import { LoadingRows, TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../print-toolbar';
 
 /**
@@ -58,7 +58,12 @@ export default function RunManifestPage() {
   }, [id]);
 
   if (error) return <p style={{ padding: 24 }}>{error}</p>;
-  if (!run) return <p style={{ padding: 24 }}>Loading…</p>;
+  if (!run)
+    return (
+      <div style={{ padding: 24 }}>
+        <LoadingRows rows={6} what="This document" />
+      </div>
+    );
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: 24, fontSize: 13 }}>

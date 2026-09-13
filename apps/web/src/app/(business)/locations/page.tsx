@@ -7,17 +7,22 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -139,6 +144,93 @@ export default function LocationsPage() {
     }
   }
 
+  // Type, replenishment days and the actions all toggle through the
+  // handlers above, so the columns are built here.
+  const columns: ColumnDef<Location>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (l) => l.name,
+      render: (l) => <strong>{l.name}</strong>,
+    },
+    {
+      id: 'type',
+      label: 'Type',
+      sortValue: (l) => l.locationType,
+      render: (l) => (
+        <button
+          type="button"
+          className={`badge cursor-pointer border-0 ${
+            l.locationType === 'warehouse' ? 'badge-info' : 'badge-neutral'
+          }`}
+          title="Click to switch between store and warehouse"
+          onClick={() => void toggleType(l)}
+        >
+          {l.locationType}
+        </button>
+      ),
+    },
+    { id: 'timezone', label: 'Timezone', sortValue: (l) => l.timezone, render: (l) => l.timezone },
+    {
+      id: 'tax',
+      label: 'Tax',
+      num: true,
+      sortValue: (l) => l.taxRateBps,
+      render: (l) => (l.taxRateBps != null ? `${(l.taxRateBps / 100).toFixed(2)}%` : 'inherit'),
+    },
+    {
+      id: 'replenishment',
+      label: 'Replenishment days',
+      title: 'Weekdays this store accepts auto replenishment transfers',
+      sortValue: (l) => (l.replenishmentDays ?? [0, 1, 2, 3, 4, 5, 6]).length,
+      render: (l) => (
+        <div className="flex gap-1">
+          {WEEKDAYS.map((label, day) => {
+            const on = (l.replenishmentDays ?? [0, 1, 2, 3, 4, 5, 6]).includes(day);
+            return (
+              <button
+                key={label}
+                type="button"
+                className={`badge cursor-pointer border-0 ${on ? 'badge-success' : 'badge-neutral'}`}
+                aria-pressed={on}
+                title={on ? `Accepts auto transfers on ${label}` : `No auto transfers on ${label}`}
+                onClick={() => void toggleDay(l, day)}
+              >
+                {label[0]}
+              </button>
+            );
+          })}
+        </div>
+      ),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (l) => (l.isActive ? 'active' : 'inactive'),
+      render: (l) => <StatusBadge status={l.isActive ? 'active' : 'inactive'} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (l) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => toggle(l)}>
+            {l.isActive ? 'Deactivate' : 'Activate'}
+          </Button>
+          {!l.isActive && (
+            <Button size="sm" variant="danger" onClick={() => void remove(l)}>
+              Delete
+            </Button>
+          )}
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('locations', columns, rows);
+
   return (
     <div>
       <PageHeader
@@ -184,85 +276,22 @@ export default function LocationsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Timezone</th>
-                    <th className="num">Tax</th>
-                    <th title="Weekdays this store accepts auto replenishment transfers">
-                      Replenishment days
-                    </th>
-                    <th>Status</th>
-                    <th className="actions">Actions</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="locations" />
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <TableEmpty colSpan={7}>No locations yet. Add the first one above.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>
+                      No locations yet. Add the first one above.
+                    </TableEmpty>
                   )}
-                  {rows.map((l) => (
+                  {cols.sorted.map((l) => (
                     <tr key={l.id}>
-                      <td>
-                        <strong>{l.name}</strong>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={`badge cursor-pointer border-0 ${
-                            l.locationType === 'warehouse' ? 'badge-info' : 'badge-neutral'
-                          }`}
-                          title="Click to switch between store and warehouse"
-                          onClick={() => void toggleType(l)}
-                        >
-                          {l.locationType}
-                        </button>
-                      </td>
-                      <td>{l.timezone}</td>
-                      <td className="num">
-                        {l.taxRateBps != null ? `${(l.taxRateBps / 100).toFixed(2)}%` : 'inherit'}
-                      </td>
-                      <td>
-                        <div className="flex gap-1">
-                          {WEEKDAYS.map((label, day) => {
-                            const on = (l.replenishmentDays ?? [0, 1, 2, 3, 4, 5, 6]).includes(day);
-                            return (
-                              <button
-                                key={label}
-                                type="button"
-                                className={`badge cursor-pointer border-0 ${
-                                  on ? 'badge-success' : 'badge-neutral'
-                                }`}
-                                aria-pressed={on}
-                                title={
-                                  on
-                                    ? `Accepts auto transfers on ${label}`
-                                    : `No auto transfers on ${label}`
-                                }
-                                onClick={() => void toggleDay(l, day)}
-                              >
-                                {label[0]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </td>
-                      <td>
-                        <StatusBadge status={l.isActive ? 'active' : 'inactive'} />
-                      </td>
-                      <td className="actions">
-                        <Button size="sm" variant="ghost" onClick={() => toggle(l)}>
-                          {l.isActive ? 'Deactivate' : 'Activate'}
-                        </Button>
-                        {!l.isActive && (
-                          <Button size="sm" variant="danger" onClick={() => void remove(l)}>
-                            Delete
-                          </Button>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={l} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

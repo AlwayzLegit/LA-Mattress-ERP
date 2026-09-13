@@ -107,6 +107,7 @@ jobs:
       SCHEDULING_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_scheduling
       RETURNS_SWEEP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_returns_sweep
       KIOSK_SESSIONS_PRINT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_kiosk_sessions_print
+      CATEGORIZE_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_categorize
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -144,6 +145,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_scheduling
           createdb -h localhost -U postgres jetnine_returns_sweep
           createdb -h localhost -U postgres jetnine_kiosk_sessions_print
+          createdb -h localhost -U postgres jetnine_categorize
           createdb -h localhost -U postgres jetnine_deliveries
           createdb -h localhost -U postgres jetnine_specials
           createdb -h localhost -U postgres jetnine_exchanges
@@ -190,6 +192,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_product_stock
           createdb -h localhost -U postgres jetnine_store_dashboard
           createdb -h localhost -U postgres jetnine_schedule
+          createdb -h localhost -U postgres jetnine_competitions
 
       - name: Format check
         run: pnpm format:check
@@ -207,7 +210,7 @@ jobs:
         run: pnpm build
 
   e2e:
-    name: Playwright E2E (auth)
+    name: Playwright E2E
     runs-on: ubuntu-latest
     needs: verify
     services:

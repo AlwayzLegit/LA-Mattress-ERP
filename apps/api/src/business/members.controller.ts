@@ -172,6 +172,12 @@ export class MembersController {
     /** And the Cashier's My Day (§12.3). */
     cashierDashboard: boolean;
     canDeleteMembers: boolean;
+    /**
+     * Whether cost figures come back at all. The product screens use this
+     * to tell "you may not see cost" (hidden) from "no cost on file" (—),
+     * which the null `costCents` projection alone cannot.
+     */
+    canSeeCost: boolean;
   }> {
     let hiddenNav: string[] = [];
     let managerDashboard = false;
@@ -215,6 +221,7 @@ export class MembersController {
         tenant.roleName === 'Cashier' && tenant.permissions.has('cashier.dashboard.view'),
       /** Owner 2026-09-02: the Members page shows Delete only to who may. */
       canDeleteMembers: tenant.permissions.has('users.delete'),
+      canSeeCost: tenant.isSuperAdmin || tenant.permissions.has('products.cost.view'),
     };
   }
 
@@ -315,6 +322,50 @@ export class MembersController {
       resent: true,
       ...(result.link && !result.emailDelivered ? { inviteLink: result.link } : {}),
     };
+  }
+
+  /**
+   * Redesign Phase 3 (README §2): the "Acting for {Store}" chip. The choice
+   * itself lives in the browser session; this records the switch in the
+   * audit log so a drawer or report attributed to a store can be traced
+   * to the person who pointed their register at it.
+   */
+  @Post('me/acting-store')
+  async actingStore(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Body() body: { locationId?: string; previousLocationId?: string | null },
+  ): Promise<{ ok: true }> {
+    const locationId = typeof body?.locationId === 'string' ? body.locationId : '';
+    if (!locationId) throw new BadRequestException('locationId is required');
+    const [loc] = await this.db
+      .select({ id: schema.locations.id, name: schema.locations.name })
+      .from(schema.locations)
+      .where(
+        and(
+          eq(schema.locations.id, locationId),
+          eq(schema.locations.businessId, tenant.businessId!),
+        ),
+      )
+      .limit(1);
+    if (!loc) throw new NotFoundException('Location not found');
+    if (
+      tenant.sellingScope === 'approved' &&
+      !(tenant.scopeLocationIds ?? []).includes(locationId)
+    ) {
+      throw new ForbiddenException('You are not approved to sell at that store');
+    }
+    await this.audit.log({
+      action: 'membership.acting_store',
+      targetType: 'membership',
+      targetId: tenant.membershipId ?? undefined,
+      metadata: {
+        locationId: loc.id,
+        locationName: loc.name,
+        previousLocationId:
+          typeof body.previousLocationId === 'string' ? body.previousLocationId : null,
+      },
+    });
+    return { ok: true };
   }
 
   @Patch(':id')

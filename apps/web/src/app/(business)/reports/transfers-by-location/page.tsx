@@ -2,21 +2,26 @@
 
 import Link from 'next/link';
 import { Download, FileText, Play } from 'lucide-react';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
 import {
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -67,9 +72,118 @@ interface Report {
   totals: { transfers: number; lines: number; orderQty: number; resQty: number; heldQty: number };
 }
 
+/**
+ * One table row = one transfer line, carrying its transfer and receiving
+ * store so the flat list can be sorted and regrouped. `first` / `last`
+ * mark the run of lines that belong to the same transfer once sorted, so
+ * the transfer-level cells print once per run.
+ */
+interface TblRow {
+  g: Group;
+  t: Transfer;
+  l: Line;
+  first: boolean;
+  last: boolean;
+}
+
 function fmtDate(d: string): string {
   const [y, m, day] = d.split('-');
   return `${m}/${day}/${y}`;
+}
+
+const TBL_COLUMNS: ColumnDef<TblRow>[] = [
+  {
+    id: 'transfer',
+    label: 'Transfer',
+    sortValue: (r) => r.t.number,
+    render: (r) => (r.first ? <Link href={`/transfers/${r.t.id}`}>{r.t.number}</Link> : ''),
+  },
+  {
+    id: 'date',
+    label: 'Date',
+    sortValue: (r) => r.t.date,
+    render: (r) => (r.first ? fmtDate(r.t.date) : ''),
+  },
+  {
+    id: 'sending',
+    label: 'Sending location',
+    sortValue: (r) => r.t.fromLocationName,
+    render: (r) => (r.first ? r.t.fromLocationName : ''),
+  },
+  {
+    id: 'transferFor',
+    label: 'Transfer for',
+    sortValue: (r) => r.t.transferFor,
+    render: (r) => (r.first ? r.t.transferFor : ''),
+  },
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (r) => r.l.sku ?? r.l.productName,
+    render: (r) => (
+      <>
+        <code>{r.l.sku ?? r.l.productName}</code>
+        {r.l.vendorModel && <div className="muted text-xs">Vendor model: {r.l.vendorModel}</div>}
+      </>
+    ),
+  },
+  {
+    id: 'brand',
+    label: 'Brand',
+    sortValue: (r) => r.l.brand,
+    render: (r) => r.l.brand ?? '—',
+  },
+  {
+    id: 'orderQty',
+    label: 'Order qty',
+    num: true,
+    sortValue: (r) => r.l.orderQty,
+    render: (r) => r.l.orderQty,
+  },
+  {
+    id: 'resQty',
+    label: 'Res qty',
+    num: true,
+    sortValue: (r) => r.l.resQty,
+    render: (r) => r.l.resQty,
+  },
+  {
+    id: 'heldQty',
+    label: 'Held qty',
+    num: true,
+    sortValue: (r) => r.l.heldQty,
+    render: (r) => r.l.heldQty,
+  },
+  {
+    id: 'manifest',
+    label: 'Manifest',
+    sortValue: (r) => r.t.manifestNumber,
+    render: (r) => (r.first ? (r.t.manifestNumber ?? '—') : ''),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.t.status,
+    render: (r) => (r.first ? <StatusBadge status={r.t.status} /> : ''),
+  },
+];
+
+/** Bucket the sorted rows per receiving store and re-mark each transfer's run of lines. */
+function regroup(sorted: TblRow[], groups: Group[]): Map<string, TblRow[]> {
+  const buckets = new Map<string, TblRow[]>(groups.map((g) => [g.locationId, []]));
+  for (const r of sorted) buckets.get(r.g.locationId)?.push(r);
+  const out = new Map<string, TblRow[]>();
+  for (const [key, bucket] of buckets) {
+    out.set(
+      key,
+      bucket.map((r, i) => ({
+        ...r,
+        first: bucket[i - 1]?.t.id !== r.t.id,
+        last: bucket[i + 1]?.t.id !== r.t.id,
+      })),
+    );
+  }
+  return out;
 }
 
 export default function TransfersByLocationPage() {
@@ -84,6 +198,29 @@ export default function TransfersByLocationPage() {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const rows = useMemo<TblRow[] | null>(
+    () =>
+      report
+        ? report.groups.flatMap((g) =>
+            g.transfers.flatMap((t) =>
+              t.lines.map((l, i) => ({
+                g,
+                t,
+                l,
+                first: i === 0,
+                last: i === t.lines.length - 1,
+              })),
+            ),
+          )
+        : null,
+    [report],
+  );
+  const cols = useListColumns('reports-transfers-by-location', TBL_COLUMNS, rows);
+  const grouped = useMemo(
+    () => (report ? regroup(cols.sorted, report.groups) : null),
+    [cols.sorted, report],
+  );
 
   useEffect(() => {
     api<Location[]>('/v1/business/locations')
@@ -242,7 +379,7 @@ export default function TransfersByLocationPage() {
           <Card>
             <LoadingRows rows={4} />
           </Card>
-        ) : report ? (
+        ) : report && grouped ? (
           report.groups.length === 0 ? (
             <Card>
               <EmptyState title="No transfers match the parameters" />
@@ -260,64 +397,32 @@ export default function TransfersByLocationPage() {
                   <TableWrap>
                     <table className="table">
                       <thead>
-                        <tr>
-                          <th>Transfer</th>
-                          <th>Date</th>
-                          <th>Sending location</th>
-                          <th>Transfer for</th>
-                          <th>Product</th>
-                          <th>Brand</th>
-                          <th className="num">Order qty</th>
-                          <th className="num">Res qty</th>
-                          <th className="num">Held qty</th>
-                          <th>Manifest</th>
-                          <th>Status</th>
-                        </tr>
+                        <ColumnHeadRow list={cols} testIdPrefix="reports-transfers-by-location" />
                       </thead>
                       <tbody>
-                        {g.transfers.map((t) => (
-                          <Fragment key={t.id}>
-                            {t.lines.map((l, i) => (
-                              <tr key={l.lineId} data-testid="tbl-line">
-                                <td>
-                                  {i === 0 ? (
-                                    <Link href={`/transfers/${t.id}`}>{t.number}</Link>
-                                  ) : (
-                                    ''
-                                  )}
-                                </td>
-                                <td>{i === 0 ? fmtDate(t.date) : ''}</td>
-                                <td>{i === 0 ? t.fromLocationName : ''}</td>
-                                <td>{i === 0 ? t.transferFor : ''}</td>
-                                <td>
-                                  <code>{l.sku ?? l.productName}</code>
-                                  {l.vendorModel && (
-                                    <div className="muted text-xs">
-                                      Vendor model: {l.vendorModel}
-                                    </div>
-                                  )}
-                                </td>
-                                <td>{l.brand ?? '—'}</td>
-                                <td className="num">{l.orderQty}</td>
-                                <td className="num">{l.resQty}</td>
-                                <td className="num">{l.heldQty}</td>
-                                <td>{i === 0 ? (t.manifestNumber ?? '—') : ''}</td>
-                                <td>{i === 0 ? <StatusBadge status={t.status} /> : ''}</td>
-                              </tr>
-                            ))}
-                            {report.filters.includeInstructions && (t.instructions || t.notes) && (
-                              <tr className="muted">
-                                <td />
-                                <td colSpan={10}>
-                                  {t.instructions && <div>Instructions: {t.instructions}</div>}
-                                  {t.notes && <div>Notes: {t.notes}</div>}
-                                </td>
-                              </tr>
-                            )}
+                        {(grouped.get(g.locationId) ?? []).map((r) => (
+                          <Fragment key={r.l.lineId}>
+                            <tr data-testid="tbl-line">
+                              <ColumnCells list={cols} row={r} />
+                            </tr>
+                            {r.last &&
+                              report.filters.includeInstructions &&
+                              (r.t.instructions || r.t.notes) && (
+                                <tr className="muted">
+                                  <td />
+                                  <td colSpan={cols.ordered.length - 1}>
+                                    {r.t.instructions && (
+                                      <div>Instructions: {r.t.instructions}</div>
+                                    )}
+                                    {r.t.notes && <div>Notes: {r.t.notes}</div>}
+                                  </td>
+                                </tr>
+                              )}
                           </Fragment>
                         ))}
                       </tbody>
                     </table>
+                    <ResetColumns list={cols} />
                   </TableWrap>
                 </Card>
               ))}

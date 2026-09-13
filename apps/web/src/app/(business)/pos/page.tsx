@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { PageHeader } from '@/components/ui';
 import { NewSale } from '@/components/new-sale';
 import { api } from '@/lib/api';
 
@@ -23,10 +22,5 @@ export default function PosPage() {
       .catch(() => undefined);
   }, [router]);
 
-  return (
-    <div>
-      <PageHeader title="New Sale" />
-      <NewSale />
-    </div>
-  );
+  return <NewSale />;
 }

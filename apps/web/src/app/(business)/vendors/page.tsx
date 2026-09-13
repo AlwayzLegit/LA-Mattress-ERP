@@ -9,6 +9,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -17,9 +20,11 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface Vendor {
@@ -124,6 +129,97 @@ export default function VendorsPage() {
     }
   }
 
+  // The actions cell calls `destroy`, so the columns are built here.
+  const columns: ColumnDef<Vendor>[] = [
+    {
+      id: 'name',
+      label: 'Name',
+      sortValue: (v) => v.name,
+      render: (v) => (
+        <Link
+          href={`/vendors/${v.id}/settings`}
+          className="font-bold"
+          data-testid="vendor-settings-link"
+        >
+          {v.name}
+        </Link>
+      ),
+    },
+    {
+      id: 'contact',
+      label: 'Contact',
+      sortValue: (v) => v.contactName,
+      render: (v) => v.contactName ?? '—',
+    },
+    { id: 'email', label: 'Email', sortValue: (v) => v.email, render: (v) => v.email ?? '—' },
+    { id: 'phone', label: 'Phone', sortValue: (v) => v.phone, render: (v) => v.phone ?? '—' },
+    {
+      id: 'products',
+      label: 'Products',
+      num: true,
+      sortValue: (v) => v.stats.productsCarried,
+      render: (v) => (
+        <CountLink
+          n={v.stats.productsCarried}
+          href={`/products?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}`}
+          testid="vendor-products"
+        />
+      ),
+    },
+    {
+      id: 'inStock',
+      label: 'In inventory',
+      num: true,
+      sortValue: (v) => v.stats.inStockProducts,
+      render: (v) => (
+        <CountLink
+          n={v.stats.inStockProducts}
+          sub={`· ${v.stats.inStockUnits} units`}
+          href={`/products/stock?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}&locationId=all`}
+          testid="vendor-in-stock"
+        />
+      ),
+    },
+    {
+      id: 'onPo',
+      label: 'On PO',
+      num: true,
+      sortValue: (v) => v.stats.onPoUnits,
+      render: (v) => (
+        <CountLink
+          n={v.stats.onPoUnits}
+          sub={`· ${v.stats.openPos} PO${v.stats.openPos === 1 ? '' : 's'}`}
+          href={`/purchase-orders?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}`}
+          testid="vendor-on-po"
+        />
+      ),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (v) => (v.isActive ? 'active' : 'inactive'),
+      render: (v) => <StatusBadge status={v.isActive ? 'active' : 'inactive'} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (v) => (
+        <>
+          <LinkButton size="sm" variant="secondary" href={`/vendors/${v.id}/settings`}>
+            Settings
+          </LinkButton>
+          <Button size="sm" variant="danger" onClick={() => destroy(v.id)}>
+            Delete
+          </Button>
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('vendors', columns, rows);
+
   return (
     <div>
       <PageHeader
@@ -204,75 +300,17 @@ export default function VendorsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Contact</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th className="num">Products</th>
-                    <th className="num">In inventory</th>
-                    <th className="num">On PO</th>
-                    <th>Status</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="vendors" />
                 </thead>
                 <tbody>
-                  {rows.map((v) => (
+                  {cols.sorted.map((v) => (
                     <tr key={v.id}>
-                      <td>
-                        <Link
-                          href={`/vendors/${v.id}/settings`}
-                          className="font-bold"
-                          data-testid="vendor-settings-link"
-                        >
-                          {v.name}
-                        </Link>
-                      </td>
-                      <td>{v.contactName ?? '—'}</td>
-                      <td>{v.email ?? '—'}</td>
-                      <td>{v.phone ?? '—'}</td>
-                      <td className="num">
-                        <CountLink
-                          n={v.stats.productsCarried}
-                          href={`/products?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}`}
-                          testid="vendor-products"
-                        />
-                      </td>
-                      <td className="num">
-                        <CountLink
-                          n={v.stats.inStockProducts}
-                          sub={`· ${v.stats.inStockUnits} units`}
-                          href={`/products/stock?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}&locationId=all`}
-                          testid="vendor-in-stock"
-                        />
-                      </td>
-                      <td className="num">
-                        <CountLink
-                          n={v.stats.onPoUnits}
-                          sub={`· ${v.stats.openPos} PO${v.stats.openPos === 1 ? '' : 's'}`}
-                          href={`/purchase-orders?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}`}
-                          testid="vendor-on-po"
-                        />
-                      </td>
-                      <td>
-                        <StatusBadge status={v.isActive ? 'active' : 'inactive'} />
-                      </td>
-                      <td className="actions">
-                        <LinkButton
-                          size="sm"
-                          variant="secondary"
-                          href={`/vendors/${v.id}/settings`}
-                        >
-                          Settings
-                        </LinkButton>
-                        <Button size="sm" variant="danger" onClick={() => destroy(v.id)}>
-                          Delete
-                        </Button>
-                      </td>
+                      <ColumnCells list={cols} row={v} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

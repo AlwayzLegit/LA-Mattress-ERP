@@ -960,6 +960,7 @@ describe('Deleting a member (owner 2026-09-02)', () => {
       .set('x-business-id', businessId)
       .expect(200);
     expect(me.body.canDeleteMembers).toBe(true);
+    expect(me.body.canSeeCost).toBe(true);
     await del(me.body.membershipId).expect(400);
   });
 

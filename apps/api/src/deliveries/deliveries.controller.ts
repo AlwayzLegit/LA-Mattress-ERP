@@ -103,6 +103,14 @@ interface UpdateDeliveryBody {
   driverMembershipId?: string | null;
   routePosition?: number | null;
   notes?: string | null;
+  /**
+   * Redesign Phase 8 (README §3.4): moving a stop onto a full day is
+   * allowed, but only deliberately — confirm the cap and say why in one
+   * line. The note is kept on the delivery (it prints on the day sheet)
+   * and on the audit row.
+   */
+  confirmOverCapacity?: boolean;
+  overCapacityNote?: string | null;
 }
 
 interface CompleteDeliveryBody {
@@ -149,6 +157,8 @@ interface DeliveryDetail extends DeliveryRow {
     id: string;
     orderLineId: string;
     quantity: number;
+    /** Physical pieces on the truck: quantity × the line's pieces-per-unit. */
+    pieces: number;
     description: string;
     lineType: string;
   }[];
@@ -190,7 +200,11 @@ export class DeliveriesController {
     @Query('driverMembershipId') driverMembershipId?: string,
     @Query('status') status?: string,
     @Query('orderId') orderId?: string,
+    @Query('limit') limitRaw?: string,
   ): Promise<DeliveryDetail[]> {
+    // The board asks for a whole month at once (35 days × cap); default stays 500.
+    const parsed = Number.parseInt(limitRaw ?? '', 10);
+    const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 2000) : 500;
     const filters = [];
     if (orderId) filters.push(eq(schema.deliveries.orderId, orderId));
     if (from) filters.push(gte(schema.deliveries.scheduledDate, from));
@@ -210,7 +224,7 @@ export class DeliveriesController {
         asc(schema.deliveries.routePosition),
         asc(schema.deliveries.createdAt),
       )
-      .limit(500);
+      .limit(limit);
     return Promise.all(rows.map((r) => this.hydrate(r)));
   }
 
@@ -534,7 +548,8 @@ export class DeliveriesController {
   @Patch('deliveries/:id')
   @RequirePermission('deliveries.schedule')
   async update(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
     @Body() body: UpdateDeliveryBody,
   ): Promise<DeliveryDetail> {
@@ -545,6 +560,64 @@ export class DeliveriesController {
     if (body.scheduledDate !== undefined && Number.isNaN(new Date(body.scheduledDate).getTime())) {
       throw new BadRequestException('scheduledDate must be a date');
     }
+    const moving = body.scheduledDate !== undefined && body.scheduledDate !== row.scheduledDate;
+    // The same soft cap the create path enforces (§7/G12), applied to a
+    // move: the target day's load plus what this stop carries.
+    let capOverride: { booked: number; cap: number; dimensions: string[]; note: string } | null =
+      null;
+    if (moving) {
+      const config = await this.capacityConfig(tenant.businessId!);
+      const load = await this.dayLoad(body.scheduledDate!);
+      const [mine] = await this.db
+        .select({
+          pieces: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1)), 0)::int`,
+          units: sql<number>`coalesce(sum(${schema.deliveryLines.quantity} * coalesce(${schema.productVariants.capacityUnits}, 1)), 0)::int`,
+        })
+        .from(schema.deliveryLines)
+        .leftJoin(schema.orderLines, eq(schema.orderLines.id, schema.deliveryLines.orderLineId))
+        .leftJoin(
+          schema.productVariants,
+          eq(schema.productVariants.id, schema.orderLines.variantId),
+        )
+        .where(eq(schema.deliveryLines.deliveryId, id));
+      const over: string[] = [];
+      if (load.stops >= config.stopCap) over.push(`stops (${load.stops}/${config.stopCap})`);
+      if (config.pieceCap != null && load.pieces + (mine?.pieces ?? 0) > config.pieceCap) {
+        over.push(`pieces (${load.pieces} + ${mine?.pieces ?? 0} > ${config.pieceCap})`);
+      }
+      if (config.unitCap != null && load.units + (mine?.units ?? 0) > config.unitCap) {
+        over.push(`capacity units (${load.units} + ${mine?.units ?? 0} > ${config.unitCap})`);
+      }
+      if (over.length > 0) {
+        if (!body.confirmOverCapacity) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'OVER_CAPACITY',
+            dimensions: over,
+            message: `${body.scheduledDate} is over capacity on ${over.join(' and ')}. Confirm to book beyond the cap.`,
+          });
+        }
+        const note = body.overCapacityNote?.trim() ?? '';
+        if (!note) {
+          throw new BadRequestException(
+            'A one-line note is required to move a stop over the cap — it prints on the day sheet',
+          );
+        }
+        const by = actor?.name?.trim() || actor?.email || null;
+        capOverride = {
+          booked: load.stops + 1,
+          cap: config.stopCap,
+          dimensions: over,
+          note: by ? `${note} — ${by}` : note,
+        };
+      }
+    }
+    const nextNotes = body.notes !== undefined ? body.notes : capOverride ? row.notes : undefined;
+    const notesWithCap = capOverride
+      ? [nextNotes ?? null, `Over cap ${body.scheduledDate}: ${capOverride.note}`]
+          .filter(Boolean)
+          .join('\n')
+      : nextNotes;
     await this.db
       .update(schema.deliveries)
       .set({
@@ -556,10 +629,41 @@ export class DeliveriesController {
           : {}),
         ...(body.routePosition !== undefined ? { routePosition: body.routePosition } : {}),
         ...(body.route !== undefined ? { route: body.route?.trim() || null } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {}),
+        ...(notesWithCap !== undefined ? { notes: notesWithCap } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.deliveries.id, id));
+    if (capOverride) {
+      await this.audit.log({
+        action: 'delivery.cap_override',
+        targetType: 'delivery',
+        targetId: id,
+        metadata: {
+          deliveryId: id,
+          orderId: row.orderId,
+          from: row.scheduledDate,
+          scheduledDate: body.scheduledDate,
+          booked: capOverride.booked,
+          cap: capOverride.cap,
+          dimensions: capOverride.dimensions,
+          note: capOverride.note,
+          actorUserId: actor?.id ?? null,
+        },
+      });
+      await this.exceptions.record({
+        type: 'delivery_cap_override',
+        severity: 'warning',
+        entityType: 'order',
+        entityId: row.orderId,
+        summary: `Delivery moved over capacity to ${body.scheduledDate} (${capOverride.booked}/${capOverride.cap}): ${capOverride.note}`,
+        metadata: {
+          deliveryId: id,
+          scheduledDate: body.scheduledDate,
+          cap: capOverride.cap,
+          note: capOverride.note,
+        },
+      });
+    }
     await this.audit.log({
       action: 'delivery.update',
       targetType: 'delivery',
@@ -1152,7 +1256,17 @@ export class DeliveriesController {
       .where(eq(schema.deliveries.runId, run.id))
       .orderBy(asc(schema.deliveries.routePosition), asc(schema.deliveries.createdAt));
     const detailed = await Promise.all(stops.map((s) => this.hydrate(s)));
-    return { ...run, stops: detailed };
+    // The day sheet prints the driver; readers with deliveries.view cannot
+    // list members, so the run carries the name.
+    const [driver] = run.driverMembershipId
+      ? await this.db
+          .select({ name: schema.users.name })
+          .from(schema.memberships)
+          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+          .where(eq(schema.memberships.id, run.driverMembershipId))
+          .limit(1)
+      : [];
+    return { ...run, driverName: driver?.name ?? null, stops: detailed };
   }
 
   // ---------------------------------------------------------------------
@@ -1313,6 +1427,8 @@ export class DeliveriesController {
         id: schema.deliveryLines.id,
         orderLineId: schema.deliveryLines.orderLineId,
         quantity: schema.deliveryLines.quantity,
+        // A20 "Assign Pieces": what the crew loads and ticks, not the unit count.
+        pieces: sql<number>`(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1))::int`,
         description: schema.orderLines.description,
         lineType: schema.orderLines.lineType,
       })

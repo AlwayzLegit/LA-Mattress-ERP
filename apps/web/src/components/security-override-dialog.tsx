@@ -1,8 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { Alert, Button, Card, Field, FormActions, FormGrid, Input, Select } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  Card,
+  Field,
+  FormActions,
+  FormGrid,
+  Input,
+  Select,
+  useFocusTrap,
+} from '@/components/ui';
 
 /**
  * The STORIS Security Override screen (PLAN-STORIS-GAP §0.1) as a
@@ -102,6 +112,15 @@ export function SecurityOverrideDialog({
     }
   }, [open, usageClass]);
 
+  // Focus stays inside the PIN prompt and returns to the opener (Phase 12).
+  const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel, {
+    active: open,
+    onClose: () => {
+      if (!busy) onClose();
+    },
+  });
+
   if (!open) return null;
   const hasCodes = (codes?.length ?? 0) > 0;
   const incomplete =
@@ -145,8 +164,8 @@ export function SecurityOverrideDialog({
   }
 
   return (
-    // Modal chrome: no shared overlay primitive exists yet, so the
-    // backdrop/panel positioning is utility classes (structural, not styling).
+    // Modal chrome: the backdrop/panel positioning is utility classes
+    // (structural, not styling); the focus trap is the shared hook.
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4"
       onClick={(e) => {
@@ -154,17 +173,12 @@ export function SecurityOverrideDialog({
       }}
     >
       <div
+        ref={panel}
         role="dialog"
         aria-modal
         aria-label={title}
         data-testid="security-override-dialog"
         className="w-full max-w-[440px]"
-        onKeyDown={(e) => {
-          if (e.key === 'Escape' && !busy) {
-            e.stopPropagation();
-            onClose();
-          }
-        }}
       >
         <Card title={title}>
           <form

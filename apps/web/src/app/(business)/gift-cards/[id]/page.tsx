@@ -11,18 +11,23 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatGrid,
   StatTile,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface GiftCardTransaction {
@@ -49,6 +54,44 @@ interface GiftCardDetail {
   transactions: GiftCardTransaction[];
 }
 
+const LEDGER_COLUMNS: ColumnDef<GiftCardTransaction>[] = [
+  {
+    id: 'when',
+    label: 'When',
+    className: 'nowrap',
+    sortValue: (t) => t.createdAt,
+    render: (t) => new Date(t.createdAt).toLocaleString(),
+  },
+  { id: 'kind', label: 'Kind', sortValue: (t) => t.kind, render: (t) => t.kind },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    sortValue: (t) => t.amountCents,
+    render: (t) => <Money cents={t.amountCents} />,
+  },
+  {
+    id: 'balanceAfter',
+    label: 'Balance after',
+    num: true,
+    sortValue: (t) => t.balanceAfterCents,
+    render: (t) => <Money cents={t.balanceAfterCents} />,
+  },
+  {
+    id: 'reference',
+    label: 'Reference',
+    sortValue: (t) => (t.saleId ? 'sale' : t.refundId ? 'refund' : null),
+    render: (t) =>
+      t.saleId ? (
+        <Link href={`/sales/${t.saleId}`}>sale</Link>
+      ) : t.refundId ? (
+        <em>refund</em>
+      ) : (
+        <span className="muted">—</span>
+      ),
+  },
+];
+
 export default function GiftCardDetailPage() {
   const params = useParams();
   const id = (params?.id ?? '') as string;
@@ -56,6 +99,7 @@ export default function GiftCardDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [adjust, setAdjust] = useState('');
   const [busy, setBusy] = useState<'adjust' | 'cancel' | null>(null);
+  const cols = useListColumns('gift-card-ledger', LEDGER_COLUMNS, card?.transactions ?? null);
 
   async function load() {
     try {
@@ -186,43 +230,22 @@ export default function GiftCardDetailPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Kind</th>
-                  <th className="num">Amount</th>
-                  <th className="num">Balance after</th>
-                  <th>Reference</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="gift-card-ledger" />
               </thead>
               <tbody>
                 {card.transactions.length === 0 && (
-                  <TableEmpty colSpan={5}>
+                  <TableEmpty colSpan={cols.ordered.length}>
                     No activity yet. Redemptions and adjustments will show up here.
                   </TableEmpty>
                 )}
-                {card.transactions.map((t) => (
+                {cols.sorted.map((t) => (
                   <tr key={t.id}>
-                    <td className="nowrap">{new Date(t.createdAt).toLocaleString()}</td>
-                    <td>{t.kind}</td>
-                    <td className="num">
-                      <Money cents={t.amountCents} />
-                    </td>
-                    <td className="num">
-                      <Money cents={t.balanceAfterCents} />
-                    </td>
-                    <td>
-                      {t.saleId ? (
-                        <Link href={`/sales/${t.saleId}`}>sale</Link>
-                      ) : t.refundId ? (
-                        <em>refund</em>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
+                    <ColumnCells list={cols} row={t} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         </Card>
       </Stack>

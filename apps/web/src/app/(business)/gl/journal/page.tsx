@@ -9,18 +9,23 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface Account {
@@ -134,6 +139,52 @@ export default function GlJournalPage() {
       return next;
     });
   }
+
+  // The Post cell needs `busy` and `postDraft`.
+  const batchColumns: ColumnDef<BatchRow>[] = [
+    {
+      id: 'number',
+      label: 'Batch',
+      sortValue: (b) => b.number,
+      render: (b) => <code>{b.number}</code>,
+    },
+    {
+      id: 'date',
+      label: 'Date',
+      className: 'nowrap',
+      sortValue: (b) => b.businessDate,
+      render: (b) => b.businessDate,
+    },
+    { id: 'type', label: 'Type', sortValue: (b) => b.batchType, render: (b) => b.batchType },
+    { id: 'memo', label: 'Memo', sortValue: (b) => b.memo, render: (b) => b.memo ?? '—' },
+    {
+      id: 'amount',
+      label: 'Amount',
+      num: true,
+      sortValue: (b) => b.debitCents,
+      render: (b) => <Money cents={b.debitCents} />,
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (b) => b.status,
+      render: (b) => <StatusBadge status={b.status} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (b) =>
+        b.status === 'draft' && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void postDraft(b.id)}>
+            Post
+          </Button>
+        ),
+    },
+  ];
+  const cols = useListColumns('gl-journal', batchColumns, rows);
 
   if (error && !rows) {
     return (
@@ -252,48 +303,20 @@ export default function GlJournalPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Batch</th>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Memo</th>
-                  <th className="num">Amount</th>
-                  <th>Status</th>
-                  <th className="actions" />
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="gl-journal" />
               </thead>
               <tbody>
-                {rows.length === 0 && <TableEmpty colSpan={7}>No journal batches yet.</TableEmpty>}
-                {rows.map((b) => (
+                {rows.length === 0 && (
+                  <TableEmpty colSpan={cols.ordered.length}>No journal batches yet.</TableEmpty>
+                )}
+                {cols.sorted.map((b) => (
                   <tr key={b.id}>
-                    <td>
-                      <code>{b.number}</code>
-                    </td>
-                    <td className="nowrap">{b.businessDate}</td>
-                    <td>{b.batchType}</td>
-                    <td>{b.memo ?? '—'}</td>
-                    <td className="num">
-                      <Money cents={b.debitCents} />
-                    </td>
-                    <td>
-                      <StatusBadge status={b.status} />
-                    </td>
-                    <td className="actions">
-                      {b.status === 'draft' && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void postDraft(b.id)}
-                        >
-                          Post
-                        </Button>
-                      )}
-                    </td>
+                    <ColumnCells list={cols} row={b} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         </Card>
       </Stack>

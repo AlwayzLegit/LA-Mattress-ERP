@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Body,
   ConflictException,
   Controller,
@@ -12,10 +13,19 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
-import { PRODUCT_PURCHASE_STATUSES, type ProductPurchaseStatus } from '@jetnine/shared';
+import {
+  FIRMNESS_LEVELS,
+  firmnessFromText,
+  MATTRESS_SIZES,
+  normalizeFirmness,
+  normalizeSize,
+  PRODUCT_PURCHASE_STATUSES,
+  sizeFromText,
+  type ProductPurchaseStatus,
+} from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import {
@@ -33,8 +43,11 @@ import {
   loadProductStockTotals,
   type LocationStockRow,
   type StockTotals,
+  loadProductStoreCells,
+  type StoreCell,
 } from './product-stock';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
+import { loadCategoryIndex } from './category-tree';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
 /** Connector syncs write import batches under their provider name. */
@@ -50,6 +63,46 @@ interface VariantInput {
   costCents?: number | null;
   barcode?: string | null;
   attributesJson?: Record<string, unknown> | null;
+  /** A22.2: canonical size / firmness; absent → read off the attributes and names. */
+  size?: string | null;
+  firmness?: string | null;
+}
+
+/**
+ * A22.2: the size and firmness a new variant carries — what the caller
+ * says (validated), else what its attributes and names state.
+ */
+export function deriveVariantSizing(
+  v: {
+    size?: string | null;
+    firmness?: string | null;
+    attributesJson?: Record<string, unknown> | null;
+    name?: string | null;
+  },
+  productName: string,
+): { size: string | null; firmness: string | null } {
+  const attrs = v.attributesJson ?? {};
+  const attrSize = typeof attrs.size === 'string' ? attrs.size : null;
+  const attrFirmness = typeof attrs.firmness === 'string' ? attrs.firmness : null;
+  const hay = `${productName} ${v.name ?? ''}`;
+  if (v.size && !normalizeSize(v.size)) {
+    throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
+  }
+  if (v.firmness && !normalizeFirmness(v.firmness)) {
+    throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
+  }
+  return {
+    size:
+      v.size === null
+        ? null
+        : (normalizeSize(v.size) ?? normalizeSize(attrSize) ?? sizeFromText(hay)),
+    firmness:
+      v.firmness === null
+        ? null
+        : (normalizeFirmness(v.firmness) ??
+          normalizeFirmness(attrFirmness) ??
+          firmnessFromText(hay)),
+  };
 }
 
 interface CreateProductBody {
@@ -96,7 +149,12 @@ interface ProductListRow {
   brandName: string | null;
   /** A21 addendum: STORIS Search for a Product leads with the category and ends with the collection. */
   categoryName: string | null;
+  /** A22.1: the full nested name, "Mattresses › Hybrid". */
+  categoryPath: string | null;
   collectionName: string | null;
+  /** A22.2: the primary variant's canonical size and firmness. */
+  size: string | null;
+  firmness: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -109,6 +167,9 @@ interface ProductListRow {
   asIsOnHand: number;
   asIsAvailable: number;
   asIsNonSellable: number;
+  /** Redesign Phase 7: reserved across locations and one cell per store. */
+  reserved: number;
+  stockByLocation: Record<string, StoreCell>;
 }
 
 interface VariantOut {
@@ -119,6 +180,8 @@ interface VariantOut {
   priceCents: number;
   costCents: number | null;
   attributesJson: unknown;
+  size: string | null;
+  firmness: string | null;
   isActive: boolean;
   reorderPoint: number | null;
   reorderQty: number | null;
@@ -154,7 +217,12 @@ interface ProductOut {
   shipping: ProductShipping;
   brandName: string | null;
   categoryName: string | null;
+  /** A22.1: the full nested name, "Mattresses › Hybrid". */
+  categoryPath: string | null;
   collectionName: string | null;
+  /** A22.2: the primary variant's canonical size and firmness. */
+  size: string | null;
+  firmness: string | null;
   vendorName: string | null;
   vendorModel: string | null;
   group: string | null;
@@ -177,6 +245,8 @@ export const PRODUCT_SORT_KEYS = [
   'purchaseStatus',
   'asIsNonSellable',
   'group',
+  'size',
+  'firmness',
   'brandName',
   'categoryName',
   'collectionName',
@@ -207,9 +277,11 @@ export function sortProductRows(
   dir: 'asc' | 'desc',
 ): ProductListRow[] {
   const sign = dir === 'desc' ? -1 : 1;
+  // A22.1: the category column reads the full path, so sort on it too.
+  const field = key === 'categoryName' ? 'categoryPath' : key;
   const cmp = (a: ProductListRow, b: ProductListRow): number => {
-    const av = a[key];
-    const bv = b[key];
+    const av = a[field];
+    const bv = b[field];
     const aBlank = av == null || av === '';
     const bBlank = bv == null || bv === '';
     if (aBlank && bBlank) return 0;
@@ -271,21 +343,92 @@ export class CatalogProductsController {
     @Query('vendorModel') vendorModelQ?: string,
     @Query('collectionId') collectionId?: string,
     @Query('group') groupQ?: string,
+    @Query('size') sizeQ?: string,
+    @Query('firmness') firmnessQ?: string,
     @Query('purchaseStatus') purchaseStatusQ?: string,
     @Query('asIsReasonCodeId') asIsReasonCodeId?: string,
+    // Redesign Phase 7 (README §3.3): the stock filter and the price /
+    // cost ranges of Advanced search; `sort=available:<locationId>` sorts
+    // one store's column.
+    @Query('stock') stockQ?: string,
+    @Query('priceMin') priceMinQ?: string,
+    @Query('priceMax') priceMaxQ?: string,
+    @Query('costMin') costMinQ?: string,
+    @Query('costMax') costMaxQ?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
     const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
+    const storeSort = /^available:([0-9a-f-]{36})$/i.exec(sortRaw ?? '')?.[1] ?? null;
     const sortKey = (PRODUCT_SORT_KEYS as readonly string[]).includes(sortRaw ?? '')
       ? (sortRaw as ProductSortKey)
       : null;
-    if (sortRaw && !sortKey) {
-      throw new BadRequestException(`sort must be one of ${PRODUCT_SORT_KEYS.join(', ')}`);
+    if (sortRaw && !sortKey && !storeSort) {
+      throw new BadRequestException(
+        `sort must be one of ${PRODUCT_SORT_KEYS.join(', ')} or available:<locationId>`,
+      );
     }
     const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
+    const sortRows = (rows: ProductListRow[]): ProductListRow[] => {
+      if (storeSort) {
+        const sign = dir === 'desc' ? -1 : 1;
+        return [...rows].sort(
+          (a, b) =>
+            sign *
+              ((a.stockByLocation[storeSort]?.available ?? 0) -
+                (b.stockByLocation[storeSort]?.available ?? 0)) || a.name.localeCompare(b.name),
+        );
+      }
+      return sortKey ? sortProductRows(rows, sortKey, dir) : rows;
+    };
     const filters: ReturnType<typeof and>[] = [];
     if (!includeInactive) filters.push(eq(schema.products.isActive, true));
-    if (categoryId) filters.push(eq(schema.products.categoryId, categoryId));
+    const availAt = sql`(il.on_hand - il.reserved - il.floor_sample)`;
+    const levelsOf = sql`FROM inventory_levels il INNER JOIN product_variants v ON v.id = il.variant_id WHERE v.product_id = ${schema.products.id}`;
+    if (stockQ === 'anywhere') {
+      filters.push(sql`EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
+    } else if (stockQ === 'out') {
+      filters.push(sql`NOT EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
+    } else if (stockQ === 'short') {
+      // Short somewhere: a store at zero with units reserved or waiting on
+      // an open order, or a store under its own minimum.
+      filters.push(
+        sql`(EXISTS (SELECT 1 ${levelsOf} AND ((${availAt} <= 0 AND il.reserved > 0) OR (il.reorder_point IS NOT NULL AND ${availAt} < il.reorder_point)))
+          OR EXISTS (SELECT 1 FROM order_lines ol INNER JOIN orders o ON o.id = ol.order_id INNER JOIN product_variants v2 ON v2.id = ol.variant_id
+            WHERE v2.product_id = ${schema.products.id} AND o.status IN ('open','partially_fulfilled') AND ol.line_type = 'stock'
+              AND ol.quantity - ol.qty_reserved - ol.qty_fulfilled > 0))`,
+      );
+    } else if (stockQ) {
+      throw new BadRequestException('stock must be one of anywhere, short, out');
+    }
+    const cents = (raw: string | undefined, name: string): number | null => {
+      if (raw == null || raw === '') return null;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 0)
+        throw new BadRequestException(`${name} must be a non-negative integer of cents`);
+      return n;
+    };
+    const priceMin = cents(priceMinQ, 'priceMin');
+    const priceMax = cents(priceMaxQ, 'priceMax');
+    if (priceMin != null || priceMax != null) {
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.priceCents} >= ${priceMin ?? 0} AND ${schema.productVariants.priceCents} <= ${priceMax ?? 2_147_483_647})`,
+      );
+    }
+    const costMin = cents(costMinQ, 'costMin');
+    const costMax = cents(costMaxQ, 'costMax');
+    if (costMin != null || costMax != null) {
+      if (!(tenant.isSuperAdmin || tenant.permissions.has('products.cost.view'))) {
+        throw new ForbiddenException('Filtering by cost needs product cost access');
+      }
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.costCents} IS NOT NULL AND ${schema.productVariants.costCents} >= ${costMin ?? 0} AND ${schema.productVariants.costCents} <= ${costMax ?? 2_147_483_647})`,
+      );
+    }
+    if (categoryId) {
+      // A22.1: categories nest — picking "Mattresses" returns the hybrids too.
+      const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+      filters.push(inArray(schema.products.categoryId, categoryIndex.treeIds(categoryId)));
+    }
     // Vendor (owner 2026-09-02): the vendors page's "products we carry"
     // count opens here. Same rule as the Add Product popup.
     if (vendorId) {
@@ -316,6 +459,24 @@ export class CatalogProductsController {
     if (groupQ?.trim()) {
       filters.push(
         sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND lower(${schema.productVariants.attributesJson} ->> 'group') = lower(${groupQ.trim()}))`,
+      );
+    }
+    // A22.2: size and firmness are variant columns now — any spelling
+    // ("cal king", "California King", "CK") resolves to the canonical one.
+    if (sizeQ?.trim()) {
+      const size = normalizeSize(sizeQ);
+      if (!size) throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.size} = ${size})`,
+      );
+    }
+    if (firmnessQ?.trim()) {
+      const firmness = normalizeFirmness(firmnessQ);
+      if (!firmness) {
+        throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
+      }
+      filters.push(
+        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.firmness} = ${firmness})`,
       );
     }
     if (purchaseStatusQ) {
@@ -349,21 +510,24 @@ export class CatalogProductsController {
             // Parenthesised: without the brackets the OR binds looser than
             // the AND `and()` puts between the filters, so a variant match
             // would smuggle a row past the active / vendor / category ones.
+            // A22.2: the product's words and a variant's words (size,
+            // firmness, SKU, barcode) count together, so "queen bamboo
+            // sheets" finds the Queen variant of "BAMBOO SHEETS WHITE".
             sql`(${schema.products.searchTsv} @@ ${tsq}
                 OR EXISTS (
                   SELECT 1 FROM ${schema.productVariants} v
                   WHERE v.product_id = ${schema.products.id}
-                    AND v.search_tsv @@ ${tsq}
+                    AND (${schema.products.searchTsv} || v.search_tsv) @@ ${tsq}
                 ))`,
           ),
         )
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))
         .limit(limit);
       const found = await this.listRows(tenant, data, locationId);
-      return { data: sortKey ? sortProductRows(found, sortKey, dir) : found, nextCursor: null };
+      return { data: sortRows(found), nextCursor: null };
     }
 
-    if (sortKey) {
+    if (sortKey || storeSort) {
       // Sorted browse: materialise, sort the finished rows, page by offset.
       const offset = offsetFromCursor(cursorStr);
       const all = await this.db
@@ -377,7 +541,7 @@ export class CatalogProductsController {
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(asc(schema.products.name), asc(schema.products.id))
         .limit(SORTED_BROWSE_CAP);
-      const sorted = sortProductRows(await this.listRows(tenant, all, locationId), sortKey, dir);
+      const sorted = sortRows(await this.listRows(tenant, all, locationId));
       const data = sorted.slice(offset, offset + limit);
       const next = offset + limit;
       return {
@@ -429,6 +593,7 @@ export class CatalogProductsController {
       .select({
         id: schema.products.id,
         purchaseStatus: schema.products.purchaseStatus,
+        categoryId: schema.products.categoryId,
         brandName: schema.brands.name,
         categoryName: schema.categories.name,
         collectionName: schema.collections.name,
@@ -446,6 +611,8 @@ export class CatalogProductsController {
         priceCents: schema.productVariants.priceCents,
         costCents: schema.productVariants.costCents,
         group: sql<string | null>`${schema.productVariants.attributesJson} ->> 'group'`,
+        size: schema.productVariants.size,
+        firmness: schema.productVariants.firmness,
         vendorName: schema.vendors.name,
         isActive: schema.productVariants.isActive,
       })
@@ -465,7 +632,9 @@ export class CatalogProductsController {
       }
     }
     const extra = new Map(products.map((p) => [p.id, p]));
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
     const totals = await loadProductStockTotals(this.db, tenant.businessId!, ids, locationId);
+    const cells = await loadProductStoreCells(this.db, tenant.businessId!, ids);
     return rows.map((r) => {
       const p = extra.get(r.id);
       const v = primary.get(r.id);
@@ -478,10 +647,13 @@ export class CatalogProductsController {
         purchaseStatus: p?.purchaseStatus ?? 'active',
         brandName: p?.brandName ?? null,
         categoryName: p?.categoryName ?? null,
+        categoryPath: categoryIndex.pathOf(p?.categoryId),
         collectionName: p?.collectionName ?? null,
         vendorName: v?.vendorName ?? null,
         vendorModel: v?.vendorSku ?? null,
         group: v?.group ?? null,
+        size: v?.size ?? null,
+        firmness: v?.firmness ?? null,
         priceCents: v?.priceCents ?? null,
         costCents: canSeeCost ? (v?.costCents ?? null) : null,
         onHand: t?.onHand ?? 0,
@@ -490,6 +662,8 @@ export class CatalogProductsController {
         asIsOnHand: t?.asIsOnHand ?? 0,
         asIsAvailable: t?.asIsAvailable ?? 0,
         asIsNonSellable: t?.asIsNonSellable ?? 0,
+        reserved: t?.reserved ?? 0,
+        stockByLocation: cells.get(r.id) ?? {},
       };
     });
   }
@@ -663,6 +837,57 @@ export class CatalogProductsController {
     return { deactivated, kept, skippedGroups };
   }
 
+  /**
+   * A22.2: the values the pickers offer — every STORIS group code, size
+   * and firmness this business's variants carry, with counts.
+   */
+  @Get('facets')
+  @RequirePermission('products.view')
+  async facets(@CurrentTenant() tenant: RequestTenantContext): Promise<{
+    groups: { value: string; count: number }[];
+    sizes: { value: string; count: number }[];
+    firmness: { value: string; count: number }[];
+  }> {
+    const businessId = tenant.businessId!;
+    const count = sql<number>`count(*)::int`;
+    const groupExpr = sql<string>`${schema.productVariants.attributesJson} ->> 'group'`;
+    const groups = await this.db
+      .select({ value: groupExpr, count })
+      .from(schema.productVariants)
+      .where(and(eq(schema.productVariants.businessId, businessId), sql`${groupExpr} IS NOT NULL`))
+      .groupBy(groupExpr)
+      .orderBy(groupExpr);
+    const sizes = await this.db
+      .select({ value: schema.productVariants.size, count })
+      .from(schema.productVariants)
+      .where(
+        and(
+          eq(schema.productVariants.businessId, businessId),
+          isNotNull(schema.productVariants.size),
+        ),
+      )
+      .groupBy(schema.productVariants.size);
+    const firmness = await this.db
+      .select({ value: schema.productVariants.firmness, count })
+      .from(schema.productVariants)
+      .where(
+        and(
+          eq(schema.productVariants.businessId, businessId),
+          isNotNull(schema.productVariants.firmness),
+        ),
+      )
+      .groupBy(schema.productVariants.firmness);
+    const order = (list: readonly string[]) => (a: { value: string }, b: { value: string }) =>
+      list.indexOf(a.value) - list.indexOf(b.value);
+    return {
+      groups: groups.map((g) => ({ value: g.value, count: g.count })),
+      sizes: sizes.map((r) => ({ value: r.value!, count: r.count })).sort(order(MATTRESS_SIZES)),
+      firmness: firmness
+        .map((r) => ({ value: r.value!, count: r.count }))
+        .sort(order(FIRMNESS_LEVELS)),
+    };
+  }
+
   @Get(':id')
   @RequirePermission('products.view')
   async get(
@@ -747,6 +972,8 @@ export class CatalogProductsController {
         priceCents: v.priceCents,
         costCents: canSeeCost ? (v.costCents ?? null) : null,
         attributesJson: v.attributesJson,
+        size: v.size ?? null,
+        firmness: v.firmness ?? null,
         isActive: v.isActive,
         reorderPoint: v.reorderPoint ?? null,
         reorderQty: v.reorderQty ?? null,
@@ -770,10 +997,15 @@ export class CatalogProductsController {
       shipping: parseShipping(p.shippingJson),
       brandName: brand?.name ?? null,
       categoryName: category?.name ?? null,
+      categoryPath: p.categoryId
+        ? (await loadCategoryIndex(this.db, tenant.businessId!)).pathOf(p.categoryId)
+        : null,
       collectionName: collection?.name ?? null,
       vendorName: vendor?.name ?? null,
       vendorModel: primary?.vendorSku ?? null,
       group: typeof group === 'string' ? group : null,
+      size: primary?.size ?? null,
+      firmness: primary?.firmness ?? null,
       stock,
     };
   }
@@ -820,6 +1052,7 @@ export class CatalogProductsController {
           costCents: v.costCents ?? null,
           barcode: v.barcode ?? null,
           attributesJson: (v.attributesJson ?? null) as never,
+          ...deriveVariantSizing(v, p.name),
         })),
       );
     }

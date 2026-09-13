@@ -5,14 +5,19 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { useSession } from '@/lib/auth-client';
@@ -54,6 +59,54 @@ function auditParams(filters: Filters, range: DateRange): URLSearchParams {
   return params;
 }
 
+const AUDIT_COLUMNS: ColumnDef<AuditLogRow>[] = [
+  {
+    id: 'when',
+    label: 'When',
+    className: 'nowrap',
+    sortValue: (r) => r.createdAt,
+    render: (r) => new Date(r.createdAt).toLocaleString(),
+  },
+  {
+    id: 'actor',
+    label: 'Actor',
+    sortValue: (r) => r.actorEmail,
+    render: (r) => r.actorEmail ?? <em>system</em>,
+  },
+  {
+    id: 'action',
+    label: 'Action',
+    sortValue: (r) => r.action,
+    render: (r) => <code>{r.action}</code>,
+  },
+  {
+    id: 'target',
+    label: 'Target',
+    sortValue: (r) => (r.targetType ? `${r.targetType}:${r.targetId ?? ''}` : null),
+    render: (r) =>
+      r.targetType ? (
+        <span>
+          {r.targetType}
+          {r.targetId ? `:${r.targetId.slice(0, 8)}…` : ''}
+        </span>
+      ) : (
+        <em className="muted">—</em>
+      ),
+  },
+  {
+    id: 'diff',
+    label: 'Diff',
+    render: (r) =>
+      r.changesJson ? (
+        <pre className="m-0 whitespace-pre-wrap rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-muted)] p-1.5 font-mono text-xs">
+          {JSON.stringify(r.changesJson, null, 2)}
+        </pre>
+      ) : (
+        <em className="muted">—</em>
+      ),
+  },
+];
+
 export default function AuditLogPage() {
   const session = useSession();
   const [filters, setFilters] = useState<Filters>({ action: '', actorUserId: '' });
@@ -63,6 +116,7 @@ export default function AuditLogPage() {
   const [rows, setRows] = useState<AuditLogRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const cols = useListColumns('audit', AUDIT_COLUMNS, rows);
 
   async function fetchRows(currentFilters: Filters, currentRange: DateRange): Promise<void> {
     setLoading(true);
@@ -152,48 +206,22 @@ export default function AuditLogPage() {
             <TableWrap>
               <table data-testid="audit-table" className="table">
                 <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Actor</th>
-                    <th>Action</th>
-                    <th>Target</th>
-                    <th>Diff</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="audit" />
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <TableEmpty colSpan={5}>No audit log entries match these filters.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>
+                      No audit log entries match these filters.
+                    </TableEmpty>
                   )}
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id} className="align-top">
-                      <td className="nowrap">{new Date(r.createdAt).toLocaleString()}</td>
-                      <td>{r.actorEmail ?? <em>system</em>}</td>
-                      <td>
-                        <code>{r.action}</code>
-                      </td>
-                      <td>
-                        {r.targetType ? (
-                          <span>
-                            {r.targetType}
-                            {r.targetId ? `:${r.targetId.slice(0, 8)}…` : ''}
-                          </span>
-                        ) : (
-                          <em className="muted">—</em>
-                        )}
-                      </td>
-                      <td>
-                        {r.changesJson ? (
-                          <pre className="m-0 whitespace-pre-wrap rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-muted)] p-1.5 font-mono text-xs">
-                            {JSON.stringify(r.changesJson, null, 2)}
-                          </pre>
-                        ) : (
-                          <em className="muted">—</em>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { salesScopeCond, sellingScopeCond } from '../common/sales-scope';
 import { CostingService } from '../costing/costing.service';
@@ -75,6 +76,8 @@ interface MerchRow {
   sku: string | null;
   vendorName: string | null;
   categoryName: string | null;
+  /** Full path ("Mattresses › Hybrid"); categoryName is the leaf. */
+  categoryPath: string | null;
   brandName: string | null;
   onHand: number;
   reserved: number;
@@ -239,7 +242,10 @@ interface ZReport {
 
 interface CategoryRow {
   categoryId: string | null;
+  /** Leaf name, 'Uncategorized' without a category. */
   categoryName: string;
+  /** Full path ("Mattresses › Hybrid"), 'Uncategorized' without a category. */
+  categoryPath: string;
   quantity: number;
   revenueCents: number;
 }
@@ -772,7 +778,7 @@ export class ReportsController {
     const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
     endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
 
-    const rows = await this.db
+    const grouped = await this.db
       .select({
         categoryId: schema.products.categoryId,
         categoryName: sql<string>`COALESCE(${schema.categories.name}, 'Uncategorized')`,
@@ -794,6 +800,12 @@ export class ReportsController {
       )
       .groupBy(schema.products.categoryId, schema.categories.name)
       .orderBy(desc(sql`COALESCE(SUM(${schema.saleLines.totalCents}), 0)`));
+    // A22.1: categories nest, so each bucket also reads its full path.
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+    const rows: CategoryRow[] = grouped.map((r) => ({
+      ...r,
+      categoryPath: categoryIndex.pathOf(r.categoryId) ?? r.categoryName,
+    }));
 
     if (format === 'csv') {
       requireExport(tenant);
@@ -802,7 +814,7 @@ export class ReportsController {
         `sales-by-category-${startDate}-to-${endDate}.csv`,
         toCsv(
           ['category', 'quantity', 'revenue_cents'],
-          rows.map((r) => [r.categoryName, r.quantity, r.revenueCents]),
+          rows.map((r) => [r.categoryPath, r.quantity, r.revenueCents]),
         ),
       );
       return;
@@ -1888,6 +1900,8 @@ export class ReportsController {
     const includeNoActivity = includeNoActivityStr === 'true';
     const CAP = 2000;
 
+    // A22.1: categories nest — filtering by "Mattresses" keeps the hybrids.
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
     const variants = await this.db
       .select({
         variantId: schema.productVariants.id,
@@ -1897,6 +1911,7 @@ export class ReportsController {
         costCents: schema.productVariants.costCents,
         priceCents: schema.productVariants.priceCents,
         vendorName: schema.vendors.name,
+        categoryId: schema.products.categoryId,
         categoryName: schema.categories.name,
         brandName: schema.brands.name,
       })
@@ -1908,7 +1923,9 @@ export class ReportsController {
       .where(
         and(
           vendorId ? eq(schema.productVariants.preferredVendorId, vendorId) : undefined,
-          categoryId ? eq(schema.products.categoryId, categoryId) : undefined,
+          categoryId
+            ? inArray(schema.products.categoryId, categoryIndex.treeIds(categoryId))
+            : undefined,
           brandId ? eq(schema.products.brandId, brandId) : undefined,
         ),
       );
@@ -2024,6 +2041,7 @@ export class ReportsController {
         sku: v.sku,
         vendorName: v.vendorName,
         categoryName: v.categoryName,
+        categoryPath: categoryIndex.pathOf(v.categoryId),
         brandName: v.brandName,
         onHand,
         reserved,
@@ -2080,7 +2098,7 @@ export class ReportsController {
               r.variantName,
               r.sku,
               r.vendorName,
-              r.categoryName,
+              r.categoryPath ?? r.categoryName,
               r.brandName,
               r.onHand,
               r.reserved,

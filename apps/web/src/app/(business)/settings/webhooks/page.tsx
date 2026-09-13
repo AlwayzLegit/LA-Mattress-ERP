@@ -7,6 +7,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -14,10 +17,12 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -42,6 +47,48 @@ interface Delivery {
   lastAttemptAt: string | null;
   createdAt: string;
 }
+
+const DELIVERY_COLUMNS: ColumnDef<Delivery>[] = [
+  {
+    id: 'time',
+    label: 'Time',
+    className: 'nowrap',
+    sortValue: (d) => d.createdAt,
+    render: (d) => new Date(d.createdAt).toLocaleString(),
+  },
+  {
+    id: 'event',
+    label: 'Event',
+    sortValue: (d) => d.eventType,
+    render: (d) => <code>{d.eventType}</code>,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (d) => d.status,
+    render: (d) => (
+      <>
+        <StatusBadge status={d.status} />
+        {d.responseStatus != null && <span className="muted"> ({d.responseStatus})</span>}
+      </>
+    ),
+  },
+  {
+    id: 'response',
+    label: 'Response',
+    sortValue: (d) => d.errorMessage ?? d.responseBody,
+    render: (d) =>
+      d.errorMessage ? (
+        <code className="text-[var(--danger)]">{d.errorMessage}</code>
+      ) : d.responseBody ? (
+        <code className="block max-h-[60px] overflow-auto break-all">
+          {d.responseBody.slice(0, 200)}
+        </code>
+      ) : (
+        '—'
+      ),
+  },
+];
 
 export default function WebhooksPage() {
   const [rows, setRows] = useState<Endpoint[] | null>(null);
@@ -150,6 +197,75 @@ export default function WebhooksPage() {
     }
   }
 
+  // Built inline: the actions cell needs the row callbacks and `testing`.
+  const endpointColumns: ColumnDef<Endpoint>[] = [
+    {
+      id: 'url',
+      label: 'URL',
+      sortValue: (r) => r.url,
+      render: (r) => (
+        <>
+          <code className="break-all">{r.url}</code>
+          {r.description && <div className="muted">{r.description}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'events',
+      label: 'Events',
+      sortValue: (r) => r.events.join(', '),
+      render: (r) => <code className="break-words">{r.events.join(', ')}</code>,
+    },
+    {
+      id: 'health',
+      label: 'Health',
+      sortValue: (r) => (r.isActive ? 'active' : 'paused'),
+      render: (r) => (
+        <>
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={r.isActive ? 'active' : 'paused'} />
+            {r.consecutiveFailures > 0 && (
+              <span className="text-[var(--danger)]">
+                {r.consecutiveFailures} consecutive failure(s)
+              </span>
+            )}
+          </span>
+          <div className="muted">
+            {r.totalDeliveries} delivered ·{' '}
+            {r.lastSuccessAt
+              ? `ok ${new Date(r.lastSuccessAt).toLocaleString()}`
+              : 'no success yet'}
+          </div>
+        </>
+      ),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => testFire(r)} disabled={testing === r.id}>
+            {testing === r.id ? 'Testing…' : 'Test'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => loadDeliveries(r.id)}>
+            History
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => toggleActive(r)}>
+            {r.isActive ? 'Pause' : 'Enable'}
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => destroy(r)}>
+            Delete
+          </Button>
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('settings-webhooks', endpointColumns, rows);
+  const deliveryCols = useListColumns('settings-webhooks-deliveries', DELIVERY_COLUMNS, deliveries);
+
   return (
     <div>
       <PageHeader
@@ -241,64 +357,17 @@ export default function WebhooksPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>URL</th>
-                    <th>Events</th>
-                    <th>Health</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="settings-webhooks" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td>
-                        <code className="break-all">{r.url}</code>
-                        {r.description && <div className="muted">{r.description}</div>}
-                      </td>
-                      <td>
-                        <code className="break-words">{r.events.join(', ')}</code>
-                      </td>
-                      <td>
-                        <span className="inline-flex flex-wrap items-center gap-1.5">
-                          <StatusBadge status={r.isActive ? 'active' : 'paused'} />
-                          {r.consecutiveFailures > 0 && (
-                            <span className="text-[var(--danger)]">
-                              {r.consecutiveFailures} consecutive failure(s)
-                            </span>
-                          )}
-                        </span>
-                        <div className="muted">
-                          {r.totalDeliveries} delivered ·{' '}
-                          {r.lastSuccessAt
-                            ? `ok ${new Date(r.lastSuccessAt).toLocaleString()}`
-                            : 'no success yet'}
-                        </div>
-                      </td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => testFire(r)}
-                          disabled={testing === r.id}
-                        >
-                          {testing === r.id ? 'Testing…' : 'Test'}
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => loadDeliveries(r.id)}>
-                          History
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => toggleActive(r)}>
-                          {r.isActive ? 'Pause' : 'Enable'}
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => destroy(r)}>
-                          Delete
-                        </Button>
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}
@@ -316,44 +385,22 @@ export default function WebhooksPage() {
             <TableWrap maxHeight="60vh">
               <table className="table table-dense table-sticky">
                 <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Event</th>
-                    <th>Status</th>
-                    <th>Response</th>
-                  </tr>
+                  <ColumnHeadRow list={deliveryCols} testIdPrefix="settings-webhooks-deliveries" />
                 </thead>
                 <tbody>
                   {deliveries.length === 0 && (
-                    <TableEmpty colSpan={4}>No deliveries yet.</TableEmpty>
+                    <TableEmpty colSpan={deliveryCols.ordered.length}>
+                      No deliveries yet.
+                    </TableEmpty>
                   )}
-                  {deliveries.map((d) => (
+                  {deliveryCols.sorted.map((d) => (
                     <tr key={d.id}>
-                      <td className="nowrap">{new Date(d.createdAt).toLocaleString()}</td>
-                      <td>
-                        <code>{d.eventType}</code>
-                      </td>
-                      <td>
-                        <StatusBadge status={d.status} />
-                        {d.responseStatus != null && (
-                          <span className="muted"> ({d.responseStatus})</span>
-                        )}
-                      </td>
-                      <td>
-                        {d.errorMessage ? (
-                          <code className="text-[var(--danger)]">{d.errorMessage}</code>
-                        ) : d.responseBody ? (
-                          <code className="block max-h-[60px] overflow-auto break-all">
-                            {d.responseBody.slice(0, 200)}
-                          </code>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
+                      <ColumnCells list={deliveryCols} row={d} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={deliveryCols} />
             </TableWrap>
           </Card>
         )}

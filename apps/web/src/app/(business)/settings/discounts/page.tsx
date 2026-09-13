@@ -7,6 +7,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -14,10 +17,12 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -119,6 +124,86 @@ export default function DiscountsPage() {
     }
   }
 
+  // Built inline: the actions cell needs `toggleActive` and `destroy`.
+  const columns: ColumnDef<DiscountCode>[] = [
+    {
+      id: 'code',
+      label: 'Code',
+      sortValue: (r) => r.code,
+      render: (r) => (
+        <>
+          <code>{r.code}</code>
+          {r.description && <div className="muted">{r.description}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'discount',
+      label: 'Discount',
+      // Percent codes sort before fixed ones; within a kind, by value.
+      sortValue: (r) => (r.kind === 'percent' ? r.value : 1_000_000_000 + r.value),
+      render: (r) => (
+        <>
+          {r.kind === 'percent' ? `${(r.value / 100).toFixed(2)}%` : <Money cents={r.value} />}
+          {r.minSubtotalCents != null && (
+            <div className="muted">
+              min <Money cents={r.minSubtotalCents} />
+            </div>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'window',
+      label: 'Window',
+      className: 'nowrap',
+      sortValue: (r) => r.startsAt,
+      render: (r) => (
+        <>
+          {r.startsAt ? new Date(r.startsAt).toLocaleDateString() : '—'} →{' '}
+          {r.endsAt ? new Date(r.endsAt).toLocaleDateString() : '∞'}
+        </>
+      ),
+    },
+    {
+      id: 'used',
+      label: 'Used',
+      num: true,
+      sortValue: (r) => r.usageCount,
+      render: (r) => (
+        <>
+          {r.usageCount}
+          {r.usageLimit != null && ` / ${r.usageLimit}`}
+          {r.perCustomerLimit != null && <div className="muted">{r.perCustomerLimit}/customer</div>}
+        </>
+      ),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => (r.isActive ? 'active' : 'inactive'),
+      render: (r) => <StatusBadge status={r.isActive ? 'active' : 'inactive'} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => toggleActive(r)}>
+            {r.isActive ? 'Disable' : 'Enable'}
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => destroy(r)}>
+            Delete
+          </Button>
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('settings-discounts', columns, rows);
+
   return (
     <div>
       <PageHeader
@@ -201,62 +286,17 @@ export default function DiscountsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th>Discount</th>
-                    <th>Window</th>
-                    <th className="num">Used</th>
-                    <th>Status</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="settings-discounts" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td>
-                        <code>{r.code}</code>
-                        {r.description && <div className="muted">{r.description}</div>}
-                      </td>
-                      <td>
-                        {r.kind === 'percent' ? (
-                          `${(r.value / 100).toFixed(2)}%`
-                        ) : (
-                          <Money cents={r.value} />
-                        )}
-                        {r.minSubtotalCents != null && (
-                          <div className="muted">
-                            min <Money cents={r.minSubtotalCents} />
-                          </div>
-                        )}
-                      </td>
-                      <td className="nowrap">
-                        {r.startsAt ? new Date(r.startsAt).toLocaleDateString() : '—'} →{' '}
-                        {r.endsAt ? new Date(r.endsAt).toLocaleDateString() : '∞'}
-                      </td>
-                      <td className="num">
-                        {r.usageCount}
-                        {r.usageLimit != null && ` / ${r.usageLimit}`}
-                        {r.perCustomerLimit != null && (
-                          <div className="muted">{r.perCustomerLimit}/customer</div>
-                        )}
-                      </td>
-                      <td>
-                        <StatusBadge status={r.isActive ? 'active' : 'inactive'} />
-                      </td>
-                      <td className="actions">
-                        <Button size="sm" variant="ghost" onClick={() => toggleActive(r)}>
-                          {r.isActive ? 'Disable' : 'Enable'}
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => destroy(r)}>
-                          Delete
-                        </Button>
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

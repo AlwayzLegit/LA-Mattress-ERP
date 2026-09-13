@@ -1,5 +1,7 @@
 'use client';
 
+import { rowKeys } from '@/components/ui';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -40,7 +42,9 @@ export function ChangesCard({
 
   useEffect(() => {
     const f = readLocal<string>(FILTER_KEY, 'all');
-    setFilterState(f === 'money' || f === 'unseen' ? f : 'all');
+    setFilterState(
+      f === 'money' || f === 'unseen' || f === 'critical' || f === 'warning' ? f : 'all',
+    );
   }, []);
   const setFilter = (f: ChangesFilter) => {
     setFilterState(f);
@@ -90,7 +94,21 @@ export function ChangesCard({
   const rows = data?.rows ?? [];
   const money = rows.filter((r) => r.moneyRelated);
   const unseen = money.filter((r) => !r.seenAt);
-  const shown = filter === 'money' ? money : filter === 'unseen' ? unseen : rows;
+  // Severity (redesign Phase 9): critical = money off the order or a
+  // refund (danger tone); warning = anything else that touched money or
+  // was flagged (warn); the rest is information.
+  const critical = rows.filter((r) => r.tone === 'danger');
+  const warning = rows.filter((r) => r.tone === 'warn');
+  const shown =
+    filter === 'critical'
+      ? critical
+      : filter === 'warning'
+        ? warning
+        : filter === 'money'
+          ? money
+          : filter === 'unseen'
+            ? unseen
+            : rows;
 
   const markAllSeen = async () => {
     if (unseen.length === 0) return;
@@ -121,7 +139,8 @@ export function ChangesCard({
             {(
               [
                 ['all', 'All', rows.length],
-                ['money', 'Money', money.length],
+                ['critical', 'Critical', critical.length],
+                ['warning', 'Warning', warning.length],
                 ['unseen', 'Unseen', unseen.length],
               ] as const
             ).map(([key, label, n]) => (
@@ -181,7 +200,9 @@ export function ChangesCard({
         >
           {filter === 'unseen'
             ? 'Every money change has your tick. Nothing waiting.'
-            : 'No changes recorded for the selected stores.'}
+            : filter === 'critical' || filter === 'warning'
+              ? 'No changes at this severity.'
+              : 'No changes recorded for the selected stores.'}
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
@@ -203,6 +224,7 @@ export function ChangesCard({
                 const cls = r.moneyRelated ? (seen ? ' is-seen' : ' is-unseen') : '';
                 return (
                   <tr
+                    {...rowKeys}
                     key={r.id}
                     className={`is-clickable${cls}`}
                     onClick={() => router.push(`/orders/${r.orderId}`)}
@@ -233,12 +255,12 @@ export function ChangesCard({
                           )}
                         </label>
                       ) : (
-                        <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>no money</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>no money</span>
                       )}
                     </td>
                     <td>
                       <div className="mono">{relTime(r.occurredAt)}</div>
-                      <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
                         {dayShort(r.occurredAt)}
                       </div>
                     </td>
@@ -275,7 +297,7 @@ export function ChangesCard({
                           fontWeight: 600,
                           color:
                             r.impactCents == null
-                              ? 'var(--faint)'
+                              ? 'var(--muted)'
                               : r.impactCents < 0
                                 ? 'var(--danger)'
                                 : r.impactCents > 0
@@ -285,7 +307,7 @@ export function ChangesCard({
                       >
                         {r.impactCents == null ? '—' : usdSigned(r.impactCents)}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--faint)' }}>{impactKind(r)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{impactKind(r)}</div>
                     </td>
                     <td style={{ paddingRight: 'var(--pad)' }}>
                       <div>{r.authorName}</div>

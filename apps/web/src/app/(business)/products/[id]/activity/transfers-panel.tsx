@@ -4,12 +4,17 @@ import Link from 'next/link';
 import { useState } from 'react';
 import {
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LoadingRows,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { fmtDate, LocationPicker, SectionError, StripTiles, titleCase, useSection } from './kit';
 import type { Strip, TransferRow } from './types';
@@ -31,6 +36,77 @@ export function TransfersPanel({
     rows: TransferRow[];
   }>(`/v1/products/${productId}/activity/transfers?${qs.toString()}`);
   const inbound = direction === 'in';
+  // The other-end location column depends on the direction, so the
+  // columns live in the component.
+  const TRANSFER_COLUMNS: ColumnDef<TransferRow>[] = [
+    {
+      id: 'number',
+      label: 'Transfer number',
+      sortValue: (r) => r.number,
+      render: (r) => <Link href={`/transfers/${r.transferId}`}>{r.number}</Link>,
+    },
+    {
+      id: 'otherLocation',
+      label: inbound ? 'From location' : 'To location',
+      sortValue: (r) => (inbound ? r.fromLocationName : r.toLocationName),
+      render: (r) => (inbound ? r.fromLocationName : r.toLocationName) ?? '—',
+    },
+    {
+      id: 'transferDate',
+      label: 'Transfer date',
+      sortValue: (r) => r.transferDate,
+      render: (r) => fmtDate(r.transferDate),
+    },
+    {
+      id: 'quantity',
+      label: 'Transfer quantity',
+      num: true,
+      sortValue: (r) => r.quantity,
+      render: (r) => r.quantity,
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved quantity',
+      num: true,
+      sortValue: (r) => r.reservedQuantity,
+      render: (r) => r.reservedQuantity,
+    },
+    {
+      id: 'order',
+      label: 'Order number',
+      sortValue: (r) => r.orderNumber,
+      render: (r) => (r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link> : '—'),
+    },
+    {
+      id: 'scheduled',
+      label: 'Scheduled date',
+      sortValue: (r) => r.scheduledFor,
+      render: (r) => fmtDate(r.scheduledFor),
+    },
+    {
+      id: 'customer',
+      label: 'Customer name',
+      sortValue: (r) => r.customerName,
+      render: (r) => r.customerName ?? '—',
+    },
+    {
+      id: 'type',
+      label: 'Transfer type',
+      sortValue: (r) => r.transferType,
+      render: (r) => titleCase(r.transferType),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+  ];
+  const cols = useListColumns(
+    `products-activity-transfers-${direction}`,
+    TRANSFER_COLUMNS,
+    data?.rows ?? null,
+  );
   return (
     <Stack>
       <Toolbar>
@@ -63,47 +139,25 @@ export function TransfersPanel({
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Transfer number</th>
-                  <th>{inbound ? 'From location' : 'To location'}</th>
-                  <th>Transfer date</th>
-                  <th className="num">Transfer quantity</th>
-                  <th className="num">Reserved quantity</th>
-                  <th>Order number</th>
-                  <th>Scheduled date</th>
-                  <th>Customer name</th>
-                  <th>Transfer type</th>
-                  <th>Status</th>
-                </tr>
+                <ColumnHeadRow
+                  list={cols}
+                  testIdPrefix={`products-activity-transfers-${direction}`}
+                />
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={10}>
+                  <TableEmpty colSpan={cols.ordered.length}>
                     No open {inbound ? 'inbound' : 'outbound'} transfers for this product.
                   </TableEmpty>
                 )}
-                {data?.rows.map((r, i) => (
+                {cols.sorted.map((r, i) => (
                   <tr key={`${r.transferId}:${i}`} data-testid="activity-transfer-row">
-                    <td>
-                      <Link href={`/transfers/${r.transferId}`}>{r.number}</Link>
-                    </td>
-                    <td>{(inbound ? r.fromLocationName : r.toLocationName) ?? '—'}</td>
-                    <td>{fmtDate(r.transferDate)}</td>
-                    <td className="num">{r.quantity}</td>
-                    <td className="num">{r.reservedQuantity}</td>
-                    <td>
-                      {r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link> : '—'}
-                    </td>
-                    <td>{fmtDate(r.scheduledFor)}</td>
-                    <td>{r.customerName ?? '—'}</td>
-                    <td>{titleCase(r.transferType)}</td>
-                    <td>
-                      <StatusBadge status={r.status} />
-                    </td>
+                    <ColumnCells list={cols} row={r} index={i} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

@@ -2,7 +2,20 @@
 
 import { useState } from 'react';
 import { Money } from '@/components/money';
-import { Card, LoadingRows, Stack, TableEmpty, TableWrap, Toolbar } from '@/components/ui';
+import { useOptionalActingStore } from '@/lib/acting-store';
+import {
+  Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
+  LoadingRows,
+  ResetColumns,
+  Stack,
+  TableEmpty,
+  TableWrap,
+  Toolbar,
+  useListColumns,
+} from '@/components/ui';
 import { LocationPicker, SectionError, StripTiles, useSection } from './kit';
 import type { SalesHistoryPeriod, Strip } from './types';
 
@@ -12,7 +25,60 @@ export function SalesHistoryPanel({ productId }: { productId: string }) {
   const { data, error, loading } = useSection<{ strip: Strip; periods: SalesHistoryPeriod[] }>(
     `/v1/products/${productId}/activity/sales-history${locationId ? `?locationId=${locationId}` : ''}`,
   );
-  const costHidden = data ? data.periods.every((p) => p.costCents === null) : false;
+  // Cost access comes from /members/me; the rows alone cannot tell "no
+  // access" from "no cost on file".
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const costHidden = canSeeCost === false;
+  // The cost cell reads the access flag, so the columns live in the component.
+  const SALES_COLUMNS: ColumnDef<SalesHistoryPeriod>[] = [
+    { id: 'period', label: 'Period', sortValue: (p) => p.period, render: (p) => p.label },
+    {
+      id: 'sales',
+      label: 'Sales amount',
+      num: true,
+      sortValue: (p) => p.salesCents,
+      render: (p) => <Money cents={p.salesCents} />,
+    },
+    {
+      id: 'cost',
+      label: 'Cost amount',
+      num: true,
+      sortValue: (p) => p.costCents,
+      render: (p) =>
+        p.costCents === null ? (
+          <em className="muted">{costHidden ? 'hidden' : '—'}</em>
+        ) : (
+          <Money cents={p.costCents} />
+        ),
+    },
+    {
+      id: 'profit',
+      label: 'Profit %',
+      num: true,
+      sortValue: (p) => p.profitPercent,
+      render: (p) => (p.profitPercent === null ? '—' : `${p.profitPercent.toFixed(2)}%`),
+    },
+    {
+      id: 'shipped',
+      label: 'Shipped quantity',
+      num: true,
+      sortValue: (p) => p.shipped,
+      render: (p) => p.shipped,
+    },
+    {
+      id: 'returned',
+      label: 'Returned quantity',
+      num: true,
+      sortValue: (p) => p.returned,
+      render: (p) => p.returned,
+    },
+    { id: 'net', label: 'Net number', num: true, sortValue: (p) => p.net, render: (p) => p.net },
+  ];
+  const cols = useListColumns(
+    'products-activity-sales-history',
+    SALES_COLUMNS,
+    data?.periods ?? null,
+  );
   return (
     <Stack>
       <Toolbar>
@@ -40,43 +106,20 @@ export function SalesHistoryPanel({ productId }: { productId: string }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Period</th>
-                  <th className="num">Sales amount</th>
-                  <th className="num">Cost amount</th>
-                  <th className="num">Profit %</th>
-                  <th className="num">Shipped quantity</th>
-                  <th className="num">Returned quantity</th>
-                  <th className="num">Net number</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products-activity-sales-history" />
               </thead>
               <tbody>
                 {data && data.periods.length === 0 && (
-                  <TableEmpty colSpan={7}>No sales history.</TableEmpty>
+                  <TableEmpty colSpan={cols.ordered.length}>No sales history.</TableEmpty>
                 )}
-                {data?.periods.map((p) => (
+                {cols.sorted.map((p) => (
                   <tr key={p.period} data-testid="activity-sales-period">
-                    <td>{p.label}</td>
-                    <td className="num">
-                      <Money cents={p.salesCents} />
-                    </td>
-                    <td className="num">
-                      {p.costCents === null ? (
-                        <em className="muted">hidden</em>
-                      ) : (
-                        <Money cents={p.costCents} />
-                      )}
-                    </td>
-                    <td className="num">
-                      {p.profitPercent === null ? '—' : `${p.profitPercent.toFixed(2)}%`}
-                    </td>
-                    <td className="num">{p.shipped}</td>
-                    <td className="num">{p.returned}</td>
-                    <td className="num">{p.net}</td>
+                    <ColumnCells list={cols} row={p} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

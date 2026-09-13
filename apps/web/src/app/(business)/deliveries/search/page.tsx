@@ -9,6 +9,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -16,12 +19,14 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatGrid,
   StatTile,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -86,6 +91,92 @@ function href(r: Row): string {
       : `/service/${r.documentId}`;
 }
 
+/** A few header labels read differently per schedule kind; the ids stay put. */
+function searchColumns(kind: Result['kind']): ColumnDef<Row>[] {
+  return [
+    { id: 'date', label: 'Date', sortValue: (r) => r.date, render: (r) => fmtDay(r.date) },
+    {
+      id: 'window',
+      label: 'Window',
+      sortValue: (r) => r.windowStart,
+      render: (r) => (r.windowStart ? `${r.windowStart}–${r.windowEnd ?? ''}` : '—'),
+    },
+    {
+      id: 'number',
+      label: 'Number',
+      sortValue: (r) => r.number,
+      render: (r) => <Link href={href(r)}>{r.number}</Link>,
+    },
+    {
+      id: 'customer',
+      label: kind === 'transfers' ? 'Manifest' : 'Customer',
+      sortValue: (r) => r.customerName,
+      render: (r) => r.customerName ?? '—',
+    },
+    {
+      id: 'from',
+      label: kind === 'transfers' ? 'From → To' : 'From',
+      sortValue: (r) => r.fromLocationName,
+      render: (r) => (
+        <>
+          {r.fromLocationName ?? '—'}
+          {r.toLocationName ? ` → ${r.toLocationName}` : ''}
+        </>
+      ),
+    },
+    { id: 'route', label: 'Route', sortValue: (r) => r.route, render: (r) => r.route ?? '—' },
+    { id: 'truck', label: 'Truck', sortValue: (r) => r.truck, render: (r) => r.truck ?? '—' },
+    {
+      id: 'crew',
+      label: kind === 'service' ? 'Technician' : 'Driver',
+      sortValue: (r) => r.crewName,
+      render: (r) => r.crewName ?? '—',
+    },
+    { id: 'city', label: 'City', sortValue: (r) => r.city, render: (r) => r.city ?? '—' },
+    {
+      id: 'zip',
+      label: 'Zip',
+      sortValue: (r) => r.postalCode,
+      render: (r) => r.postalCode ?? '—',
+    },
+    { id: 'phone', label: 'Phone', sortValue: (r) => r.phone, render: (r) => r.phone ?? '—' },
+    { id: 'units', label: 'Units', num: true, sortValue: (r) => r.units, render: (r) => r.units },
+    {
+      id: 'dollars',
+      label: 'Dollars',
+      num: true,
+      sortValue: (r) => r.dollarsCents,
+      render: (r) => <Money cents={r.dollarsCents} />,
+    },
+    {
+      id: 'due',
+      label: 'Due',
+      num: true,
+      sortValue: (r) => r.balanceDueCents,
+      render: (r) => (r.balanceDueCents != null ? <Money cents={r.balanceDueCents} /> : '—'),
+    },
+    {
+      id: 'volume',
+      label: 'Volume',
+      num: true,
+      sortValue: (r) => r.volume,
+      render: (r) => r.volume,
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      id: 'contact',
+      label: 'Contact',
+      sortValue: (r) => r.contactStatus,
+      render: (r) => (r.contactStatus ? r.contactStatus.replace(/_/g, ' ') : '—'),
+    },
+  ];
+}
+
 export default function ScheduleSearchPage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [kind, setKind] = useState<Result['kind']>('orders');
@@ -100,6 +191,11 @@ export default function ScheduleSearchPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cols = useListColumns(
+    'deliveries-search',
+    searchColumns(result?.kind ?? kind),
+    result?.rows ?? null,
+  );
 
   useEffect(() => {
     api<Location[]>('/v1/business/locations')
@@ -263,61 +359,17 @@ export default function ScheduleSearchPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Window</th>
-                        <th>Number</th>
-                        <th>{result.kind === 'transfers' ? 'Manifest' : 'Customer'}</th>
-                        <th>{result.kind === 'transfers' ? 'From → To' : 'From'}</th>
-                        <th>Route</th>
-                        <th>Truck</th>
-                        <th>{result.kind === 'service' ? 'Technician' : 'Driver'}</th>
-                        <th>City</th>
-                        <th>Zip</th>
-                        <th>Phone</th>
-                        <th className="num">Units</th>
-                        <th className="num">Dollars</th>
-                        <th className="num">Due</th>
-                        <th className="num">Volume</th>
-                        <th>Status</th>
-                        <th>Contact</th>
-                      </tr>
+                      <ColumnHeadRow list={cols} testIdPrefix="deliveries-search" />
                     </thead>
                     <tbody>
-                      {result.rows.map((r) => (
+                      {cols.sorted.map((r) => (
                         <tr key={`${r.kind}-${r.id}`} data-testid="schedule-row">
-                          <td>{fmtDay(r.date)}</td>
-                          <td>{r.windowStart ? `${r.windowStart}–${r.windowEnd ?? ''}` : '—'}</td>
-                          <td>
-                            <Link href={href(r)}>{r.number}</Link>
-                          </td>
-                          <td>{r.customerName ?? '—'}</td>
-                          <td>
-                            {r.fromLocationName ?? '—'}
-                            {r.toLocationName ? ` → ${r.toLocationName}` : ''}
-                          </td>
-                          <td>{r.route ?? '—'}</td>
-                          <td>{r.truck ?? '—'}</td>
-                          <td>{r.crewName ?? '—'}</td>
-                          <td>{r.city ?? '—'}</td>
-                          <td>{r.postalCode ?? '—'}</td>
-                          <td>{r.phone ?? '—'}</td>
-                          <td className="num">{r.units}</td>
-                          <td className="num">
-                            <Money cents={r.dollarsCents} />
-                          </td>
-                          <td className="num">
-                            {r.balanceDueCents != null ? <Money cents={r.balanceDueCents} /> : '—'}
-                          </td>
-                          <td className="num">{r.volume}</td>
-                          <td>
-                            <StatusBadge status={r.status} />
-                          </td>
-                          <td>{r.contactStatus ? r.contactStatus.replace(/_/g, ' ') : '—'}</td>
+                          <ColumnCells list={cols} row={r} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={cols} />
                 </TableWrap>
               )}
             </Card>

@@ -2,6 +2,7 @@ import { eq, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { categoryPathSql, joinCategoryPath } from '../catalog/category-tree';
 
 /**
  * The report-builder source-file catalog (pack 01/03). Sources and
@@ -228,7 +229,7 @@ export const REPORT_SOURCES: ReportSource[] = [
       textd('PRODUCT_NAME', 'Product', schema.products.name, { width: 24 }),
       textd('VARIANT_NAME', 'Variant', schema.productVariants.name, { width: 16 }),
       textd('SKU', 'SKU', schema.productVariants.sku, { width: 14 }),
-      textd('CATEGORY', 'Category', schema.categories.name, { width: 14 }),
+      textd('CATEGORY', 'Category', categoryPathSql, { width: 24 }),
       textd('VENDOR', 'Vendor', schema.vendors.name, { width: 18 }),
       money('PRICE', 'Price', schema.productVariants.priceCents),
       money('COST', 'Cost', schema.productVariants.costCents, { maskPermission: COST_MASK }),
@@ -251,11 +252,12 @@ export const REPORT_SOURCES: ReportSource[] = [
     relations: [],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     from(q: any) {
-      return q
-        .from(schema.productVariants)
-        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
-        .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
-        .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId));
+      return joinCategoryPath(
+        q
+          .from(schema.productVariants)
+          .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+          .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId)),
+      ).leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId));
     },
   },
   {

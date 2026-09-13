@@ -12,16 +12,21 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -59,6 +64,35 @@ const COLUMNS = [
   { key: 'in_service', label: 'In service' },
   { key: 'ready', label: 'Ready for pickup' },
 ] as const;
+
+/** The "Recently completed" list under the board. */
+const COMPLETED_COLUMNS: ColumnDef<Ticket>[] = [
+  {
+    id: 'number',
+    label: 'Ticket',
+    sortValue: (t) => t.number,
+    render: (t) => <Link href={`/service/${t.id}`}>{t.number}</Link>,
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (t) => t.customerName,
+    render: (t) => t.customerName,
+  },
+  {
+    id: 'item',
+    label: 'Item',
+    sortValue: (t) => t.itemDescription ?? t.issue,
+    render: (t) => t.itemDescription ?? t.issue,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (t) => t.totalCents,
+    render: (t) => formatMoney(t.totalCents),
+  },
+];
 
 export default function ServiceBoardPage() {
   const router = useRouter();
@@ -134,6 +168,7 @@ export default function ServiceBoardPage() {
   }
 
   const completed = tickets?.filter((t) => t.status === 'completed').slice(0, 10) ?? [];
+  const completedCols = useListColumns('service', COMPLETED_COLUMNS, completed);
 
   return (
     <div>
@@ -311,26 +346,17 @@ export default function ServiceBoardPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Ticket</th>
-                    <th>Customer</th>
-                    <th>Item</th>
-                    <th className="num">Total</th>
-                  </tr>
+                  <ColumnHeadRow list={completedCols} testIdPrefix="service" />
                 </thead>
                 <tbody>
-                  {completed.map((t) => (
+                  {completedCols.sorted.map((t) => (
                     <tr key={t.id}>
-                      <td>
-                        <Link href={`/service/${t.id}`}>{t.number}</Link>
-                      </td>
-                      <td>{t.customerName}</td>
-                      <td>{t.itemDescription ?? t.issue}</td>
-                      <td className="num">{formatMoney(t.totalCents)}</td>
+                      <ColumnCells list={completedCols} row={t} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={completedCols} />
             </TableWrap>
           </Card>
         )}

@@ -190,6 +190,11 @@ export const openapiSpec = {
                 method: { type: 'string', enum: ['cash', 'card', 'gift_card'] },
                 amountCents: { type: 'integer', minimum: 0 },
                 processorRef: { type: 'string' },
+                cardBrand: {
+                  type: 'string',
+                  enum: ['visa', 'mastercard', 'amex', 'discover', 'jcb', 'diners', 'other'],
+                  description: 'Card tenders only: the brand, for per-store tender breakdowns.',
+                },
                 stripePaymentMethodId: { type: 'string' },
               },
             },
@@ -312,6 +317,11 @@ export const openapiSpec = {
               images: { type: 'array', items: { $ref: '#/components/schemas/ProductImage' } },
               secondDescription: { type: 'string', nullable: true },
               categoryName: { type: 'string', nullable: true },
+              categoryPath: {
+                type: 'string',
+                nullable: true,
+                description: 'Full nested category name, e.g. "Mattresses › Hybrid"',
+              },
               serialTracked: { type: 'boolean' },
               boxesPerProduct: { type: 'integer' },
               logisticalCartonQty: { type: 'integer' },

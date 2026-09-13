@@ -1,3 +1,5 @@
+> ERP release note (2026-09-13): local history below is historical. Deploy from `codex/chat-erp-release`, reconciled with upstream f884801 and consolidated migration 0105_live_chat. See [release candidate](erp-chat-release.md).
+
 # Live chat development
 
 Started September 11, 2026, from ERP `bb212b547f64c985ffedbaf65b1c4515fc298798`.

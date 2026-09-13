@@ -8,12 +8,17 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -49,6 +54,101 @@ export default function SpecialOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Built inline: the select-all header and the row checkboxes read the
+  // `checked` state.
+  const columns: ColumnDef<QueueRow>[] = [
+    {
+      id: 'select',
+      label: (
+        <input
+          type="checkbox"
+          aria-label="Select all"
+          checked={rows != null && rows.length > 0 && checked.size === rows.length}
+          onChange={(e) =>
+            setChecked(
+              e.target.checked ? new Set((rows ?? []).map((r) => r.orderLineId)) : new Set(),
+            )
+          }
+        />
+      ),
+      fixed: true,
+      render: (r) => (
+        <input
+          type="checkbox"
+          aria-label={`Select ${r.orderNumber} — ${r.description}`}
+          checked={checked.has(r.orderLineId)}
+          onChange={(e) => {
+            const next = new Set(checked);
+            if (e.target.checked) next.add(r.orderLineId);
+            else next.delete(r.orderLineId);
+            setChecked(next);
+          }}
+        />
+      ),
+    },
+    {
+      id: 'order',
+      label: 'Order',
+      sortValue: (r) => r.orderNumber,
+      render: (r) => <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>,
+    },
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortValue: (r) => r.customerName,
+      render: (r) => r.customerName ?? '—',
+    },
+    {
+      id: 'item',
+      label: 'Item',
+      sortValue: (r) => r.description,
+      render: (r) => (
+        <>
+          {r.description}
+          {r.lineType === 'direct_ship' && (
+            <>
+              {' '}
+              <span
+                className="badge badge-info"
+                title="The vendor ships this straight to the customer — its PO carries the customer's address"
+              >
+                direct ship
+              </span>
+            </>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'sku',
+      label: 'SKU',
+      sortValue: (r) => r.sku,
+      render: (r) => <code>{r.sku ?? '—'}</code>,
+    },
+    {
+      id: 'quantity',
+      label: 'Qty',
+      num: true,
+      sortValue: (r) => r.quantity,
+      render: (r) => r.quantity,
+    },
+    {
+      id: 'allocated',
+      label: 'On PO',
+      num: true,
+      sortValue: (r) => r.allocated,
+      render: (r) => r.allocated,
+    },
+    {
+      id: 'toOrder',
+      label: 'To order',
+      num: true,
+      sortValue: (r) => r.toOrder,
+      render: (r) => <strong>{r.toOrder}</strong>,
+    },
+  ];
+  const cols = useListColumns('special-orders', columns, rows);
 
   async function load() {
     try {
@@ -145,74 +245,17 @@ export default function SpecialOrdersPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>
-                      <input
-                        type="checkbox"
-                        aria-label="Select all"
-                        checked={checked.size === rows.length}
-                        onChange={(e) =>
-                          setChecked(
-                            e.target.checked ? new Set(rows.map((r) => r.orderLineId)) : new Set(),
-                          )
-                        }
-                      />
-                    </th>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Item</th>
-                    <th>SKU</th>
-                    <th className="num">Qty</th>
-                    <th className="num">On PO</th>
-                    <th className="num">To order</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="special-orders" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.orderLineId}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${r.orderNumber} — ${r.description}`}
-                          checked={checked.has(r.orderLineId)}
-                          onChange={(e) => {
-                            const next = new Set(checked);
-                            if (e.target.checked) next.add(r.orderLineId);
-                            else next.delete(r.orderLineId);
-                            setChecked(next);
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>
-                      </td>
-                      <td>{r.customerName ?? '—'}</td>
-                      <td>
-                        {r.description}
-                        {r.lineType === 'direct_ship' && (
-                          <>
-                            {' '}
-                            <span
-                              className="badge badge-info"
-                              title="The vendor ships this straight to the customer — its PO carries the customer's address"
-                            >
-                              direct ship
-                            </span>
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        <code>{r.sku ?? '—'}</code>
-                      </td>
-                      <td className="num">{r.quantity}</td>
-                      <td className="num">{r.allocated}</td>
-                      <td className="num">
-                        <strong>{r.toOrder}</strong>
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

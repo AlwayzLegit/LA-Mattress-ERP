@@ -3,6 +3,7 @@ import { ChatProvider } from './chat/chat-provider';
 import { AuthGate } from '@/components/auth-gate';
 import { ImpersonationBanner } from '@/components/impersonation-banner';
 import { AppShell } from '@/components/app-shell';
+import { ActingStoreProvider } from '@/lib/acting-store';
 import { BusinessSettingsProvider } from '@/lib/business-settings';
 import { DashboardFiltersProvider } from '@/lib/dashboard-filters';
 
@@ -17,10 +18,12 @@ export default function BusinessLayout({ children }: { children: ReactNode }) {
     <AuthGate>
       <BusinessSettingsProvider>
         <DashboardFiltersProvider>
-          <ImpersonationBanner />
-          <ChatProvider>
-            <AppShell>{children}</AppShell>
-          </ChatProvider>
+          <ActingStoreProvider>
+            <ImpersonationBanner />
+            <ChatProvider>
+              <AppShell>{children}</AppShell>
+            </ChatProvider>
+          </ActingStoreProvider>
         </DashboardFiltersProvider>
       </BusinessSettingsProvider>
     </AuthGate>

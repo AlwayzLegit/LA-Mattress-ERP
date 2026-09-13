@@ -436,6 +436,64 @@ describe('Orders list-view + notifications (PLAN-POS-OPERATIONS P3)', () => {
     }
   });
 
+  it('Product search and the order read carry the category path (A22.1 subcategories)', async () => {
+    // The register keys its add-on chips on the path's root: a mattress
+    // filed on "Mattresses › Hybrid" must still read as a mattress.
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql2);
+    let variantId = '';
+    try {
+      const [root] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattresses' })
+        .returning();
+      const [leaf] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Hybrid', parentId: root!.id })
+        .returning();
+      const [p] = await db
+        .insert(schema.products)
+        .values({ businessId, sku: 'PATH-1', name: 'PathFixture Hybrid', categoryId: leaf!.id })
+        .returning();
+      const [v] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: p!.id, sku: 'PATH-1-Q', priceCents: 129900 })
+        .returning();
+      variantId = v!.id;
+      await db.insert(schema.inventoryLevels).values({
+        businessId,
+        variantId,
+        locationId,
+        onHand: 5,
+        reserved: 0,
+      });
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+
+    const search = await request(app.getHttpServer())
+      .get(`/v1/pos/product-search?q=PathFixture&locationId=${locationId}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(search.status).toBe(200);
+    const hit = search.body.find((r: { variantId: string }) => r.variantId === variantId);
+    expect(hit).toBeTruthy();
+    expect(hit.categoryPath).toBe('Mattresses › Hybrid');
+    expect(hit).not.toHaveProperty('categoryName');
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ locationId, customerId, lines: [{ variantId, quantity: 1 }] });
+    expect(created.status).toBe(201);
+    const read = await request(app.getHttpServer())
+      .get(`/v1/orders/${created.body.id}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(read.status).toBe(200);
+    expect(read.body.lines[0].categoryPath).toBe('Mattresses › Hybrid');
+  });
   it('Spec columns + display statuses: Draft, Quote, Reserved, Pending; balance due after payment', async () => {
     const make = async (body: Record<string, unknown>) => {
       const res = await request(app.getHttpServer())
@@ -620,6 +678,61 @@ describe('Documents + A1 print lock (PLAN-POS-OPERATIONS P4)', () => {
     expect(line).toBeTruthy();
     expect(line.brand).toBe('Docs Brand Co');
     expect(res.body.order.totalCents).toBe(res.body.order.subtotalCents + res.body.order.taxCents);
+  });
+
+  it("Document payload carries each payment's reference (the card last 4) for the invoice", async () => {
+    const order = await makeOrder();
+    const pay = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.id}/payments`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ method: 'card', amountCents: 1000, kind: 'deposit', processorRef: '4242' });
+    expect(pay.status).toBe(201);
+    const res = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.id}/document`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(res.status).toBe(200);
+    // The payments endpoint answers with the order detail, so match the row
+    // by what we sent rather than by id.
+    const printed = res.body.order.payments.find(
+      (p: { method: string; amountCents: number }) => p.method === 'card' && p.amountCents === 1000,
+    );
+    expect(printed).toBeTruthy();
+    expect(printed.processorRef).toBe('4242');
+    expect(printed.status).toBe('succeeded');
+  });
+
+  it('Document payload carries the branding accent for the invoice (null until set)', async () => {
+    const order = await makeOrder();
+    const before = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.id}/document`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(before.status).toBe(200);
+    expect(before.body.business.accentColor).toBeNull();
+
+    await request(app.getHttpServer())
+      .patch('/v1/business/settings')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ branding: { accentColor: '#0f766e' } })
+      .expect(200);
+    try {
+      const after = await request(app.getHttpServer())
+        .get(`/v1/orders/${order.id}/document`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId);
+      expect(after.status).toBe(200);
+      expect(after.body.business.accentColor).toBe('#0f766e');
+    } finally {
+      await request(app.getHttpServer())
+        .patch('/v1/business/settings')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ branding: { accentColor: null } })
+        .expect(200);
+    }
   });
 
   it('Individual ticket print locks: edits refuse 409 until unlocked with a reason', async () => {
@@ -1616,6 +1729,7 @@ describe('Return lifecycle — refund gated on goods receipt (PLAN-STORIS-GAP G3
 
 describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
   let pvVariantId = '';
+  let protectorVariantId = '';
 
   function as(cookie: string) {
     return {
@@ -1651,13 +1765,34 @@ describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
         })
         .returning();
       pvVariantId = v!.id;
-      await db.insert(schema.inventoryLevels).values({
-        businessId,
-        variantId: pvVariantId,
-        locationId,
-        onHand: 50,
-        reserved: 0,
-      });
+      // A22.1: a protector is filed under "Mattress Protection", so the
+      // word "mattress" in its name no longer makes it a recycling unit.
+      const [protection] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattress Protection', position: 5 })
+        .returning();
+      const [protectors] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattress Protectors', parentId: protection!.id, position: 0 })
+        .returning();
+      const [prot] = await db
+        .insert(schema.products)
+        .values({
+          businessId,
+          sku: 'G6-PROT',
+          name: 'Queen Mattress Protector',
+          categoryId: protectors!.id,
+        })
+        .returning();
+      const [protV] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: prot!.id, sku: 'G6-PROT-Q', priceCents: 8_000 })
+        .returning();
+      protectorVariantId = protV!.id;
+      await db.insert(schema.inventoryLevels).values([
+        { businessId, variantId: pvVariantId, locationId, onHand: 50, reserved: 0 },
+        { businessId, variantId: protectorVariantId, locationId, onHand: 50, reserved: 0 },
+      ]);
     } finally {
       await sql2.end({ timeout: 5 });
     }
@@ -1748,6 +1883,21 @@ describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
     expect(
       register.body.data.some((e: { entityId: string | null }) => e.entityId === res.body.id),
     ).toBe(true);
+
+    // The catalog category decides: a protector is not a recycling unit.
+    const protector = await as(ownerCookie)
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        confirm: true,
+        lines: [{ variantId: protectorVariantId, quantity: 1 }],
+      });
+    expect(protector.status).toBe(201);
+    const again = await as(ownerCookie).get('/v1/exceptions?type=recycling_fee_removed');
+    expect(
+      again.body.data.some((e: { entityId: string | null }) => e.entityId === protector.body.id),
+    ).toBe(false);
   });
 });
 

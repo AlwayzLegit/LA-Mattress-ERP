@@ -13,6 +13,7 @@ import {
 import { and, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { AuditService } from '../audit/audit.service';
 import {
   CurrentTenant,
@@ -167,6 +168,7 @@ export class ReplenishmentRunService {
         vendorSku: null,
         costCents: null,
         categoryName: null,
+        categoryPath: null,
       }),
     }));
     // Advanced Vendor Settings → Sort Criteria (owner 2026-09-02).
@@ -176,7 +178,7 @@ export class ReplenishmentRunService {
           return `${r.productName}\u0000${r.variantName ?? ''}`;
         case 'category':
         case 'group':
-          return `${r.categoryName ?? '~'}\u0000${r.productName}\u0000${r.variantName ?? ''}`;
+          return `${r.categoryPath ?? r.categoryName ?? '~'}\u0000${r.productName}\u0000${r.variantName ?? ''}`;
         default:
           return `${r.vendorSku ?? r.sku ?? '~'}\u0000${r.productName}`;
       }
@@ -216,30 +218,6 @@ export class ReplenishmentRunService {
       .filter((r) => r.orderQty > 0);
     if (lines.length === 0) return null;
 
-    // §5.1 delivery dates. Jetnine PO lines carry no dates — the header
-    // expected date takes the furthest-future lead-day date (T-29).
-    let expectedAt: Date;
-    if (vendor.defaultRequestedDate === 'today') {
-      expectedAt = today;
-    } else {
-      const catByVariant = new Map<string, string | null>();
-      const cats = await db
-        .select({ id: schema.productVariants.id, categoryId: schema.products.categoryId })
-        .from(schema.productVariants)
-        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
-        .where(
-          inArray(
-            schema.productVariants.id,
-            lines.map((l) => l.variantId),
-          ),
-        );
-      for (const c of cats) catByVariant.set(c.id, c.categoryId);
-      const maxLead = Math.max(
-        ...lines.map((l) => resolveLeadDays(vendor, catByVariant.get(l.variantId) ?? null)),
-      );
-      expectedAt = new Date(today.getTime() + maxLead * 86_400_000);
-    }
-
     const businessId =
       opts.businessId ??
       (
@@ -250,6 +228,33 @@ export class ReplenishmentRunService {
           .limit(1)
       )[0]?.businessId;
     if (!businessId) throw new NotFoundException('Vendor not found');
+
+    // §5.1 delivery dates. Jetnine PO lines carry no dates — the header
+    // expected date takes the furthest-future lead-day date (T-29).
+    let expectedAt: Date;
+    if (vendor.defaultRequestedDate === 'today') {
+      expectedAt = today;
+    } else {
+      // A22.1: a lead-day exception on the root category reaches the
+      // subcategories, so resolve on the lineage, not the leaf id.
+      const catByVariant = new Map<string, string[]>();
+      const cats = await db
+        .select({ id: schema.productVariants.id, categoryId: schema.products.categoryId })
+        .from(schema.productVariants)
+        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .where(
+          inArray(
+            schema.productVariants.id,
+            lines.map((l) => l.variantId),
+          ),
+        );
+      const categoryIndex = await loadCategoryIndex(db, businessId);
+      for (const c of cats) catByVariant.set(c.id, categoryIndex.lineageOf(c.categoryId));
+      const maxLead = Math.max(
+        ...lines.map((l) => resolveLeadDays(vendor, catByVariant.get(l.variantId) ?? null)),
+      );
+      expectedAt = new Date(today.getTime() + maxLead * 86_400_000);
+    }
 
     // Advanced Vendor Settings → PO Cutting Date: a collection past its
     // cutting date never lands on an automatic PO.

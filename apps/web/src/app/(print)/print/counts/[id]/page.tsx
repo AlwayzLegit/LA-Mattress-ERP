@@ -65,7 +65,7 @@ export default function CountSheetPrintPage() {
   return (
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <PrintToolbar
-        backHref={`/inventory/counts/${id}`}
+        backHref={`/products/counts/${id}`}
         onPrint={() => window.print()}
         label="Print count sheet"
       />

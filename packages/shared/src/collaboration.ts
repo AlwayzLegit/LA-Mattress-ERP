@@ -66,8 +66,9 @@ export interface InboxNotification {
   kind: string;
   title: string;
   message: string;
-  orderId: string;
-  orderNumber: string;
+  /** Null for notices that are not about an order (competition overtakes). */
+  orderId: string | null;
+  orderNumber: string | null;
   taskId: string | null;
   noteId: string | null;
   createdAt: string;

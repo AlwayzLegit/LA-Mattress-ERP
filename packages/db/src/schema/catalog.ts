@@ -182,6 +182,16 @@ export const productVariants = pgTable(
      * print this to the vendor, falling back to `sku` when unset.
      */
     vendorSku: text('vendor_sku'),
+    /**
+     * A22.2: the bedding size this variant is ("Queen", "Split Cal
+     * King"; MATTRESS_SIZES in @jetnine/shared) and its firmness ("Plush"
+     * … "Extra Firm"; FIRMNESS_LEVELS). Set from the STORIS group code /
+     * the name on import, editable on the product page, null when the
+     * item fits several sizes or has no firmness. Both ride in
+     * search_tsv so free text finds "queen bamboo sheets".
+     */
+    size: text('size'),
+    firmness: text('firmness'),
     isActive: boolean('is_active').notNull().default(true),
     searchTsv: tsvector('search_tsv'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -191,6 +201,7 @@ export const productVariants = pgTable(
     businessIdx: index('product_variants_business_id_idx').on(t.businessId),
     barcodeIdx: index('product_variants_barcode_idx').on(t.businessId, t.barcode),
     skuIdx: index('product_variants_sku_idx').on(t.businessId, t.sku),
+    sizeIdx: index('product_variants_size_idx').on(t.businessId, t.size),
   }),
 );
 

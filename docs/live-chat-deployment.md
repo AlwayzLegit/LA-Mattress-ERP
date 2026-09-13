@@ -1,18 +1,18 @@
 # Live chat rollout checklist
 
-Prepared September 13, 2026. Local implementation is verified; staging and production have not been deployed.
+Prepared September 13, 2026. **ERP release update:** use `codex/chat-erp-release` and its consolidated `0105_live_chat` migration after upstream 0104. The original local 0099–0109 sequence must not be deployed. See [ERP release candidate](erp-chat-release.md). Local implementation is verified; staging and production have not been deployed.
 
 ## Verified locally
 
 - Visitor chat, shared incoming queue, first-person acceptance, specialist help, private discussions, and team channels are implemented.
-- Migration 0109 adds background push for help invitations and unread internal messages. Existing visitor push remains supported.
+- The consolidated migration 0105 includes background push for help invitations and unread internal messages. Existing visitor push remains supported.
 - 36 API integration tests and 8 service-worker tests pass, including privacy, read suppression, revoked access, store scopes, stale ownership, retries, and subscription cleanup.
 - Database/API builds and both Next.js production builds pass. Builds used isolated source copies; storefront data was fixtures and tracking was disabled.
 - Existing warnings remain outside this chat change: ERP Sentry/OpenTelemetry bundling and unrelated lint; storefront edge/static configuration and local inventory fixture counts.
 
 ## 1. Prepare the actual release branches
 
-Fetch and reconcile each current upstream project before merging the local chat commits. The ERP branch is `codex/live-chat-foundation`; the storefront branch is `codex/live-chat-storefront`. Review only the intended chat changes against the current projects. Do not deploy the entire historical storefront snapshot over newer upstream work.
+Fetch and reconcile each current upstream project before merging the local chat commits. The ERP release branch is `codex/chat-erp-release` (reconciled through `f884801`); the storefront branch is `codex/live-chat-storefront`. Review only the intended chat changes against the current projects. Do not deploy the entire historical storefront snapshot over newer upstream work.
 
 Check the current authenticated ERP design with an authorized test account. Local chat uses the retrieved upstream design tokens/fonts, but authenticated live comparison is still pending. Re-run builds and scoped tests after upstream reconciliation.
 
@@ -38,7 +38,7 @@ Configure Ably and its server-side `ABLY_API_KEY` for the existing public-messag
 
 ## 3. Release in order
 
-1. Keep chat gated off while preparing the first staging release. Back up the database and review generated migrations through 0109 against the staging schema.
+1. Keep chat gated off while preparing the first staging release. Back up the database and review generated migrations through 0105_live_chat against the staging schema.
 2. Pause existing chat workers during a chat upgrade. Build shared/database/API packages, then apply migrations using the repository's database migration command (`pnpm --filter @jetnine/db migrate`). Verify tenant RLS is applied by that migration flow.
 3. Deploy the matching API and ERP frontend, including the new `/sw.js`. Refresh pilot browsers so the updated service worker is active before testing internal notifications.
 4. Start supervised processes from the matching API build: `start:chat-maintenance`, `start:chat-push-worker`, and `start:chat-worker` using `pnpm --filter @jetnine/api`. Each worker is configured for one business/environment. Monitor process exits and queue backlog.
@@ -63,6 +63,6 @@ Record device/browser results and operational ownership. The owner does not need
 
 Only after staging passes, repeat the setup with production-specific URLs, credentials, database backup, staff scopes and worker supervision. Deploy ERP/API/workers before exposing the storefront widget. Enable for a limited staffed pilot, monitor unassigned wait time and delivery failures, then expand.
 
-If problems occur, turn off the storefront widget and disable chat API/push gates as appropriate; stop affected workers. Preserve data and diagnose before replaying failed work. Do not downgrade to a worker that assumes every delivery has a visitor conversation after 0109 internal jobs exist. Prefer a forward fix or the matching compatible release; schema rollback requires a separately reviewed data plan.
+If problems occur, turn off the storefront widget and disable chat API/push gates as appropriate; stop affected workers. Preserve data and diagnose before replaying failed work. Do not downgrade to a worker that assumes every delivery has a visitor conversation after internal push jobs exist. Prefer a forward fix or the matching compatible release; schema rollback requires a separately reviewed data plan.
 
 Outstanding: upstream reconciliation, staging resources/credentials and staff, authenticated live-design comparison, physical push/provider verification, and production rollout approval. None of these external steps were performed by the local readiness work.

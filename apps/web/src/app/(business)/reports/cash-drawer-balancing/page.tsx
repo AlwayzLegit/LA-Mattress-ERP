@@ -1,7 +1,7 @@
 'use client';
 
 import { Download, FileText, Play, Printer } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
@@ -12,12 +12,18 @@ import Link from 'next/link';
 import {
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   Input,
+  type ListColumns,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -113,6 +119,19 @@ interface Member {
   name: string | null;
 }
 
+/** One register row = one tender line with the group / pay class / payment type it sits under. */
+interface RegisterRow {
+  g: BalanceGroup;
+  pc: PayClassGroup;
+  pt: PaymentTypeGroup;
+  l: PaymentLine;
+}
+/** One drawer-count row = one balanced drawer under its group. */
+interface DrawerRow {
+  g: BalanceGroup;
+  d: DrawerBalance;
+}
+
 const BALANCE_BY: { key: BalanceBy; label: string }[] = [
   { key: 'drawer', label: 'Drawer' },
   { key: 'operator', label: 'Operator' },
@@ -160,6 +179,67 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * A subtotal row's cells in the header's order: the label spans the
+ * leading columns that carry no total, each total sits under its own
+ * column, and the rest stay blank — so a moved Amount column keeps its
+ * subtotal under it.
+ */
+function TotalCells<Row>({
+  list,
+  label,
+  labelClassName,
+  totals,
+  totalClassName,
+  totalTestId,
+}: {
+  list: ListColumns<Row>;
+  label: ReactNode;
+  labelClassName?: string;
+  totals: Record<string, ReactNode>;
+  totalClassName?: string;
+  totalTestId?: string;
+}) {
+  const firstTotal = list.ordered.findIndex((c) => c.id in totals);
+  const lead = firstTotal < 0 ? list.ordered.length : firstTotal;
+  let placed = lead > 0;
+  return (
+    <>
+      {lead > 0 && (
+        <td colSpan={lead} className={labelClassName}>
+          {label}
+        </td>
+      )}
+      {list.ordered.slice(lead).map((c) => {
+        if (c.id in totals) {
+          return (
+            <td
+              key={c.id}
+              className={`num ${totalClassName ?? ''}`.trim()}
+              data-testid={totalTestId}
+            >
+              {totals[c.id]}
+            </td>
+          );
+        }
+        if (!placed) {
+          placed = true;
+          return (
+            <td key={c.id} className={labelClassName}>
+              {label}
+            </td>
+          );
+        }
+        return <td key={c.id} />;
+      })}
+    </>
+  );
+}
+
+function registerKey(g: BalanceGroup, pc: PayClassGroup, pt: PaymentTypeGroup): string {
+  return `${g.key}|${pc.code}|${pt.key}`;
+}
+
 export default function CashDrawerBalancingPage() {
   const [range, setRange, rangeReady] = useUrlDateRange('today');
   const [startTime, setStartTime] = useState('00:00');
@@ -176,6 +256,206 @@ export default function CashDrawerBalancingPage() {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [paramsReady, setParamsReady] = useState(false);
+
+  // The register and drawer-count tables: flat rows sorted once, then
+  // bucketed back under their group / pay class / payment type.
+  const registerColumns = useMemo<ColumnDef<RegisterRow>[]>(
+    () => [
+      {
+        id: 'customerCode',
+        label: 'Customer code',
+        sortValue: (r) => r.l.customerCode,
+        render: (r) => <code>{r.l.customerCode ?? '—'}</code>,
+      },
+      {
+        id: 'customerName',
+        label: 'Customer name',
+        sortValue: (r) => r.l.customerName,
+        render: (r) => r.l.customerName ?? '—',
+      },
+      {
+        id: 'reference',
+        label: 'Reference',
+        sortValue: (r) => r.l.reference,
+        render: (r) => <a href={docHref(r.l)}>{r.l.reference}</a>,
+      },
+      {
+        id: 'paymentType',
+        label: 'Payment type · gift cert / chk no.',
+        sortValue: (r) => r.l.paymentType,
+        render: (r) => (
+          <>
+            {r.l.paymentType}
+            {r.l.tenderRef ? <span className="ml-2 text-muted">{r.l.tenderRef}</span> : null}
+          </>
+        ),
+      },
+      {
+        id: 'amount',
+        label: 'Amount',
+        num: true,
+        sortValue: (r) => r.l.amountCents,
+        render: (r) => <Money cents={r.l.amountCents} />,
+      },
+      {
+        id: 'referenceSubtotal',
+        label: 'Reference subtotal',
+        num: true,
+        sortValue: (r) => r.l.referenceSubtotalCents,
+        render: (r) => <Money cents={r.l.referenceSubtotalCents} />,
+      },
+      {
+        id: 'time',
+        label: 'Time',
+        sortValue: (r) => `${r.l.day} ${r.l.time}`,
+        render: (r) => (
+          <>
+            {report && (r.l.day !== report.range.start || r.l.day !== report.range.end)
+              ? `${r.l.day} `
+              : ''}
+            {r.l.time}
+          </>
+        ),
+      },
+      {
+        id: 'drawer',
+        label: 'Drawer',
+        sortValue: (r) => r.l.drawerNumber,
+        render: (r) => r.l.drawerNumber ?? '—',
+      },
+      {
+        id: 'oper',
+        label: 'Oper',
+        sortValue: (r) => r.l.operatorInitials,
+        render: (r) => r.l.operatorInitials ?? '—',
+      },
+    ],
+    [report],
+  );
+  const registerRows = useMemo<RegisterRow[] | null>(
+    () =>
+      report
+        ? report.groups.flatMap((g) =>
+            g.payClasses.flatMap((pc) =>
+              pc.paymentTypes.flatMap((pt) => pt.lines.map((l) => ({ g, pc, pt, l }))),
+            ),
+          )
+        : null,
+    [report],
+  );
+  const regCols = useListColumns(
+    'reports-cash-drawer-balancing-register',
+    registerColumns,
+    registerRows,
+  );
+  const registerByType = useMemo(() => {
+    const by = new Map<string, RegisterRow[]>();
+    for (const r of regCols.sorted) {
+      const k = registerKey(r.g, r.pc, r.pt);
+      const bucket = by.get(k);
+      if (bucket) bucket.push(r);
+      else by.set(k, [r]);
+    }
+    return by;
+  }, [regCols.sorted]);
+
+  const drawerColumns = useMemo<ColumnDef<DrawerRow>[]>(
+    () => [
+      {
+        id: 'drawer',
+        label: 'Drawer',
+        sortValue: (r) => r.d.number,
+        render: (r) => (
+          <>
+            <a href={`/shifts/${r.d.id}`}>{r.d.number}</a>
+            {report && report.balanceBy !== 'store' ? (
+              <span className="ml-1 text-muted">{r.d.locationName}</span>
+            ) : null}
+          </>
+        ),
+      },
+      {
+        id: 'operator',
+        label: 'Operator',
+        sortValue: (r) => r.d.operatorName,
+        render: (r) => r.d.operatorName,
+      },
+      {
+        id: 'opened',
+        label: 'Opened',
+        sortValue: (r) => r.d.openedAt,
+        render: (r) => fmtTime(r.d.openedAt),
+      },
+      {
+        id: 'closed',
+        label: 'Closed',
+        sortValue: (r) => r.d.closedAt,
+        render: (r) => (r.d.closedAt ? fmtTime(r.d.closedAt) : 'open'),
+      },
+      {
+        id: 'float',
+        label: 'Float',
+        num: true,
+        sortValue: (r) => r.d.openingFloatCents,
+        render: (r) => <Money cents={r.d.openingFloatCents} />,
+      },
+      {
+        id: 'expected',
+        label: 'Expected',
+        num: true,
+        sortValue: (r) => r.d.expectedCashCents,
+        render: (r) =>
+          r.d.expectedCashCents != null ? <Money cents={r.d.expectedCashCents} /> : '—',
+      },
+      {
+        id: 'counted',
+        label: 'Counted',
+        num: true,
+        sortValue: (r) => r.d.countedCashCents,
+        render: (r) =>
+          r.d.countedCashCents != null ? <Money cents={r.d.countedCashCents} /> : '—',
+      },
+      {
+        id: 'overShort',
+        label: 'Over / short',
+        num: true,
+        sortValue: (r) => r.d.varianceCents,
+        render: (r) => (
+          <span
+            style={{
+              color:
+                r.d.inTolerance === false
+                  ? 'var(--danger)'
+                  : r.d.inTolerance
+                    ? 'var(--success)'
+                    : undefined,
+            }}
+          >
+            {r.d.varianceCents != null ? <Money cents={r.d.varianceCents} /> : '—'}
+          </span>
+        ),
+      },
+    ],
+    [report],
+  );
+  const drawerRows = useMemo<DrawerRow[] | null>(
+    () => (report ? report.groups.flatMap((g) => g.drawers.map((d) => ({ g, d }))) : null),
+    [report],
+  );
+  const drawerCols = useListColumns(
+    'reports-cash-drawer-balancing-drawers',
+    drawerColumns,
+    drawerRows,
+  );
+  const drawersByGroup = useMemo(() => {
+    const by = new Map<string, DrawerRow[]>();
+    for (const r of drawerCols.sorted) {
+      const bucket = by.get(r.g.key);
+      if (bucket) bucket.push(r);
+      else by.set(r.g.key, [r]);
+    }
+    return by;
+  }, [drawerCols.sorted]);
 
   // Parameters live in the URL so a balanced day can be bookmarked.
   useEffect(() => {
@@ -471,97 +751,66 @@ export default function CashDrawerBalancingPage() {
                   <div style={{ overflowX: 'auto' }}>
                     <table className="table" data-testid="cdb-register">
                       <thead>
-                        <tr>
-                          <th>Customer code</th>
-                          <th>Customer name</th>
-                          <th>Reference</th>
-                          <th>Payment type · gift cert / chk no.</th>
-                          <th className="num">Amount</th>
-                          <th className="num">Reference subtotal</th>
-                          <th>Time</th>
-                          <th>Drawer</th>
-                          <th>Oper</th>
-                        </tr>
+                        <ColumnHeadRow
+                          list={regCols}
+                          testIdPrefix="reports-cash-drawer-balancing-register"
+                        />
                       </thead>
                       <tbody>
                         {g.payClasses.map((pc) => (
                           <Fragment key={pc.code}>
                             <tr className="bg-surface-muted">
-                              <td colSpan={9} className="font-semibold">
+                              <td colSpan={regCols.ordered.length} className="font-semibold">
                                 Pay class {pc.code} – {pc.label}
                               </td>
                             </tr>
                             {pc.paymentTypes.map((pt) => (
                               <Fragment key={pt.key}>
                                 <tr>
-                                  <td colSpan={9} className="text-muted">
+                                  <td colSpan={regCols.ordered.length} className="text-muted">
                                     Payment type {pt.label}
                                   </td>
                                 </tr>
-                                {pt.lines.map((l) => (
-                                  <tr key={l.paymentId} data-testid="cdb-line">
-                                    <td>
-                                      <code>{l.customerCode ?? '—'}</code>
-                                    </td>
-                                    <td>{l.customerName ?? '—'}</td>
-                                    <td>
-                                      <a href={docHref(l)}>{l.reference}</a>
-                                    </td>
-                                    <td>
-                                      {l.paymentType}
-                                      {l.tenderRef ? (
-                                        <span className="ml-2 text-muted">{l.tenderRef}</span>
-                                      ) : null}
-                                    </td>
-                                    <td className="num">
-                                      <Money cents={l.amountCents} />
-                                    </td>
-                                    <td className="num">
-                                      <Money cents={l.referenceSubtotalCents} />
-                                    </td>
-                                    <td>
-                                      {l.day !== report.range.start || l.day !== report.range.end
-                                        ? `${l.day} `
-                                        : ''}
-                                      {l.time}
-                                    </td>
-                                    <td>{l.drawerNumber ?? '—'}</td>
-                                    <td>{l.operatorInitials ?? '—'}</td>
+                                {(registerByType.get(registerKey(g, pc, pt)) ?? []).map((r) => (
+                                  <tr key={r.l.paymentId} data-testid="cdb-line">
+                                    <ColumnCells list={regCols} row={r} />
                                   </tr>
                                 ))}
                                 <tr>
-                                  <td colSpan={4} className="text-right text-muted">
-                                    Total for payment type {pt.label}:
-                                  </td>
-                                  <td className="num font-semibold">
-                                    <Money cents={pt.amountCents} />
-                                  </td>
-                                  <td colSpan={4} />
+                                  <TotalCells
+                                    list={regCols}
+                                    label={`Total for payment type ${pt.label}:`}
+                                    labelClassName="text-right text-muted"
+                                    totals={{ amount: <Money cents={pt.amountCents} /> }}
+                                    totalClassName="font-semibold"
+                                  />
                                 </tr>
                               </Fragment>
                             ))}
                             <tr>
-                              <td colSpan={4} className="text-right font-semibold">
-                                Total for pay class {pc.code}:
-                              </td>
-                              <td className="num font-semibold">
-                                <Money cents={pc.amountCents} />
-                              </td>
-                              <td colSpan={4} />
+                              <TotalCells
+                                list={regCols}
+                                label={`Total for pay class ${pc.code}:`}
+                                labelClassName="text-right font-semibold"
+                                totals={{ amount: <Money cents={pc.amountCents} /> }}
+                                totalClassName="font-semibold"
+                              />
                             </tr>
                           </Fragment>
                         ))}
                         <tr>
-                          <td colSpan={4} className="text-right font-bold">
-                            Total for {g.label}:
-                          </td>
-                          <td className="num font-bold" data-testid="cdb-group-total">
-                            <Money cents={g.amountCents} />
-                          </td>
-                          <td colSpan={4} />
+                          <TotalCells
+                            list={regCols}
+                            label={`Total for ${g.label}:`}
+                            labelClassName="text-right font-bold"
+                            totals={{ amount: <Money cents={g.amountCents} /> }}
+                            totalClassName="font-bold"
+                            totalTestId="cdb-group-total"
+                          />
                         </tr>
                       </tbody>
                     </table>
+                    <ResetColumns list={regCols} />
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -598,67 +847,20 @@ export default function CashDrawerBalancingPage() {
                         <div style={{ overflowX: 'auto' }}>
                           <table className="table" data-testid="cdb-drawers">
                             <thead>
-                              <tr>
-                                <th>Drawer</th>
-                                <th>Operator</th>
-                                <th>Opened</th>
-                                <th>Closed</th>
-                                <th className="num">Float</th>
-                                <th className="num">Expected</th>
-                                <th className="num">Counted</th>
-                                <th className="num">Over / short</th>
-                              </tr>
+                              <ColumnHeadRow
+                                list={drawerCols}
+                                testIdPrefix="reports-cash-drawer-balancing-drawers"
+                              />
                             </thead>
                             <tbody>
-                              {g.drawers.map((d) => (
-                                <tr key={d.id}>
-                                  <td>
-                                    <a href={`/shifts/${d.id}`}>{d.number}</a>
-                                    {report.balanceBy !== 'store' ? (
-                                      <span className="ml-1 text-muted">{d.locationName}</span>
-                                    ) : null}
-                                  </td>
-                                  <td>{d.operatorName}</td>
-                                  <td>{fmtTime(d.openedAt)}</td>
-                                  <td>{d.closedAt ? fmtTime(d.closedAt) : 'open'}</td>
-                                  <td className="num">
-                                    <Money cents={d.openingFloatCents} />
-                                  </td>
-                                  <td className="num">
-                                    {d.expectedCashCents != null ? (
-                                      <Money cents={d.expectedCashCents} />
-                                    ) : (
-                                      '—'
-                                    )}
-                                  </td>
-                                  <td className="num">
-                                    {d.countedCashCents != null ? (
-                                      <Money cents={d.countedCashCents} />
-                                    ) : (
-                                      '—'
-                                    )}
-                                  </td>
-                                  <td
-                                    className="num"
-                                    style={{
-                                      color:
-                                        d.inTolerance === false
-                                          ? 'var(--danger)'
-                                          : d.inTolerance
-                                            ? 'var(--success)'
-                                            : undefined,
-                                    }}
-                                  >
-                                    {d.varianceCents != null ? (
-                                      <Money cents={d.varianceCents} />
-                                    ) : (
-                                      '—'
-                                    )}
-                                  </td>
+                              {(drawersByGroup.get(g.key) ?? []).map((r) => (
+                                <tr key={r.d.id}>
+                                  <ColumnCells list={drawerCols} row={r} />
                                 </tr>
                               ))}
                             </tbody>
                           </table>
+                          <ResetColumns list={drawerCols} />
                         </div>
                       )}
                     </div>

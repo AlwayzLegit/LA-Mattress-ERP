@@ -5,7 +5,16 @@ import { Paperclip, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
-import { Alert, Button, Field, FormGrid, Input, Select, TableWrap } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  Field,
+  FormGrid,
+  Input,
+  LoadingRows,
+  Select,
+  TableWrap,
+} from '@/components/ui';
 import { ActionDialog, errorText, money } from './dialog';
 import { LinePicker } from './line-picker';
 import type { ActionLine, ActionOrder, AttachmentRow, OpsLists } from './types';
@@ -953,7 +962,7 @@ export function AttachmentsDialog({
     >
       {error && <Alert tone="error">{error}</Alert>}
       {rows == null ? (
-        <p className="muted">Loading…</p>
+        <LoadingRows rows={3} what="Attachments" />
       ) : rows.length === 0 ? (
         <p className="muted">Nothing attached yet.</p>
       ) : (

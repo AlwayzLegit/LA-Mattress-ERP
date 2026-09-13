@@ -553,7 +553,10 @@ TMP-DEL-1,TEMP FRAME,KNICK,FURN,FRAMES,KNICK,45.50`;
       .select({ name: schema.categories.name })
       .from(schema.categories)
       .where(eq(schema.categories.id, keep!.categoryId!));
-    expect(cat?.name).toBe('MATT');
+    // A22.1: the STORIS code lands on the retail root of the same meaning
+    // when the business already has one (the earlier fixture created
+    // "Mattresses"), instead of creating a "MATT" category next to it.
+    expect(cat?.name).toBe('Mattresses');
     const [vendor] = await verifyDb
       .select({ name: schema.vendors.name })
       .from(schema.vendors)

@@ -8,7 +8,7 @@ import {
   type OrderDocumentPayload,
   LineInstructions,
 } from '@/components/order-documents';
-import { TableWrap } from '@/components/ui';
+import { LoadingRows, TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../../print-toolbar';
 
 /**
@@ -31,7 +31,12 @@ export default function PickListPrintPage() {
   }, [id]);
 
   if (error) return <p style={{ padding: 24 }}>{error}</p>;
-  if (!doc) return <p style={{ padding: 24 }}>Loading…</p>;
+  if (!doc)
+    return (
+      <div style={{ padding: 24 }}>
+        <LoadingRows rows={6} what="This document" />
+      </div>
+    );
 
   const goods = doc.lines.filter((l) => l.lineType !== 'custom');
 

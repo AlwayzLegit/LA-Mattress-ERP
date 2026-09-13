@@ -4,6 +4,16 @@
 verified against the live systems on the date above; re-check anything you are about to
 depend on rather than trusting this file's freshness.
 
+> **Update 2026-09-12.** Re-verified against the live accounts. Since this brief was
+> written: the **email thread in §4a is closed** (root `a-prompt.ai` verified in Resend,
+> `RESEND_API_KEY` + `RESEND_FROM_EMAIL` on Render, invite delivered 2026-08-27 — see
+> `SPRINT-STATUS.md` "Email is LIVE"); the STORIS screen sweeps A19–A22 and the 12-phase
+> dashboard & register redesign are built (phases 1–11 merged, phase 12 in PR #173);
+> migrations head is `0102_phase11_competitions`. `main` is well past `41577bd`. The
+> Sentry org `la-mattress` exists but has **no projects** yet, so both apps' Sentry
+> DSNs are unset — an Ops item, not a defect. The Resend account holding `a-prompt.ai`
+> is separate from the one holding `mattressstoreslosangeles.com` / `jetnine.com`.
+
 ---
 
 ## 1. Where the build actually stands
@@ -89,7 +99,7 @@ deleted / deactivated SKU lists. The whole sequence is rehearsed on the real fil
 
 ## 3. Open Ops items (owner's, not yours — flag, never silently block on)
 
-1. **Resend DNS — in flight, see §4.** The one item with a concrete next action.
+1. ~~**Resend DNS — in flight, see §4.**~~ Done 2026-08-27; email is live (§4a).
 2. ~~Add the `RENDER_API_KEY` repository secret~~ — done 2026-09-06; the API deploys
    from `main` automatically (§2).
 3. **Stripe Billing go-live (PLAN §15.5).** Create the product + two monthly
@@ -115,7 +125,13 @@ deleted / deactivated SKU lists. The whole sequence is rehearsed on the real fil
 
 ## 4. The two live threads you are picking up mid-flight
 
-### 4a. Email / Resend — one step from done
+### 4a. Email / Resend — ~~one step from done~~ CLOSED 2026-08-27
+
+> **Resolved.** The owner replaced the `mail.` subdomain with the root `a-prompt.ai`,
+> the three GoDaddy records verified, a domain-restricted sending key was created and
+> set on Render together with `RESEND_FROM_EMAIL`, and the proof invite to
+> `me.lamattress@gmail.com` was delivered through SES. The history below is kept for
+> the trap it documents (never set the key before the domain verifies).
 
 Invitation email has never worked in production. Root cause, confirmed at source:
 `RESEND_API_KEY` is unset on Render, so `createEmailTransport` falls back to
@@ -156,7 +172,7 @@ arrival.
 domain unverified, `ResendTransport` throws instead of falling back, which breaks the
 copy-link path that is currently the only working way to create accounts.
 
-### 4b. A pending invite
+### 4b. A pending invite (lapsed — re-send from the members page if still needed)
 
 A valid invite exists for `me.lamattress@gmail.com`, issued 2026-08-26 17:53 UTC,
 **expiring 2026-08-29 17:53 UTC**. If it lapses before accounts are made, just re-send
@@ -247,8 +263,8 @@ closest STORIS convention and flag it in your summary rather than inventing one.
 
 1. Read `SPRINT-STATUS.md` — it is the running log and the source of truth for what
    happened when.
-2. Ask the owner whether the GoDaddy records in §4a are saved. If yes, finish the Resend
-   chain and prove it with a real invite.
+2. ~~Ask the owner whether the GoDaddy records in §4a are saved.~~ Email is live. Ask
+   instead whether the manager / cashier accounts now exist (§3 item 6).
 3. Ask about the `priceCents: 0` catalog (§5). Nothing else on the critical path matters
    until the catalog can quote a price.
 4. Once a manager account exists, get the owner to run QA step 2.
