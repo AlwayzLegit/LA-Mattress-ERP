@@ -243,6 +243,8 @@ interface ZReport {
 interface CategoryRow {
   categoryId: string | null;
   categoryName: string;
+  /** Full path, "Mattresses › Hybrid" (A22.1). */
+  categoryPath?: string;
   quantity: number;
   revenueCents: number;
 }
@@ -472,8 +474,8 @@ const CATEGORY_COLUMNS: ColumnDef<CategoryRow>[] = [
   {
     id: 'category',
     label: 'Category',
-    sortValue: (c) => c.categoryName,
-    render: (c) => c.categoryName,
+    sortValue: (c) => c.categoryPath ?? c.categoryName,
+    render: (c) => c.categoryPath ?? c.categoryName,
   },
   { id: 'qty', label: 'Qty', num: true, sortValue: (c) => c.quantity, render: (c) => c.quantity },
   {

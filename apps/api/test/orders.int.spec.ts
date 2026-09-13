@@ -1729,6 +1729,7 @@ describe('Return lifecycle — refund gated on goods receipt (PLAN-STORIS-GAP G3
 
 describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
   let pvVariantId = '';
+  let protectorVariantId = '';
 
   function as(cookie: string) {
     return {
@@ -1764,13 +1765,34 @@ describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
         })
         .returning();
       pvVariantId = v!.id;
-      await db.insert(schema.inventoryLevels).values({
-        businessId,
-        variantId: pvVariantId,
-        locationId,
-        onHand: 50,
-        reserved: 0,
-      });
+      // A22.1: a protector is filed under "Mattress Protection", so the
+      // word "mattress" in its name no longer makes it a recycling unit.
+      const [protection] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattress Protection', position: 5 })
+        .returning();
+      const [protectors] = await db
+        .insert(schema.categories)
+        .values({ businessId, name: 'Mattress Protectors', parentId: protection!.id, position: 0 })
+        .returning();
+      const [prot] = await db
+        .insert(schema.products)
+        .values({
+          businessId,
+          sku: 'G6-PROT',
+          name: 'Queen Mattress Protector',
+          categoryId: protectors!.id,
+        })
+        .returning();
+      const [protV] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: prot!.id, sku: 'G6-PROT-Q', priceCents: 8_000 })
+        .returning();
+      protectorVariantId = protV!.id;
+      await db.insert(schema.inventoryLevels).values([
+        { businessId, variantId: pvVariantId, locationId, onHand: 50, reserved: 0 },
+        { businessId, variantId: protectorVariantId, locationId, onHand: 50, reserved: 0 },
+      ]);
     } finally {
       await sql2.end({ timeout: 5 });
     }
@@ -1861,6 +1883,21 @@ describe('Price variance 3-tier + §5 gates (PLAN-STORIS-GAP G6)', () => {
     expect(
       register.body.data.some((e: { entityId: string | null }) => e.entityId === res.body.id),
     ).toBe(true);
+
+    // The catalog category decides: a protector is not a recycling unit.
+    const protector = await as(ownerCookie)
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        confirm: true,
+        lines: [{ variantId: protectorVariantId, quantity: 1 }],
+      });
+    expect(protector.status).toBe(201);
+    const again = await as(ownerCookie).get('/v1/exceptions?type=recycling_fee_removed');
+    expect(
+      again.body.data.some((e: { entityId: string | null }) => e.entityId === protector.body.id),
+    ).toBe(false);
   });
 });
 

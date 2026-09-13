@@ -12,6 +12,7 @@ import {
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { AuditService } from '../audit/audit.service';
 import { CurrentUser, type CurrentUserPayload } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
@@ -150,14 +151,9 @@ export class AdminTemplatesController {
         .select()
         .from(schema.products)
         .where(eq(schema.products.businessId, biz.id));
-      const catNames = new Map(
-        (
-          await this.db
-            .select({ id: schema.categories.id, name: schema.categories.name })
-            .from(schema.categories)
-            .where(eq(schema.categories.businessId, biz.id))
-        ).map((c) => [c.id, c.name]),
-      );
+      // A22.1: categories nest, so a product records its full path and
+      // apply resolves it path-first (name as the legacy fallback).
+      const categoryIndex = await loadCategoryIndex(this.db, biz.id);
       const variants =
         products.length > 0
           ? await this.db
@@ -169,7 +165,7 @@ export class AdminTemplatesController {
         sku: p.sku,
         name: p.name,
         description: p.description,
-        categoryName: p.categoryId ? (catNames.get(p.categoryId) ?? null) : null,
+        categoryName: categoryIndex.pathOf(p.categoryId),
         serialTracked: p.serialTracked,
         variants: variants
           .filter((v) => v.productId === p.id)

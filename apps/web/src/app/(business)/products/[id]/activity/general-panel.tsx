@@ -23,6 +23,8 @@ export function GeneralPanel({
     id: string;
     group: string | null;
     categoryName: string | null;
+    /** Full path, "Mattresses › Hybrid" (A22.1). */
+    categoryPath?: string | null;
     collectionName: string | null;
     purchaseStatus: ProductPurchaseStatus | string;
     isActive: boolean;
@@ -68,7 +70,7 @@ export function GeneralPanel({
           <KeyValue
             rows={[
               { label: 'Group', value: product.group ?? '—' },
-              { label: 'Category', value: product.categoryName ?? '—' },
+              { label: 'Category', value: product.categoryPath ?? product.categoryName ?? '—' },
               { label: 'Collection', value: product.collectionName ?? '—' },
               {
                 label: 'Warranty category',

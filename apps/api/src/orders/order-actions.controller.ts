@@ -14,6 +14,7 @@ import type { Response } from 'express';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { PriceVarianceService, type PriceControlBody } from '../controls/price-variance.service';
@@ -197,6 +198,7 @@ export interface LineProduct {
   productId: string;
   name: string;
   brand: string | null;
+  /** Full category path ("Mattresses › Hybrid"). */
   category: string | null;
   description: string | null;
   secondDescription: string | null;
@@ -1014,7 +1016,7 @@ export class OrderActionsController {
         secondDescription: schema.products.secondDescription,
         isActive: schema.products.isActive,
         brand: schema.brands.name,
-        category: schema.categories.name,
+        categoryId: schema.products.categoryId,
         sku: schema.productVariants.sku,
         variantName: schema.productVariants.name,
         attributes: schema.productVariants.attributesJson,
@@ -1023,11 +1025,12 @@ export class OrderActionsController {
       .from(schema.productVariants)
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
-      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
       .where(eq(schema.productVariants.id, line.variantId))
       .limit(1);
     if (!row) throw new NotFoundException('Product not found');
-    return row;
+    const { categoryId, ...product } = row;
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+    return { ...product, category: categoryIndex.pathOf(categoryId) };
   }
 
   // --------------------------------------------------------------- helpers

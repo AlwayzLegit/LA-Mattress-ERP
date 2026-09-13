@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { buildCategoryIndex } from '../catalog/category-tree';
 import { DRIZZLE } from '../database/database.module';
 
 export interface TemplateSnapshot {
@@ -145,14 +146,20 @@ export class TemplatesService {
     }
 
     if (snapshot.products?.length) {
-      const catIds = new Map(
-        (
-          await this.db
-            .select({ id: schema.categories.id, name: schema.categories.name })
-            .from(schema.categories)
-            .where(eq(schema.categories.businessId, businessId))
-        ).map((c) => [c.name, c.id]),
-      );
+      // Snapshots record the category path ("Mattresses › Hybrid"); older
+      // ones the bare name. Resolve the path first, then the leaf name.
+      const cats = await this.db
+        .select({
+          id: schema.categories.id,
+          parentId: schema.categories.parentId,
+          name: schema.categories.name,
+        })
+        .from(schema.categories)
+        .where(eq(schema.categories.businessId, businessId));
+      const categoryIndex = buildCategoryIndex(cats);
+      const catIds = new Map<string, string>();
+      for (const c of cats) if (!catIds.has(c.name)) catIds.set(c.name, c.id);
+      for (const c of cats) catIds.set(categoryIndex.pathOf(c.id)!, c.id);
       const existingSkus = new Set(
         (
           await this.db

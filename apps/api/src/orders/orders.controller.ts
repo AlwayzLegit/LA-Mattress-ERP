@@ -20,6 +20,7 @@ import { schema } from '@jetnine/db';
 import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { loadCategoryIndex } from '../catalog/category-tree';
+import { qualifiesForRecyclingFee } from './recycling-fee';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
@@ -2017,9 +2018,26 @@ export class OrdersController {
     // qualifying order written without one registers an exception — the
     // removal shows up in the digest whether or not the UI prompted.
     if (!body.draft) {
-      const RECYCLING_KEYWORDS = /mattress|foundation|adjustable base|box spring/i;
-      const qualifies = priced.some(
-        (l) => l.lineType !== 'custom' && RECYCLING_KEYWORDS.test(l.description),
+      // The catalog category decides (A22.1 tree); see recycling-fee.ts.
+      const variantIds = [
+        ...new Set(priced.filter((l) => l.lineType !== 'custom').map((l) => l.variantId)),
+      ];
+      const pathByVariant = new Map<string, string | null>();
+      if (variantIds.length > 0) {
+        const cats = await this.db
+          .select({ variantId: schema.productVariants.id, categoryId: schema.products.categoryId })
+          .from(schema.productVariants)
+          .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+          .where(inArray(schema.productVariants.id, variantIds));
+        const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+        for (const c of cats) pathByVariant.set(c.variantId, categoryIndex.pathOf(c.categoryId));
+      }
+      const qualifies = priced.some((l) =>
+        qualifiesForRecyclingFee({
+          categoryPath: pathByVariant.get(l.variantId) ?? null,
+          description: l.description,
+          lineType: l.lineType,
+        }),
       );
       const hasFee = priced.some(
         (l) => l.lineType === 'custom' && /recycling/i.test(l.description),

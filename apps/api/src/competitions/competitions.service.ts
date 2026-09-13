@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { categoryRootNameSql, joinCategoryPath } from '../catalog/category-tree';
 import { phoneDigits } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { tzDayEndExclusive, tzDayStart } from '../common/date-range';
@@ -554,25 +555,34 @@ export class CompetitionsService {
       .orderBy(asc(schema.orders.completedAt));
     const orderIds = orderRows.map((o) => o.id);
 
-    // Adjustable base units per order: category name first, description second.
+    // Adjustable base units per order: the catalog category decides
+    // (A22.1 tree: "Adjustable Bases › Adjustable Bed Bases" counts, the
+    // remotes and legs under "Base Accessories & Parts" do not); a line
+    // without a category falls back to its description.
     const bedsByOrder = new Map<string, number>();
     if (orderIds.length > 0) {
-      const bedRows = await this.db
-        .select({
-          orderId: schema.orderLines.orderId,
-          qty: sql<number>`coalesce(sum(${schema.orderLines.quantity}), 0)::int`,
-        })
-        .from(schema.orderLines)
-        .leftJoin(
-          schema.productVariants,
-          eq(schema.productVariants.id, schema.orderLines.variantId),
-        )
-        .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
-        .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+      const bedRows = await joinCategoryPath(
+        this.db
+          .select({
+            orderId: schema.orderLines.orderId,
+            qty: sql<number>`coalesce(sum(${schema.orderLines.quantity}), 0)::int`,
+          })
+          .from(schema.orderLines)
+          .leftJoin(
+            schema.productVariants,
+            eq(schema.productVariants.id, schema.orderLines.variantId),
+          )
+          .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+          .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId)),
+      )
         .where(
           and(
             inArray(schema.orderLines.orderId, orderIds),
-            sql`(${schema.categories.name} ILIKE '%adjustable%' OR ${schema.orderLines.description} ILIKE '%adjustable%')`,
+            sql`CASE
+              WHEN ${schema.categories.id} IS NOT NULL
+                THEN ${categoryRootNameSql} ILIKE 'adjustable%' AND ${schema.categories.name} NOT ILIKE '%accessor%' AND ${schema.categories.name} NOT ILIKE '%part%'
+              ELSE ${schema.orderLines.description} ILIKE '%adjustable%'
+            END`,
           ),
         )
         .groupBy(schema.orderLines.orderId);

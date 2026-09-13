@@ -5637,3 +5637,39 @@ collapsed; the leaderboard lists everyone. README §3.6 and PHASE_NOTES Phase 11
 Tests: `competitions.int.spec.ts` (new DB `jetnine_competitions`): every lead-logging
 member is on every card, Operations is not, the seller ranks first, the zero-sales manager
 sits under them unranked, and Stores is gone from the board and the sheet.
+
+### Checkpoint — 2026-09-13 (Category tree wired through every surface)
+
+Owner: "This is the category — find all fields that need them and replace with these,
+make sure they are wired correctly throughout the ERP" (`docs/imports/2026-09-11/
+product-categories.csv`, the 10 × 35 tree from A22.1). The product browser, picker and
+register already read the tree; every other surface still read the leaf name or matched
+the leaf id. Now one helper (`catalog/category-tree.ts`: `pathOf`, `treeIds`,
+`lineageOf`, `rootNameOf`, plus `categoryPathSql` / `joinCategoryPath` for SQL) feeds:
+
+- **Reports**: Sales by category carries `categoryPath` ("Mattresses › Hybrid", the CSV
+  too); Merchandising rows carry the path, its category filter keeps the subcategories,
+  and the table gains a Category column; the report builder's Products CATEGORY
+  dictionary is the path.
+- **Replenishment**: the Replenish panel's category filter keeps subcategories, its lines
+  carry the path and show a Category column; the sales-rate engine resolves vendor
+  category exceptions on the lineage (a rule on "Mattresses" reaches "Mattresses ›
+  Hybrid", the nearest ancestor with a value wins) for both the grid and the PO expected
+  date, and the category sort criterion orders by path.
+- **Orders**: the line Product Benefit read returns the path; the CA recycling-fee
+  exception (G6) keys on the category root (Mattresses, Foundations & Box Springs,
+  Adjustable Bed Bases; accessories and protectors excluded, description fallback only
+  without a category) — `orders/recycling-fee.ts`, mirroring the register's chip rule.
+- **Competitions**: Most Adjustable Beds counts units filed under "Adjustable Bases"
+  minus "Base Accessories & Parts" (a remote named "adjustable" no longer counts); the
+  lead dialog's wanted-category list is the Mattresses subcategories (+ Latex, "Memory
+  Foam" spelling) plus base / specific product, accepted case-insensitively.
+- **Product detail** (edit form and General panel) shows the path; the list's Category
+  sort orders by path; the three category pickers share `lib/categories.ts`
+  (`categoryOptions`, tree order, path labels).
+- **Business templates** snapshot a product's category path and apply it path-first
+  (name as the legacy fallback).
+  Tests: `category-tree.spec.ts` (3), `recycling-fee.spec.ts` (3), engine lineage case,
+  web `categories.test.ts` (2); int specs extended — reports (path + root filter + CSV),
+  replenish (root filter, path on lines), order-actions (path), competitions (base counts,
+  remotes do not), orders (protector raises no recycling exception).

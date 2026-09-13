@@ -29,7 +29,15 @@ import {
 } from './competitions.service';
 
 const SIZES = ['Twin', 'Twin XL', 'Full', 'Queen', 'King', 'Cal King'];
-const CATEGORIES = ['Hybrid', 'Memory foam', 'Innerspring', 'Adjustable base', 'Specific product'];
+/** What the shopper wants: the Mattresses subcategories of the catalog tree (A22.1), a base, or a named product. */
+const CATEGORIES = [
+  'Hybrid',
+  'Memory Foam',
+  'Innerspring',
+  'Latex',
+  'Adjustable base',
+  'Specific product',
+];
 
 /**
  * The competition strip's API (redesign Phase 11): the board, the closed
@@ -146,7 +154,9 @@ export class CompetitionsController {
     const name = (body.name ?? '').trim().slice(0, 80);
     const wantedSize = body.wantedSize && SIZES.includes(body.wantedSize) ? body.wantedSize : null;
     const wantedCategory =
-      body.wantedCategory && CATEGORIES.includes(body.wantedCategory) ? body.wantedCategory : null;
+      CATEGORIES.find(
+        (c) => c.toLowerCase() === (body.wantedCategory ?? '').trim().toLowerCase(),
+      ) ?? null;
     const note = body.note?.trim().slice(0, 160) || null;
     const cfg = await this.competitions.config(businessId);
     const { stores } = await this.competitions.clock(businessId);

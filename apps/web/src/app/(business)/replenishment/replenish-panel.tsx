@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { categoryList, categoryOptions } from '@/lib/categories';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -66,6 +67,7 @@ interface Line {
   sku: string | null;
   vendorSku: string | null;
   categoryName: string | null;
+  categoryPath: string | null;
   collectionName: string | null;
   costCents: number | null;
   locationId: string | null;
@@ -150,8 +152,8 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
-      api<{ flat: RefOption[] } | RefOption[]>('/v1/categories')
-        .then((r) => setCategories(Array.isArray(r) ? r : r.flat))
+      api<Parameters<typeof categoryList>[0]>('/v1/categories')
+        .then((r) => setCategories(categoryOptions(categoryList(r))))
         .catch(() => setCategories([]));
       api<RefOption[]>('/v1/collections')
         .then(setCollections)
@@ -303,6 +305,12 @@ export function ReplenishPanel({ mode }: { mode: ReplenishMode }) {
       label: 'Vendor model',
       sortValue: (l) => l.vendorSku,
       render: (l) => l.vendorSku ?? '—',
+    },
+    {
+      id: 'category',
+      label: 'Category',
+      sortValue: (l) => l.categoryPath ?? l.categoryName,
+      render: (l) => l.categoryPath ?? l.categoryName ?? '—',
     },
     {
       id: 'location',

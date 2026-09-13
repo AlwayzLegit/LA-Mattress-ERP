@@ -1,6 +1,7 @@
 import { and, eq, gt, inArray, isNull, lte, max, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { buildCategoryIndex, loadCategoryIndex } from '../catalog/category-tree';
 import type {
   ReplenishmentControl,
   ReplenishmentProduct,
@@ -53,6 +54,8 @@ export interface ReplenishmentCandidateMeta {
   vendorSku: string | null;
   costCents: number | null;
   categoryName: string | null;
+  /** Full path ("Mattresses › Hybrid"); categoryName is the leaf. */
+  categoryPath: string | null;
 }
 
 /**
@@ -100,6 +103,18 @@ export async function buildReplenishmentInputs(
   const biz = (col: { businessId: unknown }) =>
     businessId ? eq(col.businessId as never, businessId) : undefined;
 
+  // A22.1: categories nest — a category filter keeps the subcategories and
+  // a vendor exception on the root reaches every product filed under it.
+  const ownerId =
+    businessId ??
+    (
+      await db
+        .select({ businessId: schema.vendors.businessId })
+        .from(schema.vendors)
+        .where(eq(schema.vendors.id, vendorId))
+        .limit(1)
+    )[0]?.businessId;
+  const categoryIndex = ownerId ? await loadCategoryIndex(db, ownerId) : buildCategoryIndex([]);
   const candidates = await db
     .select({
       variantId: schema.productVariants.id,
@@ -124,7 +139,9 @@ export async function buildReplenishmentInputs(
         criteria.productIds?.length
           ? inArray(schema.productVariants.id, criteria.productIds)
           : undefined,
-        opts.categoryId ? eq(schema.products.categoryId, opts.categoryId) : undefined,
+        opts.categoryId
+          ? inArray(schema.products.categoryId, categoryIndex.treeIds(opts.categoryId))
+          : undefined,
       ),
     );
   const meta = new Map<string, ReplenishmentCandidateMeta>(
@@ -138,6 +155,7 @@ export async function buildReplenishmentInputs(
         vendorSku: c.vendorSku,
         costCents: c.costCents,
         categoryName: c.categoryName,
+        categoryPath: categoryIndex.pathOf(c.categoryId),
       },
     ]),
   );
@@ -370,6 +388,7 @@ export async function buildReplenishmentInputs(
     return {
       variantId: c.variantId,
       categoryId: c.categoryId,
+      categoryLineage: categoryIndex.lineageOf(c.categoryId),
       unitsSold,
       unitsReturned: retBy.get(c.variantId)?.qty ?? 0,
       warehouseOnHand: lvl?.whOnHand ?? 0,
