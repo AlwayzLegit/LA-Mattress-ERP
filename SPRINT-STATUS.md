@@ -5527,3 +5527,7 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 ## Chat inbox usability — 2026-09-12
 
 - [x] Conversation-first layout, quick queue filters, reference search, clearer status labels, compact availability/notification settings, optional visitor details and secondary-action menu. Browser inspected with a live conversation; TypeScript and changed-file lint pass.
+
+## Chat notification chime — 2026-09-13
+
+- [x] Replaced the generated beep with the user-supplied shopify-sales.mp3. Same-origin audio is decoded once when enabled, previews on activation, stops on mute and restarts instead of overlapping on new alerts. Loading errors leave sound disabled.

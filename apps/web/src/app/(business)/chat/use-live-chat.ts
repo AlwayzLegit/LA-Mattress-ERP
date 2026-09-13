@@ -18,37 +18,45 @@ export function useLiveChat() {
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const audio = useRef<AudioContext | null>(null);
+  const chime = useRef<AudioBuffer | null>(null);
+  const activeChime = useRef<AudioBufferSourceNode | null>(null);
+  const loadingSound = useRef(false);
   const soundRef = useRef(false);
   const notificationRef = useRef(false);
   const beep = useCallback(() => {
     const context = audio.current;
     if (!soundRef.current || !context || context.state !== 'running') return;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.frequency.setValueAtTime(740, context.currentTime);
-    oscillator.frequency.setValueAtTime(990, context.currentTime + 0.13);
-    gain.gain.setValueAtTime(0, context.currentTime);
-    gain.gain.linearRampToValueAtTime(0.12, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.4);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.42);
-    oscillator.onended = () => {
-      oscillator.disconnect();
-      gain.disconnect();
+    if (!chime.current) return;
+    activeChime.current?.stop();
+    const source = context.createBufferSource();
+    source.buffer = chime.current;
+    source.connect(context.destination);
+    activeChime.current = source;
+    source.onended = () => {
+      source.disconnect();
+      if (activeChime.current === source) activeChime.current = null;
     };
+    source.start();
   }, []);
   const toggleSound = useCallback(async () => {
+    if (loadingSound.current) return;
     if (soundRef.current) {
+      activeChime.current?.stop();
       soundRef.current = false;
       setSound(false);
       setNotice('Chat sounds muted.');
       return;
     }
+    loadingSound.current = true;
+    setNotice('Loading notification sound…');
     try {
       if (!audio.current || audio.current.state === 'closed') audio.current = new AudioContext();
       await audio.current.resume();
+      if (!chime.current) {
+        const response = await fetch('/sounds/shopify-sales.mp3');
+        if (!response.ok) throw new Error('Sound could not be loaded');
+        chime.current = await audio.current.decodeAudioData(await response.arrayBuffer());
+      }
       soundRef.current = audio.current.state === 'running';
       setSound(soundRef.current);
       setNotice(
@@ -58,7 +66,11 @@ export function useLiveChat() {
       );
       beep();
     } catch {
-      setNotice('Sound is unavailable in this browser.');
+      soundRef.current = false;
+      setSound(false);
+      setNotice('Could not load the notification sound. Try enabling sound again.');
+    } finally {
+      loadingSound.current = false;
     }
   }, [beep]);
   const toggleNotifications = useCallback(async () => {
