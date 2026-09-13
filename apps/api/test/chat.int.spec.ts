@@ -2183,6 +2183,12 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
       const recommendation =
         'https://www.mattressstoreslosangeles.com/products/test-mattress#variant=123';
       const reply = await service.sendStaffMessage(winner, id, input(recommendation));
+      // A reply moves the chat to waiting_customer; opted-in previews must keep working.
+      expect((await post(share)).status).toBe(200);
+      expect((await service.context(winner, id)).sharedDraft?.text).toBe('UNSENT preview only');
+      expect((await service.context(loser, id)).sharedDraft).toBeNull();
+      expect((await post({ ...share, sharedDraft: { consent: false, text: '' } })).status).toBe(200);
+      expect((await service.context(winner, id)).sharedDraft).toBeNull();
       await service.sendStaffMessage(winner, id, input('INTERNAL paired note'), 'note');
       const history = await get(`conversationId=${id}&afterSequence=0`);
       expect(history.status).toBe(200);

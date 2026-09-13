@@ -75,7 +75,7 @@ export class ChatService {
   private async sharedDraft(row: ConversationRow, tenant: RequestTenantContext) {
     if (
       !this.drafts ||
-      row.status !== 'open' ||
+      !['open', 'waiting_customer'].includes(row.status) ||
       !row.acceptedAt ||
       row.assignedMembershipId !== tenant.membershipId
     )
@@ -1966,7 +1966,7 @@ export class ChatService {
         const row = await this.conversation(tx, session.businessId, id, session.id);
         const key = this.draftKey(row);
         const draft = parsed.data.sharedDraft!;
-        if (!draft.consent || !draft.text || !['queued', 'open'].includes(row.status)) {
+        if (!draft.consent || !draft.text || !['queued', 'open', 'waiting_customer'].includes(row.status)) {
           await this.drafts!.del(key);
           return { saved: true };
         }

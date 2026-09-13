@@ -30,11 +30,6 @@ export function ContextPanel({
   onTemplate: (body: string) => void;
 }) {
   const [details, setDetails] = useState<Details | null>(null);
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [member, setMember] = useState('');
@@ -61,32 +56,7 @@ export function ContextPanel({
       cancelled = true;
     };
   }, [id, version]);
-  useEffect(() => {
-    let cancelled = false;
-    let busy = false;
-    const refresh = async () => {
-      if (busy || document.hidden) return;
-      busy = true;
-      try {
-        const data = await api<Details>(`/v1/chat/conversations/${id}/context`);
-        if (!cancelled)
-          setDetails((previous) =>
-            previous
-              ? { ...previous, context: data.context, sharedDraft: data.sharedDraft }
-              : previous,
-          );
-      } catch {
-        /* Keep the last-seen timestamp visible during interruptions. */
-      } finally {
-        busy = false;
-      }
-    };
-    const timer = setInterval(() => void refresh(), 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [id]);
+
   async function save(action: string, body: object) {
     setBusy(true);
     try {
@@ -106,49 +76,12 @@ export function ContextPanel({
   }
   return (
     <aside className={styles.context} aria-label="Visitor context">
-      <h2>Visitor details</h2>
+      <h2>Customer & tools</h2>
       {!details && !status && <p role="status">Loading visitor details…</p>}
       <p role="status">{status}</p>
       {details && (
         <>
-          {details.sharedDraft && details.sharedDraft.expiresAt > now && (
-            <section aria-label="Visitor shared draft">
-              <h3>Visitor’s unsent text</h3>
-              <small>Shared with permission · still being edited · not a sent message</small>
-              <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                {details.sharedDraft.text}
-              </p>
-            </section>
-          )}
           <dl className={styles.visitorFacts}>
-            <dt>Visitor’s latest page</dt>
-            <dd>
-              {details.context?.currentPage &&
-              /^\/(?:$|(?:products|collections|pages|blogs)\/[a-zA-Z0-9/_-]+$|sleep-quiz\/?$)/.test(
-                details.context.currentPage.path,
-              ) ? (
-                <>
-                  <a
-                    href={`https://www.mattressstoreslosangeles.com${details.context.currentPage.path}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {details.context.currentPage.title}
-                  </a>
-                  <br />
-                  <small>
-                    Last seen{' '}
-                    {new Date(details.context.currentPage.seenAt).toLocaleTimeString([], {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      second: '2-digit',
-                    })}
-                  </small>
-                </>
-              ) : (
-                'No public page currently shared'
-              )}
-            </dd>
             <dt>Chat started from</dt>
             <dd>{details.context?.pagePath ?? 'Website page not available'}</dd>
             {details.context?.topic && details.context.topic !== 'other' && (

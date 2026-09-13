@@ -11,6 +11,7 @@ import { TeamWorkspaceButton } from './team-workspace';
 import { AskForHelp, TeamHelp } from './team-help';
 import { SalesHandoff } from './sales-handoff';
 import { ContextPanel } from './context-panel';
+import { useVisitorActivity, VisitorPage, VisitorDraft } from './visitor-activity';
 import { TeamControls } from './team-controls';
 import { PushControls } from './push-controls';
 import { useLiveChat } from './chat-provider';
@@ -148,8 +149,10 @@ export default function ChatPage() {
           </div>
         </details>
       </div>
-      <TeamWorkspaceButton />
-      <TeamHelp />
+      <div className={styles.teamDock}>
+        <TeamWorkspaceButton />
+        <TeamHelp />
+      </div>
       <div className={styles.inboxStatus}>
         <strong>
           {waitingCount
@@ -324,6 +327,7 @@ function ConversationPanel({
   }, [help.suggestion, id]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [showDetails, setShowDetails] = useState(false);
+  const visitorActivity = useVisitorActivity(id, conversation?.version);
   const [note, setNote] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -487,9 +491,10 @@ function ConversationPanel({
             aria-controls="visitor-details"
             onClick={() => setShowDetails(!showDetails)}
           >
-            {showDetails ? 'Hide details' : 'Visitor details'}
+            {showDetails ? 'Hide customer & tools' : 'Customer & tools'}
           </Button>
         </header>
+        <VisitorPage activity={visitorActivity} />
         <div className={styles.workflow}>
           {conversation &&
             !conversation.assignedMembershipId &&
@@ -589,11 +594,6 @@ function ConversationPanel({
           <AskForHelp id={id} />
         )}
         <FollowupPanel id={id} version={conversation?.version} />
-        {conversation?.visitorTyping && (
-          <p role="status" className={styles.arrival}>
-            Visitor is typing...
-          </p>
-        )}
         {error && (
           <p role="alert" className={styles.error}>
             {error}
@@ -656,6 +656,7 @@ function ConversationPanel({
             Jump to new messages
           </Button>
         )}
+        <VisitorDraft activity={visitorActivity} assigned={Boolean(conversation?.assignedToMe)} typing={Boolean(conversation?.visitorTyping)} />
         <div className={styles.composer} data-note={note}>
           {help.suggestion?.conversationId === id && (
             <section ref={suggestionPanel} tabIndex={-1} className={styles.suggestionPreview}>
@@ -792,6 +793,13 @@ function ConversationPanel({
             </label>
             <textarea
               id="chat-message"
+              aria-describedby="erp-chat-keyboard-hint"
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                event.preventDefault();
+                if (event.repeat || form.formState.isSubmitting || !conversation?.assignedToMe || !form.getValues('body').trim()) return;
+                event.currentTarget.form?.requestSubmit();
+              }}
               className="input"
               rows={2}
               placeholder={note ? 'Add a note for your team…' : 'Write a helpful reply…'}
@@ -813,6 +821,7 @@ function ConversationPanel({
             />
             {form.formState.errors.body && <p role="alert">{form.formState.errors.body.message}</p>}
             <FormRootError />
+            <small id="erp-chat-keyboard-hint">Enter to {note ? 'save note' : 'send'} · Shift+Enter for a new line</small>
             <div className={styles.toolbar}>
               <span role="status">{status}</span>
               <Button

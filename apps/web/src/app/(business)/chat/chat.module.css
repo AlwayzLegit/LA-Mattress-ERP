@@ -1482,3 +1482,52 @@
     padding: 16px;
   }
 }
+
+/* Conversation-first workspace: page context, transcript, shared draft, reply. */
+.layout { height: max(760px, calc(100dvh - 250px)); border-radius: 12px; background: var(--surface); }
+.queue { background: var(--surface-2); }
+.queueCard { background: transparent; }
+.queueCard .item { padding: 18px 16px; gap: 8px; }
+.heading { padding: 18px 20px 12px; border-bottom: 0; }
+.heading h2 { font-size: 19px; letter-spacing: -.4px; }
+.pageStrip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 0 20px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.activityLabel { font-size: 10px; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.pageStrip a { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(100%, 420px); }
+.pageStrip small { color: var(--muted); }
+.workflow { background: var(--surface-2); padding: 8px 20px; gap: 8px; }
+.history { padding: 24px 20px; gap: 18px; min-height: 180px; }
+.message { border-radius: 12px 12px 12px 3px; max-width: 82%; padding: 12px 16px; }
+.reply { border-radius: 12px 12px 3px 12px; }
+.note { border-radius: 8px; max-width: none; }
+.message time { font-size: 10px; color: var(--muted); }
+.liveDraft { flex-shrink: 0; margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.liveDraft[data-active='true'] { background: var(--accent-soft); border-left: 3px solid var(--accent); padding-left: 17px; }
+.draftHeading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.draftHeading strong { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.draftHeading > span { font-size: 9px; font-weight: 700; letter-spacing: .07em; color: var(--muted); }
+.draftDot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.liveDraft[data-active='true'] .draftDot { background: var(--accent); }
+.draftText { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 110px; overflow: auto; margin: 8px 0; font-size: 14px; line-height: 1.6; }
+.draftHint { color: var(--muted); font-size: 11px; margin: 5px 0 0; }
+.liveDraft > small { color: var(--muted); font-size: 10px; }
+.composer { margin-top: 0; padding: 16px 20px; background: var(--surface); }
+.composer textarea { border-radius: 8px; min-height: 82px; padding: 12px; }
+.composer .modes { margin-bottom: 10px; }
+.composer .toolbar { padding-top: 10px; }
+.detailsWrap { background: var(--surface); }
+@media (max-width: 760px) {
+  .layout { height: auto; }
+  .conversationWithContext .conversation { height: auto; min-height: 760px; }
+  .heading, .composer, .liveDraft { padding-left: 14px; padding-right: 14px; }
+  .pageStrip { padding-left: 14px; padding-right: 14px; }
+  .history { min-height: 240px; max-height: 440px; }
+}
+.root { gap: 10px; }
+.teamDock { display: flex; gap: 8px; align-items: flex-start; }
+.teamDock > button { flex: 0 0 auto; }
+.teamDock > details { flex: 1; margin: 0; padding: 6px 12px; }
+.layout { height: max(650px, calc(100dvh - 285px)); }
+.history { min-height: 100px; }
+.conversation { overflow-y: auto; }
+.heading, .pageStrip, .workflow, .composer { flex-shrink: 0; }
+@media (max-width: 760px) { .layout { height: auto; } .teamDock { flex-wrap: wrap; } }
