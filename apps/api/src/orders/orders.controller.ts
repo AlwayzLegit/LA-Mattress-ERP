@@ -19,6 +19,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
@@ -5327,18 +5328,19 @@ export class OrdersController {
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, id))
       .orderBy(schema.orderLines.createdAt);
-    // The register keys its add-on chips on the catalog category, so a
-    // resumed draft needs it back (2026-09-12).
+    // The register keys its add-on chips on the catalog category's root
+    // (A22.1 files most sleep surfaces on a subcategory), so a resumed
+    // draft needs the whole path back (2026-09-12, 2026-09-13).
     const lineVariantIds = lines.map((l) => l.variantId).filter((v): v is string => !!v);
     const categoryByVariant = new Map<string, string | null>();
     if (lineVariantIds.length > 0) {
       const cats = await this.db
-        .select({ variantId: schema.productVariants.id, categoryName: schema.categories.name })
+        .select({ variantId: schema.productVariants.id, categoryId: schema.products.categoryId })
         .from(schema.productVariants)
         .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
-        .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
         .where(inArray(schema.productVariants.id, lineVariantIds));
-      for (const c of cats) categoryByVariant.set(c.variantId, c.categoryName);
+      const categoryIndex = await loadCategoryIndex(this.db, order.businessId);
+      for (const c of cats) categoryByVariant.set(c.variantId, categoryIndex.pathOf(c.categoryId));
     }
 
     const payments = await this.db
@@ -5473,7 +5475,7 @@ export class OrdersController {
         fulfillmentMethod: l.fulfillmentMethod,
         sourceLocationId: l.sourceLocationId,
         deliveryDate: l.deliveryDate,
-        categoryName: l.variantId ? (categoryByVariant.get(l.variantId) ?? null) : null,
+        categoryPath: l.variantId ? (categoryByVariant.get(l.variantId) ?? null) : null,
         comment: l.comment,
         room: l.room,
         pieces: l.pieces,

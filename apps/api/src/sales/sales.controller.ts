@@ -25,6 +25,7 @@ import {
   normalizeSize,
 } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
+import { loadCategoryIndex } from '../catalog/category-tree';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -298,8 +299,8 @@ export class SalesController {
       size: string | null;
       /** Canonical firmness read off the name/attributes, or null. */
       firmness: string | null;
-      /** Catalog category name; the register keys the add-on chips on it. */
-      categoryName: string | null;
+      /** Catalog category path ("Mattresses › Hybrid"); the register keys the add-on chips on its root. */
+      categoryPath: string | null;
       availableHere: number;
       availableTotal: number;
       atpDate: string | null;
@@ -371,7 +372,7 @@ export class SalesController {
         vendorName: schema.vendors.name,
         size: sql<string | null>`${SIZE_EXPR}`,
         firmness: sql<string | null>`${FIRMNESS_EXPR}`,
-        categoryName: schema.categories.name,
+        categoryId: schema.products.categoryId,
         taxRateBps: sql<number | null>`coalesce(
           ${
             locationId
@@ -389,7 +390,6 @@ export class SalesController {
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
-      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
       .leftJoin(
         schema.inventoryLevels,
         eq(schema.inventoryLevels.variantId, schema.productVariants.id),
@@ -400,7 +400,6 @@ export class SalesController {
         schema.products.id,
         schema.vendors.name,
         schema.brands.name,
-        schema.categories.name,
       )
       .having(
         inStock === '1'
@@ -438,7 +437,14 @@ export class SalesController {
       for (const r of pos) if (r.variantId && r.expectedAt) atp.set(r.variantId, r.expectedAt);
     }
 
-    return rows.map((r) => ({ ...r, atpDate: atp.get(r.variantId) ?? null }));
+    // A22.1: the category is a tree and most sleep surfaces sit on a
+    // subcategory; the register wants the whole path to read the root.
+    const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
+    return rows.map(({ categoryId, ...r }) => ({
+      ...r,
+      categoryPath: categoryIndex.pathOf(categoryId),
+      atpDate: atp.get(r.variantId) ?? null,
+    }));
   }
 
   @Get('pos/lookup')
