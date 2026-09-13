@@ -920,7 +920,11 @@ export class CompetitionsService {
     // An owner watches the race; there is no pinned row for someone off the board.
     const meId =
       tenant.membershipId && !excluded.has(tenant.membershipId) ? tenant.membershipId : null;
-    const isDayOne = data.orders.length === 0 && data.leadRows.length === 0;
+    // Day one is judged on what is on the board: an owner's orders or
+    // leads (off the board) do not end it.
+    const isDayOne = ![...subjects.values()].some(
+      (s) => s.orders.length > 0 || s.leadsLogged > 0 || s.leadsConverted.length > 0,
+    );
 
     const cards: RaceCard[] = [];
     let sweepLeader: { id: string; name: string; n: number } | null = null;
@@ -1093,6 +1097,29 @@ export class CompetitionsService {
         ),
       );
     let rows = existing;
+    // A month frozen before the Owner role left the board may still name an
+    // owner as its winner or in its ranking. Unless a prize was already
+    // marked paid, throw that snapshot away and rebuild it from the ledger.
+    if (rows.length > 0 && !rows.some((r) => r.paidAt)) {
+      const excluded = await this.nonCompetitors(businessId);
+      const tainted = rows.some(
+        (r) =>
+          (r.winnerId && excluded.has(r.winnerId)) ||
+          ((r.rankingJson ?? []) as { id: string }[]).some((x) => excluded.has(x.id)),
+      );
+      if (tainted) {
+        await this.db
+          .delete(schema.competitionResults)
+          .where(
+            and(
+              eq(schema.competitionResults.businessId, businessId),
+              eq(schema.competitionResults.month, month),
+              eq(schema.competitionResults.scope, scope),
+            ),
+          );
+        rows = [];
+      }
+    }
     if (rows.length === 0) {
       const { today } = await this.clock(businessId);
       if (month >= today.slice(0, 7)) return [];
