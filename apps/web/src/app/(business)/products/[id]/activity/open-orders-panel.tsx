@@ -4,13 +4,18 @@ import Link from 'next/link';
 import { useState } from 'react';
 import {
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LoadingRows,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { fmtDate, LocationPicker, SectionError, StripTiles, titleCase, useSection } from './kit';
 import type { OpenOrderRow, Strip } from './types';
@@ -36,6 +41,131 @@ function fulfillmentStatus(s: string | null): string {
   return titleCase(s);
 }
 
+const OPEN_ORDER_COLUMNS: ColumnDef<OpenOrderRow>[] = [
+  {
+    id: 'orderNumber',
+    label: 'Order number',
+    sortValue: (r) => r.orderNumber,
+    render: (r) => <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>,
+  },
+  {
+    id: 'orderType',
+    label: 'Order type',
+    sortValue: (r) => ORDER_TYPE_LABEL[r.orderType],
+    render: (r) => ORDER_TYPE_LABEL[r.orderType],
+  },
+  {
+    id: 'sellingLocation',
+    label: 'Selling location',
+    sortValue: (r) => r.sellingLocationName,
+    render: (r) => r.sellingLocationName ?? '—',
+  },
+  {
+    id: 'fulfillmentDate',
+    label: 'Fulfillment date',
+    sortValue: (r) => r.fulfillmentDate,
+    render: (r) => fmtDate(r.fulfillmentDate),
+  },
+  {
+    id: 'orderQuantity',
+    label: 'Order quantity',
+    num: true,
+    sortValue: (r) => r.orderQuantity,
+    render: (r) => r.orderQuantity,
+  },
+  {
+    id: 'reserved',
+    label: 'Reserved',
+    num: true,
+    sortValue: (r) => r.reservedQuantity,
+    render: (r) => r.reservedQuantity,
+  },
+  {
+    id: 'fulfillmentType',
+    label: 'Fulfillment type',
+    sortValue: (r) => r.fulfillmentType,
+    render: (r) => titleCase(r.fulfillmentType),
+  },
+  {
+    id: 'fulfillmentStatus',
+    label: 'Fulfillment status',
+    sortValue: (r) => r.fulfillmentStatus,
+    render: (r) =>
+      r.fulfillmentStatus && r.fulfillmentStatus !== 'will_call' ? (
+        <StatusBadge status={r.fulfillmentStatus} />
+      ) : (
+        fulfillmentStatus(r.fulfillmentStatus)
+      ),
+  },
+  {
+    id: 'shipFrom',
+    label: 'Ship from',
+    sortValue: (r) => r.shipFromLocationName,
+    render: (r) => r.shipFromLocationName ?? '—',
+  },
+  {
+    id: 'orderDate',
+    label: 'Order date',
+    sortValue: (r) => r.orderDate,
+    render: (r) => fmtDate(r.orderDate),
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (r) => r.customerName,
+    render: (r) =>
+      r.customerId ? (
+        <Link href={`/customers/${r.customerId}`}>{r.customerName ?? '—'}</Link>
+      ) : (
+        (r.customerName ?? '—')
+      ),
+  },
+  {
+    id: 'line',
+    label: 'Line',
+    className: 'muted',
+    sortValue: (r) => r.lineDescription,
+    render: (r) => (
+      <>
+        {r.lineDescription}
+        {r.lineType !== 'stock' && <> · {titleCase(r.lineType)}</>}
+      </>
+    ),
+  },
+  {
+    id: 'linkedTransfer',
+    label: 'Linked transfer',
+    sortValue: (r) => r.linkedTransferNumber,
+    render: (r) =>
+      r.linkedTransferId ? (
+        <Link href={`/transfers/${r.linkedTransferId}`}>{r.linkedTransferNumber}</Link>
+      ) : (
+        '—'
+      ),
+  },
+  {
+    id: 'linkedTransferQty',
+    label: 'Linked transfer qty',
+    num: true,
+    sortValue: (r) => (r.linkedTransferId ? r.linkedTransferQuantity : null),
+    render: (r) => (r.linkedTransferId ? r.linkedTransferQuantity : '—'),
+  },
+  {
+    id: 'linkedPo',
+    label: 'Linked PO',
+    sortValue: (r) => r.linkedPurchaseOrderNumber,
+    render: (r) =>
+      r.linkedPurchaseOrderId ? (
+        <Link href={`/purchase-orders/${r.linkedPurchaseOrderId}`}>
+          {r.linkedPurchaseOrderNumber}
+          <span className="muted"> · {r.linkedPurchaseOrderQuantity}</span>
+        </Link>
+      ) : (
+        '—'
+      ),
+  },
+];
+
 /** STORIS Open Orders tab (A21 D6). */
 export function OpenOrdersPanel({
   productId,
@@ -57,6 +187,11 @@ export function OpenOrdersPanel({
   const blocked = Boolean(locationId) && !useFulfillment && !useSelling;
   const { data, error, loading } = useSection<{ strip: Strip; rows: OpenOrderRow[] }>(
     blocked ? null : `/v1/products/${productId}/activity/open-orders?${qs.toString()}`,
+  );
+  const cols = useListColumns(
+    'products-activity-open-orders',
+    OPEN_ORDER_COLUMNS,
+    data?.rows ?? null,
   );
   return (
     <Stack>
@@ -110,83 +245,22 @@ export function OpenOrdersPanel({
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Order number</th>
-                  <th>Order type</th>
-                  <th>Selling location</th>
-                  <th>Fulfillment date</th>
-                  <th className="num">Order quantity</th>
-                  <th className="num">Reserved</th>
-                  <th>Fulfillment type</th>
-                  <th>Fulfillment status</th>
-                  <th>Ship from</th>
-                  <th>Order date</th>
-                  <th>Customer</th>
-                  <th>Line</th>
-                  <th>Linked transfer</th>
-                  <th className="num">Linked transfer qty</th>
-                  <th>Linked PO</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products-activity-open-orders" />
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={15}>No open orders for this product.</TableEmpty>
+                  <TableEmpty colSpan={cols.ordered.length}>
+                    No open orders for this product.
+                  </TableEmpty>
                 )}
-                {data?.rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.lineId} data-testid="activity-open-order-row">
-                    <td>
-                      <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>
-                    </td>
-                    <td>{ORDER_TYPE_LABEL[r.orderType]}</td>
-                    <td>{r.sellingLocationName ?? '—'}</td>
-                    <td>{fmtDate(r.fulfillmentDate)}</td>
-                    <td className="num">{r.orderQuantity}</td>
-                    <td className="num">{r.reservedQuantity}</td>
-                    <td>{titleCase(r.fulfillmentType)}</td>
-                    <td>
-                      {r.fulfillmentStatus && r.fulfillmentStatus !== 'will_call' ? (
-                        <StatusBadge status={r.fulfillmentStatus} />
-                      ) : (
-                        fulfillmentStatus(r.fulfillmentStatus)
-                      )}
-                    </td>
-                    <td>{r.shipFromLocationName ?? '—'}</td>
-                    <td>{fmtDate(r.orderDate)}</td>
-                    <td>
-                      {r.customerId ? (
-                        <Link href={`/customers/${r.customerId}`}>{r.customerName ?? '—'}</Link>
-                      ) : (
-                        (r.customerName ?? '—')
-                      )}
-                    </td>
-                    <td className="muted">
-                      {r.lineDescription}
-                      {r.lineType !== 'stock' && <> · {titleCase(r.lineType)}</>}
-                    </td>
-                    <td>
-                      {r.linkedTransferId ? (
-                        <Link href={`/transfers/${r.linkedTransferId}`}>
-                          {r.linkedTransferNumber}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="num">{r.linkedTransferId ? r.linkedTransferQuantity : '—'}</td>
-                    <td>
-                      {r.linkedPurchaseOrderId ? (
-                        <Link href={`/purchase-orders/${r.linkedPurchaseOrderId}`}>
-                          {r.linkedPurchaseOrderNumber}
-                          <span className="muted"> · {r.linkedPurchaseOrderQuantity}</span>
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

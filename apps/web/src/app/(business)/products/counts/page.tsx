@@ -12,17 +12,22 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface Location {
@@ -43,6 +48,57 @@ interface CountRow {
   countedCount: number;
 }
 
+const COUNT_COLUMNS: ColumnDef<CountRow>[] = [
+  {
+    id: 'date',
+    label: 'Date',
+    sortValue: (c) => c.countDate,
+    render: (c) => new Date(`${c.countDate}T00:00:00`).toLocaleDateString(),
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (c) => c.locationName,
+    render: (c) => c.locationName,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (c) => c.status,
+    render: (c) => <StatusBadge status={c.status} />,
+  },
+  {
+    id: 'progress',
+    label: 'Progress',
+    num: true,
+    sortValue: (c) => (c.lineCount > 0 ? c.countedCount / c.lineCount : 0),
+    render: (c) => `${c.countedCount}/${c.lineCount} counted`,
+  },
+  {
+    id: 'posted',
+    label: 'Posted',
+    sortValue: (c) => c.postedAt,
+    render: (c) => (c.postedAt ? new Date(c.postedAt).toLocaleString() : '—'),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (c) => (
+      <LinkButton
+        size="sm"
+        variant="ghost"
+        href={`/products/counts/${c.id}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function PhysicalCountsPage() {
   const router = useRouter();
   const list = useCursorList<CountRow>('/v1/inventory/counts');
@@ -51,6 +107,7 @@ export default function PhysicalCountsPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counts = list.rows;
+  const cols = useListColumns('products-counts', COUNT_COLUMNS, counts);
 
   useEffect(() => {
     void list.load();
@@ -133,48 +190,26 @@ export default function PhysicalCountsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                    <th className="num">Progress</th>
-                    <th>Posted</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="products-counts" />
                 </thead>
                 <tbody>
                   {counts.length === 0 && (
-                    <TableEmpty colSpan={6}>No physical counts yet. Start one above.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>
+                      No physical counts yet. Start one above.
+                    </TableEmpty>
                   )}
-                  {counts.map((c) => (
+                  {cols.sorted.map((c) => (
                     <tr
                       key={c.id}
                       className="cursor-pointer"
                       onClick={() => router.push(`/products/counts/${c.id}`)}
                     >
-                      <td>{new Date(`${c.countDate}T00:00:00`).toLocaleDateString()}</td>
-                      <td>{c.locationName}</td>
-                      <td>
-                        <StatusBadge status={c.status} />
-                      </td>
-                      <td className="num">
-                        {c.countedCount}/{c.lineCount} counted
-                      </td>
-                      <td>{c.postedAt ? new Date(c.postedAt).toLocaleString() : '—'}</td>
-                      <td className="actions">
-                        <LinkButton
-                          size="sm"
-                          variant="ghost"
-                          href={`/products/counts/${c.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Open
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={c} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <LoadMore state={list} noun="counts" />
           </Card>

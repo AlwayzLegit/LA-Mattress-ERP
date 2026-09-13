@@ -4,12 +4,17 @@ import Link from 'next/link';
 import { useState } from 'react';
 import {
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LoadingRows,
+  ResetColumns,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { fmtDate, LocationPicker, SectionError, StripTiles, titleCase, useSection } from './kit';
 import type { SerialRow, Strip } from './types';
@@ -22,6 +27,63 @@ const STATUS_LABEL: Record<string, string> = {
   returned: 'Returned',
   in_service: 'In service',
 };
+
+const SERIAL_COLUMNS: ColumnDef<SerialRow>[] = [
+  {
+    id: 'serial',
+    label: 'Serial / reference',
+    sortValue: (r) => r.serial,
+    render: (r) => <code>{r.serial}</code>,
+  },
+  {
+    id: 'sku',
+    label: 'SKU',
+    sortValue: (r) => r.sku,
+    render: (r) => <code>{r.sku ?? '—'}</code>,
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName,
+    render: (r) => r.locationName ?? '—',
+  },
+  {
+    id: 'received',
+    label: 'Received date',
+    sortValue: (r) => r.receivedAt,
+    render: (r) => fmtDate(r.receivedAt),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => STATUS_LABEL[r.status] ?? titleCase(r.status),
+    render: (r) => STATUS_LABEL[r.status] ?? titleCase(r.status),
+  },
+  {
+    id: 'storage',
+    label: 'Storage location',
+    sortValue: (r) => r.storageBinCode,
+    render: (r) => r.storageBinCode ?? '—',
+  },
+  {
+    id: 'order',
+    label: 'Order number',
+    sortValue: (r) => r.orderNumber,
+    render: (r) => (r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link> : '—'),
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (r) => r.customerName,
+    render: (r) => r.customerName ?? '—',
+  },
+  {
+    id: 'specialOrder',
+    label: 'Special-order detail',
+    sortValue: (r) => r.specialOrder,
+    render: (r) => r.specialOrder ?? '—',
+  },
+];
 
 /** STORIS Serial/Reference tab (A21 D10). */
 export function SerialsPanel({
@@ -37,6 +99,7 @@ export function SerialsPanel({
     serialTracked: boolean;
     rows: SerialRow[];
   }>(`/v1/products/${productId}/activity/serials${locationId ? `?locationId=${locationId}` : ''}`);
+  const cols = useListColumns('products-activity-serials', SERIAL_COLUMNS, data?.rows ?? null);
   return (
     <Stack>
       <Toolbar>
@@ -74,43 +137,22 @@ export function SerialsPanel({
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Serial / reference</th>
-                  <th>SKU</th>
-                  <th>Location</th>
-                  <th>Received date</th>
-                  <th>Status</th>
-                  <th>Storage location</th>
-                  <th>Order number</th>
-                  <th>Customer</th>
-                  <th>Special-order detail</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products-activity-serials" />
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={9}>No pieces on hand at this location.</TableEmpty>
+                  <TableEmpty colSpan={cols.ordered.length}>
+                    No pieces on hand at this location.
+                  </TableEmpty>
                 )}
-                {data?.rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="activity-serial-row">
-                    <td>
-                      <code>{r.serial}</code>
-                    </td>
-                    <td>
-                      <code>{r.sku ?? '—'}</code>
-                    </td>
-                    <td>{r.locationName ?? '—'}</td>
-                    <td>{fmtDate(r.receivedAt)}</td>
-                    <td>{STATUS_LABEL[r.status] ?? titleCase(r.status)}</td>
-                    <td>{r.storageBinCode ?? '—'}</td>
-                    <td>
-                      {r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link> : '—'}
-                    </td>
-                    <td>{r.customerName ?? '—'}</td>
-                    <td>{r.specialOrder ?? '—'}</td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>
