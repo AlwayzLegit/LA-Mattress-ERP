@@ -181,12 +181,14 @@ export default function MerchandisingPage() {
     void load();
     void (async () => {
       try {
+        type Lookup = NamedRow[] | { data?: NamedRow[]; flat?: NamedRow[] };
         const [v, c, b] = await Promise.all([
-          api<NamedRow[] | { data: NamedRow[] }>('/v1/vendors'),
-          api<NamedRow[] | { data: NamedRow[] }>('/v1/categories'),
-          api<NamedRow[] | { data: NamedRow[] }>('/v1/brands'),
+          api<Lookup>('/v1/vendors'),
+          api<Lookup>('/v1/categories'),
+          api<Lookup>('/v1/brands'),
         ]);
-        const arr = (x: NamedRow[] | { data: NamedRow[] }) => (Array.isArray(x) ? x : x.data);
+        // Vendors and brands come back as arrays; categories as `{ flat, tree }`.
+        const arr = (x: Lookup) => (Array.isArray(x) ? x : (x.data ?? x.flat ?? []));
         setVendors(arr(v));
         setCategories(arr(c));
         setBrands(arr(b));

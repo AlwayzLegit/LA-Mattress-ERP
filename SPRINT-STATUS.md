@@ -5598,6 +5598,15 @@ have a list." Shared primitive `components/ui/columns.tsx` (`useListColumns`,
 `jetnine.columns.<screen>`, client-side sort unless the screen sorts through the API).
 Converted by hand: Orders (server sort), Customers, At risk, Returns, Exchanges, Transfers,
 Purchase orders; Products migrated onto the primitive (saved order carried over from the
-old key). The remaining list screens follow in the same PR. README §3.3 amended,
+old key). Then every other list screen — 80 lists across Products sub-pages and activity
+panels, Deliveries, Manifests, Replenishment, GL, Marketing, customer / salesperson /
+gift-card / GL-account / sale / service detail lists, Salespeople, Reports (index, builder,
+written sales, transfers by location, merchandising, cash drawer balancing) and Settings
+(API keys, sessions, webhooks, discounts, tax classes). README §3.3 amended,
 `PHASE_NOTES.md` amendment. Tests: `columns.test.ts` (4); Chromium on `/dev/orders` and
-`/dev/products`: sort click, drag, persistence, reset.
+`/dev/products`: sort click, drag, persistence, reset; then a logged-in Chromium sweep of
+all 48 list routes against a seeded local stack (no page errors, headers carry
+`<screen>-col-<id>` / `<screen>-sort-<id>` test ids, first sort click sets `aria-sort`).
+That sweep caught a pre-existing crash: Reports → Merchandising read `/v1/categories` as
+an array-or-`{data}` while it returns `{ flat, tree }`, so the filter lookup was
+`undefined` and the page threw on `.map` — fixed in the same PR.
