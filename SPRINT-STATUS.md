@@ -5545,3 +5545,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] **Local guided chat handoff (2026-09-13):** Preference/next-step capture saved as private notes, plus editable sales replies. Typecheck/lint pass; browser save and visitor-history exclusion verified.
 
 - [x] **Chat redesign source alignment (2026-09-13):** Applied current upstream design tokens/fonts, flat queue and semantic status badges. Typecheck/lint and local rendering pass. Authenticated live visual comparison remains pending sign-in.
+
+- [x] **Chat specialist help Phase 1 (2026-09-13):** Scoped help requests, available specialist/store/workload picker, request/accept/finish/cancel and ERP-wide attention cues. Customer ownership unchanged. Migration 0106, 34 integration tests, builds/typecheck/lint and local browser state transitions verified.

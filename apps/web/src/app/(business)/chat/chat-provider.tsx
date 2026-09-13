@@ -2,12 +2,14 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useChatHelp } from './use-chat-help';
 import { useChatAvailability } from './use-chat-availability';
 import { useLiveChatEngine } from './use-live-chat';
 import styles from './chat.module.css';
 const ChatContext = createContext<
   | (ReturnType<typeof useLiveChatEngine> & {
       availability: ReturnType<typeof useChatAvailability>;
+      help: ReturnType<typeof useChatHelp>;
     })
   | null
 >(null);
@@ -19,7 +21,8 @@ export function useLiveChat() {
 export function ChatProvider({ children }: { children: ReactNode }) {
   const engine = useLiveChatEngine();
   const availability = useChatAvailability();
-  const chat = { ...engine, availability };
+  const help = useChatHelp(['live', 'reconnecting'].includes(engine.connection), engine.notifyHelp);
+  const chat = { ...engine, availability, help };
   const pathname = usePathname();
   const waiting = chat.conversations.filter(
     (row) => !row.assignedMembershipId && ['queued', 'open'].includes(row.status),
@@ -41,11 +44,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }}
             >
               <strong>
-                {count
-                  ? `${count} unread chat${count === 1 ? '' : 's'}`
-                  : waiting.length
-                    ? `${waiting.length} waiting for help`
-                    : 'Chat inbox'}
+                {help.requests.some(
+                  (row) => row.incoming && ['requested', 'accepted'].includes(row.status),
+                )
+                  ? 'Team help needs attention'
+                  : count
+                    ? `${count} unread chat${count === 1 ? '' : 's'}`
+                    : waiting.length
+                      ? `${waiting.length} waiting for help`
+                      : 'Chat inbox'}
               </strong>
               <span>{chat.connection === 'live' ? 'Open inbox →' : 'Reconnecting…'}</span>
             </Link>

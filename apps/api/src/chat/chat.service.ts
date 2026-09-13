@@ -10,6 +10,8 @@ import { or, and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext, type DrizzleTransaction } from '@jetnine/db';
 import {
+  chatHelpRequestSchema,
+  chatHelpActionSchema,
   chatPushSubscriptionSchema,
   chatSettingsSchema,
   chatContextSchema,
@@ -254,6 +256,224 @@ export class ChatService {
           templates: settings.config.templates,
           version: row.version,
         };
+      },
+    );
+  }
+
+  async helpOptions(tenant: RequestTenantContext, id: string) {
+    this.uuid(id);
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, true);
+        const conversation = await this.staffConversation(tx, tenant, id);
+        if (conversation.assignedMembershipId !== tenant.membershipId)
+          throw new ForbiddenException('Only the chat owner can request help');
+        const agents = await this.eligibleAgents(tx, tenant.businessId!, conversation.locationId);
+        return Promise.all(
+          agents
+            .filter((a) => a.id !== tenant.membershipId)
+            .map(async (agent) => {
+              const locations = await tx
+                .select({ name: schema.locations.name })
+                .from(schema.membershipLocationScopes)
+                .innerJoin(
+                  schema.locations,
+                  and(
+                    eq(schema.locations.id, schema.membershipLocationScopes.locationId),
+                    eq(schema.locations.businessId, tenant.businessId!),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(schema.membershipLocationScopes.businessId, tenant.businessId!),
+                    eq(schema.membershipLocationScopes.membershipId, agent.id),
+                  ),
+                );
+              return { ...agent, stores: locations.map((l) => l.name) };
+            }),
+        );
+      },
+    );
+  }
+  async helpInbox(tenant: RequestTenantContext) {
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, true);
+        const h = schema.chatHelpRequests;
+        const rows = await tx
+          .select()
+          .from(h)
+          .where(
+            and(
+              eq(h.businessId, tenant.businessId!),
+              or(eq(h.helperId, tenant.membershipId!), eq(h.requesterId, tenant.membershipId!)),
+            ),
+          )
+          .orderBy(
+            sql`case when ${h.status} in ('requested','accepted') then 0 else 1 end`,
+            sql`${h.createdAt} desc`,
+          )
+          .limit(200);
+        const people = await tx
+          .select({ id: schema.memberships.id, name: schema.users.name })
+          .from(schema.memberships)
+          .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+          .where(eq(schema.memberships.businessId, tenant.businessId!));
+        return rows.map((row) => ({
+          ...row,
+          incoming: row.helperId === tenant.membershipId,
+          requesterName: people.find((p) => p.id === row.requesterId)?.name || 'Teammate',
+          helperName: people.find((p) => p.id === row.helperId)?.name || 'Teammate',
+        }));
+      },
+    );
+  }
+  async requestHelp(tenant: RequestTenantContext, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatHelpRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Choose a specialist and write a question');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, true);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
+        const conversation = await this.staffConversation(tx, tenant, id);
+        if (
+          conversation.assignedMembershipId !== tenant.membershipId ||
+          ['resolved', 'spam'].includes(conversation.status)
+        )
+          throw new ForbiddenException('Only the current owner of an active chat can request help');
+        const h = schema.chatHelpRequests;
+        const [existing] = await tx
+          .select()
+          .from(h)
+          .where(and(eq(h.businessId, tenant.businessId!), eq(h.id, parsed.data.id)));
+        if (existing) {
+          if (
+            existing.requesterId !== tenant.membershipId ||
+            existing.conversationId !== id ||
+            existing.helperId !== parsed.data.helperId ||
+            existing.question !== parsed.data.question
+          )
+            throw new ConflictException('Request identifier already used');
+          return existing;
+        }
+        if (parsed.data.helperId === tenant.membershipId)
+          throw new BadRequestException('Choose another specialist');
+        const agent = (
+          await this.eligibleAgents(tx, tenant.businessId!, conversation.locationId)
+        ).find((a) => a.id === parsed.data.helperId);
+        if (!agent?.available || agent.workload >= agent.capacity)
+          throw new ConflictException('Specialist is away or at capacity. Choose someone else.');
+        const [active] = await tx
+          .select()
+          .from(h)
+          .where(
+            and(
+              eq(h.businessId, tenant.businessId!),
+              eq(h.conversationId, id),
+              eq(h.helperId, agent.id),
+              inArray(h.status, ['requested', 'accepted']),
+            ),
+          );
+        if (active)
+          throw new ConflictException('This specialist already has an open request for this chat');
+        const [created] = await tx
+          .insert(h)
+          .values({
+            id: parsed.data.id,
+            businessId: tenant.businessId!,
+            conversationId: id,
+            requesterId: tenant.membershipId!,
+            helperId: agent.id,
+            question: parsed.data.question,
+          })
+          .returning();
+        await this.audit(tx, tenant, 'chat.help_requested', id, {
+          requestId: created!.id,
+          helperId: agent.id,
+        });
+        return created;
+      },
+    );
+  }
+  async updateHelp(tenant: RequestTenantContext, id: string, body: unknown) {
+    this.uuid(id);
+    const parsed = chatHelpActionSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Invalid help action');
+    return withDrizzleTenantContext(
+      this.db,
+      { businessId: tenant.businessId, userId: tenant.userId },
+      async (tx) => {
+        await this.requireStaff(tx, tenant, true);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tenant.businessId!}))`);
+        const h = schema.chatHelpRequests;
+        const [row] = await tx
+          .select()
+          .from(h)
+          .where(and(eq(h.businessId, tenant.businessId!), eq(h.id, id)))
+          .for('update');
+        if (
+          !row ||
+          (row.helperId !== tenant.membershipId && row.requesterId !== tenant.membershipId)
+        )
+          throw new NotFoundException('Help request unavailable');
+        if (row.version !== parsed.data.version)
+          throw new ConflictException('Request changed. Refresh and retry.');
+        const { action } = parsed.data;
+        if (
+          action === 'cancel'
+            ? row.requesterId !== tenant.membershipId
+            : row.helperId !== tenant.membershipId
+        )
+          throw new ForbiddenException(
+            'Only the designated specialist can accept or finish; only the requester can cancel',
+          );
+        if (
+          action === 'accept'
+            ? row.status !== 'requested'
+            : action === 'finish'
+              ? row.status !== 'accepted'
+              : !['requested', 'accepted'].includes(row.status)
+        )
+          throw new ConflictException('This request is no longer in that state');
+        if (action !== 'cancel') {
+          const [conversation] = await tx
+            .select()
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.businessId, tenant.businessId!),
+                eq(conversations.id, row.conversationId),
+              ),
+            )
+            .for('share');
+          if (
+            !conversation ||
+            conversation.assignedMembershipId !== row.requesterId ||
+            ['resolved', 'spam'].includes(conversation.status)
+          )
+            throw new ConflictException(
+              'The chat owner or status changed. Ask the requester to cancel this request.',
+            );
+        }
+        const [updated] = await tx
+          .update(h)
+          .set({
+            status:
+              action === 'accept' ? 'accepted' : action === 'finish' ? 'finished' : 'cancelled',
+            version: row.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(h.businessId, tenant.businessId!), eq(h.id, id)))
+          .returning();
+        await this.audit(tx, tenant, 'chat.help_' + action, row.conversationId, { requestId: id });
+        return updated;
       },
     );
   }

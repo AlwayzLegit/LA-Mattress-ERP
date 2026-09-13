@@ -156,6 +156,37 @@ export class ChatStaffController {
     @Inject(ChatService) private readonly chat: ChatService,
     @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
+
+  @Get('help-inbox')
+  @RequirePermission('chat.reply')
+  @Header('Cache-Control', 'no-store')
+  helpInbox(@CurrentTenant() tenant: RequestTenantContext) {
+    return this.chat.helpInbox(tenant);
+  }
+  @Get(':id/help-options')
+  @RequirePermission('chat.reply')
+  @Header('Cache-Control', 'no-store')
+  helpOptions(@CurrentTenant() tenant: RequestTenantContext, @Param('id') id: string) {
+    return this.chat.helpOptions(tenant, id);
+  }
+  @Post(':id/help')
+  @RequirePermission('chat.reply')
+  requestHelp(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.requestHelp(tenant, id, body);
+  }
+  @Post('help/:id')
+  @RequirePermission('chat.reply')
+  updateHelp(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.chat.updateHelp(tenant, id, body);
+  }
   @Get('customer-candidates')
   @RequirePermission('chat.manage', 'customers.view')
   candidates(@CurrentTenant() tenant: RequestTenantContext, @Query() query: unknown) {

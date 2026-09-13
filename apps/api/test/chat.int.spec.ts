@@ -124,6 +124,91 @@ afterAll(async () => {
 });
 
 describe('chat persistence foundation on Postgres', () => {
+  it('keeps help private, preserves ownership, and restricts request transitions to participants', async () => {
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email: 'helper-' + randomUUID() + '@example.test', name: 'Test specialist' })
+      .returning();
+    const [role] = await db
+      .insert(schema.roles)
+      .values({ businessId, name: 'Help test specialist' })
+      .returning();
+    await db.insert(schema.rolePermissions).values(
+      ['chat.view_assigned', 'chat.reply'].map((permission) => ({
+        roleId: role!.id,
+        permission,
+      })),
+    );
+    const [member] = await db
+      .insert(schema.memberships)
+      .values({ businessId, userId: user!.id, roleId: role!.id, status: 'active' })
+      .returning();
+    const helper = {
+      ...staff,
+      userId: user!.id,
+      membershipId: member!.id,
+      roleId: role!.id,
+      permissions: new Set(['chat.view_assigned', 'chat.reply']),
+    };
+    await service.availability(helper, { available: true, capacity: 5 });
+    const created = await service.startConversation(auth, randomUUID(), input());
+    const id = created.conversationId;
+    await db
+      .update(schema.chatConversations)
+      .set({ assignedMembershipId: staff.membershipId!, status: 'open' })
+      .where(eq(schema.chatConversations.id, id));
+    const request = {
+      id: randomUUID(),
+      helperId: member!.id,
+      question: 'Internal help: check showroom display',
+    };
+    const help = await service.requestHelp(staff, id, request);
+    expect((await service.requestHelp(staff, id, request))!.id).toBe(help!.id);
+    await expect(service.requestHelp(staff, id, { ...request, id: randomUUID() })).rejects.toThrow(
+      'already has an open request',
+    );
+    expect(
+      (await service.helpInbox(helper)).some((row) => row.id === help!.id && row.incoming),
+    ).toBe(true);
+    await expect(service.staffHistory(helper, id, {})).rejects.toThrow();
+    await expect(
+      service.updateHelp(staff, help!.id, { action: 'accept', version: 1 }),
+    ).rejects.toThrow();
+    await expect(
+      service.updateHelp(helper, help!.id, { action: 'finish', version: 1 }),
+    ).rejects.toThrow();
+    const accepted = await service.updateHelp(helper, help!.id, { action: 'accept', version: 1 });
+    expect(accepted!.status).toBe('accepted');
+    await expect(
+      service.updateHelp(helper, help!.id, { action: 'finish', version: 1 }),
+    ).rejects.toThrow('changed');
+    expect(
+      (await service.updateHelp(helper, help!.id, { action: 'finish', version: 2 }))!.status,
+    ).toBe('finished');
+    const [conversation] = await db
+      .select()
+      .from(schema.chatConversations)
+      .where(eq(schema.chatConversations.id, id));
+    expect(conversation!.assignedMembershipId).toBe(staff.membershipId);
+    expect(JSON.stringify(await service.visitorHistory(auth, id, {}))).not.toContain(
+      request.question,
+    );
+    const otherRows = await withDrizzleTenantContext(db, { businessId: otherBusinessId }, (tx) =>
+      tx.select().from(schema.chatHelpRequests),
+    );
+    expect(otherRows.some((row) => row.id === help!.id)).toBe(false);
+    await service.availability(helper, { available: false, capacity: 5 });
+    await expect(service.requestHelp(staff, id, { ...request, id: randomUUID() })).rejects.toThrow(
+      'away or at capacity',
+    );
+    await db
+      .update(schema.chatConversations)
+      .set({ status: 'resolved' })
+      .where(eq(schema.chatConversations.id, id));
+    await db.delete(schema.memberships).where(eq(schema.memberships.id, member!.id));
+    await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    await expect(service.helpInbox(helper)).rejects.toThrow();
+  });
   it('reclaims abandoned leases and rejects completion from stale workers', async () => {
     await db
       .update(schema.chatOutbox)

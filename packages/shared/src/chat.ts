@@ -161,3 +161,17 @@ export const chatLinkSchema = z
     version: z.number().int().positive(),
   })
   .strict();
+
+export const chatHelpRequestSchema = z
+  .object({
+    id: z.string().uuid(),
+    helperId: z.string().uuid(),
+    question: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+export const chatHelpActionSchema = z
+  .object({
+    action: z.enum(['accept', 'finish', 'cancel']),
+    version: z.number().int().positive(),
+  })
+  .strict();

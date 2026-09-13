@@ -2,6 +2,8 @@ import { Controller, Get } from '@nestjs/common';
 import { z } from 'zod';
 import {
   CHAT_CONTRACT_VERSION,
+  chatHelpRequestSchema,
+  chatHelpActionSchema,
   chatMessageInputSchema,
   chatActivitySchema,
   chatFollowupSchema,
@@ -77,6 +79,31 @@ export const chatOpenApi = {
     },
   },
   paths: {
+    '/v1/chat/conversations/help-inbox': {
+      get: read(
+        'Private requests addressed to or created by the current member. Requires chat.reply; no conversation access is granted.',
+      ),
+    },
+    '/v1/chat/conversations/{id}/help-options': {
+      parameters: historyParameters.slice(0, 1),
+      get: read('Chat owner only. Eligible specialists, availability, workload and store scopes.'),
+    },
+    '/v1/chat/conversations/{id}/help': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Current owner requests private help without changing assignment. Stable client id deduplicates retries.',
+        z.toJSONSchema(chatHelpRequestSchema),
+      ),
+    },
+    '/v1/chat/conversations/help/{id}': {
+      parameters: historyParameters.slice(0, 1),
+      post: mutation(
+        staffSecurity,
+        'Helper accepts/finishes; requester cancels. Requires current version and chat.reply.',
+        z.toJSONSchema(chatHelpActionSchema),
+      ),
+    },
     '/v1/chat/visitor/options': {
       get: {
         ...read('Public availability and showroom choices; no guest session required.'),

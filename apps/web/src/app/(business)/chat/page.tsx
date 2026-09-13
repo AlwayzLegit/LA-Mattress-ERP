@@ -7,6 +7,7 @@ import { Form, FormRootError, useZodForm } from '@/components/form/form';
 import { Button, PageHeader } from '@/components/ui';
 import styles from './chat.module.css';
 import { AdminControls } from './admin-controls';
+import { AskForHelp, TeamHelp } from './team-help';
 import { SalesHandoff } from './sales-handoff';
 import { ContextPanel } from './context-panel';
 import { TeamControls } from './team-controls';
@@ -146,6 +147,7 @@ export default function ChatPage() {
           </div>
         </details>
       </div>
+      <TeamHelp />
       <div className={styles.inboxStatus}>
         <strong>
           {waitingCount
@@ -573,6 +575,9 @@ function ConversationPanel({
             </div>
           </details>
         </div>
+        {conversation?.assignedToMe && !['resolved', 'spam'].includes(conversation.status) && (
+          <AskForHelp id={id} />
+        )}
         <FollowupPanel id={id} version={conversation?.version} />
         {conversation?.visitorTyping && (
           <p role="status" className={styles.arrival}>

@@ -275,3 +275,34 @@ export const chatSettings = pgTable('chat_settings', {
   version: integer('version').notNull().default(1),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const chatHelpRequests = pgTable(
+  'chat_help_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: businessId(),
+    conversationId: uuid('conversation_id').notNull(),
+    requesterId: uuid('requester_id').notNull(),
+    helperId: uuid('helper_id').notNull(),
+    question: text('question').notNull(),
+    status: text('status').notNull().default('requested'),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    conversationFk: foreignKey({
+      columns: [t.businessId, t.conversationId],
+      foreignColumns: [chatConversations.businessId, chatConversations.id],
+    }).onDelete('cascade'),
+    recipientIndex: index('chat_help_recipient').on(t.businessId, t.helperId, t.status),
+    activeUnique: uniqueIndex('chat_help_active')
+      .on(t.businessId, t.conversationId, t.helperId)
+      .where(sql`${t.status} in ('requested','accepted')`),
+    stateCheck: check(
+      'chat_help_state',
+      sql`${t.status} in ('requested','accepted','finished','cancelled')`,
+    ),
+    distinctPeople: check('chat_help_people', sql`${t.requesterId} <> ${t.helperId}`),
+  }),
+);

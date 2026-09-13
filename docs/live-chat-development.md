@@ -365,3 +365,31 @@ older shell awaits upstream reconciliation. No shared shell or global stylesheet
 was replaced. Web typecheck and changed-file lint pass; local browser rendering
 checked. The live dashboard redirected to sign-in; authenticated visual comparison
 is still pending user sign-in. Deployment preparation is paused for that check.
+
+## Specialist help Phase 1 - September 13, 2026
+
+Migration 0106 adds tenant-isolated help requests linked to conversations.
+The current owner can choose an eligible available specialist, view their store
+scope and chat workload, and submit a private question. One active request per
+conversation/helper is allowed; stable request ids make creation retries safe.
+
+Team help lists only requests made by or addressed to the current member.
+The helper accepts then finishes; the requester can cancel. Version checks,
+fresh chat.reply permission checks and owner/status checks guard transitions.
+Assignment never changes, and requests grant no transcript/customer access.
+Questions do not enter visitor history, generic notification text or audit bodies.
+
+The ERP provider polls requests every three seconds while connected, shows a
+global attention cue, opens incoming requests in Team help, and uses enabled
+sound/desktop notifications. These are open-ERP alerts; closed-browser push
+for assistance requests is not implemented. Internal discussion/reply suggestions
+remain Phase 2. No actual staff access or production services were changed.
+
+Validation: shared/db/API builds, web typecheck, changed-file lint, 34 Postgres
+integration tests and migration drift check pass. Browser-created a synthetic
+request; the synthetic helper accepted/finished through the same service; the
+owner's browser reflected both transitions and retained customer ownership.
+Integration checks include private visitor history, tenant isolation, expired
+membership denial, unavailable helper rejection, duplicate requests and invalid
+or stale state transitions. Physical desktop notification delivery remains a
+staging check.

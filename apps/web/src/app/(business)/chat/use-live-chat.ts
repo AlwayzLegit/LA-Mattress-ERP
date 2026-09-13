@@ -43,6 +43,29 @@ export function useLiveChatEngine() {
     };
     source.start();
   }, []);
+  const notifyHelp = useCallback(() => {
+    beep();
+    if (
+      notificationRef.current &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted' &&
+      document.hidden
+    ) {
+      try {
+        const alert = new Notification('LA Mattress · Team help', {
+          body: 'A teammate help request needs your attention.',
+          tag: 'la-mattress-team-help',
+        });
+        alert.onclick = () => {
+          window.focus();
+          router.push('/chat');
+          alert.close();
+        };
+      } catch {
+        /* In-app help alerts remain available when desktop delivery is blocked. */
+      }
+    }
+  }, [beep, router]);
   const toggleSound = useCallback(async () => {
     if (loadingSound.current) return;
     if (soundRef.current) {
@@ -241,6 +264,7 @@ export function useLiveChatEngine() {
     [],
   );
   return {
+    notifyHelp,
     conversations,
     connection,
     unread,

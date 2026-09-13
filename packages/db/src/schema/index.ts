@@ -50,6 +50,7 @@ export const TENANT_SCOPED_TABLES = [
   'chat_push_deliveries',
   'chat_agents',
   'chat_settings',
+  'chat_help_requests',
   'order_attachments',
   'cash_pickup_receipts',
   'order_change_acks',
