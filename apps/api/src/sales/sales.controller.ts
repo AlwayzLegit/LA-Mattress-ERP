@@ -14,7 +14,16 @@ import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
-import { FIRMNESS_LEVELS, MATTRESS_SIZES, normalizeFirmness, normalizeSize } from '@jetnine/shared';
+import {
+  FIRMNESS_LEVELS,
+  MATTRESS_SIZES,
+  isCardBrand,
+  isCardMethod,
+  isFinancingMethod,
+  isFinancingTerm,
+  normalizeFirmness,
+  normalizeSize,
+} from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
@@ -53,6 +62,10 @@ interface LookupRow {
 
 interface PaymentInput {
   method?: 'cash' | 'card' | 'gift_card' | 'financing' | 'external_card' | 'check';
+  /** For card tenders: 'visa' | 'mastercard' | 'amex' | 'discover' | 'jcb' | 'diners' | 'other'. */
+  cardBrand?: string;
+  /** For financing tenders: the promo term signed — 6 | 12 | 15 | 18 | 24 | 36 | 48. */
+  financingMonths?: number;
   /** For 'financing': which provider approved it (Synchrony, Acima, …). */
   financingProvider?: string;
   /** For 'financing': the provider's approval/application reference. */
@@ -930,6 +943,26 @@ export class SalesController {
       if (p.method === 'financing' && !p.financingProvider) {
         throw new BadRequestException('financing payments need financingProvider');
       }
+      if (p.cardBrand !== undefined) {
+        if (!isCardMethod(p.method!)) {
+          throw new BadRequestException('cardBrand only applies to card payments');
+        }
+        if (!isCardBrand(p.cardBrand)) {
+          throw new BadRequestException(
+            'cardBrand must be one of: visa, mastercard, amex, discover, jcb, diners, other',
+          );
+        }
+      }
+      if (p.financingMonths !== undefined) {
+        if (!isFinancingMethod(p.method!)) {
+          throw new BadRequestException('financingMonths only applies to financing payments');
+        }
+        if (!Number.isInteger(p.financingMonths) || !isFinancingTerm(p.financingMonths)) {
+          throw new BadRequestException(
+            'financingMonths must be one of: 6, 12, 15, 18, 24, 36, 48',
+          );
+        }
+      }
       if (
         typeof p.amountCents !== 'number' ||
         !Number.isInteger(p.amountCents) ||
@@ -1109,6 +1142,8 @@ export class SalesController {
             processorRef: gcId ?? charge?.paymentIntentId ?? p.processorRef ?? null,
             financingProvider: p.method === 'financing' ? (p.financingProvider ?? null) : null,
             financingRef: p.method === 'financing' ? (p.financingRef ?? null) : null,
+            cardBrand: isCardMethod(p.method!) ? (p.cardBrand ?? null) : null,
+            financingMonths: isFinancingMethod(p.method!) ? (p.financingMonths ?? null) : null,
             status: 'succeeded',
           };
         }),

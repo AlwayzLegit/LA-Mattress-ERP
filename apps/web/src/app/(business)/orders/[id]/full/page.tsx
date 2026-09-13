@@ -5,7 +5,12 @@ import { Fragment, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, CreditCard, Lock, Printer, Share2, Truck } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatMoney } from '@jetnine/shared';
+import {
+  CARD_BRANDS,
+  FINANCING_TERM_MONTHS,
+  formatMoney,
+  isFinancingMethod,
+} from '@jetnine/shared';
 import { orderNextSteps } from '@/lib/order-next-steps';
 import { api, ApiError } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -95,6 +100,8 @@ interface OrderPayment {
   amountCents: number;
   status: string;
   processorRef: string | null;
+  cardBrand: string | null;
+  financingMonths: number | null;
   createdAt: string;
 }
 interface OrderDetail {
@@ -308,6 +315,10 @@ export default function OrderDetailPage() {
   const [addQty, setAddQty] = useState('1');
   const [payMethod, setPayMethod] = useState<(typeof TENDERS)[number]['value']>('card');
   const [payRef, setPayRef] = useState('');
+  /** Card tenders: brand subcategory — required before taking the payment. */
+  const [payCardBrand, setPayCardBrand] = useState('');
+  /** Synchrony/Acima tenders: months financed — required before taking the payment. */
+  const [payMonths, setPayMonths] = useState('');
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
@@ -695,14 +706,25 @@ export default function OrderDetailPage() {
       setError('Enter a payment amount.');
       return;
     }
+    // Subcategories the dashboards break tenders down by.
+    if (payMethod === 'card' && !payCardBrand) {
+      setError('Pick the card brand (Visa, Mastercard, …) before taking the payment.');
+      return;
+    }
+    if (isFinancingMethod(payMethod) && !payMonths) {
+      setError('Pick the months financed before taking the payment.');
+      return;
+    }
     await act('/payments', {
       method: payMethod,
       amountCents: cents,
+      ...(payMethod === 'card' ? { cardBrand: payCardBrand } : {}),
       // A20 Step 4 Financing: Synchrony / Acima carry the provider and
       // the account / approval number the API already stores.
       ...(payMethod === 'synchrony' || payMethod === 'acima'
         ? {
             financingProvider: payMethod,
+            financingMonths: Number(payMonths),
             ...(payRef.trim() ? { financingRef: payRef.trim() } : {}),
           }
         : payRef.trim()
@@ -711,6 +733,8 @@ export default function OrderDetailPage() {
     });
     setPayAmount('');
     setPayRef('');
+    setPayCardBrand('');
+    setPayMonths('');
   }
 
   if (error && !order) {
@@ -1471,7 +1495,14 @@ export default function OrderDetailPage() {
                       <tr key={p.id}>
                         <td>{new Date(p.createdAt).toLocaleString()}</td>
                         <td>{p.kind}</td>
-                        <td>{TENDERS.find((t) => t.value === p.method)?.label ?? p.method}</td>
+                        <td>
+                          {TENDERS.find((t) => t.value === p.method)?.label ?? p.method}
+                          {p.cardBrand
+                            ? ` · ${CARD_BRANDS.find((b) => b.value === p.cardBrand)?.label ?? p.cardBrand}`
+                            : p.financingMonths
+                              ? ` · ${p.financingMonths} mo`
+                              : ''}
+                        </td>
                         <td className="muted">{p.processorRef ?? '—'}</td>
                         <td>
                           <StatusBadge status={p.status} />
@@ -1517,6 +1548,38 @@ export default function OrderDetailPage() {
                       data-testid="payment-amount"
                     />
                   </Field>
+                  {payMethod === 'card' && (
+                    <Field label="Card brand">
+                      <Select
+                        value={payCardBrand}
+                        onChange={(e) => setPayCardBrand(e.target.value)}
+                        data-testid="payment-card-brand"
+                      >
+                        <option value="">Pick brand…</option>
+                        {CARD_BRANDS.map((b) => (
+                          <option key={b.value} value={b.value}>
+                            {b.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+                  {(payMethod === 'synchrony' || payMethod === 'acima') && (
+                    <Field label="Months financed">
+                      <Select
+                        value={payMonths}
+                        onChange={(e) => setPayMonths(e.target.value)}
+                        data-testid="payment-months"
+                      >
+                        <option value="">Pick term…</option>
+                        {FINANCING_TERM_MONTHS.map((m) => (
+                          <option key={m} value={m}>
+                            {m} months
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
                   {payMethod !== 'cash' && (
                     <Field
                       label={
