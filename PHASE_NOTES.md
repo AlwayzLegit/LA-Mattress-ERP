@@ -292,6 +292,18 @@ lives in the ops settings registry like every other operational knob.
   implicit single-warehouse step stays client-side), and the `order.create`
   audit row carries `takeWithOffStore` when a take-with line is sourced from another store
   (allowed, on the record). Reservations already use `line.source_location_id`.
+- _2026-09-13 amendment (owner: "when in sales you go to add a product make sure for everyone
+  from warehouse is default")_ — production still opened Add Product on the signed-in store:
+  the rule above is right, but migration 0066 only added `location_type` with the default
+  `store` and nothing ever marked the location the business calls "Warehouse", and no
+  default stock source was configured, so steps 2 and 3 found nothing and step 4 fell back to
+  the store. Migration `0104_warehouse_source_default` does the handoff's step 3: it marks the
+  location named Warehouse (case-insensitive, per tenant) as a warehouse and, where a business
+  then has exactly one active warehouse and no default of its own, sets
+  `ops.defaultSourceLocationId` to it — so the picker and every untouched delivery / pickup
+  line read "From Warehouse — warehouse" at every store, for every member. Take-with lines
+  still follow the order's Store (Change B). `packages/db/test/warehouse-default.test.ts`
+  replays the migration over production-shaped fixtures.
 - **Guards and states** — `$0.00 is intentional` checkbox blocks Record and Complete until
   ticked; Complete says "Complete sale" / "Complete with balance" with the hint naming what
   is collected at the door; completion locks every control, flips the chip to Scheduled,

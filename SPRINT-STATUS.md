@@ -5712,3 +5712,17 @@ validate on run 3): 1,948/1,948 SKUs filed, 364 As-Is siblings filed with their 
 product, 339 products moved out of stray categories, 8 code categories renamed, 35
 subcategories created, 3 legacy (MATT, RF, PILLOW) + 76 stray categories deleted,
 0 strays kept. The Products category picker now lists only the 10 × 35 tree.
+
+### Checkpoint — 2026-09-13 (Add Product: From defaults to the warehouse for everyone)
+
+Owner (screenshot of Add Product opening on "From Koreatown — this store"): "when in sales you
+go to add a product make sure for everyone from warehouse is default." The Phase 4 rule
+already prefers the business default source, then the single warehouse, then the store — but
+on production nothing was typed `warehouse` (0066 added the column with default `store` and
+no backfill) and no default source was set, so every store fell through to itself. Migration
+`0104_warehouse_source_default` marks the location named Warehouse per tenant and sets
+`ops.defaultSourceLocationId` where exactly one warehouse exists and no default is
+configured (idempotent; a configured default is never overwritten). Tests:
+`packages/db/test/warehouse-default.test.ts` (3) replays the migration over a plain tenant, a
+two-warehouse tenant and a configured one. PHASE_NOTES Phase 4 amended. Take-with lines keep
+sourcing from the order's Store (HANDOFF §3, locked).
