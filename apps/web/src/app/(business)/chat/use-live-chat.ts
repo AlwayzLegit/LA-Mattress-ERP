@@ -216,16 +216,23 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
     let previous: Map<string, number> | null = null;
     let assignments = new Map<string, string | null>();
     let disposed = false;
+    let revoked = false;
+    let lastConnect = Date.now();
     let source: EventSource;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let lastSnapshot = Date.now();
     let attempt = 0;
     function connect() {
-      if (disposed) return;
+      if (disposed || revoked) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      lastConnect = Date.now();
       source = new EventSource(`${apiUrl}/v1/chat/conversations/live`, {
         withCredentials: true,
       });
+      const stream = source;
       source.addEventListener('snapshot', (event) => {
+        if (disposed || revoked || source !== stream) return;
         const { conversations: rows } = JSON.parse((event as MessageEvent).data) as {
           conversations: LiveConversation[];
         };
@@ -326,6 +333,7 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
         }
       });
       const revoke = () => {
+        revoked = true;
         source.close();
         clearTimeout(reconnectTimer);
         setConnection('denied');
@@ -337,8 +345,11 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
       source.addEventListener('access-revoked', revoke);
       source.addEventListener('unavailable', () => setConnection('reconnecting'));
       source.onerror = () => {
+        if (disposed || revoked || source !== stream) return;
         source.close();
-        setConnection('reconnecting');
+        // The API renews its authenticated SSE stream every 30 seconds.
+        // A recent snapshot remains healthy during that brief renewal.
+        if (Date.now() - lastSnapshot > 10000) setConnection('reconnecting');
         reconnectTimer = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 15000));
         void api('/v1/chat/conversations?limit=1', { cache: 'no-store' }).catch(
           (error: unknown) => {
@@ -350,8 +361,13 @@ export function useLiveChatEngine(policy: ChatPolicy | null) {
     }
     connect();
     const timer = setInterval(() => {
-      if (source.readyState !== EventSource.CLOSED && Date.now() - lastSnapshot > 10000)
-        setConnection('reconnecting');
+      if (disposed || revoked || Date.now() - lastSnapshot <= 10000) return;
+      setConnection('reconnecting');
+      // A half-open stream can stop emitting without firing onerror.
+      if (!reconnectTimer && Date.now() - lastConnect > 10000) {
+        source.close();
+        connect();
+      }
     }, 3000);
     const onFocus = () => {
       if (inInbox.current && !document.hidden && selectedRef.current)
