@@ -9,12 +9,16 @@ import {
   Alert,
   BackLink,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   DisplayStatusBadge,
   EmptyState,
   Field,
   KeyValue,
   LinkButton,
   PageHeader,
+  ResetColumns,
   Select,
   Skeleton,
   Stack,
@@ -23,6 +27,7 @@ import {
   StatusBadge,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 
@@ -66,100 +71,107 @@ interface Activity {
     depositsCents: number;
     arCents: number;
     unpaidBalanceCents: number;
-    rows: {
-      id: string;
-      number: string;
-      orderType: string;
-      fulfillmentType: string;
-      orderDate: string;
-      salespersonName: string | null;
-      merchandiseCents: number;
-      otherCents: number;
-      totalCents: number;
-      amountPaidCents: number;
-      balanceCents: number;
-      displayStatus: string;
-    }[];
+    rows: OpenOrderRow[];
   };
   orderLines: {
     orderId: string;
     number: string;
     status: string;
-    lines: {
-      id: string;
-      sku: string | null;
-      description: string;
-      qtyReserved: number;
-      qtyOrdered: number;
-      backorderQty: number;
-      fulfillmentDate: string | null;
-      qtyReceived: number;
-      poNumber: string | null;
-      poId: string | null;
-      poDeliveryDate: string | null;
-      poQuantity: number;
-      fulfillmentMethod: string;
-      fulfillmentStatus: string;
-    }[];
+    lines: OrderLine[];
   }[];
-  historicalPurchases: {
-    docId: string;
-    docType: 'order' | 'sale' | 'return';
-    number: string;
-    orderType: string;
-    invoiceDate: string;
-    sku: string | null;
-    description: string;
-    quantity: number;
-    priceCents: number;
-  }[];
-  currentDeposits: {
-    orderId: string;
-    number: string;
-    depositCents: number;
-    orderCents: number;
-    orderType: string;
-    orderDate: string;
-    depositType: string | null;
-    arCreditCents: number;
-  }[];
+  historicalPurchases: HistoricalPurchase[];
+  currentDeposits: CurrentDeposit[];
   historicalDeposits: {
     totalLiabilityCents: number;
-    rows: {
-      id: string;
-      orderId: string;
-      number: string;
-      type: string;
-      date: string;
-      depositCents: number;
-      activityCents: number;
-      reason: string;
-    }[];
+    rows: HistoricalDeposit[];
   };
-  openArItems: {
-    id: string;
-    orderId: string;
-    reference: string;
-    transactionDate: string;
-    dueDate: string | null;
-    inDispute: boolean;
-    transactionType: string;
-    memo: string;
-    amountCents: number;
-  }[];
-  openServiceOrders: {
-    id: string;
-    number: string;
-    orderDate: string;
-    type: string;
-    coordinator: string | null;
-    status: string;
-    product: string;
-    description: string;
-    estimatedDate: string | null;
-    scheduledDate: string | null;
-    totalCents: number;
-  }[];
+  openArItems: ArItem[];
+  openServiceOrders: ServiceOrderRow[];
+}
+interface OpenOrderRow {
+  id: string;
+  number: string;
+  orderType: string;
+  fulfillmentType: string;
+  orderDate: string;
+  salespersonName: string | null;
+  merchandiseCents: number;
+  otherCents: number;
+  totalCents: number;
+  amountPaidCents: number;
+  balanceCents: number;
+  displayStatus: string;
+}
+interface OrderLine {
+  id: string;
+  sku: string | null;
+  description: string;
+  qtyReserved: number;
+  qtyOrdered: number;
+  backorderQty: number;
+  fulfillmentDate: string | null;
+  qtyReceived: number;
+  poNumber: string | null;
+  poId: string | null;
+  poDeliveryDate: string | null;
+  poQuantity: number;
+  fulfillmentMethod: string;
+  fulfillmentStatus: string;
+}
+interface HistoricalPurchase {
+  docId: string;
+  docType: 'order' | 'sale' | 'return';
+  number: string;
+  orderType: string;
+  invoiceDate: string;
+  sku: string | null;
+  description: string;
+  quantity: number;
+  priceCents: number;
+}
+interface CurrentDeposit {
+  orderId: string;
+  number: string;
+  depositCents: number;
+  orderCents: number;
+  orderType: string;
+  orderDate: string;
+  depositType: string | null;
+  arCreditCents: number;
+}
+interface HistoricalDeposit {
+  id: string;
+  orderId: string;
+  number: string;
+  type: string;
+  date: string;
+  depositCents: number;
+  activityCents: number;
+  reason: string;
+}
+interface ArItem {
+  id: string;
+  orderId: string;
+  reference: string;
+  transactionDate: string;
+  dueDate: string | null;
+  inDispute: boolean;
+  transactionType: string;
+  memo: string;
+  amountCents: number;
+}
+interface ServiceOrderRow {
+  id: string;
+  number: string;
+  orderDate: string;
+  type: string;
+  coordinator: string | null;
+  status: string;
+  product: string;
+  description: string;
+  estimatedDate: string | null;
+  scheduledDate: string | null;
+  totalCents: number;
 }
 
 const TABS = [
@@ -186,6 +198,346 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 const PAGE_TITLE = 'View Customer Activity';
+
+const money = <R,>(get: (r: R) => number) => ({
+  num: true as const,
+  sortValue: get,
+  render: (r: R) => <Money cents={get(r)} />,
+});
+
+const OPEN_ORDER_COLUMNS: ColumnDef<OpenOrderRow>[] = [
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (r) => r.number,
+    render: (r) => <Link href={`/orders/${r.id}`}>{r.number}</Link>,
+  },
+  {
+    id: 'orderType',
+    label: 'Order type',
+    sortValue: (r) => r.orderType,
+    render: (r) => r.orderType,
+  },
+  {
+    id: 'fulfillment',
+    label: 'Fulfillment',
+    cellClassName: () => 'capitalize',
+    sortValue: (r) => r.fulfillmentType,
+    render: (r) => r.fulfillmentType.replace(/_/g, ' '),
+  },
+  {
+    id: 'orderDate',
+    label: 'Order date',
+    sortValue: (r) => r.orderDate,
+    render: (r) => fmtDate(r.orderDate),
+  },
+  {
+    id: 'salesperson',
+    label: 'Salesperson',
+    sortValue: (r) => r.salespersonName,
+    render: (r) => r.salespersonName ?? '—',
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.displayStatus,
+    render: (r) => <DisplayStatusBadge displayStatus={r.displayStatus} />,
+  },
+  { id: 'merchandise', label: 'Merchandise', ...money<OpenOrderRow>((r) => r.merchandiseCents) },
+  { id: 'other', label: 'Other', ...money<OpenOrderRow>((r) => r.otherCents) },
+  { id: 'total', label: 'Total', ...money<OpenOrderRow>((r) => r.totalCents) },
+  { id: 'amountPaid', label: 'Amount paid', ...money<OpenOrderRow>((r) => r.amountPaidCents) },
+  {
+    id: 'balance',
+    label: 'Balance',
+    num: true,
+    sortValue: (r) => r.balanceCents,
+    render: (r) => (
+      <strong>
+        <Money cents={r.balanceCents} />
+      </strong>
+    ),
+  },
+];
+
+const ORDER_LINE_COLUMNS: ColumnDef<OrderLine>[] = [
+  {
+    id: 'product',
+    label: 'Product',
+    className: 'nowrap',
+    sortValue: (l) => l.sku,
+    render: (l) => l.sku ?? '—',
+  },
+  {
+    id: 'description',
+    label: 'Description',
+    sortValue: (l) => l.description,
+    render: (l) => l.description,
+  },
+  {
+    id: 'qtyReserved',
+    label: 'Qty reserved',
+    num: true,
+    sortValue: (l) => l.qtyReserved,
+    render: (l) => l.qtyReserved,
+  },
+  {
+    id: 'qtyOrdered',
+    label: 'Qty ordered',
+    num: true,
+    sortValue: (l) => l.qtyOrdered,
+    render: (l) => l.qtyOrdered,
+  },
+  {
+    id: 'backorderQty',
+    label: 'Backorder qty',
+    num: true,
+    sortValue: (l) => l.backorderQty,
+    render: (l) => l.backorderQty,
+  },
+  {
+    id: 'fulfillmentDate',
+    label: 'Fulfillment date',
+    sortValue: (l) => l.fulfillmentDate,
+    render: (l) => fmtDate(l.fulfillmentDate),
+  },
+  {
+    id: 'qtyReceived',
+    label: 'Qty received',
+    num: true,
+    sortValue: (l) => l.qtyReceived,
+    render: (l) => l.qtyReceived,
+  },
+  {
+    id: 'poNumber',
+    label: 'PO number',
+    sortValue: (l) => l.poNumber,
+    render: (l) =>
+      l.poNumber && l.poId ? <Link href={`/purchase-orders/${l.poId}`}>{l.poNumber}</Link> : '—',
+  },
+  {
+    id: 'poDeliveryDate',
+    label: 'PO delivery date',
+    sortValue: (l) => l.poDeliveryDate,
+    render: (l) => fmtDate(l.poDeliveryDate),
+  },
+  {
+    id: 'poQty',
+    label: 'PO qty',
+    num: true,
+    sortValue: (l) => l.poQuantity || null,
+    render: (l) => l.poQuantity || '—',
+  },
+  {
+    id: 'fulfillmentMethod',
+    label: 'Fulfillment method',
+    sortValue: (l) => l.fulfillmentMethod,
+    render: (l) => l.fulfillmentMethod,
+  },
+  {
+    id: 'fulfillmentStatus',
+    label: 'Fulfillment status',
+    sortValue: (l) => l.fulfillmentStatus,
+    render: (l) => l.fulfillmentStatus,
+  },
+];
+
+const HISTORY_COLUMNS: ColumnDef<HistoricalPurchase>[] = [
+  {
+    id: 'orderNumber',
+    label: 'Order number',
+    sortValue: (r) => r.number,
+    render: (r) => <Link href={docHref(r.docType, r.docId)}>{r.number}</Link>,
+  },
+  {
+    id: 'orderType',
+    label: 'Order type',
+    sortValue: (r) => r.orderType,
+    render: (r) => r.orderType,
+  },
+  {
+    id: 'invoiceDate',
+    label: 'Invoice date',
+    sortValue: (r) => r.invoiceDate,
+    render: (r) => fmtDate(r.invoiceDate),
+  },
+  {
+    id: 'product',
+    label: 'Product',
+    className: 'nowrap',
+    sortValue: (r) => r.sku,
+    render: (r) => r.sku ?? '—',
+  },
+  {
+    id: 'description',
+    label: 'Description',
+    sortValue: (r) => r.description,
+    render: (r) => r.description,
+  },
+  {
+    id: 'quantity',
+    label: 'Quantity',
+    num: true,
+    sortValue: (r) => r.quantity,
+    render: (r) => r.quantity,
+  },
+  { id: 'price', label: 'Price', ...money<HistoricalPurchase>((r) => r.priceCents) },
+];
+
+const DEPOSIT_COLUMNS: ColumnDef<CurrentDeposit>[] = [
+  {
+    id: 'orderNumber',
+    label: 'Order number',
+    sortValue: (r) => r.number,
+    render: (r) => <Link href={`/orders/${r.orderId}`}>{r.number}</Link>,
+  },
+  { id: 'depositAmount', label: 'Deposit amount', ...money<CurrentDeposit>((r) => r.depositCents) },
+  { id: 'orderAmount', label: 'Order amount', ...money<CurrentDeposit>((r) => r.orderCents) },
+  {
+    id: 'orderType',
+    label: 'Order type',
+    sortValue: (r) => r.orderType,
+    render: (r) => r.orderType,
+  },
+  {
+    id: 'orderDate',
+    label: 'Order date',
+    sortValue: (r) => r.orderDate,
+    render: (r) => fmtDate(r.orderDate),
+  },
+  {
+    id: 'depositType',
+    label: 'Deposit type',
+    cellClassName: () => 'capitalize',
+    sortValue: (r) => r.depositType,
+    render: (r) => r.depositType ?? '—',
+  },
+  { id: 'arCredit', label: 'A/R credit', ...money<CurrentDeposit>((r) => r.arCreditCents) },
+];
+
+const DEPOSIT_HISTORY_COLUMNS: ColumnDef<HistoricalDeposit>[] = [
+  {
+    id: 'orderNumber',
+    label: 'Order number',
+    sortValue: (r) => r.number,
+    render: (r) => (r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.number}</Link> : r.number),
+  },
+  { id: 'type', label: 'Type', sortValue: (r) => r.type, render: (r) => r.type },
+  { id: 'date', label: 'Date', sortValue: (r) => r.date, render: (r) => fmtDate(r.date) },
+  {
+    id: 'depositAmount',
+    label: 'Deposit amount',
+    ...money<HistoricalDeposit>((r) => r.depositCents),
+  },
+  {
+    id: 'activityAmount',
+    label: 'Activity amount',
+    num: true,
+    cellClassName: (r) => r.activityCents < 0 && 'text-danger',
+    sortValue: (r) => r.activityCents,
+    render: (r) => <Money cents={r.activityCents} />,
+  },
+  {
+    id: 'reason',
+    label: 'Reason for activity',
+    cellClassName: () => 'capitalize',
+    sortValue: (r) => r.reason,
+    render: (r) => r.reason,
+  },
+];
+
+const AR_COLUMNS: ColumnDef<ArItem>[] = [
+  {
+    id: 'reference',
+    label: 'Reference',
+    sortValue: (r) => r.reference,
+    render: (r) => <Link href={`/orders/${r.orderId}`}>{r.reference}</Link>,
+  },
+  {
+    id: 'transactionDate',
+    label: 'Transaction date',
+    sortValue: (r) => r.transactionDate,
+    render: (r) => fmtDate(r.transactionDate),
+  },
+  {
+    id: 'dueDate',
+    label: 'Due date',
+    sortValue: (r) => r.dueDate,
+    render: (r) => fmtDate(r.dueDate),
+  },
+  {
+    id: 'inDispute',
+    label: 'In dispute',
+    sortValue: (r) => r.inDispute,
+    render: (r) => (r.inDispute ? 'Yes' : 'No'),
+  },
+  {
+    id: 'transactionType',
+    label: 'Transaction type',
+    sortValue: (r) => r.transactionType,
+    render: (r) => r.transactionType,
+  },
+  { id: 'memo', label: 'Memo reference', sortValue: (r) => r.memo, render: (r) => r.memo },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    sortValue: (r) => r.amountCents,
+    render: (r) => (
+      <strong>
+        <Money cents={r.amountCents} />
+      </strong>
+    ),
+  },
+];
+
+const SERVICE_COLUMNS: ColumnDef<ServiceOrderRow>[] = [
+  {
+    id: 'orderNumber',
+    label: 'Order number',
+    sortValue: (r) => r.number,
+    render: (r) => <Link href={`/service/${r.id}`}>{r.number}</Link>,
+  },
+  {
+    id: 'orderDate',
+    label: 'Order date',
+    sortValue: (r) => r.orderDate,
+    render: (r) => fmtDate(r.orderDate),
+  },
+  { id: 'type', label: 'Type', sortValue: (r) => r.type, render: (r) => r.type },
+  {
+    id: 'coordinator',
+    label: 'Coordinator',
+    sortValue: (r) => r.coordinator,
+    render: (r) => r.coordinator ?? '—',
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.status,
+    render: (r) => <StatusBadge status={r.status} />,
+  },
+  { id: 'product', label: 'Product', sortValue: (r) => r.product, render: (r) => r.product },
+  {
+    id: 'description',
+    label: 'Product description',
+    sortValue: (r) => r.description,
+    render: (r) => r.description,
+  },
+  {
+    id: 'estimatedDate',
+    label: 'Estimated date',
+    sortValue: (r) => r.estimatedDate,
+    render: (r) => fmtDate(r.estimatedDate),
+  },
+  {
+    id: 'scheduledDate',
+    label: 'Scheduled date',
+    sortValue: (r) => r.scheduledDate,
+    render: (r) => fmtDate(r.scheduledDate),
+  },
+  { id: 'total', label: 'Total', ...money<ServiceOrderRow>((r) => r.totalCents) },
+];
 
 export default function CustomerActivityPage() {
   const params = useParams<{ id: string }>();
@@ -429,8 +781,17 @@ function OpenOrdersSummary({ data }: { data: Activity }) {
 
 function OpenOrders({ data }: { data: Activity }) {
   const rows = data.openOrders.rows;
+  const cols = useListColumns('customer-activity-orders', OPEN_ORDER_COLUMNS, rows);
   const sum = (k: keyof (typeof rows)[number]) =>
     rows.reduce((s, r) => s + (typeof r[k] === 'number' ? (r[k] as number) : 0), 0);
+  const totals: Record<string, number> = {
+    merchandise: sum('merchandiseCents'),
+    other: sum('otherCents'),
+    total: sum('totalCents'),
+    amountPaid: sum('amountPaidCents'),
+    balance: sum('balanceCents'),
+  };
+  const totalsLabelId = cols.ordered.find((c) => !(c.id in totals))?.id;
   return (
     <Card title="Open orders" data-testid="activity-open-orders">
       <Stack>
@@ -441,74 +802,30 @@ function OpenOrders({ data }: { data: Activity }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Order</th>
-                  <th>Order type</th>
-                  <th>Fulfillment</th>
-                  <th>Order date</th>
-                  <th>Salesperson</th>
-                  <th>Status</th>
-                  <th className="num">Merchandise</th>
-                  <th className="num">Other</th>
-                  <th className="num">Total</th>
-                  <th className="num">Amount paid</th>
-                  <th className="num">Balance</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="customer-activity-orders" />
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="open-order-row">
-                    <td>
-                      <Link href={`/orders/${r.id}`}>{r.number}</Link>
-                    </td>
-                    <td>{r.orderType}</td>
-                    <td className="capitalize">{r.fulfillmentType.replace(/_/g, ' ')}</td>
-                    <td>{fmtDate(r.orderDate)}</td>
-                    <td>{r.salespersonName ?? '—'}</td>
-                    <td>
-                      <DisplayStatusBadge displayStatus={r.displayStatus} />
-                    </td>
-                    <td className="num">
-                      <Money cents={r.merchandiseCents} />
-                    </td>
-                    <td className="num">
-                      <Money cents={r.otherCents} />
-                    </td>
-                    <td className="num">
-                      <Money cents={r.totalCents} />
-                    </td>
-                    <td className="num">
-                      <Money cents={r.amountPaidCents} />
-                    </td>
-                    <td className="num">
-                      <strong>
-                        <Money cents={r.balanceCents} />
-                      </strong>
-                    </td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="font-bold">
-                  <td colSpan={6}>Totals</td>
-                  <td className="num">
-                    <Money cents={sum('merchandiseCents')} />
-                  </td>
-                  <td className="num">
-                    <Money cents={sum('otherCents')} />
-                  </td>
-                  <td className="num">
-                    <Money cents={sum('totalCents')} />
-                  </td>
-                  <td className="num">
-                    <Money cents={sum('amountPaidCents')} />
-                  </td>
-                  <td className="num">
-                    <Money cents={sum('balanceCents')} />
-                  </td>
+                  {cols.ordered.map((c) => (
+                    <td key={c.id} className={c.num ? 'num' : undefined}>
+                      {c.id in totals ? (
+                        <Money cents={totals[c.id] ?? 0} />
+                      ) : c.id === totalsLabelId ? (
+                        'Totals'
+                      ) : null}
+                    </td>
+                  ))}
                 </tr>
               </tfoot>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Stack>
@@ -520,6 +837,11 @@ function OrderLineDetails({ data }: { data: Activity }) {
   const orders = data.orderLines;
   const [orderId, setOrderId] = useState<string>(orders[0]?.orderId ?? '');
   const current = useMemo(() => orders.find((o) => o.orderId === orderId), [orders, orderId]);
+  const cols = useListColumns(
+    'customer-activity-order-lines',
+    ORDER_LINE_COLUMNS,
+    current?.lines ?? null,
+  );
   return (
     <Card
       title="Order line details"
@@ -554,46 +876,17 @@ function OrderLineDetails({ data }: { data: Activity }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Description</th>
-                  <th className="num">Qty reserved</th>
-                  <th className="num">Qty ordered</th>
-                  <th className="num">Backorder qty</th>
-                  <th>Fulfillment date</th>
-                  <th className="num">Qty received</th>
-                  <th>PO number</th>
-                  <th>PO delivery date</th>
-                  <th className="num">PO qty</th>
-                  <th>Fulfillment method</th>
-                  <th>Fulfillment status</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="customer-activity-order-lines" />
               </thead>
               <tbody>
-                {(current?.lines ?? []).map((l) => (
+                {cols.sorted.map((l) => (
                   <tr key={l.id} data-testid="order-line-row">
-                    <td className="nowrap">{l.sku ?? '—'}</td>
-                    <td>{l.description}</td>
-                    <td className="num">{l.qtyReserved}</td>
-                    <td className="num">{l.qtyOrdered}</td>
-                    <td className="num">{l.backorderQty}</td>
-                    <td>{fmtDate(l.fulfillmentDate)}</td>
-                    <td className="num">{l.qtyReceived}</td>
-                    <td>
-                      {l.poNumber && l.poId ? (
-                        <Link href={`/purchase-orders/${l.poId}`}>{l.poNumber}</Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td>{fmtDate(l.poDeliveryDate)}</td>
-                    <td className="num">{l.poQuantity || '—'}</td>
-                    <td>{l.fulfillmentMethod}</td>
-                    <td>{l.fulfillmentStatus}</td>
+                    <ColumnCells list={cols} row={l} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         </>
       )}
@@ -603,7 +896,11 @@ function OrderLineDetails({ data }: { data: Activity }) {
 
 function HistoricalPurchases({ data }: { data: Activity }) {
   const [filter, setFilter] = useState<'all' | 'order' | 'sale' | 'return'>('all');
-  const rows = data.historicalPurchases.filter((r) => filter === 'all' || r.docType === filter);
+  const rows = useMemo(
+    () => data.historicalPurchases.filter((r) => filter === 'all' || r.docType === filter),
+    [data.historicalPurchases, filter],
+  );
+  const cols = useListColumns('customer-activity-history', HISTORY_COLUMNS, rows);
   return (
     <Card title="Historical purchases" data-testid="activity-history">
       <Toolbar>
@@ -626,34 +923,17 @@ function HistoricalPurchases({ data }: { data: Activity }) {
         <TableWrap>
           <table className="table">
             <thead>
-              <tr>
-                <th>Order number</th>
-                <th>Order type</th>
-                <th>Invoice date</th>
-                <th>Product</th>
-                <th>Description</th>
-                <th className="num">Quantity</th>
-                <th className="num">Price</th>
-              </tr>
+              <ColumnHeadRow list={cols} testIdPrefix="customer-activity-history" />
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {cols.sorted.map((r, i) => (
                 <tr key={`${r.docId}-${i}`} data-testid="history-row">
-                  <td>
-                    <Link href={docHref(r.docType, r.docId)}>{r.number}</Link>
-                  </td>
-                  <td>{r.orderType}</td>
-                  <td>{fmtDate(r.invoiceDate)}</td>
-                  <td className="nowrap">{r.sku ?? '—'}</td>
-                  <td>{r.description}</td>
-                  <td className="num">{r.quantity}</td>
-                  <td className="num">
-                    <Money cents={r.priceCents} />
-                  </td>
+                  <ColumnCells list={cols} row={r} index={i} />
                 </tr>
               ))}
             </tbody>
           </table>
+          <ResetColumns list={cols} />
         </TableWrap>
       )}
     </Card>
@@ -662,8 +942,15 @@ function HistoricalPurchases({ data }: { data: Activity }) {
 
 function CurrentDeposits({ data }: { data: Activity }) {
   const rows = data.currentDeposits;
-  const totalDeposit = rows.reduce((s, r) => s + r.depositCents, 0);
-  const totalCredit = rows.reduce((s, r) => s + r.arCreditCents, 0);
+  const cols = useListColumns('customer-activity-deposits', DEPOSIT_COLUMNS, rows);
+  const totals: Record<string, { testid?: string; cents: number }> = {
+    depositAmount: {
+      testid: 'deposits-total',
+      cents: rows.reduce((s, r) => s + r.depositCents, 0),
+    },
+    arCredit: { cents: rows.reduce((s, r) => s + r.arCreditCents, 0) },
+  };
+  const totalsLabelId = cols.ordered.find((c) => !totals[c.id])?.id;
   return (
     <Card title="Current deposits" data-testid="activity-deposits">
       {rows.length === 0 ? (
@@ -672,50 +959,29 @@ function CurrentDeposits({ data }: { data: Activity }) {
         <TableWrap>
           <table className="table">
             <thead>
-              <tr>
-                <th>Order number</th>
-                <th className="num">Deposit amount</th>
-                <th className="num">Order amount</th>
-                <th>Order type</th>
-                <th>Order date</th>
-                <th>Deposit type</th>
-                <th className="num">A/R credit</th>
-              </tr>
+              <ColumnHeadRow list={cols} testIdPrefix="customer-activity-deposits" />
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {cols.sorted.map((r) => (
                 <tr key={r.orderId} data-testid="deposit-row">
-                  <td>
-                    <Link href={`/orders/${r.orderId}`}>{r.number}</Link>
-                  </td>
-                  <td className="num">
-                    <Money cents={r.depositCents} />
-                  </td>
-                  <td className="num">
-                    <Money cents={r.orderCents} />
-                  </td>
-                  <td>{r.orderType}</td>
-                  <td>{fmtDate(r.orderDate)}</td>
-                  <td className="capitalize">{r.depositType ?? '—'}</td>
-                  <td className="num">
-                    <Money cents={r.arCreditCents} />
-                  </td>
+                  <ColumnCells list={cols} row={r} />
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="font-bold">
-                <td>Totals</td>
-                <td className="num" data-testid="deposits-total">
-                  <Money cents={totalDeposit} />
-                </td>
-                <td colSpan={4}></td>
-                <td className="num">
-                  <Money cents={totalCredit} />
-                </td>
+                {cols.ordered.map((c) => {
+                  const t = totals[c.id];
+                  return (
+                    <td key={c.id} className={c.num ? 'num' : undefined} data-testid={t?.testid}>
+                      {t ? <Money cents={t.cents} /> : c.id === totalsLabelId ? 'Totals' : null}
+                    </td>
+                  );
+                })}
               </tr>
             </tfoot>
           </table>
+          <ResetColumns list={cols} />
         </TableWrap>
       )}
     </Card>
@@ -724,6 +990,7 @@ function CurrentDeposits({ data }: { data: Activity }) {
 
 function HistoricalDeposits({ data }: { data: Activity }) {
   const h = data.historicalDeposits;
+  const cols = useListColumns('customer-activity-deposit-history', DEPOSIT_HISTORY_COLUMNS, h.rows);
   return (
     <Card title="Historical deposits" data-testid="activity-deposit-history">
       <Stack>
@@ -741,34 +1008,17 @@ function HistoricalDeposits({ data }: { data: Activity }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Order number</th>
-                  <th>Type</th>
-                  <th>Date</th>
-                  <th className="num">Deposit amount</th>
-                  <th className="num">Activity amount</th>
-                  <th>Reason for activity</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="customer-activity-deposit-history" />
               </thead>
               <tbody>
-                {h.rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="deposit-history-row">
-                    <td>
-                      {r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.number}</Link> : r.number}
-                    </td>
-                    <td>{r.type}</td>
-                    <td>{fmtDate(r.date)}</td>
-                    <td className="num">
-                      <Money cents={r.depositCents} />
-                    </td>
-                    <td className={`num${r.activityCents < 0 ? ' text-danger' : ''}`}>
-                      <Money cents={r.activityCents} />
-                    </td>
-                    <td className="capitalize">{r.reason}</td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Stack>
@@ -781,11 +1031,16 @@ function OpenArItems({ data }: { data: Activity }) {
   // "All time" is the default and means no filter. Filtering is client-side
   // on the rows already loaded, so there is nothing to wait for.
   const [range, setRange] = useUrlDateRange('all', { key: 'ar' });
-  const rows = data.openArItems.filter((r) => {
-    if (range.preset === 'all') return true;
-    const d = (r.dueDate ?? r.transactionDate).slice(0, 10);
-    return d >= range.start && d <= range.end;
-  });
+  const rows = useMemo(
+    () =>
+      data.openArItems.filter((r) => {
+        if (range.preset === 'all') return true;
+        const d = (r.dueDate ?? r.transactionDate).slice(0, 10);
+        return d >= range.start && d <= range.end;
+      }),
+    [data.openArItems, range.preset, range.start, range.end],
+  );
+  const cols = useListColumns('customer-activity-ar', AR_COLUMNS, rows);
   const total = rows.reduce((s, r) => s + r.amountCents, 0);
   return (
     <Card title="Open A/R items" data-testid="activity-ar">
@@ -824,36 +1079,17 @@ function OpenArItems({ data }: { data: Activity }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Transaction date</th>
-                  <th>Due date</th>
-                  <th>In dispute</th>
-                  <th>Transaction type</th>
-                  <th>Memo reference</th>
-                  <th className="num">Amount</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="customer-activity-ar" />
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="ar-row">
-                    <td>
-                      <Link href={`/orders/${r.orderId}`}>{r.reference}</Link>
-                    </td>
-                    <td>{fmtDate(r.transactionDate)}</td>
-                    <td>{fmtDate(r.dueDate)}</td>
-                    <td>{r.inDispute ? 'Yes' : 'No'}</td>
-                    <td>{r.transactionType}</td>
-                    <td>{r.memo}</td>
-                    <td className="num">
-                      <strong>
-                        <Money cents={r.amountCents} />
-                      </strong>
-                    </td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Stack>
@@ -863,6 +1099,7 @@ function OpenArItems({ data }: { data: Activity }) {
 
 function OpenServiceOrders({ data }: { data: Activity }) {
   const rows = data.openServiceOrders;
+  const cols = useListColumns('customer-activity-service', SERVICE_COLUMNS, rows);
   return (
     <Card title="Open service orders" data-testid="activity-service">
       <Stack>
@@ -873,42 +1110,17 @@ function OpenServiceOrders({ data }: { data: Activity }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Order number</th>
-                  <th>Order date</th>
-                  <th>Type</th>
-                  <th>Coordinator</th>
-                  <th>Status</th>
-                  <th>Product</th>
-                  <th>Product description</th>
-                  <th>Estimated date</th>
-                  <th>Scheduled date</th>
-                  <th className="num">Total</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="customer-activity-service" />
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="service-row">
-                    <td>
-                      <Link href={`/service/${r.id}`}>{r.number}</Link>
-                    </td>
-                    <td>{fmtDate(r.orderDate)}</td>
-                    <td>{r.type}</td>
-                    <td>{r.coordinator ?? '—'}</td>
-                    <td>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td>{r.product}</td>
-                    <td>{r.description}</td>
-                    <td>{fmtDate(r.estimatedDate)}</td>
-                    <td>{fmtDate(r.scheduledDate)}</td>
-                    <td className="num">
-                      <Money cents={r.totalCents} />
-                    </td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Stack>

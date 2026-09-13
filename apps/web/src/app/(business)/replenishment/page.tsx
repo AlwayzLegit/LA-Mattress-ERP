@@ -8,6 +8,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -16,10 +19,12 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface Vendor {
@@ -61,6 +66,8 @@ interface GridRow {
   asIsQty: number;
   lastSaleDate: string | null;
 }
+/** A grid row with the session-only Order Qty override applied. */
+type SalesRateRow = GridRow & { effectiveQty: number };
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -249,6 +256,104 @@ function SalesRatePanel() {
   );
   const orderable = effectiveRows.filter((r) => r.effectiveQty > 0);
 
+  // Order Qty is edited in place, so the cell needs `setOverrides`.
+  const gridColumns: ColumnDef<SalesRateRow>[] = [
+    {
+      id: 'product',
+      label: 'Product',
+      sortValue: (r) => r.productName,
+      render: (r) => (
+        <>
+          {r.productName}
+          {r.variantName ? ` — ${r.variantName}` : ''}
+          {r.sku ? (
+            <>
+              {' '}
+              <span className="muted">{r.sku}</span>
+            </>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      id: 'vendorProduct',
+      label: 'Vendor product',
+      sortValue: (r) => r.vendorSku ?? r.sku,
+      render: (r) => r.vendorSku ?? r.sku ?? '—',
+    },
+    {
+      id: 'rate',
+      label: 'Rate/wk',
+      num: true,
+      sortValue: (r) => r.salesRate,
+      render: (r) => r.salesRate.toFixed(2),
+    },
+    {
+      id: 'required',
+      label: 'Required',
+      num: true,
+      sortValue: (r) => r.required,
+      render: (r) => r.required,
+    },
+    {
+      id: 'additional',
+      label: 'Additional',
+      num: true,
+      sortValue: (r) => r.additional,
+      render: (r) => r.additional,
+    },
+    {
+      id: 'available',
+      label: 'Available',
+      num: true,
+      sortValue: (r) => r.available,
+      render: (r) => r.available,
+    },
+    { id: 'netPo', label: 'Net PO', num: true, sortValue: (r) => r.netPo, render: (r) => r.netPo },
+    {
+      id: 'volume',
+      label: 'Volume',
+      num: true,
+      sortValue: (r) => r.volume,
+      render: (r) => r.volume,
+    },
+    {
+      id: 'asIs',
+      label: 'As-is',
+      num: true,
+      sortValue: (r) => r.asIsQty,
+      render: (r) => r.asIsQty,
+    },
+    {
+      id: 'lastSale',
+      label: 'Last sale',
+      sortValue: (r) => r.lastSaleDate,
+      render: (r) => r.lastSaleDate ?? '—',
+    },
+    {
+      id: 'orderQty',
+      label: 'Order qty',
+      num: true,
+      sortValue: (r) => r.effectiveQty,
+      render: (r) => (
+        <Input
+          type="number"
+          className="w-20 text-right"
+          aria-label={`Order quantity for ${r.productName}`}
+          value={String(r.effectiveQty)}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            setOverrides((o) => ({
+              ...o,
+              [r.variantId]: Number.isInteger(n) ? n : 0,
+            }));
+          }}
+        />
+      ),
+    },
+  ];
+  const cols = useListColumns('replenishment-sales-rate', gridColumns, effectiveRows);
+
   return (
     <div>
       <Stack>
@@ -412,61 +517,17 @@ function SalesRatePanel() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Vendor product</th>
-                    <th className="num">Rate/wk</th>
-                    <th className="num">Required</th>
-                    <th className="num">Additional</th>
-                    <th className="num">Available</th>
-                    <th className="num">Net PO</th>
-                    <th className="num">Volume</th>
-                    <th className="num">As-is</th>
-                    <th>Last sale</th>
-                    <th className="num">Order qty</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="replenishment-sales-rate" />
                 </thead>
                 <tbody>
-                  {effectiveRows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.variantId}>
-                      <td>
-                        {r.productName}
-                        {r.variantName ? ` — ${r.variantName}` : ''}
-                        {r.sku ? (
-                          <>
-                            {' '}
-                            <span className="muted">{r.sku}</span>
-                          </>
-                        ) : null}
-                      </td>
-                      <td>{r.vendorSku ?? r.sku ?? '—'}</td>
-                      <td className="num">{r.salesRate.toFixed(2)}</td>
-                      <td className="num">{r.required}</td>
-                      <td className="num">{r.additional}</td>
-                      <td className="num">{r.available}</td>
-                      <td className="num">{r.netPo}</td>
-                      <td className="num">{r.volume}</td>
-                      <td className="num">{r.asIsQty}</td>
-                      <td>{r.lastSaleDate ?? '—'}</td>
-                      <td className="num">
-                        <Input
-                          type="number"
-                          className="w-20 text-right"
-                          aria-label={`Order quantity for ${r.productName}`}
-                          value={String(r.effectiveQty)}
-                          onChange={(e) => {
-                            const n = Number(e.target.value);
-                            setOverrides((o) => ({
-                              ...o,
-                              [r.variantId]: Number.isInteger(n) ? n : 0,
-                            }));
-                          }}
-                        />
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <FormActions
               start={

@@ -814,6 +814,20 @@ Sales competitions are Phase 11.
 
 ## Phase 11 — Sales competitions (2026-09-12)
 
+> **Amendment 2026-09-13 (owner):** _people only, everyone listed._ The Stores race is
+> retired: no People | Stores toggle, no store prizes, no store winner column in History, no
+> stores line on the banner or the printable sheet; `?scope` is gone from
+> `GET /v1/competitions/current` and `races` / `prizeStoreCents` are no longer settings (a
+> stored value is ignored). Every active member whose role can log a lead
+> (`competitions.leads.log` — Manager, Cashier by default; never the Owner role, who is off
+> the board entirely, pinned row and ledger included) is on every card from day
+> one, sales or not: the ranked rows come first, then the people the race cannot rank yet
+> (no sales for a $ race or Least Exchanges; neither a lead nor a sale for a count race) in
+> name order with `rank: null`, "—" for a $ value and "no sales yet" as the secondary. The
+> strip lists everyone when expanded and the top three when collapsed; the leaderboard
+> lists everyone; day one keeps the empty copy. `competition_results.scope` and
+> `competition_ranks.scope` keep the value `people`.
+
 **Branch:** `claude/new-session-q4kc7l` · **Scope:** README §3.6 / canvas 10 (`Proto Competition`,
 `Redesign 10 Competitions`): the strip above every role home, six races for People and Stores,
 the leaderboard, leads (form, list, auto-conversion, attach by hand), the winner banner and
@@ -1031,3 +1045,34 @@ to what Phases 1–11 shipped.
 - **Competitions.** Rank recount on return completion; store-manager notices for the Stores
   race and a month-end "who won" push; the managers' store-wide leads list (API supports
   `?all=1`).
+
+## Amendment — 2026-09-12 (Phase 3 sidebar: groups always open)
+
+Owner: "make the sidebar all open not collapsible." README §2 amended in the same
+change. `components/shell/sidebar.tsx` renders the five groups as static uppercase
+headings (`.nav-group-head`, `role="group"` + `aria-labelledby`) with every item
+showing; the toggle button, chevron, `aria-expanded`, the `jetnine.nav.open`
+localStorage key and the `userKey` prop are gone (`app-shell.tsx`, `/dev/shell`).
+`groupForPath` in `nav.ts` had no other caller and is removed. The `.app-sidebar` column already
+scrolls (`overflow-y: auto`), so the owner's 26 links fit at 1440 and scroll below.
+
+## Amendment — 2026-09-13 (Every list gets Products-style columns)
+
+Owner: "similar to how we have it inside of Products — do the same for the remaining
+that have a list." README §3.3 amended. One implementation now, `components/ui/columns.tsx`:
+`useListColumns(key, columns, rows, { server? })` keeps the order per browser under
+`jetnine.columns.<key>` (unknown ids drop, new ids append), `ColumnHeadRow` renders the
+grip-to-drag / click-to-sort `aria-sort` headers (fixed columns such as Actions never move),
+`ColumnCells` renders a row in the header's order, `ResetColumns` shows once the order
+differs. Drop semantics: dragging right lands after the target, left lands before it, so
+every slot is reachable. Sorting is client-side over the rows on screen (numbers and dates
+numerically, text with numeric awareness, blanks last both ways) unless the screen sorts
+through the API (Products, Orders), where the column carries the server `sortKey`. Products
+migrated onto the primitive; its saved order carries across from the old key. Tests:
+`columns.test.ts` (4). Verified in Chromium on the Orders and Products previews.
+
+### Later
+
+- Keyboard column reordering (a Move-left / Move-right menu on the header) — drag only for now.
+- Client-side sort covers the loaded pages of a cursor list, not the whole result set; a
+  server sort per list needs API `sort`/`dir` support the way Orders and Products have.

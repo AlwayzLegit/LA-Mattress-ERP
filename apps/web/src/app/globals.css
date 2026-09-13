@@ -712,6 +712,42 @@ pre {
 .table th.th-drop {
   box-shadow: inset 3px 0 0 var(--brand);
 }
+/* Reorderable, sortable list columns (components/ui/columns.tsx). */
+.table th.th-draggable {
+  white-space: nowrap;
+}
+.col-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.col-sort.is-on {
+  color: var(--text);
+}
+.col-sort-arrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  min-width: 8px;
+}
+.col-reset {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 /* P-018 (S01 audit): the one dense-list pattern — tighter rows and a
    header that stays visible inside the list's scroll container. */
@@ -3395,33 +3431,14 @@ kbd.key {
 .nav-group {
   margin-top: 6px;
 }
-.nav-group-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  background: transparent;
-  border-radius: var(--radius-control);
+.nav-group-head {
+  padding: 5px 8px 3px;
   font-family: var(--font-text);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
-  cursor: pointer;
-  text-align: left;
-}
-.nav-group-btn:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.nav-chev {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  width: 10px;
-  color: var(--faint);
 }
 .nav-group-items {
   display: flex;
@@ -4191,8 +4208,17 @@ kbd.key {
 }
 .reg-two {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): a bare 1fr floors at the input's intrinsic width, so two
+     inputs plus the gap ran past the 316px rail (owner 2026-09-12). */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
+}
+.reg-two > * {
+  min-width: 0;
+}
+.reg-stack > .input,
+.reg-two > .input {
+  width: 100%;
 }
 .reg-more {
   border: 0;
@@ -4688,27 +4714,6 @@ select.picker-from {
 .ob-table tbody tr {
   height: 36px;
   cursor: pointer;
-}
-.ob-sort {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  color: var(--muted);
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.ob-sort.is-on {
-  color: var(--text);
-}
-.ob-sort-arrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  min-width: 8px;
 }
 .ob-num-cell {
   white-space: nowrap;
@@ -5318,29 +5323,8 @@ select.picker-from {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.pb-table th.pb-store-th .pb-sort {
+.pb-table th.pb-store-th .col-sort {
   color: var(--accent);
-}
-.pb-sort {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  color: var(--muted);
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.pb-sort.is-on {
-  color: var(--text);
-}
-.pb-sort-arrow {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  min-width: 8px;
 }
 .pb-sku {
   font-family: var(--font-mono);
@@ -7460,6 +7444,14 @@ select.picker-from {
 .cs-top li.is-you {
   background: var(--accent-soft);
   font-weight: 600;
+}
+/* Nothing to rank yet: listed under the ranked rows, quieter, no number. */
+.cs-top li.is-unranked,
+.lb-table tr.is-unranked td {
+  color: var(--muted);
+}
+.cs-top li.is-unranked.is-you {
+  color: inherit;
 }
 .cs-rank {
   font-family: var(--font-mono);

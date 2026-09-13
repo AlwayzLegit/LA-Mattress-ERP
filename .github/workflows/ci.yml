@@ -190,6 +190,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_product_stock
           createdb -h localhost -U postgres jetnine_store_dashboard
           createdb -h localhost -U postgres jetnine_schedule
+          createdb -h localhost -U postgres jetnine_competitions
 
       - name: Format check
         run: pnpm format:check

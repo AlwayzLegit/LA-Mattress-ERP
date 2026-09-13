@@ -39,6 +39,8 @@ export interface MemberMe {
   operationsDashboard?: boolean;
   warehouseDashboard?: boolean;
   cashierDashboard?: boolean;
+  /** Whether the API returns cost figures to this viewer (`products.cost.view`). */
+  canSeeCost?: boolean;
 }
 
 interface ActingStore {

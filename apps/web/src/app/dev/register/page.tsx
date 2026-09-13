@@ -101,6 +101,16 @@ const PRODUCTS = CAT.map(([name, sku, size, firm, price, vendor, model, avail, p
   vendorName: vendor,
   size,
   firmness: firm,
+  categoryPath:
+    /mattress|hybrid|adapt|posturepedic/i.test(name) && !/protector/i.test(name)
+      ? 'Mattresses › Hybrid'
+      : /adjustable/i.test(name)
+        ? 'Adjustable Bases › Adjustable Bed Bases'
+        : /protector/i.test(name)
+          ? 'Mattress Protection › Mattress Protectors'
+          : /pillow/i.test(name)
+            ? 'Pillows'
+            : null,
   model,
   avail: Object.fromEntries(IDS.map((id, j) => [id, avail[j]])) as Record<string, number>,
   po,
@@ -252,6 +262,7 @@ function installStub() {
           vendorName: x.vendorName,
           size: x.size,
           firmness: x.firmness,
+          categoryPath: x.categoryPath,
           availableHere: x.avail[loc] ?? 0,
           availableTotal: Object.values(x.avail).reduce((a, b) => a + b, 0),
           atpDate: x.po > 0 && (x.avail[loc] ?? 0) === 0 ? '2026-09-20' : null,

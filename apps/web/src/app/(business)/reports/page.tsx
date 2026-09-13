@@ -1,17 +1,22 @@
 'use client';
 
 import { Download, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   Input,
   LinkButton,
+  type ListColumns,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
@@ -20,6 +25,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { api } from '@/lib/api';
@@ -52,6 +58,44 @@ function CsvButton({ path, filename, size }: { path: string; filename: string; s
       <Download size={size === 'sm' ? 13 : 14} aria-hidden />
       {busy ? 'Preparing…' : 'Download CSV'}
     </Button>
+  );
+}
+
+/**
+ * A totals row's cells in the header's order: the label spans the leading
+ * columns that carry no total, each total sits under its own column and
+ * the rest stay blank, so a moved column keeps its total under it.
+ */
+function TotalCells<Row>({
+  list,
+  label,
+  totals,
+}: {
+  list: ListColumns<Row>;
+  label: ReactNode;
+  totals: Record<string, ReactNode>;
+}) {
+  const firstTotal = list.ordered.findIndex((c) => c.id in totals);
+  const lead = firstTotal < 0 ? list.ordered.length : firstTotal;
+  let placed = lead > 0;
+  return (
+    <>
+      {lead > 0 && <td colSpan={lead}>{label}</td>}
+      {list.ordered.slice(lead).map((c) => {
+        if (c.id in totals) {
+          return (
+            <td key={c.id} className="num">
+              {totals[c.id]}
+            </td>
+          );
+        }
+        if (!placed) {
+          placed = true;
+          return <td key={c.id}>{label}</td>;
+        }
+        return <td key={c.id} />;
+      })}
+    </>
   );
 }
 
@@ -173,6 +217,15 @@ interface InventoryRow {
   available: number;
 }
 
+interface ZShift {
+  id: string;
+  openedAt: string;
+  closedAt: string | null;
+  openingFloatCents: number;
+  expectedCashCents: number | null;
+  countedCashCents: number | null;
+  varianceCents: number | null;
+}
 interface ZReport {
   date: string;
   saleCount: number;
@@ -185,15 +238,7 @@ interface ZReport {
   netCents: number;
   tenders: { method: string; amountCents: number; count: number }[];
   orderPaymentsCents: number;
-  shifts: {
-    id: string;
-    openedAt: string;
-    closedAt: string | null;
-    openingFloatCents: number;
-    expectedCashCents: number | null;
-    countedCashCents: number | null;
-    varianceCents: number | null;
-  }[];
+  shifts: ZShift[];
 }
 interface CategoryRow {
   categoryId: string | null;
@@ -201,39 +246,414 @@ interface CategoryRow {
   quantity: number;
   revenueCents: number;
 }
+interface TaxClassRow {
+  taxClassId: string | null;
+  taxClassName: string;
+  lineCount: number;
+  netSalesCents: number;
+  taxCents: number;
+}
+interface TaxLocationRow {
+  locationId: string;
+  locationName: string | null;
+  documents: number;
+  taxCents: number;
+  totalCents: number;
+}
 interface TaxSummary {
-  rows: {
-    taxClassId: string | null;
-    taxClassName: string;
-    lineCount: number;
-    netSalesCents: number;
-    taxCents: number;
-  }[];
-  byLocation: {
-    locationId: string;
-    locationName: string | null;
-    documents: number;
-    taxCents: number;
-    totalCents: number;
-  }[];
+  rows: TaxClassRow[];
+  byLocation: TaxLocationRow[];
   totalTaxCents: number;
 }
+interface ValuationRow {
+  variantId: string;
+  locationId: string;
+  locationName: string | null;
+  productName: string;
+  variantName: string | null;
+  sku: string | null;
+  onHand: number;
+  costCents: number | null;
+  costValueCents: number | null;
+  retailValueCents: number;
+}
 interface Valuation {
-  rows: {
-    variantId: string;
-    locationId: string;
-    locationName: string | null;
-    productName: string;
-    variantName: string | null;
-    sku: string | null;
-    onHand: number;
-    costCents: number | null;
-    costValueCents: number | null;
-    retailValueCents: number;
-  }[];
+  rows: ValuationRow[];
   totalCostValueCents: number;
   totalRetailValueCents: number;
 }
+
+const Z_DRAWER_COLUMNS: ColumnDef<ZShift>[] = [
+  {
+    id: 'opened',
+    label: 'Opened',
+    sortValue: (s) => s.openedAt,
+    render: (s) => new Date(s.openedAt).toLocaleTimeString(),
+  },
+  {
+    id: 'closed',
+    label: 'Closed',
+    sortValue: (s) => s.closedAt,
+    render: (s) => (s.closedAt ? new Date(s.closedAt).toLocaleTimeString() : 'open'),
+  },
+  {
+    id: 'float',
+    label: 'Float',
+    num: true,
+    sortValue: (s) => s.openingFloatCents,
+    render: (s) => <Money cents={s.openingFloatCents} />,
+  },
+  {
+    id: 'expected',
+    label: 'Expected',
+    num: true,
+    sortValue: (s) => s.expectedCashCents,
+    render: (s) => (s.expectedCashCents != null ? <Money cents={s.expectedCashCents} /> : '—'),
+  },
+  {
+    id: 'counted',
+    label: 'Counted',
+    num: true,
+    sortValue: (s) => s.countedCashCents,
+    render: (s) => (s.countedCashCents != null ? <Money cents={s.countedCashCents} /> : '—'),
+  },
+  {
+    id: 'variance',
+    label: 'Variance',
+    num: true,
+    sortValue: (s) => s.varianceCents,
+    render: (s) => (
+      <span
+        style={{
+          color: s.varianceCents != null && s.varianceCents !== 0 ? 'var(--danger)' : undefined,
+        }}
+      >
+        {s.varianceCents != null ? <Money cents={s.varianceCents} /> : '—'}
+      </span>
+    ),
+  },
+];
+
+const DAILY_COLUMNS: ColumnDef<DailyTotalRow>[] = [
+  { id: 'day', label: 'Day', sortValue: (d) => d.day, render: (d) => d.day },
+  {
+    id: 'sales',
+    label: 'Sales',
+    num: true,
+    sortValue: (d) => d.saleCount,
+    render: (d) => d.saleCount,
+  },
+  {
+    id: 'subtotal',
+    label: 'Subtotal',
+    num: true,
+    sortValue: (d) => d.subtotalCents,
+    render: (d) => <Money cents={d.subtotalCents} />,
+  },
+  {
+    id: 'discount',
+    label: 'Discount',
+    num: true,
+    sortValue: (d) => d.discountCents,
+    render: (d) => <Money cents={d.discountCents} />,
+  },
+  {
+    id: 'tax',
+    label: 'Tax',
+    num: true,
+    sortValue: (d) => d.taxCents,
+    render: (d) => <Money cents={d.taxCents} />,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (d) => d.totalCents,
+    render: (d) => (
+      <strong>
+        <Money cents={d.totalCents} />
+      </strong>
+    ),
+  },
+];
+
+const ASSOCIATE_COLUMNS: ColumnDef<AssociateTotalRow>[] = [
+  {
+    id: 'associate',
+    label: 'Associate',
+    sortValue: (a) => a.associateEmail,
+    render: (a) => a.associateEmail ?? '(deleted)',
+  },
+  {
+    id: 'sales',
+    label: 'Sales',
+    num: true,
+    sortValue: (a) => a.saleCount,
+    render: (a) => a.saleCount,
+  },
+  {
+    id: 'total',
+    label: 'Total',
+    num: true,
+    sortValue: (a) => a.totalCents,
+    render: (a) => <Money cents={a.totalCents} />,
+  },
+];
+
+const PRODUCT_COLUMNS: ColumnDef<ProductRow>[] = [
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (p) => p.productName,
+    render: (p) => p.productName,
+  },
+  {
+    id: 'variant',
+    label: 'Variant',
+    sortValue: (p) => p.variantName,
+    render: (p) => p.variantName ?? '—',
+  },
+  { id: 'sku', label: 'SKU', sortValue: (p) => p.sku, render: (p) => <code>{p.sku ?? '—'}</code> },
+  { id: 'qty', label: 'Qty', num: true, sortValue: (p) => p.quantity, render: (p) => p.quantity },
+  {
+    id: 'revenue',
+    label: 'Revenue',
+    num: true,
+    sortValue: (p) => p.revenueCents,
+    render: (p) => <Money cents={p.revenueCents} />,
+  },
+];
+/** Only shown when the API returned margins (cost visibility). */
+const PRODUCT_MARGIN_COLUMN: ColumnDef<ProductRow> = {
+  id: 'margin',
+  label: 'Margin',
+  num: true,
+  sortValue: (p) => p.marginCents,
+  render: (p) => (p.marginCents != null ? <Money cents={p.marginCents} /> : '—'),
+};
+
+const INVENTORY_COLUMNS: ColumnDef<InventoryRow>[] = [
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (r) => r.productName,
+    render: (r) => (
+      <>
+        {r.productName}
+        {r.variantName && <span className="muted"> — {r.variantName}</span>}
+      </>
+    ),
+  },
+  { id: 'sku', label: 'SKU', sortValue: (r) => r.sku, render: (r) => <code>{r.sku ?? '—'}</code> },
+  {
+    id: 'onHand',
+    label: 'On hand',
+    num: true,
+    sortValue: (r) => r.onHand,
+    render: (r) => r.onHand,
+  },
+  {
+    id: 'reserved',
+    label: 'Reserved',
+    num: true,
+    sortValue: (r) => r.reserved,
+    render: (r) => r.reserved,
+  },
+  {
+    id: 'available',
+    label: 'Available',
+    num: true,
+    sortValue: (r) => r.available,
+    render: (r) => <strong>{r.available}</strong>,
+  },
+];
+
+const CATEGORY_COLUMNS: ColumnDef<CategoryRow>[] = [
+  {
+    id: 'category',
+    label: 'Category',
+    sortValue: (c) => c.categoryName,
+    render: (c) => c.categoryName,
+  },
+  { id: 'qty', label: 'Qty', num: true, sortValue: (c) => c.quantity, render: (c) => c.quantity },
+  {
+    id: 'revenue',
+    label: 'Revenue',
+    num: true,
+    sortValue: (c) => c.revenueCents,
+    render: (c) => <Money cents={c.revenueCents} />,
+  },
+];
+
+const GIFT_CARD_COLUMNS: ColumnDef<GiftCardLiabilityRow>[] = [
+  { id: 'code', label: 'Code', sortValue: (r) => r.code, render: (r) => <code>{r.code}</code> },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (r) => r.customerName,
+    render: (r) => r.customerName ?? '—',
+  },
+  { id: 'issued', label: 'Issued', sortValue: (r) => r.issuedAt, render: (r) => r.issuedAt },
+  {
+    id: 'expires',
+    label: 'Expires',
+    sortValue: (r) => r.expiresAt,
+    render: (r) => r.expiresAt ?? '—',
+  },
+  {
+    id: 'initial',
+    label: 'Initial',
+    num: true,
+    sortValue: (r) => r.initialCents,
+    render: (r) => <Money cents={r.initialCents} />,
+  },
+  {
+    id: 'remaining',
+    label: 'Remaining',
+    num: true,
+    sortValue: (r) => r.remainingCents,
+    render: (r) => <Money cents={r.remainingCents} />,
+  },
+];
+
+function describeDateChange(r: DeliveryDateChangeRow): string {
+  return r.action === 'delivery.cancel'
+    ? 'Cancelled'
+    : r.fromDate && r.toDate
+      ? `${r.fromDate} → ${r.toDate}`
+      : (r.toDate ?? r.fromDate ?? r.action);
+}
+
+const DATE_CHANGE_COLUMNS: ColumnDef<DeliveryDateChangeRow>[] = [
+  {
+    id: 'when',
+    label: 'When',
+    sortValue: (r) => r.at,
+    render: (r) => new Date(r.at).toLocaleString(),
+  },
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (r) => r.orderNumber,
+    render: (r) => r.orderNumber ?? '—',
+  },
+  {
+    id: 'change',
+    label: 'Change',
+    sortValue: (r) => describeDateChange(r),
+    render: (r) => describeDateChange(r),
+  },
+  { id: 'by', label: 'By', sortValue: (r) => r.actorEmail, render: (r) => r.actorEmail ?? '—' },
+];
+
+const TAX_CLASS_COLUMNS: ColumnDef<TaxClassRow>[] = [
+  {
+    id: 'taxClass',
+    label: 'Tax class',
+    sortValue: (r) => r.taxClassName,
+    render: (r) => r.taxClassName,
+  },
+  {
+    id: 'lines',
+    label: 'Lines',
+    num: true,
+    sortValue: (r) => r.lineCount,
+    render: (r) => r.lineCount,
+  },
+  {
+    id: 'netSales',
+    label: 'Net sales',
+    num: true,
+    sortValue: (r) => r.netSalesCents,
+    render: (r) => <Money cents={r.netSalesCents} />,
+  },
+  {
+    id: 'taxCollected',
+    label: 'Tax collected',
+    num: true,
+    sortValue: (r) => r.taxCents,
+    render: (r) => <Money cents={r.taxCents} />,
+  },
+];
+
+const TAX_LOCATION_COLUMNS: ColumnDef<TaxLocationRow>[] = [
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName ?? r.locationId,
+    render: (r) => r.locationName ?? r.locationId,
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    num: true,
+    sortValue: (r) => r.documents,
+    render: (r) => r.documents,
+  },
+  {
+    id: 'totalSold',
+    label: 'Total sold',
+    num: true,
+    sortValue: (r) => r.totalCents,
+    render: (r) => <Money cents={r.totalCents} />,
+  },
+  {
+    id: 'taxCollected',
+    label: 'Tax collected',
+    num: true,
+    sortValue: (r) => r.taxCents,
+    render: (r) => <Money cents={r.taxCents} />,
+  },
+];
+
+const VALUATION_COLUMNS: ColumnDef<ValuationRow>[] = [
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (r) => r.productName,
+    render: (r) => (
+      <>
+        {r.productName}
+        {r.variantName && <span className="muted"> — {r.variantName}</span>}
+      </>
+    ),
+  },
+  { id: 'sku', label: 'SKU', sortValue: (r) => r.sku, render: (r) => <code>{r.sku ?? '—'}</code> },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName,
+    render: (r) => r.locationName ?? '—',
+  },
+  {
+    id: 'onHand',
+    label: 'On hand',
+    num: true,
+    sortValue: (r) => r.onHand,
+    render: (r) => r.onHand,
+  },
+  {
+    id: 'unitCost',
+    label: 'Unit cost',
+    num: true,
+    sortValue: (r) => r.costCents,
+    render: (r) => (r.costCents != null ? <Money cents={r.costCents} /> : '—'),
+  },
+  {
+    id: 'costValue',
+    label: 'Cost value',
+    num: true,
+    sortValue: (r) => r.costValueCents,
+    render: (r) => (r.costValueCents != null ? <Money cents={r.costValueCents} /> : '—'),
+  },
+  {
+    id: 'retailValue',
+    label: 'Retail value',
+    num: true,
+    sortValue: (r) => r.retailValueCents,
+    render: (r) => <Money cents={r.retailValueCents} />,
+  },
+];
 
 export default function ReportsPage() {
   const today = new Date().toISOString().slice(0, 10);
@@ -260,6 +680,106 @@ export default function ReportsPage() {
   const [dateChanges, setDateChanges] = useState<DeliveryDateChangeRow[] | null>(null);
   const [summaryBasis, setSummaryBasis] = useState<'written' | 'delivered'>('written');
   const [summaryGroupBy, setSummaryGroupBy] = useState<'day' | 'location' | 'salesperson'>('day');
+
+  // Column order + sort per record list on this page (one hook per table).
+  const zDrawerCols = useListColumns('reports-z-drawers', Z_DRAWER_COLUMNS, z?.shifts ?? null);
+  const summaryColumns = useMemo<ColumnDef<SalesSummaryRow>[]>(
+    () => [
+      {
+        id: 'group',
+        label:
+          summaryGroupBy === 'day'
+            ? 'Day'
+            : summaryGroupBy === 'location'
+              ? 'Location'
+              : 'Salesperson',
+        sortValue: (r) => r.label,
+        render: (r) => r.label,
+      },
+      {
+        id: 'documents',
+        label: 'Documents',
+        num: true,
+        sortValue: (r) => r.documentCount,
+        render: (r) => r.documentCount,
+      },
+      {
+        id: 'merchandise',
+        label: 'Merchandise',
+        num: true,
+        sortValue: (r) => r.merchandiseCents,
+        render: (r) => <Money cents={r.merchandiseCents} />,
+      },
+      {
+        id: 'discounts',
+        label: 'Discounts',
+        num: true,
+        sortValue: (r) => r.discountCents,
+        render: (r) => <Money cents={r.discountCents} />,
+      },
+      {
+        id: 'tax',
+        label: 'Tax',
+        num: true,
+        sortValue: (r) => r.taxCents,
+        render: (r) => <Money cents={r.taxCents} />,
+      },
+      {
+        id: 'total',
+        label: 'Total',
+        num: true,
+        sortValue: (r) => r.totalCents,
+        render: (r) => <Money cents={r.totalCents} />,
+      },
+    ],
+    [summaryGroupBy],
+  );
+  const summaryCols = useListColumns(
+    'reports-sales-summary',
+    summaryColumns,
+    summary?.rows ?? null,
+  );
+  const dailyCols = useListColumns('reports-daily-by-day', DAILY_COLUMNS, daily?.byDay ?? null);
+  const associateCols = useListColumns(
+    'reports-daily-by-associate',
+    ASSOCIATE_COLUMNS,
+    daily?.byAssociate ?? null,
+  );
+  const productColumns = useMemo(
+    () =>
+      products?.[0]?.marginCents != null
+        ? [...PRODUCT_COLUMNS, PRODUCT_MARGIN_COLUMN]
+        : PRODUCT_COLUMNS,
+    [products],
+  );
+  const productCols = useListColumns('reports-sales-by-product', productColumns, products);
+  const invCols = useListColumns('reports-inventory-on-hand', INVENTORY_COLUMNS, inv);
+  const categoryCols = useListColumns('reports-sales-by-category', CATEGORY_COLUMNS, categories);
+  const giftCols = useListColumns(
+    'reports-gift-card-liability',
+    GIFT_CARD_COLUMNS,
+    giftLiability?.rows ?? null,
+  );
+  const dateChangeCols = useListColumns(
+    'reports-delivery-date-changes',
+    DATE_CHANGE_COLUMNS,
+    dateChanges,
+  );
+  const taxClassCols = useListColumns(
+    'reports-tax-summary',
+    TAX_CLASS_COLUMNS,
+    taxSummary?.rows ?? null,
+  );
+  const taxLocationCols = useListColumns(
+    'reports-tax-by-location',
+    TAX_LOCATION_COLUMNS,
+    taxSummary?.byLocation ?? null,
+  );
+  const valuationCols = useListColumns(
+    'reports-inventory-valuation',
+    VALUATION_COLUMNS,
+    valuation?.rows ?? null,
+  );
 
   async function loadSummary(
     basis: 'written' | 'delivered' = summaryBasis,
@@ -503,49 +1023,20 @@ export default function ReportsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Opened</th>
-                      <th>Closed</th>
-                      <th className="num">Float</th>
-                      <th className="num">Expected</th>
-                      <th className="num">Counted</th>
-                      <th className="num">Variance</th>
-                    </tr>
+                    <ColumnHeadRow list={zDrawerCols} testIdPrefix="reports-z-drawers" />
                   </thead>
                   <tbody>
-                    {z.shifts.length === 0 && <TableEmpty colSpan={6}>No data.</TableEmpty>}
-                    {z.shifts.map((s) => (
+                    {z.shifts.length === 0 && (
+                      <TableEmpty colSpan={zDrawerCols.ordered.length}>No data.</TableEmpty>
+                    )}
+                    {zDrawerCols.sorted.map((s) => (
                       <tr key={s.id}>
-                        <td>{new Date(s.openedAt).toLocaleTimeString()}</td>
-                        <td>{s.closedAt ? new Date(s.closedAt).toLocaleTimeString() : 'open'}</td>
-                        <td className="num">
-                          <Money cents={s.openingFloatCents} />
-                        </td>
-                        <td className="num">
-                          {s.expectedCashCents != null ? (
-                            <Money cents={s.expectedCashCents} />
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="num">
-                          {s.countedCashCents != null ? <Money cents={s.countedCashCents} /> : '—'}
-                        </td>
-                        <td
-                          className="num"
-                          style={{
-                            color:
-                              s.varianceCents != null && s.varianceCents !== 0
-                                ? 'var(--danger)'
-                                : undefined,
-                          }}
-                        >
-                          {s.varianceCents != null ? <Money cents={s.varianceCents} /> : '—'}
-                        </td>
+                        <ColumnCells list={zDrawerCols} row={s} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={zDrawerCols} />
               </TableWrap>
             </>
           ) : (
@@ -617,43 +1108,20 @@ export default function ReportsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>
-                        {summaryGroupBy === 'day'
-                          ? 'Day'
-                          : summaryGroupBy === 'location'
-                            ? 'Location'
-                            : 'Salesperson'}
-                      </th>
-                      <th className="num">Documents</th>
-                      <th className="num">Merchandise</th>
-                      <th className="num">Discounts</th>
-                      <th className="num">Tax</th>
-                      <th className="num">Total</th>
-                    </tr>
+                    <ColumnHeadRow list={summaryCols} testIdPrefix="reports-sales-summary" />
                   </thead>
                   <tbody>
-                    {summary.rows.length === 0 && <TableEmpty colSpan={6}>No data.</TableEmpty>}
-                    {summary.rows.map((r) => (
+                    {summary.rows.length === 0 && (
+                      <TableEmpty colSpan={summaryCols.ordered.length}>No data.</TableEmpty>
+                    )}
+                    {summaryCols.sorted.map((r) => (
                       <tr key={r.key || '(none)'}>
-                        <td>{r.label}</td>
-                        <td className="num">{r.documentCount}</td>
-                        <td className="num">
-                          <Money cents={r.merchandiseCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={r.discountCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={r.taxCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={r.totalCents} />
-                        </td>
+                        <ColumnCells list={summaryCols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={summaryCols} />
               </TableWrap>
             </Stack>
           ) : (
@@ -692,66 +1160,40 @@ export default function ReportsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Day</th>
-                      <th className="num">Sales</th>
-                      <th className="num">Subtotal</th>
-                      <th className="num">Discount</th>
-                      <th className="num">Tax</th>
-                      <th className="num">Total</th>
-                    </tr>
+                    <ColumnHeadRow list={dailyCols} testIdPrefix="reports-daily-by-day" />
                   </thead>
                   <tbody>
-                    {daily.byDay.length === 0 && <TableEmpty colSpan={6}>No data.</TableEmpty>}
-                    {daily.byDay.map((d) => (
+                    {daily.byDay.length === 0 && (
+                      <TableEmpty colSpan={dailyCols.ordered.length}>No data.</TableEmpty>
+                    )}
+                    {dailyCols.sorted.map((d) => (
                       <tr key={d.day}>
-                        <td>{d.day}</td>
-                        <td className="num">{d.saleCount}</td>
-                        <td className="num">
-                          <Money cents={d.subtotalCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={d.discountCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={d.taxCents} />
-                        </td>
-                        <td className="num">
-                          <strong>
-                            <Money cents={d.totalCents} />
-                          </strong>
-                        </td>
+                        <ColumnCells list={dailyCols} row={d} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={dailyCols} />
               </TableWrap>
 
               <SectionHeading as="h3" title="By associate" />
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Associate</th>
-                      <th className="num">Sales</th>
-                      <th className="num">Total</th>
-                    </tr>
+                    <ColumnHeadRow list={associateCols} testIdPrefix="reports-daily-by-associate" />
                   </thead>
                   <tbody>
                     {daily.byAssociate.length === 0 && (
-                      <TableEmpty colSpan={3}>No data.</TableEmpty>
+                      <TableEmpty colSpan={associateCols.ordered.length}>No data.</TableEmpty>
                     )}
-                    {daily.byAssociate.map((a) => (
+                    {associateCols.sorted.map((a) => (
                       <tr key={a.associateUserId ?? 'none'}>
-                        <td>{a.associateEmail ?? '(deleted)'}</td>
-                        <td className="num">{a.saleCount}</td>
-                        <td className="num">
-                          <Money cents={a.totalCents} />
-                        </td>
+                        <ColumnCells list={associateCols} row={a} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={associateCols} />
               </TableWrap>
 
               <SectionHeading as="h3" title="By payment method" />
@@ -800,37 +1242,20 @@ export default function ReportsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Variant</th>
-                    <th>SKU</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Revenue</th>
-                    {products[0]?.marginCents != null && <th className="num">Margin</th>}
-                  </tr>
+                  <ColumnHeadRow list={productCols} testIdPrefix="reports-sales-by-product" />
                 </thead>
                 <tbody>
-                  {products.length === 0 && <TableEmpty colSpan={6}>No data.</TableEmpty>}
-                  {products.map((p) => (
+                  {products.length === 0 && (
+                    <TableEmpty colSpan={productCols.ordered.length}>No data.</TableEmpty>
+                  )}
+                  {productCols.sorted.map((p) => (
                     <tr key={p.variantId}>
-                      <td>{p.productName}</td>
-                      <td>{p.variantName ?? '—'}</td>
-                      <td>
-                        <code>{p.sku ?? '—'}</code>
-                      </td>
-                      <td className="num">{p.quantity}</td>
-                      <td className="num">
-                        <Money cents={p.revenueCents} />
-                      </td>
-                      {p.marginCents != null && (
-                        <td className="num">
-                          <Money cents={p.marginCents ?? 0} />
-                        </td>
-                      )}
+                      <ColumnCells list={productCols} row={p} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={productCols} />
             </TableWrap>
           ) : (
             <LoadingRows />
@@ -866,34 +1291,20 @@ export default function ReportsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>SKU</th>
-                    <th className="num">On hand</th>
-                    <th className="num">Reserved</th>
-                    <th className="num">Available</th>
-                  </tr>
+                  <ColumnHeadRow list={invCols} testIdPrefix="reports-inventory-on-hand" />
                 </thead>
                 <tbody>
-                  {inv.length === 0 && <TableEmpty colSpan={5}>No data.</TableEmpty>}
-                  {inv.map((r) => (
+                  {inv.length === 0 && (
+                    <TableEmpty colSpan={invCols.ordered.length}>No data.</TableEmpty>
+                  )}
+                  {invCols.sorted.map((r) => (
                     <tr key={r.variantId}>
-                      <td>
-                        {r.productName}
-                        {r.variantName && <span className="muted"> — {r.variantName}</span>}
-                      </td>
-                      <td>
-                        <code>{r.sku ?? '—'}</code>
-                      </td>
-                      <td className="num">{r.onHand}</td>
-                      <td className="num">{r.reserved}</td>
-                      <td className="num">
-                        <strong>{r.available}</strong>
-                      </td>
+                      <ColumnCells list={invCols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={invCols} />
             </TableWrap>
           ) : (
             <LoadingRows />
@@ -914,25 +1325,20 @@ export default function ReportsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Revenue</th>
-                  </tr>
+                  <ColumnHeadRow list={categoryCols} testIdPrefix="reports-sales-by-category" />
                 </thead>
                 <tbody>
-                  {categories.length === 0 && <TableEmpty colSpan={3}>No data.</TableEmpty>}
-                  {categories.map((c) => (
+                  {categories.length === 0 && (
+                    <TableEmpty colSpan={categoryCols.ordered.length}>No data.</TableEmpty>
+                  )}
+                  {categoryCols.sorted.map((c) => (
                     <tr key={c.categoryId ?? 'none'}>
-                      <td>{c.categoryName}</td>
-                      <td className="num">{c.quantity}</td>
-                      <td className="num">
-                        <Money cents={c.revenueCents} />
-                      </td>
+                      <ColumnCells list={categoryCols} row={c} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={categoryCols} />
             </TableWrap>
           ) : (
             <LoadingRows />
@@ -963,37 +1369,20 @@ export default function ReportsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Code</th>
-                      <th>Customer</th>
-                      <th>Issued</th>
-                      <th>Expires</th>
-                      <th className="num">Initial</th>
-                      <th className="num">Remaining</th>
-                    </tr>
+                    <ColumnHeadRow list={giftCols} testIdPrefix="reports-gift-card-liability" />
                   </thead>
                   <tbody>
                     {giftLiability.rows.length === 0 && (
-                      <TableEmpty colSpan={6}>No data.</TableEmpty>
+                      <TableEmpty colSpan={giftCols.ordered.length}>No data.</TableEmpty>
                     )}
-                    {giftLiability.rows.map((r) => (
+                    {giftCols.sorted.map((r) => (
                       <tr key={r.code}>
-                        <td>
-                          <code>{r.code}</code>
-                        </td>
-                        <td>{r.customerName ?? '—'}</td>
-                        <td>{r.issuedAt}</td>
-                        <td>{r.expiresAt ?? '—'}</td>
-                        <td className="num">
-                          <Money cents={r.initialCents} />
-                        </td>
-                        <td className="num">
-                          <Money cents={r.remainingCents} />
-                        </td>
+                        <ColumnCells list={giftCols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={giftCols} />
               </TableWrap>
             </Stack>
           </Card>
@@ -1115,31 +1504,23 @@ export default function ReportsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Order</th>
-                    <th>Change</th>
-                    <th>By</th>
-                  </tr>
+                  <ColumnHeadRow
+                    list={dateChangeCols}
+                    testIdPrefix="reports-delivery-date-changes"
+                  />
                 </thead>
                 <tbody>
-                  {dateChanges.length === 0 && <TableEmpty colSpan={4}>No data.</TableEmpty>}
-                  {dateChanges.map((r, i) => (
+                  {dateChanges.length === 0 && (
+                    <TableEmpty colSpan={dateChangeCols.ordered.length}>No data.</TableEmpty>
+                  )}
+                  {dateChangeCols.sorted.map((r, i) => (
                     <tr key={`${r.deliveryId ?? 'x'}-${i}`}>
-                      <td>{new Date(r.at).toLocaleString()}</td>
-                      <td>{r.orderNumber ?? '—'}</td>
-                      <td>
-                        {r.action === 'delivery.cancel'
-                          ? 'Cancelled'
-                          : r.fromDate && r.toDate
-                            ? `${r.fromDate} → ${r.toDate}`
-                            : (r.toDate ?? r.fromDate ?? r.action)}
-                      </td>
-                      <td>{r.actorEmail ?? '—'}</td>
+                      <ColumnCells list={dateChangeCols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={dateChangeCols} />
             </TableWrap>
           )}
         </Card>
@@ -1160,39 +1541,29 @@ export default function ReportsPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>Tax class</th>
-                        <th className="num">Lines</th>
-                        <th className="num">Net sales</th>
-                        <th className="num">Tax collected</th>
-                      </tr>
+                      <ColumnHeadRow list={taxClassCols} testIdPrefix="reports-tax-summary" />
                     </thead>
                     <tbody>
                       {taxSummary.rows.length === 0 && (
-                        <TableEmpty colSpan={4}>No data.</TableEmpty>
+                        <TableEmpty colSpan={taxClassCols.ordered.length}>No data.</TableEmpty>
                       )}
-                      {taxSummary.rows.map((r) => (
+                      {taxClassCols.sorted.map((r) => (
                         <tr key={r.taxClassId ?? 'default'}>
-                          <td>{r.taxClassName}</td>
-                          <td className="num">{r.lineCount}</td>
-                          <td className="num">
-                            <Money cents={r.netSalesCents} />
-                          </td>
-                          <td className="num">
-                            <Money cents={r.taxCents} />
-                          </td>
+                          <ColumnCells list={taxClassCols} row={r} />
                         </tr>
                       ))}
                       {taxSummary.rows.length > 0 && (
                         <tr className="font-semibold">
-                          <td colSpan={3}>Total tax</td>
-                          <td className="num">
-                            <Money cents={taxSummary.totalTaxCents} />
-                          </td>
+                          <TotalCells
+                            list={taxClassCols}
+                            label="Total tax"
+                            totals={{ taxCollected: <Money cents={taxSummary.totalTaxCents} /> }}
+                          />
                         </tr>
                       )}
                     </tbody>
                   </table>
+                  <ResetColumns list={taxClassCols} />
                 </TableWrap>
                 {taxSummary.byLocation && taxSummary.byLocation.length > 0 && (
                   <>
@@ -1200,28 +1571,20 @@ export default function ReportsPage() {
                     <TableWrap>
                       <table className="table">
                         <thead>
-                          <tr>
-                            <th>Location</th>
-                            <th className="num">Documents</th>
-                            <th className="num">Total sold</th>
-                            <th className="num">Tax collected</th>
-                          </tr>
+                          <ColumnHeadRow
+                            list={taxLocationCols}
+                            testIdPrefix="reports-tax-by-location"
+                          />
                         </thead>
                         <tbody>
-                          {taxSummary.byLocation.map((r) => (
+                          {taxLocationCols.sorted.map((r) => (
                             <tr key={r.locationId}>
-                              <td>{r.locationName ?? r.locationId}</td>
-                              <td className="num">{r.documents}</td>
-                              <td className="num">
-                                <Money cents={r.totalCents} />
-                              </td>
-                              <td className="num">
-                                <Money cents={r.taxCents} />
-                              </td>
+                              <ColumnCells list={taxLocationCols} row={r} />
                             </tr>
                           ))}
                         </tbody>
                       </table>
+                      <ResetColumns list={taxLocationCols} />
                     </TableWrap>
                   </>
                 )}
@@ -1258,42 +1621,23 @@ export default function ReportsPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th>SKU</th>
-                        <th>Location</th>
-                        <th className="num">On hand</th>
-                        <th className="num">Unit cost</th>
-                        <th className="num">Cost value</th>
-                        <th className="num">Retail value</th>
-                      </tr>
+                      <ColumnHeadRow
+                        list={valuationCols}
+                        testIdPrefix="reports-inventory-valuation"
+                      />
                     </thead>
                     <tbody>
-                      {valuation.rows.length === 0 && <TableEmpty colSpan={7}>No data.</TableEmpty>}
-                      {valuation.rows.map((r) => (
+                      {valuation.rows.length === 0 && (
+                        <TableEmpty colSpan={valuationCols.ordered.length}>No data.</TableEmpty>
+                      )}
+                      {valuationCols.sorted.map((r) => (
                         <tr key={`${r.variantId}-${r.locationId}`}>
-                          <td>
-                            {r.productName}
-                            {r.variantName && <span className="muted"> — {r.variantName}</span>}
-                          </td>
-                          <td>
-                            <code>{r.sku ?? '—'}</code>
-                          </td>
-                          <td>{r.locationName ?? '—'}</td>
-                          <td className="num">{r.onHand}</td>
-                          <td className="num">
-                            {r.costCents != null ? <Money cents={r.costCents} /> : '—'}
-                          </td>
-                          <td className="num">
-                            {r.costValueCents != null ? <Money cents={r.costValueCents} /> : '—'}
-                          </td>
-                          <td className="num">
-                            <Money cents={r.retailValueCents} />
-                          </td>
+                          <ColumnCells list={valuationCols} row={r} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={valuationCols} />
                 </TableWrap>
               </Stack>
             ) : (

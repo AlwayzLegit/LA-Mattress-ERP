@@ -7,15 +7,20 @@ import {
   Alert,
   BackLink,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Input,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   TableEmpty,
   TableWrap,
   Toolbar,
   rowKeys,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -31,6 +36,44 @@ interface MemberRow {
   roleName?: string | null;
   status?: string;
 }
+
+const MEMBER_COLUMNS: ColumnDef<MemberRow>[] = [
+  {
+    id: 'salesperson',
+    label: 'Salesperson',
+    sortValue: (m) => m.name,
+    render: (m) => <strong>{m.name ?? '(no name)'}</strong>,
+  },
+  {
+    id: 'email',
+    label: 'Email',
+    sortValue: (m) => m.email,
+    render: (m) => m.email,
+  },
+  {
+    id: 'role',
+    label: 'Role',
+    sortValue: (m) => m.roleName,
+    render: (m) => m.roleName ?? '—',
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (m) => (
+      <LinkButton
+        size="sm"
+        variant="ghost"
+        href={`/salespeople/${m.membershipId}/activity`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        View activity
+      </LinkButton>
+    ),
+  },
+];
 
 export default function SalespersonActivityLookupPage() {
   const router = useRouter();
@@ -49,6 +92,7 @@ export default function SalespersonActivityLookupPage() {
     (m) =>
       !term || (m.name ?? '').toLowerCase().includes(term) || m.email.toLowerCase().includes(term),
   );
+  const cols = useListColumns('salespeople-activity', MEMBER_COLUMNS, hits);
 
   return (
     <div>
@@ -67,8 +111,9 @@ export default function SalespersonActivityLookupPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && hits[0]) {
-                router.push(`/salespeople/${hits[0].membershipId}/activity`);
+              const first = cols.sorted[0];
+              if (e.key === 'Enter' && first) {
+                router.push(`/salespeople/${first.membershipId}/activity`);
               }
             }}
             data-testid="sp-lookup"
@@ -85,16 +130,13 @@ export default function SalespersonActivityLookupPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Salesperson</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th className="actions" />
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="salespeople-activity" />
               </thead>
               <tbody>
-                {hits.length === 0 && <TableEmpty colSpan={4}>No salespeople match.</TableEmpty>}
-                {hits.map((m) => (
+                {hits.length === 0 && (
+                  <TableEmpty colSpan={cols.ordered.length}>No salespeople match.</TableEmpty>
+                )}
+                {cols.sorted.map((m) => (
                   <tr
                     {...rowKeys}
                     key={m.membershipId}
@@ -102,25 +144,12 @@ export default function SalespersonActivityLookupPage() {
                     onClick={() => router.push(`/salespeople/${m.membershipId}/activity`)}
                     className="cursor-pointer"
                   >
-                    <td>
-                      <strong>{m.name ?? '(no name)'}</strong>
-                    </td>
-                    <td>{m.email}</td>
-                    <td>{m.roleName ?? '—'}</td>
-                    <td className="actions">
-                      <LinkButton
-                        size="sm"
-                        variant="ghost"
-                        href={`/salespeople/${m.membershipId}/activity`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        View activity
-                      </LinkButton>
-                    </td>
+                    <ColumnCells list={cols} row={m} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

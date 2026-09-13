@@ -25,7 +25,6 @@ import {
   type CompetitionBoard,
   type HistoryRow,
   type LeadRow,
-  type RaceScope,
   type WinnerLine,
 } from './competitions.service';
 
@@ -53,7 +52,6 @@ export class CompetitionsController {
   @RequirePermission('competitions.view')
   async current(
     @CurrentTenant() tenant: RequestTenantContext,
-    @Query('scope') scope?: string,
     @Query('month') month?: string,
   ): Promise<CompetitionBoard> {
     const cfg = await this.competitions.config(tenant.businessId!);
@@ -64,10 +62,7 @@ export class CompetitionsController {
       (role === 'Manager' && !cfg.visibility.managers) ||
       (role === 'Warehouse' && !cfg.visibility.warehouse);
     if (hidden) throw new NotFoundException('Competitions are hidden for this role');
-    return this.competitions.board(tenant, {
-      scope: scope === 'people' || scope === 'stores' ? (scope as RaceScope) : undefined,
-      month,
-    });
+    return this.competitions.board(tenant, { month });
   }
 
   @Get('history')
@@ -89,8 +84,6 @@ export class CompetitionsController {
     /** The one prize every race pays, or null when they differ (each winner carries its own). */
     prizeCents: number | null;
     winners: WinnerLine[];
-    stores: WinnerLine[];
-    storesLine: string | null;
   }> {
     const businessId = tenant.businessId!;
     const cfg = await this.competitions.config(businessId);
@@ -99,12 +92,7 @@ export class CompetitionsController {
     const [y, m] = cur.split('-').map(Number) as [number, number];
     const lastMonth = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
     const month = monthQ && /^\d{4}-\d{2}$/.test(monthQ) && monthQ < cur ? monthQ : lastMonth;
-    const winners = await this.competitions.winners(tenant, month, 'people');
-    const stores =
-      cfg.races !== 'people' ? await this.competitions.winners(tenant, month, 'stores') : [];
-    const tally = new Map<string, number>();
-    for (const w of stores) if (w.name) tally.set(w.name, (tally.get(w.name) ?? 0) + 1);
-    const top = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+    const winners = await this.competitions.winners(tenant, month);
     const [py, pm] = month.split('-').map(Number) as [number, number];
     const next = new Date(Date.UTC(py, pm, 1));
     const payMonth = next.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
@@ -120,10 +108,6 @@ export class CompetitionsController {
         ? (winners[0]?.prizeCents ?? null)
         : null,
       winners,
-      stores,
-      storesLine: top
-        ? `Stores race: ${top[0]} took ${top[1]} of ${stores.length}. Store prize to the manager.`
-        : null,
     };
   }
 
@@ -169,7 +153,7 @@ export class CompetitionsController {
     let locationId =
       body.locationId && stores.some((s) => s.id === body.locationId) ? body.locationId : null;
     if (!locationId) {
-      const board = await this.competitions.board(tenant, { scope: 'people' });
+      const board = await this.competitions.board(tenant);
       locationId = board.viewer.storeId ?? stores[0]?.id ?? null;
     }
     if (!locationId) throw new BadRequestException('No selling store to log the lead at');

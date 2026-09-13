@@ -13,6 +13,7 @@ import {
   type ProductPurchaseStatus,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { Money } from '@/components/money';
 import { ProductsNav } from '@/components/products-nav';
 import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
@@ -152,6 +153,10 @@ interface TaxClass {
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  // "hidden" only when the viewer lacks products.cost.view; a null cost
+  // with access is simply no cost on file.
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const costHidden = <em className="muted">{canSeeCost === false ? 'hidden' : '—'}</em>;
   const id = (params?.id ?? '') as string;
   const [p, setP] = useState<Product | null>(null);
   const [taxClasses, setTaxClasses] = useState<TaxClass[]>([]);
@@ -740,12 +745,7 @@ export default function ProductDetailPage() {
                         },
                         {
                           label: 'Sales margin cost',
-                          value:
-                            v?.costCents != null ? (
-                              <Money cents={v.costCents} />
-                            ) : (
-                              <em className="muted">hidden</em>
-                            ),
+                          value: v?.costCents != null ? <Money cents={v.costCents} /> : costHidden,
                         },
                         {
                           label: 'Suggested retail price',
@@ -1246,11 +1246,7 @@ export default function ProductDetailPage() {
                             />
                           </td>
                           <td className="num">
-                            {v.costCents != null ? (
-                              <Money cents={v.costCents} />
-                            ) : (
-                              <em className="muted">hidden</em>
-                            )}
+                            {v.costCents != null ? <Money cents={v.costCents} /> : costHidden}
                           </td>
                           <td className="actions">
                             {v.isActive ? (

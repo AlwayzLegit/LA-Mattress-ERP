@@ -2,14 +2,27 @@
 
 import { Download, Play, Printer } from 'lucide-react';
 import Link from 'next/link';
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
 import { rangeToSearch } from '@/lib/date-range';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { Money } from '@/components/money';
-import { Button, Card, EmptyState, Field, LoadingRows, PageHeader } from '@/components/ui';
+import {
+  Button,
+  Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
+  EmptyState,
+  Field,
+  type ListColumns,
+  LoadingRows,
+  PageHeader,
+  ResetColumns,
+  useListColumns,
+} from '@/components/ui';
 
 /**
  * Report Written Sales Dollars (STORIS TE.320, owner 2026-09-02). The
@@ -89,6 +102,14 @@ interface Location {
   locationType?: string;
 }
 
+/** One body row = one document line, with the location / type / document it sits under. */
+interface LineRow {
+  loc: LocationGroup;
+  t: TypeGroup;
+  d: Doc;
+  l: Line;
+}
+
 const ORDER_TYPES: { key: OrderTypeFilter; label: string }[] = [
   { key: 'both', label: 'Both' },
   { key: 'orders', label: 'Orders only' },
@@ -138,51 +159,95 @@ function Stat({
   );
 }
 
-const COLS = 11;
+/**
+ * A totals row's cells in the header's order: the label spans the leading
+ * columns that carry no total, each total sits under its own column and
+ * the rest stay blank, so a moved column keeps its total under it.
+ */
+function TotalCells<Row>({
+  list,
+  label,
+  labelClassName,
+  totals,
+  totalClassName,
+}: {
+  list: ListColumns<Row>;
+  label: ReactNode;
+  labelClassName?: string;
+  totals: Record<string, ReactNode>;
+  totalClassName?: string;
+}) {
+  const firstTotal = list.ordered.findIndex((c) => c.id in totals);
+  const lead = firstTotal < 0 ? list.ordered.length : firstTotal;
+  let placed = lead > 0;
+  return (
+    <>
+      {lead > 0 && (
+        <td colSpan={lead} className={labelClassName}>
+          {label}
+        </td>
+      )}
+      {list.ordered.slice(lead).map((c) => {
+        if (c.id in totals) {
+          return (
+            <td key={c.id} className={`num ${totalClassName ?? ''}`.trim()}>
+              {totals[c.id]}
+            </td>
+          );
+        }
+        if (!placed) {
+          placed = true;
+          return (
+            <td key={c.id} className={labelClassName}>
+              {label}
+            </td>
+          );
+        }
+        return <td key={c.id} />;
+      })}
+    </>
+  );
+}
 
 function TotalsRow({
+  list,
   label,
   t,
   profit,
   strong,
   testid,
 }: {
+  list: ListColumns<LineRow>;
   label: string;
   t: Totals;
   profit: boolean;
   strong?: boolean;
   testid?: string;
 }) {
-  const cls = strong ? 'num font-bold' : 'num font-semibold';
   return (
     <tr data-testid={testid} className={strong ? 'bg-surface-muted' : undefined}>
-      <td colSpan={3} className={strong ? 'text-right font-bold' : 'text-right font-semibold'}>
-        {label}
-      </td>
-      <td className={cls}>
-        <Money cents={t.merchCents} />
-      </td>
-      <td className={cls}>
-        {profit && t.profitCents != null ? <Money cents={t.profitCents} /> : '—'}
-      </td>
-      <td className={cls}>{profit ? <Pct value={t.profitPct} /> : '—'}</td>
-      <td className={cls}>
-        <Money cents={t.chargesCents} />
-      </td>
-      <td className={cls}>
-        <Money cents={t.discountCents} />
-      </td>
-      <td className={cls}>
-        <Money cents={t.miscFeeCents} />
-      </td>
-      <td className={cls}>
-        <Money cents={t.taxCents} />
-      </td>
-      <td className={cls}>
-        <Money cents={t.totalCents} />
-      </td>
+      <TotalCells
+        list={list}
+        label={label}
+        labelClassName={strong ? 'text-right font-bold' : 'text-right font-semibold'}
+        totalClassName={strong ? 'font-bold' : 'font-semibold'}
+        totals={{
+          merch: <Money cents={t.merchCents} />,
+          profit: profit && t.profitCents != null ? <Money cents={t.profitCents} /> : '—',
+          profitPct: profit ? <Pct value={t.profitPct} /> : '—',
+          charges: <Money cents={t.chargesCents} />,
+          discount: <Money cents={t.discountCents} />,
+          miscFee: <Money cents={t.miscFeeCents} />,
+          tax: <Money cents={t.taxCents} />,
+          total: <Money cents={t.totalCents} />,
+        }}
+      />
     </tr>
   );
+}
+
+function docKey(d: Doc): string {
+  return `${d.documentId}:${d.adjustmentKind ?? 'doc'}:${d.time}`;
 }
 
 export default function WrittenSalesPage() {
@@ -199,6 +264,92 @@ export default function WrittenSalesPage() {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [paramsReady, setParamsReady] = useState(false);
+
+  const profit = report?.canSeeProfit ?? false;
+
+  // Line columns: the STORIS body's charges / discount / misc fee / tax
+  // cells are only filled on totals rows; "entered by" prints under the
+  // order-total column, as on the spool.
+  const lineColumns = useMemo<ColumnDef<LineRow>[]>(
+    () => [
+      {
+        id: 'qty',
+        label: 'Qty',
+        num: true,
+        sortValue: (r) => r.l.quantity,
+        render: (r) => r.l.quantity || '',
+      },
+      {
+        id: 'productNumber',
+        label: 'Product number',
+        sortValue: (r) => r.l.productNumber,
+        render: (r) => r.l.productNumber ?? '—',
+      },
+      {
+        id: 'description',
+        label: 'Product description',
+        sortValue: (r) => r.l.description,
+        render: (r) => r.l.description,
+      },
+      {
+        id: 'merch',
+        label: 'Merch amount',
+        num: true,
+        sortValue: (r) => r.l.merchCents,
+        render: (r) => <Money cents={r.l.merchCents} />,
+      },
+      {
+        id: 'profit',
+        label: 'Gross profit',
+        num: true,
+        sortValue: (r) => (profit ? r.l.profitCents : null),
+        render: (r) =>
+          profit && r.l.profitCents != null ? <Money cents={r.l.profitCents} /> : '—',
+      },
+      {
+        id: 'profitPct',
+        label: 'Profit pct',
+        num: true,
+        sortValue: (r) => (profit ? r.l.profitPct : null),
+        render: (r) => (profit ? <Pct value={r.l.profitPct} /> : '—'),
+      },
+      { id: 'charges', label: 'Charges', num: true, render: () => null },
+      { id: 'discount', label: 'Customer discount', num: true, render: () => null },
+      { id: 'miscFee', label: 'Misc fee charge', num: true, render: () => null },
+      { id: 'tax', label: 'Sales tax', num: true, render: () => null },
+      {
+        id: 'total',
+        label: 'Total order',
+        num: true,
+        sortValue: (r) => r.l.enteredBy,
+        render: (r) => <span className="text-muted">{r.l.enteredBy ?? ''}</span>,
+      },
+    ],
+    [profit],
+  );
+  const lineRows = useMemo<LineRow[] | null>(
+    () =>
+      report
+        ? report.locations.flatMap((loc) =>
+            loc.types.flatMap((t) =>
+              t.documents.flatMap((d) => d.lines.map((l) => ({ loc, t, d, l }))),
+            ),
+          )
+        : null,
+    [report],
+  );
+  const cols = useListColumns('reports-written-sales', lineColumns, lineRows);
+  // Sorted once across the report, then bucketed back under each document.
+  const linesByDoc = useMemo(() => {
+    const by = new Map<string, LineRow[]>();
+    for (const r of cols.sorted) {
+      const k = `${r.loc.locationId}|${r.t.key}|${docKey(r.d)}`;
+      const bucket = by.get(k);
+      if (bucket) bucket.push(r);
+      else by.set(k, [r]);
+    }
+    return by;
+  }, [cols.sorted]);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -295,8 +446,6 @@ export default function WrittenSalesPage() {
       setExporting(false);
     }
   }
-
-  const profit = report?.canSeeProfit ?? false;
 
   return (
     <div data-testid="written-sales">
@@ -478,34 +627,20 @@ export default function WrittenSalesPage() {
                   <div style={{ overflowX: 'auto' }}>
                     <table className="table" data-testid="ws-location">
                       <thead>
-                        <tr>
-                          <th className="num">Qty</th>
-                          <th>Product number</th>
-                          <th>Product description</th>
-                          <th className="num">Merch amount</th>
-                          <th className="num">Gross profit</th>
-                          <th className="num">Profit pct</th>
-                          <th className="num">Charges</th>
-                          <th className="num">Customer discount</th>
-                          <th className="num">Misc fee charge</th>
-                          <th className="num">Sales tax</th>
-                          <th className="num">Total order</th>
-                        </tr>
+                        <ColumnHeadRow list={cols} testIdPrefix="reports-written-sales" />
                       </thead>
                       <tbody>
                         {loc.types.map((t) => (
                           <Fragment key={t.key}>
                             <tr className="bg-surface-muted">
-                              <td colSpan={COLS} className="font-semibold">
+                              <td colSpan={cols.ordered.length} className="font-semibold">
                                 Type {t.label}
                               </td>
                             </tr>
                             {t.documents.map((d) => (
-                              <Fragment
-                                key={`${d.documentId}:${d.adjustmentKind ?? 'doc'}:${d.time}`}
-                              >
+                              <Fragment key={docKey(d)}>
                                 <tr data-testid="ws-document">
-                                  <td colSpan={COLS}>
+                                  <td colSpan={cols.ordered.length}>
                                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                                       <span>
                                         <span className="text-muted">Order number </span>
@@ -570,29 +705,15 @@ export default function WrittenSalesPage() {
                                     ) : null}
                                   </td>
                                 </tr>
-                                {d.lines.map((l) => (
-                                  <tr key={l.lineId} data-testid="ws-line">
-                                    <td className="num">{l.quantity || ''}</td>
-                                    <td>{l.productNumber ?? '—'}</td>
-                                    <td>{l.description}</td>
-                                    <td className="num">
-                                      <Money cents={l.merchCents} />
-                                    </td>
-                                    <td className="num">
-                                      {profit && l.profitCents != null ? (
-                                        <Money cents={l.profitCents} />
-                                      ) : (
-                                        '—'
-                                      )}
-                                    </td>
-                                    <td className="num">
-                                      {profit ? <Pct value={l.profitPct} /> : '—'}
-                                    </td>
-                                    <td colSpan={4} />
-                                    <td className="num text-muted">{l.enteredBy ?? ''}</td>
+                                {(
+                                  linesByDoc.get(`${loc.locationId}|${t.key}|${docKey(d)}`) ?? []
+                                ).map((r) => (
+                                  <tr key={r.l.lineId} data-testid="ws-line">
+                                    <ColumnCells list={cols} row={r} />
                                   </tr>
                                 ))}
                                 <TotalsRow
+                                  list={cols}
                                   label={`Total for order ${d.number}:`}
                                   t={d.totals}
                                   profit={profit}
@@ -601,6 +722,7 @@ export default function WrittenSalesPage() {
                               </Fragment>
                             ))}
                             <TotalsRow
+                              list={cols}
                               label={`Total for type ${t.label}:`}
                               t={t.totals}
                               profit={profit}
@@ -609,6 +731,7 @@ export default function WrittenSalesPage() {
                           </Fragment>
                         ))}
                         <TotalsRow
+                          list={cols}
                           label={`Total for location ${loc.locationName}:`}
                           t={loc.totals}
                           profit={profit}
@@ -617,6 +740,7 @@ export default function WrittenSalesPage() {
                         />
                       </tbody>
                     </table>
+                    <ResetColumns list={cols} />
                   </div>
                 </Card>
               ))
@@ -639,7 +763,39 @@ export default function WrittenSalesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <TotalsRow label="Grand total:" t={report.totals} profit={profit} strong />
+                    <tr>
+                      <td colSpan={3} className="text-right font-bold">
+                        Grand total:
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.merchCents} />
+                      </td>
+                      <td className="num font-bold">
+                        {profit && report.totals.profitCents != null ? (
+                          <Money cents={report.totals.profitCents} />
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="num font-bold">
+                        {profit ? <Pct value={report.totals.profitPct} /> : '—'}
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.chargesCents} />
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.discountCents} />
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.miscFeeCents} />
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.taxCents} />
+                      </td>
+                      <td className="num font-bold">
+                        <Money cents={report.totals.totalCents} />
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

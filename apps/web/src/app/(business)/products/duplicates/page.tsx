@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -9,12 +9,17 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface DupProduct {
@@ -123,6 +128,110 @@ export default function DuplicateProductsPage() {
     }
   }
 
+  // One column set shared by every group's table; the rows are sorted as
+  // one list and then split back into their groups (jeopardy's pattern).
+  const DUP_COLUMNS: ColumnDef<DupProduct>[] = [
+    {
+      id: 'sku',
+      label: 'SKU',
+      sortValue: (p) => p.sku,
+      render: (p) => (
+        <>
+          <code>{p.sku ?? '—'}</code>
+          {p.variants > 1 && <span className="muted"> · {p.variants} variants</span>}
+        </>
+      ),
+    },
+    {
+      id: 'source',
+      label: 'Source',
+      sortValue: (p) => p.source ?? 'built here',
+      render: (p) => (
+        <span
+          className={`badge ${p.imported ? 'badge-success' : 'badge-neutral'}`}
+          data-testid="duplicate-source"
+        >
+          {p.source ?? 'built here'}
+        </span>
+      ),
+    },
+    {
+      id: 'price',
+      label: 'Price',
+      num: true,
+      sortValue: (p) => p.priceCents,
+      render: (p) => (p.priceCents != null ? <Money cents={p.priceCents} /> : '—'),
+    },
+    {
+      id: 'onHand',
+      label: 'On hand',
+      num: true,
+      sortValue: (p) => p.onHand,
+      render: (p) => (
+        <strong style={{ color: p.onHand > 0 ? 'var(--success)' : undefined }}>{p.onHand}</strong>
+      ),
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved',
+      num: true,
+      sortValue: (p) => p.reserved,
+      render: (p) => p.reserved,
+    },
+    {
+      id: 'documents',
+      label: 'Documents',
+      num: true,
+      sortValue: (p) => p.documents,
+      render: (p) => p.documents,
+    },
+    {
+      id: 'created',
+      label: 'Created',
+      className: 'nowrap',
+      sortValue: (p) => p.createdAt,
+      render: (p) => new Date(p.createdAt).toLocaleDateString(),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (p) => (
+        <>
+          <LinkButton href={`/products/${p.id}`} variant="secondary" size="sm">
+            Open
+          </LinkButton>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={busy === p.id}
+            onClick={() => void deactivate(p)}
+            data-testid="duplicate-deactivate"
+          >
+            Deactivate
+          </Button>
+          {p.deletable && (
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              disabled={busy === p.id}
+              onClick={() => void remove(p)}
+              data-testid="duplicate-delete"
+            >
+              Delete
+            </Button>
+          )}
+        </>
+      ),
+    },
+  ];
+  const allProducts = useMemo(() => groups?.flatMap((g) => g.products) ?? null, [groups]);
+  const cols = useListColumns('products-duplicates', DUP_COLUMNS, allProducts);
+
   return (
     <div data-testid="duplicate-products">
       <PageHeader
@@ -186,76 +295,19 @@ export default function DuplicateProductsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>SKU</th>
-                      <th>Source</th>
-                      <th className="num">Price</th>
-                      <th className="num">On hand</th>
-                      <th className="num">Reserved</th>
-                      <th className="num">Documents</th>
-                      <th>Created</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="products-duplicates" />
                   </thead>
                   <tbody>
-                    {g.products.map((p) => (
-                      <tr key={p.id}>
-                        <td>
-                          <code>{p.sku ?? '—'}</code>
-                          {p.variants > 1 && (
-                            <span className="muted"> · {p.variants} variants</span>
-                          )}
-                        </td>
-                        <td>
-                          <span
-                            className={`badge ${p.imported ? 'badge-success' : 'badge-neutral'}`}
-                            data-testid="duplicate-source"
-                          >
-                            {p.source ?? 'built here'}
-                          </span>
-                        </td>
-                        <td className="num">
-                          {p.priceCents != null ? <Money cents={p.priceCents} /> : '—'}
-                        </td>
-                        <td className="num">
-                          <strong style={{ color: p.onHand > 0 ? 'var(--success)' : undefined }}>
-                            {p.onHand}
-                          </strong>
-                        </td>
-                        <td className="num">{p.reserved}</td>
-                        <td className="num">{p.documents}</td>
-                        <td className="nowrap">{new Date(p.createdAt).toLocaleDateString()}</td>
-                        <td className="actions">
-                          <LinkButton href={`/products/${p.id}`} variant="secondary" size="sm">
-                            Open
-                          </LinkButton>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy === p.id}
-                            onClick={() => void deactivate(p)}
-                            data-testid="duplicate-deactivate"
-                          >
-                            Deactivate
-                          </Button>
-                          {p.deletable && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="danger"
-                              disabled={busy === p.id}
-                              onClick={() => void remove(p)}
-                              data-testid="duplicate-delete"
-                            >
-                              Delete
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {cols.sorted
+                      .filter((p) => g.products.includes(p))
+                      .map((p) => (
+                        <tr key={p.id}>
+                          <ColumnCells list={cols} row={p} />
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
             </Card>
           ))

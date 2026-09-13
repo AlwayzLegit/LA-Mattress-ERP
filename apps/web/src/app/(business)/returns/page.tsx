@@ -18,6 +18,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -25,12 +28,14 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   StatusBadge,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 interface ReturnRow {
@@ -71,9 +76,59 @@ interface DraftLine {
  * customer with no findable invoice. Store-credit only; goods go to
  * As-Is review; a non-manager finishes through the override dialog.
  */
+const RETURN_COLUMNS: ColumnDef<ReturnRow>[] = [
+  {
+    id: 'rma',
+    label: 'RMA',
+    sortValue: (r) => r.rmaNumber,
+    render: (r) => <code>{r.rmaNumber}</code>,
+  },
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (r) => (r.orderId ? 'a' : 'b'),
+    render: (r) =>
+      r.orderId ? (
+        <Link href={`/orders/${r.orderId}`}>View order</Link>
+      ) : (
+        <span className="muted">
+          No original
+          {r.referencedOrderNumber ? ` (claimed ${r.referencedOrderNumber})` : ''}
+        </span>
+      ),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.status,
+    render: (r) => <StatusBadge status={r.status} />,
+  },
+  {
+    id: 'refund',
+    label: 'Refund',
+    sortValue: (r) => r.refundMethod,
+    render: (r) => (r.refundMethod === 'store_credit' ? 'Store credit' : 'Original tender'),
+  },
+  {
+    id: 'amount',
+    label: 'Amount',
+    num: true,
+    sortValue: (r) => r.amountCents,
+    render: (r) => <Money cents={r.amountCents} />,
+  },
+  {
+    id: 'authorized',
+    label: 'Authorized',
+    className: 'nowrap',
+    sortValue: (r) => r.authorizedAt,
+    render: (r) => new Date(r.authorizedAt).toLocaleString(),
+  },
+];
+
 export default function ReturnsPage() {
   const list = useCursorList<ReturnRow>('/v1/order-returns');
   const { rows, error } = list;
+  const cols = useListColumns('returns', RETURN_COLUMNS, rows);
 
   useEffect(() => {
     void list.load();
@@ -97,45 +152,17 @@ export default function ReturnsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>RMA</th>
-                    <th>Order</th>
-                    <th>Status</th>
-                    <th>Refund</th>
-                    <th className="num">Amount</th>
-                    <th>Authorized</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="returns" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td>
-                        <code>{r.rmaNumber}</code>
-                      </td>
-                      <td>
-                        {r.orderId ? (
-                          <Link href={`/orders/${r.orderId}`}>View order</Link>
-                        ) : (
-                          <span className="muted">
-                            No original
-                            {r.referencedOrderNumber ? ` (claimed ${r.referencedOrderNumber})` : ''}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <StatusBadge status={r.status} />
-                      </td>
-                      <td>
-                        {r.refundMethod === 'store_credit' ? 'Store credit' : 'Original tender'}
-                      </td>
-                      <td className="num">
-                        <Money cents={r.amountCents} />
-                      </td>
-                      <td className="nowrap">{new Date(r.authorizedAt).toLocaleString()}</td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <LoadMore state={list} noun="returns" />
           </Card>

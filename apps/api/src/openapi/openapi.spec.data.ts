@@ -190,6 +190,11 @@ export const openapiSpec = {
                 method: { type: 'string', enum: ['cash', 'card', 'gift_card'] },
                 amountCents: { type: 'integer', minimum: 0 },
                 processorRef: { type: 'string' },
+                cardBrand: {
+                  type: 'string',
+                  enum: ['visa', 'mastercard', 'amex', 'discover', 'jcb', 'diners', 'other'],
+                  description: 'Card tenders only: the brand, for per-store tender breakdowns.',
+                },
                 stripePaymentMethodId: { type: 'string' },
               },
             },

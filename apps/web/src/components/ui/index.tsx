@@ -3,6 +3,7 @@
  * Import from `@/components/ui`; every piece reads the tokens in
  * `globals.css`. `/dev/components` shows every state.
  */
+export { cx } from './cx';
 export { Button, LinkButton } from './button';
 export { Kbd, formatKeys, usePlatform } from './kbd';
 export { StatusChip, StatusBadge, DisplayStatusBadge } from './status-chip';
@@ -11,6 +12,15 @@ export { SlideOver } from './slide-over';
 export { useFocusTrap } from './focus-trap';
 export { Skeleton, LoadingRows, ErrorState, EmptyState } from './states';
 export { RowLink, SortHeader, rowKeys, type SortDir } from './table';
+export {
+  ColumnCells,
+  ColumnHeadRow,
+  ResetColumns,
+  useListColumns,
+  type ColumnDef,
+  type ListColumns,
+  type ServerSort,
+} from './columns';
 export {
   Input,
   Select,

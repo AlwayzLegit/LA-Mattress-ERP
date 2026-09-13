@@ -1,7 +1,6 @@
 /** Wire shapes for `/v1/competitions/*` (redesign Phase 11). */
 
 export type RaceKey = 'leads' | 'avg' | 'high' | 'sales' | 'beds' | 'ex';
-export type RaceScope = 'people' | 'stores';
 
 export interface RaceOrder {
   id: string;
@@ -17,7 +16,8 @@ export interface RaceRow {
   storeId: string | null;
   storeCode: string | null;
   storeName: string | null;
-  rank: number;
+  /** 1-based; null when the race cannot rank this person yet (listed after the ranked rows). */
+  rank: number | null;
   value: number;
   valueLabel: string;
   detail: string;
@@ -39,7 +39,9 @@ export interface RaceCard {
   empty: string;
   on: boolean;
   prizeCents: number;
+  /** Everyone who competes, ranked rows first, then the unranked in name order. */
   rows: RaceRow[];
+  /** The first three ranked rows (the collapsed strip). */
   top: RaceRow[];
   you: { rank: number | null; value: number | null; valueLabel: string; gap: string } | null;
   unranked: string | null;
@@ -66,7 +68,6 @@ export interface HistoryRow {
   winner: string | null;
   winnerStore: string | null;
   result: string;
-  storeWinner: string | null;
   yourRank: number | null;
   paid: string;
 }
@@ -81,8 +82,6 @@ export interface CompetitionBoard {
   endsAt: string;
   last48: boolean;
   isDayOne: boolean;
-  scope: RaceScope;
-  scopes: RaceScope[];
   config: {
     prizeCents: number;
     sweep: { four: number; five: number; six: number };
@@ -96,7 +95,6 @@ export interface CompetitionBoard {
     storeId: string | null;
     storeName: string | null;
     canLog: boolean;
-    defaultScope: RaceScope;
   };
   cards: RaceCard[];
   sweep: { name: string; n: number; bonus: string; isYou: boolean } | null;
@@ -105,7 +103,6 @@ export interface CompetitionBoard {
     label: string;
     winners: WinnerLine[];
     until: string;
-    storesLine: string | null;
   } | null;
 }
 
@@ -137,8 +134,6 @@ export interface WinnersSheet {
   /** One prize for every race, or null when they differ — then each winner shows its own. */
   prizeCents: number | null;
   winners: WinnerLine[];
-  stores: WinnerLine[];
-  storesLine: string | null;
 }
 
 export const LEAD_SIZES = ['Twin', 'Twin XL', 'Full', 'Queen', 'King', 'Cal King'];

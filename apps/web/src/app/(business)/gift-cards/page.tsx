@@ -6,13 +6,18 @@ import { Money } from '@/components/money';
 import {
   Alert,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface GiftCard {
@@ -25,9 +30,70 @@ interface GiftCard {
   createdAt: string;
 }
 
+const GIFT_CARD_COLUMNS: ColumnDef<GiftCard>[] = [
+  {
+    id: 'code',
+    label: 'Code',
+    sortValue: (g) => g.code,
+    render: (g) => <code>{g.code}</code>,
+  },
+  {
+    id: 'balance',
+    label: 'Balance',
+    num: true,
+    sortValue: (g) => g.currentBalanceCents,
+    render: (g) => (
+      <>
+        <Money cents={g.currentBalanceCents} />
+        <div className="muted">
+          of <Money cents={g.initialBalanceCents} />
+        </div>
+      </>
+    ),
+  },
+  {
+    id: 'issuedFor',
+    label: 'Issued for',
+    render: () => '—',
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (g) => g.status,
+    render: (g) => <StatusBadge status={g.status} />,
+  },
+  {
+    id: 'issued',
+    label: 'Issued',
+    className: 'nowrap',
+    sortValue: (g) => g.createdAt,
+    render: (g) => new Date(g.createdAt).toLocaleDateString(),
+  },
+  {
+    id: 'expires',
+    label: 'Expires',
+    className: 'nowrap',
+    sortValue: (g) => g.expiresAt,
+    render: (g) => (g.expiresAt ? new Date(g.expiresAt).toLocaleDateString() : '—'),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (g) => (
+      <LinkButton size="sm" href={`/gift-cards/${g.id}`}>
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function GiftCardsPage() {
   const [rows, setRows] = useState<GiftCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cols = useListColumns('gift-cards', GIFT_CARD_COLUMNS, rows);
 
   useEffect(() => {
     void (async () => {
@@ -69,45 +135,17 @@ export default function GiftCardsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th className="num">Balance</th>
-                    <th>Issued for</th>
-                    <th>Status</th>
-                    <th>Issued</th>
-                    <th>Expires</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="gift-cards" />
                 </thead>
                 <tbody>
-                  {rows.map((g) => (
+                  {cols.sorted.map((g) => (
                     <tr key={g.id}>
-                      <td>
-                        <code>{g.code}</code>
-                      </td>
-                      <td className="num">
-                        <Money cents={g.currentBalanceCents} />
-                        <div className="muted">
-                          of <Money cents={g.initialBalanceCents} />
-                        </div>
-                      </td>
-                      <td>—</td>
-                      <td>
-                        <StatusBadge status={g.status} />
-                      </td>
-                      <td className="nowrap">{new Date(g.createdAt).toLocaleDateString()}</td>
-                      <td className="nowrap">
-                        {g.expiresAt ? new Date(g.expiresAt).toLocaleDateString() : '—'}
-                      </td>
-                      <td className="actions">
-                        <LinkButton size="sm" href={`/gift-cards/${g.id}`}>
-                          Open
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={g} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

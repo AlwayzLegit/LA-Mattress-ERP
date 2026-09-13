@@ -8,13 +8,18 @@ import { useCursorList } from '@/lib/use-cursor-list';
 import {
   Alert,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface TransferRow {
@@ -31,10 +36,82 @@ interface TransferRow {
   createdAt: string;
 }
 
+const TRANSFER_COLUMNS: ColumnDef<TransferRow>[] = [
+  {
+    id: 'number',
+    label: 'Transfer',
+    sortValue: (t) => t.number,
+    render: (t) => (
+      <>
+        <code>{t.number}</code>
+        {t.orderId && (
+          <>
+            {' '}
+            <Link href={`/orders/${t.orderId}`} className="muted">
+              order
+            </Link>
+          </>
+        )}
+      </>
+    ),
+  },
+  {
+    id: 'type',
+    label: 'Type',
+    sortValue: (t) => t.transferType,
+    render: (t) => t.transferType.replace('_', ' '),
+  },
+  {
+    id: 'from',
+    label: 'From',
+    sortValue: (t) => t.fromLocationName,
+    render: (t) => t.fromLocationName ?? '—',
+  },
+  {
+    id: 'to',
+    label: 'To',
+    sortValue: (t) => t.toLocationName,
+    render: (t) => t.toLocationName ?? '—',
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (t) => t.status,
+    render: (t) => <StatusBadge status={t.status} />,
+  },
+  {
+    id: 'scheduled',
+    label: 'Scheduled',
+    title: 'Auto transfers: the XFR-053 schedule date',
+    sortValue: (t) => t.scheduledFor,
+    render: (t) =>
+      t.scheduledFor ? new Date(`${t.scheduledFor}T00:00:00`).toLocaleDateString() : '—',
+  },
+  {
+    id: 'created',
+    label: 'Created',
+    sortValue: (t) => t.createdAt,
+    render: (t) => new Date(t.createdAt).toLocaleDateString(),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (t) => (
+      <LinkButton size="sm" href={`/transfers/${t.id}`}>
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function TransfersPage() {
   const list = useCursorList<TransferRow>('/v1/stock-transfers');
   const [aging, setAging] = useState<{ id: string; number: string; daysInTransit: number }[]>([]);
   const { rows, error } = list;
+  const cols = useListColumns('transfers', TRANSFER_COLUMNS, rows);
 
   useEffect(() => {
     api<{ id: string; number: string; daysInTransit: number }[]>('/v1/stock-transfers/aging?days=3')
@@ -102,52 +179,17 @@ export default function TransfersPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Transfer</th>
-                    <th>Type</th>
-                    <th>From</th>
-                    <th>To</th>
-                    <th>Status</th>
-                    <th title="Auto transfers: the XFR-053 schedule date">Scheduled</th>
-                    <th>Created</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="transfers" />
                 </thead>
                 <tbody>
-                  {rows.map((t) => (
+                  {cols.sorted.map((t) => (
                     <tr key={t.id}>
-                      <td>
-                        <code>{t.number}</code>
-                        {t.orderId && (
-                          <>
-                            {' '}
-                            <Link href={`/orders/${t.orderId}`} className="muted">
-                              order
-                            </Link>
-                          </>
-                        )}
-                      </td>
-                      <td>{t.transferType.replace('_', ' ')}</td>
-                      <td>{t.fromLocationName ?? '—'}</td>
-                      <td>{t.toLocationName ?? '—'}</td>
-                      <td>
-                        <StatusBadge status={t.status} />
-                      </td>
-                      <td>
-                        {t.scheduledFor
-                          ? new Date(`${t.scheduledFor}T00:00:00`).toLocaleDateString()
-                          : '—'}
-                      </td>
-                      <td>{new Date(t.createdAt).toLocaleDateString()}</td>
-                      <td className="actions">
-                        <LinkButton size="sm" href={`/transfers/${t.id}`}>
-                          Open
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={t} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <LoadMore state={list} noun="transfers" />
           </Card>

@@ -4,8 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { LeadDialog } from '@/components/competition/lead-dialog';
-import { formatMoney } from '@jetnine/shared';
+import {
+  CARD_BRANDS,
+  FINANCING_TERM_MONTHS,
+  cardBrandLabel,
+  formatMoney,
+  isCardMethod,
+  isFinancingMethod,
+} from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { lineHasAddons } from '@/lib/pos-addons';
 import { setDraftSummary } from '@/lib/api-status';
 import { SELLING_STORE_KEY } from '@/lib/acting-store';
 import {
@@ -105,6 +113,8 @@ interface Line {
   /** True once the salesperson picked the source by hand. */
   sourceTouched: boolean;
   deliveryDate: string;
+  /** Catalog category path ("Mattresses › Hybrid"); its root decides the add-on chips. */
+  categoryPath: string | null;
   /** Removal / Recycling / Declined foundation toggles on mattress and base lines. */
   addons: Addons;
   atpDate?: string | null;
@@ -116,6 +126,10 @@ interface PaymentLine {
   method: Tender;
   amountCents: number;
   ref: string;
+  /** Card tenders: the brand picked at the register (visa | mastercard | …). */
+  cardBrand?: string;
+  /** Financing tenders (Synchrony/Acima): the promo term signed, in months. */
+  financingMonths?: number;
 }
 interface LocationRow {
   id: string;
@@ -146,13 +160,6 @@ interface Avail {
 let lineKeySeq = 0;
 const nextKey = () => `l${++lineKeySeq}`;
 const NO_ADDONS: Addons = { removal: false, recycling: false, declined: false };
-
-/** Add-on chips show on mattress and base lines only. */
-function isMattressOrBase(description: string): boolean {
-  return /mattress|foundation|box ?spring|adjustable|\bbase\b|hybrid|posturepedic|tempur/i.test(
-    description,
-  );
-}
 
 const EMPTY_ADDRESS = { line1: '', line2: '', city: '', region: '', postalCode: '' };
 const EMPTY_NEW_CUSTOMER = {
@@ -248,6 +255,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [payMethod, setPayMethod] = useState<Tender>('card');
   const [payAmount, setPayAmount] = useState('');
   const [payRef, setPayRef] = useState('');
+  /** Card tenders: brand subcategory — required before Record. */
+  const [payCardBrand, setPayCardBrand] = useState('');
+  /** Synchrony/Acima tenders: months financed — required before Record. */
+  const [payMonths, setPayMonths] = useState('');
   /** The "Take a payment" rail panel is open (F8 or the 44px button). */
   const [paying, setPaying] = useState(false);
   const [zeroOk, setZeroOk] = useState(false);
@@ -598,6 +609,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   });
   const hasZero = lines.some((l) => l.lineType !== 'custom' && l.unitPriceCents === 0);
   const zeroBlock = hasZero && !zeroOk;
+  // No money, no completion: until a payment is recorded the order can
+  // only be parked as a draft (quotes and exchanges are exempt — quotes
+  // hold no money by design, exchanges may be covered by the original
+  // order's tenders).
+  const needsMoney =
+    orderType !== 'quote' && !exchangeOriginal && totals.totalCents > 0 && totals.paidCents === 0;
   const status: 'draft' | 'waiting' | 'scheduled' = locked
     ? 'scheduled'
     : anyShort
@@ -639,6 +656,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         description: [row.productName, row.variantName].filter(Boolean).join(' — '),
         sku: row.sku,
         size: row.size,
+        categoryPath: row.categoryPath ?? null,
         quantity: 1,
         unitPriceCents: row.priceCents,
         lineDiscountCents: 0,
@@ -731,12 +749,31 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
     const cents = parseDollars(payAmount);
     if (cents <= 0) return;
+    // Subcategories the dashboards break tenders down by: a card payment
+    // names its brand, a financing payment names the months signed.
+    if (isCardMethod(payMethod) && !payCardBrand) {
+      toast.error('Pick the card brand (Visa, Mastercard, …) before recording.');
+      return;
+    }
+    if (isFinancingMethod(payMethod) && !payMonths) {
+      toast.error('Pick the months financed before recording.');
+      return;
+    }
     setPayments((prev) => [
       ...prev,
-      { key: nextKey(), method: payMethod, amountCents: cents, ref: payRef.trim() },
+      {
+        key: nextKey(),
+        method: payMethod,
+        amountCents: cents,
+        ref: payRef.trim(),
+        cardBrand: isCardMethod(payMethod) ? payCardBrand : undefined,
+        financingMonths: isFinancingMethod(payMethod) ? Number(payMonths) : undefined,
+      },
     ]);
     setPayAmount('');
     setPayRef('');
+    setPayCardBrand('');
+    setPayMonths('');
     // Repeat to $0: the panel stays open for the next tender and closes on
     // its own once nothing is left to collect (canvas 4d).
     if (totals.balanceCents - cents <= 0) setPaying(false);
@@ -770,6 +807,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           fulfillmentMethod: string | null;
           sourceLocationId: string | null;
           deliveryDate: string | null;
+          categoryPath?: string | null;
         }[];
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
@@ -801,6 +839,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             description: l.description,
             sku: null,
             size: null,
+            categoryPath: l.categoryPath ?? null,
             quantity: l.quantity,
             unitPriceCents: l.unitPriceCents,
             lineDiscountCents: l.discountCents,
@@ -836,6 +875,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
     if (mode === 'complete' && zeroBlock) {
       setError('A line is priced at $0.00 — fix the price or confirm it is intentional.');
+      return;
+    }
+    if (mode === 'complete' && needsMoney) {
+      setError('No money on this order yet — record a payment to complete, or Save draft.');
       return;
     }
     if (mode === 'complete' && parseDollars(payAmount) > 0) {
@@ -920,6 +963,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             {
               method: payments[0]?.method === 'cash' ? 'cash' : 'card',
               amountCents: totals.totalCents,
+              cardBrand: payments[0]?.method !== 'cash' ? payments[0]?.cardBrand : undefined,
             },
           ],
         }),
@@ -987,6 +1031,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             amountCents: p.amountCents,
             kind: 'deposit',
             processorRef: p.ref || undefined,
+            cardBrand: p.cardBrand,
+            financingMonths: p.financingMonths,
           }),
         });
       }
@@ -1196,9 +1242,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     ? 'Add a customer to complete'
     : lines.length === 0
       ? ' '
-      : totals.balanceCents > 0
-        ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
-        : "Reserves stock at each line's source";
+      : needsMoney
+        ? 'Record a payment to complete — Save draft keeps it without money down'
+        : totals.balanceCents > 0
+          ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
+          : "Reserves stock at each line's source";
   const draftNumber = done?.number ?? resumedDraft?.number ?? null;
 
   return (
@@ -1832,6 +1880,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               <div key={p.key} className="reg-total-row reg-payment">
                 <span>
                   {TENDERS.find((t) => t.value === p.method)?.label}
+                  {p.cardBrand ? ` · ${cardBrandLabel(p.cardBrand)}` : null}
+                  {p.financingMonths ? ` · ${p.financingMonths} mo` : null}
                   {p.ref ? <span className="mono"> ••{p.ref.slice(-4)}</span> : null}
                   {!locked && (
                     <button
@@ -1919,17 +1969,61 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     </Field>
                   </div>
                   {payMethod === 'card' ? (
-                    <Field label="Card last 4">
-                      <Input
-                        value={payRef}
-                        onChange={(e) => setPayRef(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                        inputMode="numeric"
-                        placeholder="4412"
-                        className="input-mono"
-                        data-testid="pay-ref"
-                        disabled={zeroBlock}
-                      />
-                    </Field>
+                    <div className="reg-pay-grid">
+                      <Field label="Card brand">
+                        <Select
+                          value={payCardBrand}
+                          onChange={(e) => setPayCardBrand(e.target.value)}
+                          data-testid="pay-card-brand"
+                          disabled={zeroBlock}
+                        >
+                          <option value="">Pick brand…</option>
+                          {CARD_BRANDS.map((b) => (
+                            <option key={b.value} value={b.value}>
+                              {b.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Card last 4">
+                        <Input
+                          value={payRef}
+                          onChange={(e) => setPayRef(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                          inputMode="numeric"
+                          placeholder="4412"
+                          className="input-mono"
+                          data-testid="pay-ref"
+                          disabled={zeroBlock}
+                        />
+                      </Field>
+                    </div>
+                  ) : isFinancingMethod(payMethod) ? (
+                    <div className="reg-pay-grid">
+                      <Field label="Months financed">
+                        <Select
+                          value={payMonths}
+                          onChange={(e) => setPayMonths(e.target.value)}
+                          data-testid="pay-months"
+                          disabled={zeroBlock}
+                        >
+                          <option value="">Pick term…</option>
+                          {FINANCING_TERM_MONTHS.map((m) => (
+                            <option key={m} value={m}>
+                              {m} months
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Reference (optional)">
+                        <Input
+                          value={payRef}
+                          onChange={(e) => setPayRef(e.target.value)}
+                          className="input-mono"
+                          data-testid="pay-ref"
+                          disabled={zeroBlock}
+                        />
+                      </Field>
+                    </div>
                   ) : payMethod !== 'cash' ? (
                     <Field label="Reference (optional)">
                       <Input
@@ -1991,7 +2085,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               <div className="reg-two">
                 <Button
                   className="reg-complete"
-                  disabled={busy || zeroBlock || !customer || lines.length === 0}
+                  disabled={busy || zeroBlock || !customer || lines.length === 0 || needsMoney}
                   onClick={() => void submit('complete')}
                   data-testid="complete-sale"
                 >
@@ -2173,7 +2267,7 @@ function LineRow({
             </button>
           )}
         </div>
-        {!isFee && isMattressOrBase(l.description) && (
+        {!isFee && lineHasAddons(l) && (
           <div className="reg-addons">
             {(
               [

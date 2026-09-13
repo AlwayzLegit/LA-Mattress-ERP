@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { phoneDigits } from '@jetnine/shared';
@@ -11,11 +11,18 @@ import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 
 /**
- * Sales competitions (redesign Phase 11, README §3.6): six races a month,
- * People and Stores, computed from the order ledger every time the strip
+ * Sales competitions (redesign Phase 11, README §3.6): six races a month
+ * between people, computed from the order ledger every time the strip
  * asks. Only completed orders count; an order with a completed return
  * comes off the board; ties break by net sales; the sweep tiers replace
  * the per-card prizes. Imported legacy documents never count (D8).
+ *
+ * Every active member whose role can log a lead (`competitions.leads.log`),
+ * except the Owner role, is on every card, sales or not (owner
+ * 2026-09-13): the ranked rows come
+ * first, then the people the race cannot rank yet (no sales for a $ race,
+ * nothing at all for a count race) with no rank number. The Stores race
+ * was retired the same day — only people compete.
  *
  * The service owns three side effects: converting a lead when an order
  * completes (phone match, same salesperson, inside the lead's window),
@@ -24,7 +31,8 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
  */
 
 export type RaceKey = 'leads' | 'avg' | 'high' | 'sales' | 'beds' | 'ex';
-export type RaceScope = 'people' | 'stores';
+/** Only people compete (owner 2026-09-13); the column keeps the value for stored results. */
+export type RaceScope = 'people';
 
 export interface RaceDef {
   key: RaceKey;
@@ -105,8 +113,7 @@ export const RACE_KEYS = RACES.map((r) => r.key);
 /** Resolved settings — every knob has a value. */
 export interface CompetitionConfig {
   enabled: boolean;
-  races: 'people' | 'stores' | 'both';
-  cards: Record<RaceKey, { on: boolean; prizePeopleCents: number; prizeStoreCents: number }>;
+  cards: Record<RaceKey, { on: boolean; prizePeopleCents: number }>;
   sweep: { four: number; five: number; six: number };
   payoutDay: number;
   returnWindowDays: number;
@@ -117,9 +124,8 @@ export interface CompetitionConfig {
 
 export const DEFAULT_CONFIG: CompetitionConfig = {
   enabled: true,
-  races: 'both',
   cards: Object.fromEntries(
-    RACE_KEYS.map((k) => [k, { on: true, prizePeopleCents: 10_000, prizeStoreCents: 10_000 }]),
+    RACE_KEYS.map((k) => [k, { on: true, prizePeopleCents: 10_000 }]),
   ) as CompetitionConfig['cards'],
   sweep: { four: 100_000, five: 150_000, six: 200_000 },
   payoutDay: 5,
@@ -144,12 +150,10 @@ export function resolveConfig(raw: unknown): CompetitionConfig {
     cards[k] = {
       on: c?.on ?? d.on,
       prizePeopleCents: c?.prizePeopleCents ?? d.prizePeopleCents,
-      prizeStoreCents: c?.prizeStoreCents ?? d.prizeStoreCents,
     };
   }
   return {
     enabled: r.enabled ?? DEFAULT_CONFIG.enabled,
-    races: r.races ?? DEFAULT_CONFIG.races,
     cards,
     sweep: {
       four: r.sweep?.four ?? DEFAULT_CONFIG.sweep.four,
@@ -186,8 +190,9 @@ export interface RaceRow {
   storeId: string | null;
   storeCode: string | null;
   storeName: string | null;
-  rank: number;
-  /** The metric as an integer: cents for $ races, a count otherwise. */
+  /** 1-based; null when the race cannot rank this person yet (listed after the ranked rows). */
+  rank: number | null;
+  /** The metric as an integer: cents for $ races, a count otherwise (0 when unranked). */
   value: number;
   valueLabel: string;
   /** "8 sales", "of 15", "SC-10234 · Priya" */
@@ -203,7 +208,9 @@ export interface RaceRow {
 export interface RaceCard extends RaceDef {
   on: boolean;
   prizeCents: number;
+  /** Everyone, ranked rows first, then the unranked in name order. */
   rows: RaceRow[];
+  /** The first three ranked rows (the collapsed strip, the winners). */
   top: RaceRow[];
   you: {
     rank: number | null;
@@ -236,7 +243,6 @@ export interface HistoryRow {
   winner: string | null;
   winnerStore: string | null;
   result: string;
-  storeWinner: string | null;
   yourRank: number | null;
   paid: string;
 }
@@ -251,8 +257,6 @@ export interface CompetitionBoard {
   endsAt: string;
   last48: boolean;
   isDayOne: boolean;
-  scope: RaceScope;
-  scopes: RaceScope[];
   config: {
     prizeCents: number;
     sweep: CompetitionConfig['sweep'];
@@ -266,7 +270,6 @@ export interface CompetitionBoard {
     storeId: string | null;
     storeName: string | null;
     canLog: boolean;
-    defaultScope: RaceScope;
   };
   cards: RaceCard[];
   sweep: { name: string; n: number; bonus: string; isYou: boolean } | null;
@@ -275,7 +278,6 @@ export interface CompetitionBoard {
     label: string;
     winners: WinnerLine[];
     until: string;
-    storesLine: string | null;
   } | null;
 }
 
@@ -445,6 +447,58 @@ export class CompetitionsService {
     return { tz, today: c?.today ?? new Date().toISOString().slice(0, 10), stores };
   }
 
+  /**
+   * Who competes: every active member whose role can log a lead (Manager,
+   * Cashier by default) — never the Owner role (owner 2026-09-13: the
+   * owner is off the board entirely, ledger and all). They are on every
+   * card from day one, sales or not — the store shown is the first one
+   * their access covers until they sell somewhere.
+   */
+  private async competitors(
+    businessId: string,
+  ): Promise<{ id: string; name: string; storeId: string | null }[]> {
+    const rows = await this.db
+      .select({
+        id: schema.memberships.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        storeId: sql<string | null>`(
+          select mls.location_id from membership_location_scopes mls
+          where mls.membership_id = ${schema.memberships.id}
+          order by mls.location_id limit 1
+        )`,
+      })
+      .from(schema.memberships)
+      .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+      .innerJoin(schema.roles, eq(schema.roles.id, schema.memberships.roleId))
+      .innerJoin(
+        schema.rolePermissions,
+        and(
+          eq(schema.rolePermissions.roleId, schema.memberships.roleId),
+          eq(schema.rolePermissions.permission, 'competitions.leads.log'),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.memberships.businessId, businessId),
+          eq(schema.memberships.status, 'active'),
+          ne(schema.roles.name, 'Owner'),
+        ),
+      )
+      .orderBy(asc(schema.users.name));
+    return rows.map((r) => ({ id: r.id, name: r.name?.trim() || r.email, storeId: r.storeId }));
+  }
+
+  /** Memberships that never appear on the board: the Owner role, in any month. */
+  private async nonCompetitors(businessId: string): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ id: schema.memberships.id })
+      .from(schema.memberships)
+      .innerJoin(schema.roles, eq(schema.roles.id, schema.memberships.roleId))
+      .where(and(eq(schema.memberships.businessId, businessId), eq(schema.roles.name, 'Owner')));
+    return new Set(rows.map((r) => r.id));
+  }
+
   private async memberNames(businessId: string): Promise<Map<string, string>> {
     const rows = await this.db
       .select({
@@ -594,25 +648,30 @@ export class CompetitionsService {
     return { orders, exchangeRows, leadRows, from, to };
   }
 
-  /** Every subject of a scope, with its month folded in. */
+  /**
+   * Every person on the board with the month folded in: the competitors
+   * first (all of them, zero to start), then anyone else the ledger names
+   * — a former member's completed orders still count for the month. The
+   * `excluded` memberships (the Owner role) never appear, sales or not.
+   */
   private buildSubjects(
-    scope: RaceScope,
     data: Awaited<ReturnType<CompetitionsService['loadMonth']>>,
     names: Map<string, string>,
     stores: { id: string; name: string; code: string }[],
+    competitors: { id: string; name: string; storeId: string | null }[],
+    excluded: Set<string>,
   ): Map<string, Subject> {
     const byStore = new Map(stores.map((s) => [s.id, s]));
     const subjects = new Map<string, Subject>();
-    const get = (id: string | null, storeId: string | null): Subject | null => {
-      const key = scope === 'people' ? id : storeId;
-      if (!key) return null;
+    const get = (key: string | null, storeId: string | null, name?: string): Subject | null => {
+      if (!key || excluded.has(key)) return null;
       let s = subjects.get(key);
       if (!s) {
         const st = storeId ? byStore.get(storeId) : undefined;
         s = {
           id: key,
-          name: scope === 'people' ? (names.get(key) ?? 'former member') : (st?.name ?? 'Store'),
-          storeId: scope === 'people' ? storeId : key,
+          name: name ?? names.get(key) ?? 'former member',
+          storeId,
           storeCode: st?.code ?? null,
           storeName: st?.name ?? null,
           orders: [],
@@ -628,6 +687,7 @@ export class CompetitionsService {
       }
       return s;
     };
+    for (const c of competitors) get(c.id, c.storeId, c.name);
     for (const o of data.orders) {
       const s = get(o.repId, o.locationId);
       if (!s) continue;
@@ -636,13 +696,11 @@ export class CompetitionsService {
       s.sales += 1;
       s.beds += o.beds;
       if (!s.high || o.netCents > s.high.netCents) s.high = o;
-      // People: the person's store is where they last sold.
-      if (scope === 'people') {
-        s.storeId = o.locationId;
-        const st = byStore.get(o.locationId);
-        s.storeCode = st?.code ?? null;
-        s.storeName = st?.name ?? null;
-      }
+      // The person's store is where they last sold.
+      s.storeId = o.locationId;
+      const st = byStore.get(o.locationId);
+      s.storeCode = st?.code ?? null;
+      s.storeName = st?.name ?? null;
     }
     for (const e of data.exchangeRows) {
       const s = get(e.repId, e.locationId);
@@ -767,12 +825,21 @@ export class CompetitionsService {
     return s.orders.slice(-6).reverse().map(toRO);
   }
 
-  /** Rank a race: value desc (ex asc), ties by net desc, then by sales desc. */
-  private rank(subjects: Subject[], key: RaceKey): { s: Subject; v: number }[] {
-    const ranked = subjects
-      .map((s) => ({ s, v: this.metric(s, key) }))
-      .filter((r): r is { s: Subject; v: number } => r.v !== null)
-      .filter((r) => (key === 'leads' || key === 'beds' ? r.v > 0 || r.s.sales > 0 : true));
+  /**
+   * Rank a race: value desc (ex asc), ties by net desc, then by sales desc.
+   * Everyone comes back — the ranked rows first with 1-based ranks, then
+   * the people the race cannot rank yet (no sales for a $ race or Least
+   * Exchanges; neither a lead nor a sale for the count races) in name
+   * order with `rank: null`.
+   */
+  private rank(
+    subjects: Subject[],
+    key: RaceKey,
+  ): { s: Subject; v: number | null; rank: number | null }[] {
+    const all = subjects.map((s) => ({ s, v: this.metric(s, key) }));
+    const rankable = (r: { s: Subject; v: number | null }): r is { s: Subject; v: number } =>
+      r.v !== null && (key === 'leads' || key === 'beds' ? r.v > 0 || r.s.sales > 0 : true);
+    const ranked = all.filter(rankable);
     ranked.sort((a, b) => {
       const dv = key === 'ex' ? a.v - b.v : b.v - a.v;
       if (dv !== 0) return dv;
@@ -780,7 +847,11 @@ export class CompetitionsService {
       if (b.s.netCents !== a.s.netCents) return b.s.netCents - a.s.netCents;
       return b.s.sales - a.s.sales;
     });
-    return ranked;
+    const rest = all.filter((r) => !rankable(r)).sort((a, b) => a.s.name.localeCompare(b.s.name));
+    return [
+      ...ranked.map((r, i) => ({ ...r, rank: i + 1 })),
+      ...rest.map((r) => ({ ...r, rank: null })),
+    ];
   }
 
   private gapText(key: RaceKey, leaderV: number, mineV: number, leaderName: string): string {
@@ -803,7 +874,7 @@ export class CompetitionsService {
   // -------------------------------------------------------------------------
   // The board
 
-  /** Which store is "yours" for the Stores race and the lead form. */
+  /** Which store is "yours" for the lead form. */
   private async viewerStore(
     tenant: RequestTenantContext,
     stores: { id: string; name: string }[],
@@ -827,7 +898,7 @@ export class CompetitionsService {
 
   async board(
     tenant: RequestTenantContext,
-    opts: { scope?: RaceScope; month?: string } = {},
+    opts: { month?: string } = {},
   ): Promise<CompetitionBoard> {
     const businessId = tenant.businessId!;
     const cfg = await this.config(businessId);
@@ -836,24 +907,24 @@ export class CompetitionsService {
     const dim = daysIn(month);
     const dayOfMonth = month === today.slice(0, 7) ? Number(today.slice(8, 10)) : dim;
     const daysLeft = Math.max(0, dim - dayOfMonth);
-    const scopes: RaceScope[] =
-      cfg.races === 'both'
-        ? ['people', 'stores']
-        : cfg.races === 'people'
-          ? ['people']
-          : ['stores'];
-    const defaultScope: RaceScope =
-      tenant.roleName === 'Owner' && scopes.includes('stores') ? 'stores' : scopes[0]!;
-    const scope = opts.scope && scopes.includes(opts.scope) ? opts.scope : defaultScope;
 
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
-    const people = this.buildSubjects('people', data, names, stores);
-    const subjects =
-      scope === 'people' ? people : this.buildSubjects('stores', data, names, stores);
-    const viewerStore = await this.viewerStore(tenant, stores, people);
-    const meId = scope === 'people' ? tenant.membershipId : (viewerStore?.id ?? null);
-    const isDayOne = data.orders.length === 0 && data.leadRows.length === 0;
+    // Today's roster only joins the live month. A closed month is what its
+    // ledger says: no zero-sale "winner" from an empty month, no rank for
+    // someone hired since.
+    const competitors = month === today.slice(0, 7) ? await this.competitors(businessId) : [];
+    const excluded = await this.nonCompetitors(businessId);
+    const subjects = this.buildSubjects(data, names, stores, competitors, excluded);
+    const viewerStore = await this.viewerStore(tenant, stores, subjects);
+    // An owner watches the race; there is no pinned row for someone off the board.
+    const meId =
+      tenant.membershipId && !excluded.has(tenant.membershipId) ? tenant.membershipId : null;
+    // Day one is judged on what is on the board: an owner's orders or
+    // leads (off the board) do not end it.
+    const isDayOne = ![...subjects.values()].some(
+      (s) => s.orders.length > 0 || s.leadsLogged > 0 || s.leadsConverted.length > 0,
+    );
 
     const cards: RaceCard[] = [];
     let sweepLeader: { id: string; name: string; n: number } | null = null;
@@ -867,18 +938,22 @@ export class CompetitionsService {
         storeId: r.s.storeId,
         storeCode: r.s.storeCode,
         storeName: r.s.storeName,
-        rank: i + 1,
-        value: r.v,
-        valueLabel: this.fmt(r.v, def.key),
-        detail: this.detail(r.s, def.key),
+        rank: r.rank,
+        value: r.v ?? 0,
+        // A count race shows the zero; a $ race has nothing to show yet.
+        valueLabel: r.v !== null ? this.fmt(r.v, def.key) : '—',
+        detail: r.rank !== null || r.v !== null ? this.detail(r.s, def.key) : 'no sales yet',
         netCents: r.s.netCents,
         sales: r.s.sales,
         spark: this.spark(r.s, def.key, dim),
         orders: i < 12 || r.s.id === meId ? this.ordersBehind(r.s, def.key) : [],
         isYou: r.s.id === meId,
       }));
-      const leader = rows[0] ?? null;
-      const mine = rows.find((r) => r.isYou) ?? null;
+      const top = rows.filter((r) => r.rank !== null).slice(0, 3);
+      // A zero cannot lead a count race; fewest exchanges (with sales) can.
+      const leader = top[0] && (top[0].value > 0 || def.key === 'ex') ? top[0] : null;
+      const mineRow = rows.find((r) => r.isYou) ?? null;
+      const mine = mineRow && mineRow.rank !== null ? mineRow : null;
       const mineSubject = meId ? subjects.get(meId) : undefined;
       if (leader && card.on) {
         const cur = leadCounts.get(leader.id) ?? { name: leader.name, n: 0 };
@@ -895,30 +970,31 @@ export class CompetitionsService {
       cards.push({
         ...def,
         on: card.on,
-        prizeCents: scope === 'people' ? card.prizePeopleCents : card.prizeStoreCents,
+        prizeCents: card.prizePeopleCents,
         rows,
-        top: rows.slice(0, 3),
-        you: mine
-          ? {
-              rank: mine.rank,
-              value: mine.value,
-              valueLabel: mine.valueLabel,
-              gap:
-                mine.rank === 1
-                  ? 'you lead'
-                  : this.gapText(def.key, leader!.value, mine.value, leader!.name),
-            }
-          : meId
+        top,
+        you:
+          mine && leader
             ? {
-                rank: null,
-                value: null,
-                valueLabel: '—',
+                rank: mine.rank,
+                value: mine.value,
+                valueLabel: mine.valueLabel,
                 gap:
-                  def.key === 'ex' && mineSubject && mineSubject.sales === 0
-                    ? 'sell one to be ranked'
-                    : 'nothing yet',
+                  mine.rank === 1
+                    ? 'you lead'
+                    : this.gapText(def.key, leader.value, mine.value, leader.name),
               }
-            : null,
+            : meId
+              ? {
+                  rank: mine?.rank ?? null,
+                  value: mine?.value ?? null,
+                  valueLabel: mineRow?.valueLabel ?? '—',
+                  gap:
+                    def.key === 'ex' && mineSubject && mineSubject.sales === 0
+                      ? 'sell one to be ranked'
+                      : 'nothing yet',
+                }
+              : null,
         unranked:
           def.key === 'ex' && mineSubject && mineSubject.sales === 0
             ? 'sell one to be ranked'
@@ -960,23 +1036,13 @@ export class CompetitionsService {
     let banner: CompetitionBoard['banner'] = null;
     if (month === today.slice(0, 7) && dayOfMonth <= cfg.bannerDays) {
       const prev = prevMonth(month);
-      const winners = await this.winners(tenant, prev, 'people');
+      const winners = await this.winners(tenant, prev);
       if (winners.some((w) => w.name)) {
-        const storeWinners = scopes.includes('stores')
-          ? await this.winners(tenant, prev, 'stores')
-          : [];
-        const storeTally = new Map<string, number>();
-        for (const w of storeWinners)
-          if (w.name) storeTally.set(w.name, (storeTally.get(w.name) ?? 0) + 1);
-        const topStore = [...storeTally.entries()].sort((a, b) => b[1] - a[1])[0];
         banner = {
           month: prev,
           label: `${monthName(prev)} winners`,
           winners,
           until: `${month}-${String(cfg.bannerDays).padStart(2, '0')}`,
-          storesLine: topStore
-            ? `Stores race: ${topStore[0]} took ${topStore[1]} of ${storeWinners.length}. Store prize to the manager.`
-            : null,
         };
       }
     }
@@ -993,8 +1059,6 @@ export class CompetitionsService {
       endsAt: `${WEEKDAY_SHORT[endsAtDate.getUTCDay()]} ${monthName(month).slice(0, 3)} ${dim}, 11:59 PM`,
       last48: daysLeft <= 2 && daysLeft > 0,
       isDayOne,
-      scope,
-      scopes,
       config: {
         prizeCents: cfg.cards.sales.prizePeopleCents,
         sweep: cfg.sweep,
@@ -1008,7 +1072,6 @@ export class CompetitionsService {
         storeId: viewerStore?.id ?? null,
         storeName: viewerStore?.name ?? null,
         canLog: tenant.permissions.has('competitions.leads.log') && !!tenant.membershipId,
-        defaultScope,
       },
       cards,
       sweep,
@@ -1020,11 +1083,8 @@ export class CompetitionsService {
   // Closed months: winners, history, the sheet
 
   /** The winners of a closed month, frozen on first read. */
-  async winners(
-    tenant: RequestTenantContext,
-    month: string,
-    scope: RaceScope,
-  ): Promise<WinnerLine[]> {
+  async winners(tenant: RequestTenantContext, month: string): Promise<WinnerLine[]> {
+    const scope: RaceScope = 'people';
     const businessId = tenant.businessId!;
     const existing = await this.db
       .select()
@@ -1037,13 +1097,35 @@ export class CompetitionsService {
         ),
       );
     let rows = existing;
+    // A month frozen before the Owner role left the board may still name an
+    // owner as its winner or in its ranking. Unless a prize was already
+    // marked paid, throw that snapshot away and rebuild it from the ledger.
+    if (rows.length > 0 && !rows.some((r) => r.paidAt)) {
+      const excluded = await this.nonCompetitors(businessId);
+      const tainted = rows.some(
+        (r) =>
+          (r.winnerId && excluded.has(r.winnerId)) ||
+          ((r.rankingJson ?? []) as { id: string }[]).some((x) => excluded.has(x.id)),
+      );
+      if (tainted) {
+        await this.db
+          .delete(schema.competitionResults)
+          .where(
+            and(
+              eq(schema.competitionResults.businessId, businessId),
+              eq(schema.competitionResults.month, month),
+              eq(schema.competitionResults.scope, scope),
+            ),
+          );
+        rows = [];
+      }
+    }
     if (rows.length === 0) {
       const { today } = await this.clock(businessId);
       if (month >= today.slice(0, 7)) return [];
-      const board = await this.board(tenant, { scope, month });
+      const board = await this.board(tenant, { month });
       const values = board.cards.map((c) => {
         const w = c.top[0] ?? null;
-        const s = w ? board.cards.find((x) => x.key === c.key)!.rows[0]! : null;
         return {
           businessId,
           month,
@@ -1053,7 +1135,7 @@ export class CompetitionsService {
           winnerName: w?.name ?? null,
           winnerStore: w?.storeName ?? null,
           value: w?.value ?? null,
-          story: w && s ? this.story(c.key, s) : null,
+          story: w ? this.story(c.key, w) : null,
           short: w ? this.short(c.key, w) : null,
           prizeCents: c.on ? c.prizeCents : 0,
           rankingJson: c.rows.slice(0, 20).map((r) => ({
@@ -1140,12 +1222,11 @@ export class CompetitionsService {
     const out: HistoryRow[] = [];
     let month = prevMonth(today.slice(0, 7));
     for (let i = 0; i < 12; i++) {
-      const people = await this.winners(tenant, month, 'people');
+      const people = await this.winners(tenant, month);
       if (people.every((w) => !w.name)) {
         month = prevMonth(month);
         continue;
       }
-      const stores = cfg.races !== 'people' ? await this.winners(tenant, month, 'stores') : [];
       const rows = await this.db
         .select({
           race: schema.competitionResults.race,
@@ -1165,7 +1246,7 @@ export class CompetitionsService {
       const payLabel = `${monthName(nm).slice(0, 3)} ${cfg.payoutDay}`;
       for (const w of people) {
         const r = rows.find((x) => x.race === w.race);
-        const ranking = (r?.ranking ?? []) as { id: string; rank: number }[];
+        const ranking = (r?.ranking ?? []) as { id: string; rank: number | null }[];
         const mine = tenant.membershipId ? ranking.find((x) => x.id === tenant.membershipId) : null;
         out.push({
           month,
@@ -1175,7 +1256,6 @@ export class CompetitionsService {
           winner: w.name,
           winnerStore: w.store,
           result: w.short,
-          storeWinner: stores.find((s) => s.race === w.race)?.name ?? null,
           yourRank: mine?.rank ?? null,
           paid: r?.paidAt
             ? `paid ${payLabel}`
@@ -1332,7 +1412,9 @@ export class CompetitionsService {
     const month = today.slice(0, 7);
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
-    const people = this.buildSubjects('people', data, names, stores);
+    const competitors = await this.competitors(businessId);
+    const excluded = await this.nonCompetitors(businessId);
+    const people = this.buildSubjects(data, names, stores, competitors, excluded);
     const [order] = await this.db
       .select({ repId: schema.orders.salespersonMembershipId, number: schema.orders.number })
       .from(schema.orders)
@@ -1359,9 +1441,11 @@ export class CompetitionsService {
     const notices: (typeof schema.memberNotifications.$inferInsert)[] = [];
     for (const def of RACES) {
       if (!cfg.cards[def.key].on) continue;
-      const ranked = this.rank([...people.values()], def.key);
+      const ranked = this.rank([...people.values()], def.key).filter(
+        (r): r is { s: Subject; v: number; rank: number } => r.rank !== null,
+      );
       ranked.forEach((r, i) => {
-        const rank = i + 1;
+        const rank = r.rank;
         upserts.push({
           businessId,
           month,
@@ -1371,12 +1455,14 @@ export class CompetitionsService {
           rank,
         });
         const before = prev.get(`${def.key}:${r.s.id}`);
+        // A zero-sale row shuffling down when someone sells is not an overtake.
         if (
           cfg.visibility.notices &&
           before != null &&
           rank > before &&
           r.s.id !== order?.repId &&
-          i > 0
+          i > 0 &&
+          (r.v > 0 || def.key === 'ex')
         ) {
           const leader = ranked[0]!;
           const passer = ranked[i - 1]!;

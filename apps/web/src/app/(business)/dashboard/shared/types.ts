@@ -23,6 +23,10 @@ export interface CashPaymentRow {
   soldAt: string;
   paidAt: string;
   kind: string;
+  /** Card tenders: 'visa' | 'mastercard' | … recorded at the register. */
+  cardBrand: string | null;
+  /** Financing tenders: the promo term signed (months). */
+  financingMonths: number | null;
   salespersonName: string | null;
   amountCents: number;
   receipt: PickupReceipt | null;

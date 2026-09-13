@@ -5241,7 +5241,8 @@ Phase 1 (this branch):
       info; payment terminal — _2026-09-10: `orders/[id]/actions/` (menu +
       dialogs), Order details card, ⋯ per line, `?scope=order` invoice;
       phase-2/3 items stay on the menu and say so instead of hiding._
-- [ ] Tests (int spec for the new endpoints), docs, CI green, merge —
+- [x] Tests (int spec for the new endpoints), docs, CI green, merge —
+      _2026-09-12: box ticked late — PR #154 merged 2026-09-10 23:50Z._
       _2026-09-10: `order-actions.int.spec.ts` (5; CI db
       `jetnine_order_actions`); `orders.int.spec.ts` (101),
       `order-detail-extras` (4) and `customers` (16) still green; PR #154.
@@ -5533,3 +5534,106 @@ Exchange Order, add a balance-due callout, straight to code (PLAN §11 amendment
   in the document payload; `orders.int.spec.ts` +1 proves the round trip.
 - Tests: `order-documents.test.tsx` (5, react-dom/server render; vitest now emits
   JSX for web component tests).
+
+### Checkpoint — 2026-09-12 (Cost column: "hidden" vs no cost on file)
+
+HANDOFF §5 cosmetic: the product screens printed "hidden" both when the viewer lacks
+`products.cost.view` and when the cost is genuinely null. `/v1/business/members/me` now
+carries `canSeeCost` (super-admin or `products.cost.view`), the acting-store snapshot
+exposes it, and the Products browser, product page (Sales margin cost field + variants
+table), General panel cost figures and Sales history cost column say **hidden** only
+without access and **—** for a missing cost. The browser's cost column now follows the
+permission instead of guessing from whether any row carried a cost. Tests:
+`business.int.spec.ts` (owner true) and `cashier.int.spec.ts` (cashier false).
+Also this session: HANDOFF §4a marked closed (email went live 2026-08-27 — the brief
+predated it) and a dated update block added at its top; PR #154's box ticked.
+
+### Checkpoint — 2026-09-12 (Sidebar: all groups open)
+
+Owner ask: "make the sidebar all open not collapsible." README §2 line amended
+(struck + dated), `PHASE_NOTES.md` amendment logged. Sidebar groups are static
+headings with every link visible; no toggle, no remembered open group, no `userKey`
+prop. CSS: `.nav-group-btn` / `.nav-chev` replaced by `.nav-group-head`.
+
+### Checkpoint — 2026-09-12 (Owner dashboard: "Cash on hand is unavailable")
+
+Live: `GET /v1/dashboard/cash-pickups/queue` returns 500 for the owner's business on every
+call since Phase 9 went live (Render logs: `Failed query: select "payments"…` from
+`pendingCash`), so every store card shows "Cash on hand is unavailable right now". One
+other identity got 200 at 17:03Z. Postgres logged no ERROR for the app role, and the API
+logger dropped the wrapped driver error, so the cause is not yet in evidence. Shipped:
+pino `errWithCause` serializer so the next failure logs the Postgres message and code;
+`nav-counts` returns 403 instead of a TypeError when RLS hides the business row (12
+such 500s 21:52–22:03Z). Read-only production query blocked in-session — owner to allow
+or run. Root cause still open.
+
+### Checkpoint — 2026-09-12 (Register: add-on chips on real products, new-customer form)
+
+Owner: "the recycle removal declined foundation are not showing up" + the new-customer
+form overflowing its card. The chips were keyed on a name regex (/mattress|base|…/) that no
+STORIS name matches ("E KING MICAH FIRM"). They now follow the catalog category
+(`lib/pos-addons.ts`: Mattresses, Adjustable Bases, Foundations & Box Springs; name
+fallback only without a category, accessories excluded) — `/v1/pos/product-search` and
+`GET /v1/orders/:id` lines carry `categoryName` so picked and resumed lines both know.
+Form: `.reg-two` columns are `minmax(0, 1fr)` so two inputs plus the gap fit the 316px
+rail. Tests: `pos-addons.test.ts` (4); `product-filters` (15) and `orders` (101) int
+specs green; Chromium on `/dev/register`: chips on mattress + base only, form 286px in
+the rail with nothing overflowing.
+_2026-09-13 follow-up (owner: "we recently had all of the product categories sorted out"):_
+the A22.1 categorize run files almost every sleep surface on a subcategory (Innerspring,
+Hybrid, Memory Foam, Latex, Adjustable Bed Bases, Standard / Low Profile, Bunkie Board),
+so a rule keyed on the leaf name still missed nearly every real product. The endpoints
+now carry `categoryPath` ("Mattresses › Hybrid") and the rule reads the root; Base
+Accessories & Parts stay off. `pos-addons.test.ts` covers the real subcategories; the
+orders int spec proves the path on search and on a resumed order.
+
+### Checkpoint — 2026-09-13 (Cash on hand: root cause found and fixed)
+
+The new `cause` logging (PR #174) caught it on the first owner load after deploy:
+`ERR_INVALID_ARG_TYPE — The "string" argument must be of type string … Received an
+instance of Date`. Not Postgres at all: `pendingCash` bound the 60-day floor as a raw
+`Date` inside a `sql` template, and Drizzle's postgres-js driver passes timestamptz params
+through untouched, so the driver tried to `Buffer.byteLength` a Date. Every owner load
+failed; the one 200 was a store-scoped member with no stores (early return). Fix: bind
+`floor.toISOString()::timestamptz`. `store-dashboard.int.spec.ts` gains two queue tests
+that 500 on the old code (nothing had exercised the endpoint). The two other raw
+`${cutoff}` templates (closeout, orders auto-release) bind date strings and are fine.
+
+### Checkpoint — 2026-09-13 (Products-style columns on every list)
+
+Owner: "similar to how we have it inside of Products — do the same for the remaining that
+have a list." Shared primitive `components/ui/columns.tsx` (`useListColumns`,
+`ColumnHeadRow`, `ColumnCells`, `ResetColumns`; order per browser under
+`jetnine.columns.<screen>`, client-side sort unless the screen sorts through the API).
+Converted by hand: Orders (server sort), Customers, At risk, Returns, Exchanges, Transfers,
+Purchase orders; Products migrated onto the primitive (saved order carried over from the
+old key). Then every other list screen — 80 lists across Products sub-pages and activity
+panels, Deliveries, Manifests, Replenishment, GL, Marketing, customer / salesperson /
+gift-card / GL-account / sale / service detail lists, Salespeople, Reports (index, builder,
+written sales, transfers by location, merchandising, cash drawer balancing) and Settings
+(API keys, sessions, webhooks, discounts, tax classes). README §3.3 amended,
+`PHASE_NOTES.md` amendment. Tests: `columns.test.ts` (4); Chromium on `/dev/orders` and
+`/dev/products`: sort click, drag, persistence, reset; then a logged-in Chromium sweep of
+all 48 list routes against a seeded local stack (no page errors, headers carry
+`<screen>-col-<id>` / `<screen>-sort-<id>` test ids, first sort click sets `aria-sort`).
+That sweep caught a pre-existing crash: Reports → Merchandising read `/v1/categories` as
+an array-or-`{data}` while it returns `{ flat, tree }`, so the filter lookup was
+`undefined` and the page threw on `.map` — fixed in the same PR.
+Main's E2E job was red from #175 (the no-money completion gate and card-brand rule)
+until #177 realigned the four order-writer tests; this branch carries #177's version.
+
+### Checkpoint — 2026-09-13 (Competition strip: people only, everyone listed)
+
+Owner: "We don't need by store, only people… put all managers in there even with 0 sales
+not just top 2." The Stores race is retired end to end (toggle, prizes, store winner
+column, banner and sheet lines, `?scope`, the `races` / `prizeStoreCents` settings — a
+stored value is ignored). The competitor pool is every active member whose role can log a
+lead (`competitions.leads.log`: Manager, Cashier by default — the Owner role is off the
+board entirely, pinned row and ledger sales included, owner ask the same day), seeded onto every card
+at zero from day one; ranked rows first, then the unranked (no sales for a $ race or
+Least Exchanges, nothing at all for a count race) in name order with `rank: null`, "—"
+for a $ value and "no sales yet". The strip lists everyone expanded and the top three
+collapsed; the leaderboard lists everyone. README §3.6 and PHASE_NOTES Phase 11 amended.
+Tests: `competitions.int.spec.ts` (new DB `jetnine_competitions`): every lead-logging
+member is on every card, Operations is not, the seller ranks first, the zero-sales manager
+sits under them unranked, and Stores is gone from the board and the sheet.

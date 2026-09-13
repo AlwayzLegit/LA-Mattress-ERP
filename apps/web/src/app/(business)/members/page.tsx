@@ -9,6 +9,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
@@ -16,12 +19,14 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   rowKeys,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -167,6 +172,76 @@ export default function MembersPage() {
     }
   }
 
+  // The actions cell reads `me` and calls resend/removeMember, so the
+  // columns are built here. Rows navigate on click; the actions span
+  // swallows the click so its buttons don't also open the member.
+  const columns: ColumnDef<Member>[] = [
+    {
+      id: 'member',
+      label: 'Member',
+      sortValue: (m) => m.name || m.email,
+      render: (m) => (
+        <>
+          <Link href={`/members/${m.membershipId}`} onClick={(e) => e.stopPropagation()}>
+            <strong>{m.name || m.email}</strong>
+          </Link>
+          <div className="muted text-xs">{m.email}</div>
+        </>
+      ),
+    },
+    { id: 'role', label: 'Role', sortValue: (m) => m.roleName, render: (m) => m.roleName },
+    {
+      id: 'scope',
+      label: 'Store access',
+      sortValue: (m) =>
+        m.dataScope === 'all' ? 'All locations' : `${m.scopeLocationIds.length} locations`,
+      render: (m) =>
+        m.dataScope === 'all' ? (
+          'All locations'
+        ) : m.scopeLocationIds.length > 0 ? (
+          `${m.scopeLocationIds.length} location${m.scopeLocationIds.length === 1 ? '' : 's'}`
+        ) : (
+          <span className="text-[var(--danger)]">No store selected</span>
+        ),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (m) => m.status,
+      render: (m) => <StatusBadge status={m.status} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (m) => (
+        <span onClick={(e) => e.stopPropagation()}>
+          {m.status === 'invited' && (
+            <Button size="sm" variant="ghost" onClick={() => resend(m.membershipId)}>
+              Resend invite
+            </Button>
+          )}
+          <LinkButton size="sm" variant="secondary" href={`/members/${m.membershipId}`}>
+            Manage
+          </LinkButton>
+          {me?.canDeleteMembers && me.membershipId !== m.membershipId && (
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => void removeMember(m)}
+              data-testid="member-delete"
+            >
+              Delete
+            </Button>
+          )}
+        </span>
+      ),
+    },
+  ];
+  const cols = useListColumns('members', columns, members);
+
   return (
     <div>
       <PageHeader
@@ -261,75 +336,27 @@ export default function MembersPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Role</th>
-                    <th>Store access</th>
-                    <th>Status</th>
-                    <th className="actions">Actions</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="members" />
                 </thead>
                 <tbody>
                   {members.length === 0 && (
-                    <TableEmpty colSpan={5}>No members yet. Invite someone above.</TableEmpty>
+                    <TableEmpty colSpan={cols.ordered.length}>
+                      No members yet. Invite someone above.
+                    </TableEmpty>
                   )}
-                  {members.map((m) => (
+                  {cols.sorted.map((m) => (
                     <tr
                       {...rowKeys}
                       key={m.membershipId}
                       className="cursor-pointer"
                       onClick={() => router.push(`/members/${m.membershipId}`)}
                     >
-                      <td>
-                        <Link
-                          href={`/members/${m.membershipId}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <strong>{m.name || m.email}</strong>
-                        </Link>
-                        <div className="muted text-xs">{m.email}</div>
-                      </td>
-                      <td>{m.roleName}</td>
-                      <td>
-                        {m.dataScope === 'all' ? (
-                          'All locations'
-                        ) : m.scopeLocationIds.length > 0 ? (
-                          `${m.scopeLocationIds.length} location${m.scopeLocationIds.length === 1 ? '' : 's'}`
-                        ) : (
-                          <span className="text-[var(--danger)]">No store selected</span>
-                        )}
-                      </td>
-                      <td>
-                        <StatusBadge status={m.status} />
-                      </td>
-                      <td className="actions" onClick={(e) => e.stopPropagation()}>
-                        {m.status === 'invited' && (
-                          <Button size="sm" variant="ghost" onClick={() => resend(m.membershipId)}>
-                            Resend invite
-                          </Button>
-                        )}
-                        <LinkButton
-                          size="sm"
-                          variant="secondary"
-                          href={`/members/${m.membershipId}`}
-                        >
-                          Manage
-                        </LinkButton>
-                        {me?.canDeleteMembers && me.membershipId !== m.membershipId && (
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => void removeMember(m)}
-                            data-testid="member-delete"
-                          >
-                            Delete
-                          </Button>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={m} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

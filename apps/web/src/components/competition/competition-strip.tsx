@@ -8,48 +8,39 @@ import { readLocal, writeLocal } from '@/app/(business)/dashboard/shared/kit';
 import { LeadDialog } from './lead-dialog';
 import { LeaderboardDialog } from './leaderboard-dialog';
 import { LeadsPanel } from './leads-panel';
-import {
-  COMPETITION_EVENT,
-  usdWholeCents,
-  type CompetitionBoard,
-  type RaceCard,
-  type RaceScope,
-} from './types';
+import { COMPETITION_EVENT, usdWholeCents, type CompetitionBoard, type RaceCard } from './types';
 
 /**
  * The sales competition strip (redesign Phase 11, README §3.6): above
- * every role home. Header line, People | Stores, days left, the sweep
- * chip, + Log lead, Collapse; six cards with the top three, the pace
- * line, your pinned row with the gap in the metric's units, and the
- * one-line rule; the rules footer. Hidden when the viewer may not see it
- * (403 / 404) so a home never breaks for it.
+ * every role home. Header line, days left, the sweep chip, + Log lead,
+ * Collapse; six cards with everyone who competes (owner 2026-09-13: every
+ * salesperson, sales or not — the unranked sit under the ranked with no
+ * number; collapsed keeps the top three), the pace line, your pinned row
+ * with the gap in the metric's units, and the one-line rule; the rules
+ * footer. Hidden when the viewer may not see it (403 / 404) so a home
+ * never breaks for it.
  *
  * Motion budget: a rank change on your own screen slides the row once
  * (280ms) and flashes the card once (800ms). Nothing else moves.
  */
 const COLLAPSE_KEY = 'jetnine.competition.collapsed';
-const SCOPE_KEY = 'jetnine.competition.scope';
 const POLL_MS = 60_000;
 
-export function useCompetition(scope: RaceScope | null) {
+export function useCompetition() {
   const [board, setBoard] = useState<CompetitionBoard | null | undefined>(undefined);
   const [error, setError] = useState(false);
-  const load = useCallback(
-    (quiet = true) => {
-      if (!quiet) setBoard(undefined);
-      const qs = scope ? `?scope=${scope}` : '';
-      return api<CompetitionBoard>(`/v1/competitions/current${qs}`)
-        .then((b) => {
-          setBoard(b);
-          setError(false);
-        })
-        .catch((e: unknown) => {
-          if (e instanceof ApiError && (e.status === 403 || e.status === 404)) setBoard(null);
-          else setError(true);
-        });
-    },
-    [scope],
-  );
+  const load = useCallback((quiet = true) => {
+    if (!quiet) setBoard(undefined);
+    return api<CompetitionBoard>('/v1/competitions/current')
+      .then((b) => {
+        setBoard(b);
+        setError(false);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && (e.status === 403 || e.status === 404)) setBoard(null);
+        else setError(true);
+      });
+  }, []);
   useEffect(() => {
     void load();
     const t = window.setInterval(() => void load(), POLL_MS);
@@ -75,17 +66,14 @@ export function CompetitionStrip({
   showLeads?: boolean;
   actorName?: string | null;
 }) {
-  const [scope, setScope] = useState<RaceScope | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<{ card: RaceCard; tab: 'month' | 'history' } | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
   const [bannerHidden, setBannerHidden] = useState<string | null>(null);
-  const { board, error, reload } = useCompetition(scope);
+  const { board, error, reload } = useCompetition();
 
   useEffect(() => {
     setCollapsed(readLocal<boolean>(COLLAPSE_KEY, false));
-    const s = readLocal<string>(SCOPE_KEY, '');
-    if (s === 'people' || s === 'stores') setScope(s);
     setBannerHidden(readLocal<string>('jetnine.competition.bannerHidden', ''));
   }, []);
 
@@ -99,17 +87,17 @@ export function CompetitionStrip({
     const flashed = new Set<string>();
     const slid = new Set<string>();
     for (const c of board.cards) {
-      for (const r of c.rows.slice(0, 3)) next.set(`${c.key}:${r.id}`, r.rank);
+      for (const r of c.top) next.set(`${c.key}:${r.id}`, r.rank ?? 0);
       const you = c.rows.find((r) => r.isYou);
-      if (you) next.set(`${c.key}:you`, you.rank);
+      if (you) next.set(`${c.key}:you`, you.rank ?? 0);
       const before = prevRanks.current.get(`${c.key}:you`);
-      if (before != null && you && before !== you.rank) {
+      if (before != null && you && before !== (you.rank ?? 0)) {
         flashed.add(c.key);
         slid.add(c.key);
       } else if (
         prevRanks.current.size > 0 &&
-        c.rows[0] &&
-        prevRanks.current.get(`${c.key}:${c.rows[0].id}`) !== 1
+        c.top[0] &&
+        prevRanks.current.get(`${c.key}:${c.top[0].id}`) !== 1
       ) {
         flashed.add(c.key);
       }
@@ -133,11 +121,6 @@ export function CompetitionStrip({
       return !c;
     });
   };
-  const pickScope = (s: RaceScope) => {
-    setScope(s);
-    writeLocal(SCOPE_KEY, s);
-  };
-
   const sweepChip = useMemo(() => {
     if (!board?.sweep) return null;
     const s = board.sweep;
@@ -188,9 +171,6 @@ export function CompetitionStrip({
                   {w.store ? `, ${w.store}` : ''} · {w.short}
                 </span>
               ))}
-            {board.banner.storesLine && (
-              <span className="cs-banner-race">{board.banner.storesLine}</span>
-            )}
           </div>
           <div className="cs-banner-actions">
             <Link
@@ -222,7 +202,6 @@ export function CompetitionStrip({
       <section
         className={`cs${board.last48 ? ' is-last48' : ''}${collapsed ? ' is-collapsed' : ''}`}
         data-testid="competition-strip"
-        data-scope={board.scope}
       >
         <div className="cs-head">
           <h2>{board.monthLabel} competition</h2>
@@ -233,23 +212,6 @@ export function CompetitionStrip({
               {usdWholeCents(sw.six)}
             </strong>
           </span>
-          {board.scopes.length > 1 && (
-            <div className="seg" role="tablist" aria-label="Race">
-              {board.scopes.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  role="tab"
-                  aria-selected={board.scope === s}
-                  className={`seg-btn${board.scope === s ? ' is-active' : ''}`}
-                  onClick={() => pickScope(s)}
-                  data-testid={`cs-scope-${s}`}
-                >
-                  {s === 'people' ? 'People' : 'Stores'}
-                </button>
-              ))}
-            </div>
-          )}
           <span
             className={`cs-days${board.last48 ? ' is-last48' : days <= 5 ? ' is-soon' : ''}`}
             data-testid="cs-days"
@@ -359,7 +321,10 @@ function RaceCardView({
   onOpen: () => void;
 }) {
   const you = card.you;
-  const empty = card.rows.length === 0;
+  // Day one keeps each card's own empty copy instead of a column of zeros.
+  const empty = card.rows.length === 0 || board.isDayOne;
+  // Collapsed keeps the top three; expanded lists everyone who competes.
+  const shown = collapsed ? card.top : card.rows;
   return (
     <button
       type="button"
@@ -376,14 +341,16 @@ function RaceCardView({
         <div className="cs-empty">{card.empty}</div>
       ) : (
         <ol className="cs-top">
-          {card.top.map((r) => (
-            <li key={r.id} className={r.isYou ? 'is-you' : ''}>
-              <span className="cs-rank">{r.rank}</span>
+          {shown.map((r) => (
+            <li
+              key={r.id}
+              className={`${r.isYou ? 'is-you' : ''}${r.rank === null ? ' is-unranked' : ''}`}
+              data-testid={`cs-row-${card.key}`}
+            >
+              <span className="cs-rank">{r.rank ?? '—'}</span>
               <span className="cs-name">
                 {r.name}
-                {board.scope === 'people' && r.storeCode && (
-                  <span className="cs-store"> {r.storeCode}</span>
-                )}
+                {r.storeCode && <span className="cs-store"> {r.storeCode}</span>}
               </span>
               <span className="mono cs-value">{r.valueLabel}</span>
               {r.detail && card.key !== 'high' && (
@@ -414,8 +381,7 @@ function RaceCardView({
         <div className={`cs-you${moved ? ' is-moved' : ''}`} data-testid={`cs-you-${card.key}`}>
           <span className="cs-rank">{you.rank ?? '—'}</span>
           <span className="cs-you-name">
-            {board.scope === 'people' ? 'You' : (board.viewer.storeName ?? 'Your store')}{' '}
-            <span className="cs-gap">{you.gap}</span>
+            You <span className="cs-gap">{you.gap}</span>
           </span>
           <span className="mono cs-value">{you.valueLabel}</span>
         </div>

@@ -128,6 +128,12 @@ export const payments = pgTable(
     // For method='financing': who approved it and under what number.
     financingProvider: text('financing_provider'),
     financingRef: text('financing_ref'),
+    // Card tenders: the brand ('visa' | 'mastercard' | 'amex' | …) so the
+    // store dashboards can break card volume down by network.
+    cardBrand: text('card_brand'),
+    // Financing tenders (synchrony/acima/financing): the promo term the
+    // customer signed (6 | 12 | 15 | 18 | 24 | 36 | 48 months).
+    financingMonths: integer('financing_months'),
     // 'pending' | 'succeeded' | 'failed' | 'refunded'
     status: text('status').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

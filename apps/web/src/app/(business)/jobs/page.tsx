@@ -9,6 +9,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -16,10 +19,12 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface JobDef {
@@ -96,6 +101,104 @@ export default function JobsPage() {
 
   const jobName = (id: string) => registry.find((j) => j.id === id)?.name ?? id;
 
+  // Both lists name steps through `jobName` (the registry in state), so
+  // their columns are built here.
+  const stepColumns: ColumnDef<JobDef>[] = [
+    { id: 'order', label: 'Order', num: true, sortValue: (j) => j.order, render: (j) => j.order },
+    {
+      id: 'step',
+      label: 'Step',
+      sortValue: (j) => j.name,
+      render: (j) => (
+        <>
+          <strong>{j.name}</strong>
+          {j.dependsOn.length > 0 && (
+            <div className="muted">after {j.dependsOn.map(jobName).join(', ')}</div>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'description',
+      label: 'What it does',
+      sortValue: (j) => j.description,
+      render: (j) => j.description,
+    },
+    {
+      id: 'destructive',
+      label: 'Destructive',
+      sortValue: (j) => j.destructive,
+      render: (j) => (
+        <span className={`badge ${j.destructive ? 'badge-danger' : 'badge-success'}`}>
+          {j.destructive ? 'yes' : 'no'}
+        </span>
+      ),
+    },
+  ];
+  const stepCols = useListColumns('jobs-steps', stepColumns, registry);
+
+  const runColumns: ColumnDef<JobRun>[] = [
+    {
+      id: 'businessDate',
+      label: 'Business date',
+      className: 'nowrap',
+      sortValue: (r) => r.businessDate,
+      render: (r) => r.businessDate,
+    },
+    {
+      id: 'step',
+      label: 'Step',
+      sortValue: (r) => jobName(r.jobId),
+      render: (r) => jobName(r.jobId),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) =>
+        r.status === 'disabled' ? (
+          <span className="badge badge-neutral">disabled</span>
+        ) : (
+          <StatusBadge status={r.status} />
+        ),
+    },
+    {
+      id: 'records',
+      label: 'Records',
+      num: true,
+      sortValue: (r) => r.recordsAffected,
+      render: (r) => r.recordsAffected,
+    },
+    {
+      id: 'duration',
+      label: 'Duration',
+      num: true,
+      sortValue: (r) => r.durationMs,
+      render: (r) => (r.durationMs != null ? `${r.durationMs}ms` : '—'),
+    },
+    {
+      id: 'detail',
+      label: 'Detail',
+      render: (r) => (
+        <>
+          <div>{r.summary ?? r.error ?? 'Review the run details.'}</div>
+          {r.actionHref && (
+            <Link href={r.actionHref} className="link">
+              {r.actionLabel}
+            </Link>
+          )}
+          {r.detailJson && (
+            <details className="mt-2 muted">
+              <summary className="cursor-pointer">Technical details</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-all text-xs">{r.detailJson}</pre>
+            </details>
+          )}
+        </>
+      ),
+    },
+  ];
+  const runCols = useListColumns('jobs-runs', runColumns, runs);
+
   return (
     <div>
       <PageHeader
@@ -110,34 +213,20 @@ export default function JobsPage() {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th className="num">Order</th>
-                  <th>Step</th>
-                  <th>What it does</th>
-                  <th>Destructive</th>
-                </tr>
+                <ColumnHeadRow list={stepCols} testIdPrefix="jobs-steps" />
               </thead>
               <tbody>
-                {registry.length === 0 && <TableEmpty colSpan={4}>No steps registered.</TableEmpty>}
-                {registry.map((j) => (
+                {registry.length === 0 && (
+                  <TableEmpty colSpan={stepCols.ordered.length}>No steps registered.</TableEmpty>
+                )}
+                {stepCols.sorted.map((j) => (
                   <tr key={j.id}>
-                    <td className="num">{j.order}</td>
-                    <td>
-                      <strong>{j.name}</strong>
-                      {j.dependsOn.length > 0 && (
-                        <div className="muted">after {j.dependsOn.map(jobName).join(', ')}</div>
-                      )}
-                    </td>
-                    <td>{j.description}</td>
-                    <td>
-                      <span className={`badge ${j.destructive ? 'badge-danger' : 'badge-success'}`}>
-                        {j.destructive ? 'yes' : 'no'}
-                      </span>
-                    </td>
+                    <ColumnCells list={stepCols} row={j} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={stepCols} />
           </TableWrap>
         </Card>
 
@@ -187,49 +276,17 @@ export default function JobsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Business date</th>
-                    <th>Step</th>
-                    <th>Status</th>
-                    <th className="num">Records</th>
-                    <th className="num">Duration</th>
-                    <th>Detail</th>
-                  </tr>
+                  <ColumnHeadRow list={runCols} testIdPrefix="jobs-runs" />
                 </thead>
                 <tbody>
-                  {runs.map((r) => (
+                  {runCols.sorted.map((r) => (
                     <tr key={r.id}>
-                      <td className="nowrap">{r.businessDate}</td>
-                      <td>{jobName(r.jobId)}</td>
-                      <td>
-                        {r.status === 'disabled' ? (
-                          <span className="badge badge-neutral">disabled</span>
-                        ) : (
-                          <StatusBadge status={r.status} />
-                        )}
-                      </td>
-                      <td className="num">{r.recordsAffected}</td>
-                      <td className="num">{r.durationMs != null ? `${r.durationMs}ms` : '—'}</td>
-                      <td>
-                        <div>{r.summary ?? r.error ?? 'Review the run details.'}</div>
-                        {r.actionHref && (
-                          <Link href={r.actionHref} className="link">
-                            {r.actionLabel}
-                          </Link>
-                        )}
-                        {r.detailJson && (
-                          <details className="mt-2 muted">
-                            <summary className="cursor-pointer">Technical details</summary>
-                            <pre className="mt-1 whitespace-pre-wrap break-all text-xs">
-                              {r.detailJson}
-                            </pre>
-                          </details>
-                        )}
-                      </td>
+                      <ColumnCells list={runCols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={runCols} />
             </TableWrap>
           )}
         </Card>

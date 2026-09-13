@@ -12,13 +12,18 @@ import { Money } from '@/components/money';
 import {
   Alert,
   Button,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   Input,
   Kbd,
   LinkButton,
   LoadingRows,
+  ResetColumns,
   Select,
   StatusChip,
+  useListColumns,
 } from '@/components/ui';
 import { STATUS_OPTIONS, chipFor, fmtDay } from './order-format';
 
@@ -78,6 +83,7 @@ const WRITTEN = [
 ] as const;
 const DEFAULT_WRITTEN = '30';
 
+/** Server sort keys and labels; the cells are built in the component (they need the filters). */
 const COLUMNS: { key: string; label: string; align?: 'right' }[] = [
   { key: 'number', label: 'Order' },
   { key: 'customer', label: 'Customer' },
@@ -355,6 +361,130 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
   const filtered = chips.length > 0;
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const columns: ColumnDef<OrderListRow>[] = [
+    {
+      id: 'number',
+      label: 'Order',
+      sortKey: 'number',
+      className: 'ob-num-cell',
+      render: (r) => (
+        <>
+          <Link
+            href={`/orders/${r.id}${writeFilters(f)}`}
+            className="ob-num"
+            data-testid="order-number-link"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {r.number}
+          </Link>
+          {r.lockedAt && (
+            <span className="ob-lock" title="Locked — delivery ticket printed" aria-label="Locked">
+              ◷
+            </span>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortKey: 'customer',
+      render: (r) => (
+        <>
+          <span className="ob-customer">{r.customerName}</span>
+          {r.customerPhone && <span className="ob-phone">{r.customerPhone}</span>}
+        </>
+      ),
+    },
+    {
+      id: 'store',
+      label: 'Store',
+      sortKey: 'store',
+      className: 'ob-muted',
+      render: (r) => r.locationName ?? '—',
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortKey: 'status',
+      render: (r) => {
+        const chip = chipFor(r.displayStatus, { deliveryDate: r.deliveryDate, today });
+        return <StatusChip status={chip.status} label={chip.label} />;
+      },
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved',
+      sortKey: 'reserved',
+      className: 'ob-res-cell',
+      render: (r) => {
+        const units = r.lineSummary?.units ?? 0;
+        const done = Math.min(
+          units,
+          (r.lineSummary?.reserved ?? 0) + (r.lineSummary?.fulfilled ?? 0),
+        );
+        const pct = units > 0 ? Math.round((done / units) * 100) : 0;
+        const resTone = units === 0 ? 'none' : done >= units ? 'full' : done > 0 ? 'part' : 'zero';
+        return units > 0 ? (
+          <div className="ob-res" title={`${done} of ${units} units reserved`}>
+            <div className="ob-res-bar" aria-hidden>
+              <div className={`ob-res-fill is-${resTone}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="ob-res-frac">
+              {done}/{units}
+            </span>
+          </div>
+        ) : (
+          <span className="ob-muted">—</span>
+        );
+      },
+    },
+    {
+      id: 'deliveryDate',
+      label: 'Promised',
+      sortKey: 'deliveryDate',
+      className: 'ob-mono ob-muted',
+      render: (r) => fmtDay(r.deliveryDate),
+    },
+    {
+      id: 'salesperson',
+      label: 'Salesperson',
+      sortKey: 'salesperson',
+      className: 'ob-muted',
+      render: (r) => r.salespersonName ?? '—',
+    },
+    {
+      id: 'total',
+      label: 'Total',
+      sortKey: 'total',
+      num: true,
+      className: 'ob-mono',
+      render: (r) => <Money cents={r.totalCents} />,
+    },
+    {
+      id: 'balanceDue',
+      label: 'Balance',
+      sortKey: 'balanceDue',
+      num: true,
+      className: 'ob-mono ob-balance',
+      cellClassName: (r) => r.displayStatus !== 'Cancelled' && r.balanceDueCents > 0 && 'is-due',
+      render: (r) => {
+        const cancelled = r.displayStatus === 'Cancelled';
+        if (cancelled) return '—';
+        if (r.balanceDueCents > 0) return <Money cents={r.balanceDueCents} />;
+        if (r.creditDueCents > 0)
+          return (
+            <span className="ob-credit">
+              Credit <Money cents={r.creditDueCents} />
+            </span>
+          );
+        return '—';
+      },
+    },
+  ];
+  const cols = useListColumns('orders', columns, rows, {
+    server: { sort: f.sort, dir: f.dir, onSort: toggleSort },
+  });
   const sortLabel = f.sort
     ? `${COLUMNS.find((c) => c.key === f.sort)?.label.toLowerCase() ?? f.sort} ${f.dir === 'asc' ? '↑' : '↓'}`
     : 'newest first';
@@ -507,121 +637,23 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
               ref={tableRef}
             >
               <thead>
-                <tr>
-                  {COLUMNS.map((c) => {
-                    const on = f.sort === c.key;
-                    return (
-                      <th
-                        key={c.key}
-                        className={c.align === 'right' ? 'num' : undefined}
-                        aria-sort={on ? (f.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                      >
-                        <button
-                          type="button"
-                          className={`ob-sort${on ? ' is-on' : ''}`}
-                          onClick={() => toggleSort(c.key)}
-                          data-testid={`sort-${c.key}`}
-                        >
-                          {c.label}
-                          <span className="ob-sort-arrow" aria-hidden>
-                            {on ? (f.dir === 'asc' ? '▲' : '▼') : ''}
-                          </span>
-                        </button>
-                      </th>
-                    );
-                  })}
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="orders" />
               </thead>
               <tbody>
-                {rows.map((r, i) => {
-                  const chip = chipFor(r.displayStatus, { deliveryDate: r.deliveryDate, today });
-                  const units = r.lineSummary?.units ?? 0;
-                  const done = Math.min(
-                    units,
-                    (r.lineSummary?.reserved ?? 0) + (r.lineSummary?.fulfilled ?? 0),
-                  );
-                  const pct = units > 0 ? Math.round((done / units) * 100) : 0;
-                  const resTone =
-                    units === 0 ? 'none' : done >= units ? 'full' : done > 0 ? 'part' : 'zero';
-                  const cancelled = r.displayStatus === 'Cancelled';
-                  return (
-                    <tr
-                      key={r.id}
-                      data-testid="order-row"
-                      className={i === hi ? 'is-selected' : undefined}
-                      onClick={() => open(r.id)}
-                      onMouseEnter={() => setHi(i)}
-                    >
-                      <td className="ob-num-cell">
-                        <Link
-                          href={`/orders/${r.id}${writeFilters(f)}`}
-                          className="ob-num"
-                          data-testid="order-number-link"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {r.number}
-                        </Link>
-                        {r.lockedAt && (
-                          <span
-                            className="ob-lock"
-                            title="Locked — delivery ticket printed"
-                            aria-label="Locked"
-                          >
-                            ◷
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span className="ob-customer">{r.customerName}</span>
-                        {r.customerPhone && <span className="ob-phone">{r.customerPhone}</span>}
-                      </td>
-                      <td className="ob-muted">{r.locationName ?? '—'}</td>
-                      <td>
-                        <StatusChip status={chip.status} label={chip.label} />
-                      </td>
-                      <td className="ob-res-cell">
-                        {units > 0 ? (
-                          <div className="ob-res" title={`${done} of ${units} units reserved`}>
-                            <div className="ob-res-bar" aria-hidden>
-                              <div
-                                className={`ob-res-fill is-${resTone}`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="ob-res-frac">
-                              {done}/{units}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="ob-muted">—</span>
-                        )}
-                      </td>
-                      <td className="ob-mono ob-muted">{fmtDay(r.deliveryDate)}</td>
-                      <td className="ob-muted">{r.salespersonName ?? '—'}</td>
-                      <td className="num ob-mono">
-                        <Money cents={r.totalCents} />
-                      </td>
-                      <td
-                        className={`num ob-mono ob-balance${!cancelled && r.balanceDueCents > 0 ? ' is-due' : ''}`}
-                      >
-                        {cancelled ? (
-                          '—'
-                        ) : r.balanceDueCents > 0 ? (
-                          <Money cents={r.balanceDueCents} />
-                        ) : r.creditDueCents > 0 ? (
-                          <span className="ob-credit">
-                            Credit <Money cents={r.creditDueCents} />
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {rows.map((r, i) => (
+                  <tr
+                    key={r.id}
+                    data-testid="order-row"
+                    className={i === hi ? 'is-selected' : undefined}
+                    onClick={() => open(r.id)}
+                    onMouseEnter={() => setHi(i)}
+                  >
+                    <ColumnCells list={cols} row={r} index={i} />
+                  </tr>
+                ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={COLUMNS.length} className="ob-empty">
+                    <td colSpan={cols.ordered.length} className="ob-empty">
                       <div className="ob-empty-title">No orders match</div>
                       <div>Widen the date range or clear a filter.</div>
                       {filtered && (
@@ -635,6 +667,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
               </tbody>
             </table>
           )}
+          <ResetColumns list={cols} />
           {nextCursor && (
             <div className="ob-more">
               <Button

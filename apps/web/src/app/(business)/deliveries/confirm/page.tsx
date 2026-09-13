@@ -10,6 +10,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -17,12 +20,14 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatGrid,
   StatTile,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -90,6 +95,119 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** The Contact cell writes through `setContact`, so the columns are built per render. */
+function confirmColumns(setContact: (row: Row, contactStatus: string) => void): ColumnDef<Row>[] {
+  return [
+    {
+      id: 'position',
+      label: '#',
+      num: true,
+      sortValue: (r) => r.routePosition,
+      render: (r) => r.routePosition ?? '—',
+    },
+    {
+      id: 'window',
+      label: 'Window',
+      sortValue: (r) => r.windowStart,
+      render: (r) => (r.windowStart ? `${r.windowStart}–${r.windowEnd ?? ''}` : '—'),
+    },
+    {
+      id: 'order',
+      label: 'Order',
+      sortValue: (r) => r.orderNumber,
+      render: (r) => (
+        <>
+          <Link href={`/deliveries/${r.deliveryId}`}>{r.orderNumber}</Link>
+          {r.fulfillmentType === 'pickup' && <span className="muted text-xs"> pickup</span>}
+        </>
+      ),
+    },
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortValue: (r) => r.customerName,
+      render: (r) => r.customerName ?? '—',
+    },
+    { id: 'phone', label: 'Phone', sortValue: (r) => r.phone, render: (r) => r.phone ?? '—' },
+    { id: 'city', label: 'City', sortValue: (r) => r.city, render: (r) => r.city ?? '—' },
+    {
+      id: 'zip',
+      label: 'Zip',
+      sortValue: (r) => r.postalCode,
+      render: (r) => r.postalCode ?? '—',
+    },
+    { id: 'route', label: 'Route', sortValue: (r) => r.route, render: (r) => r.route ?? '—' },
+    {
+      id: 'truck',
+      label: 'Truck / driver',
+      sortValue: (r) => [r.truck, r.driverName].filter(Boolean).join(' · ') || null,
+      render: (r) => [r.truck, r.driverName].filter(Boolean).join(' · ') || '—',
+    },
+    { id: 'units', label: 'Units', num: true, sortValue: (r) => r.units, render: (r) => r.units },
+    {
+      id: 'dollars',
+      label: 'Dollars',
+      num: true,
+      sortValue: (r) => r.dollarsCents,
+      render: (r) => <Money cents={r.dollarsCents} />,
+    },
+    {
+      id: 'due',
+      label: 'Due',
+      num: true,
+      sortValue: (r) => r.balanceDueCents,
+      render: (r) => <Money cents={r.balanceDueCents} />,
+    },
+    {
+      id: 'volume',
+      label: 'Vol',
+      num: true,
+      sortValue: (r) => r.volume,
+      render: (r) => r.volume,
+    },
+    ...FLAGS.map(
+      (f): ColumnDef<Row> => ({
+        id: `flag${f.key}`,
+        label: f.label,
+        num: true,
+        title: f.title,
+        sortValue: (r) => r.flags[f.key],
+        render: (r) => (
+          <span title={f.title} data-testid={`confirm-flag-${f.key}`}>
+            {r.flags[f.key] ? <strong>{f.label}</strong> : <span className="muted">·</span>}
+          </span>
+        ),
+      }),
+    ),
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      id: 'contact',
+      label: 'Contact',
+      sortValue: (r) => r.contactStatus,
+      render: (r) => (
+        <Select
+          value={r.contactStatus ?? ''}
+          onChange={(e) => setContact(r, e.target.value)}
+          aria-label={`Contact status for ${r.orderNumber}`}
+          data-testid="confirm-contact-select"
+        >
+          <option value="">Not called</option>
+          {CONTACT_STATUSES.filter((c) => c.key !== 'none').map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
+      ),
+    },
+  ];
+}
+
 export default function ConfirmSchedulePage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationId, setLocationId] = useState('');
@@ -144,6 +262,12 @@ export default function ConfirmSchedulePage() {
       toast.error(err instanceof Error ? err.message : String(err));
     }
   }
+
+  const cols = useListColumns(
+    'deliveries-confirm',
+    confirmColumns((row, s) => void setContact(row, s)),
+    result?.rows ?? null,
+  );
 
   const toggle = (set: Set<string>, key: string) => {
     const next = new Set(set);
@@ -256,90 +380,17 @@ export default function ConfirmSchedulePage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th className="num">#</th>
-                        <th>Window</th>
-                        <th>Order</th>
-                        <th>Customer</th>
-                        <th>Phone</th>
-                        <th>City</th>
-                        <th>Zip</th>
-                        <th>Route</th>
-                        <th>Truck / driver</th>
-                        <th className="num">Units</th>
-                        <th className="num">Dollars</th>
-                        <th className="num">Due</th>
-                        <th className="num">Vol</th>
-                        {FLAGS.map((f) => (
-                          <th key={f.key} className="num" title={f.title}>
-                            {f.label}
-                          </th>
-                        ))}
-                        <th>Status</th>
-                        <th>Contact</th>
-                      </tr>
+                      <ColumnHeadRow list={cols} testIdPrefix="deliveries-confirm" />
                     </thead>
                     <tbody>
-                      {result.rows.map((r) => (
+                      {cols.sorted.map((r) => (
                         <tr key={r.deliveryId} data-testid="confirm-row">
-                          <td className="num">{r.routePosition ?? '—'}</td>
-                          <td>{r.windowStart ? `${r.windowStart}–${r.windowEnd ?? ''}` : '—'}</td>
-                          <td>
-                            <Link href={`/deliveries/${r.deliveryId}`}>{r.orderNumber}</Link>
-                            {r.fulfillmentType === 'pickup' && (
-                              <span className="muted text-xs"> pickup</span>
-                            )}
-                          </td>
-                          <td>{r.customerName ?? '—'}</td>
-                          <td>{r.phone ?? '—'}</td>
-                          <td>{r.city ?? '—'}</td>
-                          <td>{r.postalCode ?? '—'}</td>
-                          <td>{r.route ?? '—'}</td>
-                          <td>{[r.truck, r.driverName].filter(Boolean).join(' · ') || '—'}</td>
-                          <td className="num">{r.units}</td>
-                          <td className="num">
-                            <Money cents={r.dollarsCents} />
-                          </td>
-                          <td className="num">
-                            <Money cents={r.balanceDueCents} />
-                          </td>
-                          <td className="num">{r.volume}</td>
-                          {FLAGS.map((f) => (
-                            <td
-                              key={f.key}
-                              className="num"
-                              title={f.title}
-                              data-testid={`confirm-flag-${f.key}`}
-                            >
-                              {r.flags[f.key] ? (
-                                <strong>{f.label}</strong>
-                              ) : (
-                                <span className="muted">·</span>
-                              )}
-                            </td>
-                          ))}
-                          <td>
-                            <StatusBadge status={r.status} />
-                          </td>
-                          <td>
-                            <Select
-                              value={r.contactStatus ?? ''}
-                              onChange={(e) => void setContact(r, e.target.value)}
-                              aria-label={`Contact status for ${r.orderNumber}`}
-                              data-testid="confirm-contact-select"
-                            >
-                              <option value="">Not called</option>
-                              {CONTACT_STATUSES.filter((c) => c.key !== 'none').map((c) => (
-                                <option key={c.key} value={c.key}>
-                                  {c.label}
-                                </option>
-                              ))}
-                            </Select>
-                          </td>
+                          <ColumnCells list={cols} row={r} />
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={cols} />
                 </TableWrap>
               )}
             </Card>
