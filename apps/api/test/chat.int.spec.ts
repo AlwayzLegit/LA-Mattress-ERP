@@ -2072,6 +2072,44 @@ it.skipIf(!process.env.CHAT_STOREFRONT_ROOT)(
       expect((await retry.json()).message.id).toBe(first.message.id);
       const context = await service.context(staff, id);
       expect(context.context).toMatchObject(payload.context);
+      const pageActivity = {
+        operation: 'activity',
+        conversationId: id,
+        currentPage: { path: '/products/test-mattress', title: 'Test mattress' },
+      };
+      expect((await post(pageActivity)).status).toBe(200);
+      expect((await service.context(staff, id)).context).toMatchObject({
+        ...payload.context,
+        currentPage: {
+          path: '/products/test-mattress',
+          title: 'Test mattress',
+          seenAt: expect.any(String),
+        },
+      });
+      expect(
+        (
+          await post({
+            ...pageActivity,
+            currentPage: { path: '/account/orders', title: 'Private' },
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await post({
+            ...pageActivity,
+            currentPage: { path: '/products/test?email=private', title: 'Private' },
+          })
+        ).status,
+      ).toBe(400);
+      await expect(
+        service.activity(staff, null, id, { currentPage: pageActivity.currentPage }),
+      ).rejects.toThrow();
+      expect((await post({ ...pageActivity, currentPage: null })).status).toBe(200);
+      expect((await service.context(staff, id)).context).toMatchObject({
+        ...payload.context,
+        currentPage: null,
+      });
       expect(
         (
           await post(

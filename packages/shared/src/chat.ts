@@ -51,6 +51,17 @@ export const chatActivitySchema = z
   .object({
     readSequence: z.number().int().min(0).max(2147483646).optional(),
     typing: z.boolean().optional(),
+    currentPage: z
+      .object({
+        path: z
+          .string()
+          .max(500)
+          .regex(/^\/(?:$|(?:products|collections|pages|blogs)\/[a-zA-Z0-9/_-]+$|sleep-quiz\/?$)/),
+        title: z.string().trim().min(1).max(160),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 export const chatWorkflowSchema = z

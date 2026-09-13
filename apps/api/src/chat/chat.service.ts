@@ -1930,6 +1930,8 @@ export class ChatService {
     this.uuid(id);
     const parsed = chatActivitySchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException('Invalid activity');
+    if (tenant && parsed.data.currentPage !== undefined)
+      throw new BadRequestException('Only visitors can report their current page');
     const update = async (tx: DrizzleTransaction, row: ConversationRow, staff: boolean) => {
       const current = staff ? row.staffReadSequence : row.visitorReadSequence;
       // Acknowledge only persisted public messages, never internal-note sequences.
@@ -1949,6 +1951,18 @@ export class ChatService {
       await tx
         .update(conversations)
         .set({
+          ...(!staff && parsed.data.currentPage !== undefined
+            ? {
+                contextJson: {
+                  ...(typeof row.contextJson === 'object' && row.contextJson !== null
+                    ? row.contextJson
+                    : {}),
+                  currentPage: parsed.data.currentPage
+                    ? { ...parsed.data.currentPage, seenAt: new Date().toISOString() }
+                    : null,
+                },
+              }
+            : {}),
           ...(parsed.data.readSequence !== undefined
             ? staff
               ? { staffReadSequence: Math.max(current, last?.sequence ?? 0) }

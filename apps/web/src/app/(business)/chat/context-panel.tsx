@@ -4,7 +4,11 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui';
 import styles from './chat.module.css';
 type Details = {
-  context: { topic?: string; pagePath?: string } | null;
+  context: {
+    topic?: string;
+    pagePath?: string;
+    currentPage?: { path: string; title: string; seenAt: string } | null;
+  } | null;
   locationId: string | null;
   locationName: string | null;
   customerId: string | null;
@@ -50,6 +54,28 @@ export function ContextPanel({
       cancelled = true;
     };
   }, [id, version]);
+  useEffect(() => {
+    let cancelled = false;
+    let busy = false;
+    const refresh = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try {
+        const data = await api<Details>(`/v1/chat/conversations/${id}/context`);
+        if (!cancelled)
+          setDetails((previous) => (previous ? { ...previous, context: data.context } : previous));
+      } catch {
+        /* Keep the last-seen timestamp visible during interruptions. */
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [id]);
   async function save(action: string, body: object) {
     setBusy(true);
     try {
@@ -75,6 +101,34 @@ export function ContextPanel({
       {details && (
         <>
           <dl className={styles.visitorFacts}>
+            <dt>Visitor’s latest page</dt>
+            <dd>
+              {details.context?.currentPage &&
+              /^\/(?:$|(?:products|collections|pages|blogs)\/[a-zA-Z0-9/_-]+$|sleep-quiz\/?$)/.test(
+                details.context.currentPage.path,
+              ) ? (
+                <>
+                  <a
+                    href={`https://www.mattressstoreslosangeles.com${details.context.currentPage.path}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {details.context.currentPage.title}
+                  </a>
+                  <br />
+                  <small>
+                    Last seen{' '}
+                    {new Date(details.context.currentPage.seenAt).toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
+                  </small>
+                </>
+              ) : (
+                'No public page currently shared'
+              )}
+            </dd>
             <dt>Chat started from</dt>
             <dd>{details.context?.pagePath ?? 'Website page not available'}</dd>
             {details.context?.topic && details.context.topic !== 'other' && (
