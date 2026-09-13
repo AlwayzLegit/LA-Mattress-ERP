@@ -5707,4 +5707,8 @@ agreement or the root), refined by the same description words the build script u
 A stray the tree cannot read is still `strayKept`. Unit spec `stray-categories.spec.ts`
 (3); int spec seeds QUFND, QUEEN and "Hybrid Mattress" strays (all empty and go) next to
 an unreadable "Gizmos" (stays, reported).
-**Ops (done in-session once deployed):** workflow `validate`, read `strayKept`, `commit`.
+**Applied to production 2026-09-13 12:46 UTC** (workflow run 4, `commit`, after a clean
+validate on run 3): 1,948/1,948 SKUs filed, 364 As-Is siblings filed with their base
+product, 339 products moved out of stray categories, 8 code categories renamed, 35
+subcategories created, 3 legacy (MATT, RF, PILLOW) + 76 stray categories deleted,
+0 strays kept. The Products category picker now lists only the 10 × 35 tree.
