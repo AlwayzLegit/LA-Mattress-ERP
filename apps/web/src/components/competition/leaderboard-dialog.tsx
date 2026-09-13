@@ -14,10 +14,11 @@ import {
 } from './types';
 
 /**
- * The leaderboard (README §3.6): every subject ranked, a month sparkline
- * per row, the secondary number, your row tinted, and the orders behind
- * the focused number on the right. History lists past months with the
- * winner, the store winner, your rank and the payout.
+ * The leaderboard (README §3.6): everyone who competes — the ranked rows
+ * first, then the people the race cannot rank yet with no number — a
+ * month sparkline per row, the secondary number, your row tinted, and the
+ * orders behind the focused number on the right. History lists past
+ * months with the winner, your rank and the payout.
  */
 export function LeaderboardDialog({
   board,
@@ -39,9 +40,8 @@ export function LeaderboardDialog({
       .catch(() => setHistory([]));
   }, [tab, history]);
 
-  const focus: RaceRow | null = card.rows.find((r) => r.isYou) ?? card.rows[0] ?? null;
+  const focus: RaceRow | null = card.rows.find((r) => r.isYou) ?? card.top[0] ?? null;
   const focusName = focus ? (focus.isYou ? 'you' : firstName(focus.name)) : '—';
-  const who = board.scope === 'people' ? 'Salesperson' : 'Store';
   const sparkMax = Math.max(1, ...card.rows.flatMap((r) => r.spark));
 
   return (
@@ -49,7 +49,7 @@ export function LeaderboardDialog({
       title={card.title}
       description={
         <span className="lb-sub">
-          {board.scope === 'people' ? 'People' : 'Stores'} · {board.monthLabel} ·{' '}
+          People · {board.monthLabel} ·{' '}
           {board.daysLeft === 0 ? 'ends tonight' : `${board.daysLeft} days left`}{' '}
           <span className="mono lb-prize">{usdWholeCents(card.prizeCents)} to first</span>
         </span>
@@ -91,7 +91,7 @@ export function LeaderboardDialog({
               <thead>
                 <tr>
                   <th className="first">#</th>
-                  <th>{who}</th>
+                  <th>Salesperson</th>
                   <th>Month</th>
                   <th className="num">{card.detailLabel || 'Net'}</th>
                   <th className="num last">{card.metricLabel}</th>
@@ -106,13 +106,15 @@ export function LeaderboardDialog({
                   </tr>
                 )}
                 {card.rows.map((r) => (
-                  <tr key={r.id} className={r.isYou ? 'is-you' : ''} data-testid="lb-row">
-                    <td className="first lb-rank">{r.rank}</td>
+                  <tr
+                    key={r.id}
+                    className={`${r.isYou ? 'is-you' : ''}${r.rank === null ? ' is-unranked' : ''}`}
+                    data-testid="lb-row"
+                  >
+                    <td className="first lb-rank">{r.rank ?? '—'}</td>
                     <td>
                       <span style={{ fontWeight: r.isYou ? 600 : 500 }}>{r.name}</span>{' '}
-                      {board.scope === 'people' && r.storeName && (
-                        <span className="sub">{r.storeName}</span>
-                      )}
+                      {r.storeName && <span className="sub">{r.storeName}</span>}
                     </td>
                     <td>
                       <span className="lb-spark" aria-hidden>
@@ -175,9 +177,8 @@ export function LeaderboardDialog({
               <thead>
                 <tr>
                   <th className="first">Month</th>
-                  <th>Winner · people</th>
+                  <th>Winner</th>
                   <th className="num">Result</th>
-                  <th>Winner · store</th>
                   <th className="num">Your rank</th>
                   <th className="num last">Paid</th>
                 </tr>
@@ -185,7 +186,7 @@ export function LeaderboardDialog({
               <tbody>
                 {history.filter((h) => h.race === card.key).length === 0 && (
                   <tr>
-                    <td colSpan={6} className="sub" style={{ padding: '18px var(--pad)' }}>
+                    <td colSpan={5} className="sub" style={{ padding: '18px var(--pad)' }}>
                       No closed month yet — {board.monthLabel} is the first.
                     </td>
                   </tr>
@@ -204,7 +205,6 @@ export function LeaderboardDialog({
                       <td className="num mono" style={{ fontWeight: 600 }}>
                         {h.result}
                       </td>
-                      <td>{h.storeWinner ?? '—'}</td>
                       <td className="num mono" style={{ color: 'var(--accent)' }}>
                         {h.yourRank ? `#${h.yourRank}` : '—'}
                       </td>

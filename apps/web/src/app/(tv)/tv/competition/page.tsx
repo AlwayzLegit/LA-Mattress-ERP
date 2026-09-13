@@ -15,7 +15,7 @@ import { usdWholeCents, type RaceCard } from '@/components/competition/types';
 const CYCLE_MS = 6000;
 
 export default function CompetitionTvPage() {
-  const { board } = useCompetition('people');
+  const { board } = useCompetition();
   const [idx, setIdx] = useState(0);
   const [clock, setClock] = useState('');
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function CompetitionTvPage() {
             <ol className="tv-rows">
               {focus.rows.slice(0, 10).map((r) => (
                 <li key={r.id} className={r.rank === 1 ? 'is-leader' : ''}>
-                  <span className="tv-rank">{r.rank}</span>
+                  <span className="tv-rank">{r.rank ?? '—'}</span>
                   <span className="tv-name">
                     {r.name} <span className="tv-store">{r.storeName ?? ''}</span>
                   </span>
@@ -96,7 +96,7 @@ export default function CompetitionTvPage() {
         </section>
         <aside className="tv-side">
           {others.map((c) => {
-            const l = c.rows[0];
+            const l = c.top[0];
             return (
               <div className="tv-leader" key={c.key}>
                 <span className="tv-leader-title">{c.title}</span>

@@ -5612,3 +5612,18 @@ an array-or-`{data}` while it returns `{ flat, tree }`, so the filter lookup was
 `undefined` and the page threw on `.map` — fixed in the same PR.
 Main's E2E job was red from #175 (the no-money completion gate and card-brand rule)
 until #177 realigned the four order-writer tests; this branch carries #177's version.
+
+### Checkpoint — 2026-09-13 (Competition strip: people only, everyone listed)
+
+Owner: "We don't need by store, only people… put all managers in there even with 0 sales
+not just top 2." The Stores race is retired end to end (toggle, prizes, store winner
+column, banner and sheet lines, `?scope`, the `races` / `prizeStoreCents` settings — a
+stored value is ignored). The competitor pool is every active member whose role can log a
+lead (`competitions.leads.log`: Owner, Manager, Cashier by default), seeded onto every card
+at zero from day one; ranked rows first, then the unranked (no sales for a $ race or
+Least Exchanges, nothing at all for a count race) in name order with `rank: null`, "—"
+for a $ value and "no sales yet". The strip lists everyone expanded and the top three
+collapsed; the leaderboard lists everyone. README §3.6 and PHASE_NOTES Phase 11 amended.
+Tests: `competitions.int.spec.ts` (new DB `jetnine_competitions`): every lead-logging
+member is on every card, Operations is not, the seller ranks first, the zero-sales manager
+sits under them unranked, and Stores is gone from the board and the sheet.

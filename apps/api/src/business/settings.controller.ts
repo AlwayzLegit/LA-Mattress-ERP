@@ -104,17 +104,17 @@ interface OpsSettings {
   } | null;
   /**
    * Sales competitions (redesign Phase 11, README §3.6). Null block = the
-   * defaults: six cards on, People and Stores, $100 a card, sweep
-   * $1,000 / $1,500 / $2,000, paid on the 5th, 30-day return window,
-   * banner for 3 days, visible to everyone, overtaken notices on.
+   * defaults: six cards on, $100 a card, sweep $1,000 / $1,500 / $2,000,
+   * paid on the 5th, 30-day return window, banner for 3 days, visible to
+   * everyone, overtaken notices on. Only people compete (owner 2026-09-13);
+   * a stored `races` / `prizeStoreCents` from before is ignored.
    */
   competitions?: {
     enabled?: boolean | null;
-    races?: 'people' | 'stores' | 'both' | null;
     cards?: Partial<
       Record<
         'leads' | 'avg' | 'high' | 'sales' | 'beds' | 'ex',
-        { on?: boolean | null; prizePeopleCents?: number | null; prizeStoreCents?: number | null }
+        { on?: boolean | null; prizePeopleCents?: number | null }
       >
     > | null;
     sweep?: { four?: number | null; five?: number | null; six?: number | null } | null;
@@ -492,12 +492,6 @@ function validateCompetitions(
   };
   const e = bool(raw.enabled, 'enabled');
   if (e !== undefined) out.enabled = e;
-  if (raw.races !== undefined) {
-    if (raw.races !== null && !['people', 'stores', 'both'].includes(raw.races)) {
-      throw new BadRequestException('ops.competitions.races must be people, stores or both');
-    }
-    out.races = raw.races;
-  }
   if (raw.cards !== undefined) {
     if (raw.cards === null) out.cards = null;
     else {
@@ -510,11 +504,9 @@ function validateCompetitions(
         }
         const on = bool(c.on, `cards.${key}.on`);
         const pp = cents(c.prizePeopleCents, `cards.${key}.prizePeopleCents`);
-        const ps = cents(c.prizeStoreCents, `cards.${key}.prizeStoreCents`);
         cards[key] = {
           ...(on !== undefined ? { on } : {}),
           ...(pp !== undefined ? { prizePeopleCents: pp } : {}),
-          ...(ps !== undefined ? { prizeStoreCents: ps } : {}),
         };
       }
       out.cards = cards;

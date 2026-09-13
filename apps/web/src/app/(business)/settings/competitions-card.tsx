@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 
 /**
  * Owner settings for the sales competitions (README §3.6): per card
- * on/off, the People and Stores prizes, which races run, month reset
+ * on/off and prize (people only — owner 2026-09-13), month reset
  * (fixed: 12:01 AM on the 1st, store time), payout date, return window,
  * how long the winner banner stays, who sees it, and overtaken notices.
  * The footer totals the monthly payout. Changes apply from the next month
@@ -25,12 +25,8 @@ const RACES: { key: RaceKey; title: string }[] = [
 
 export interface CompetitionSettings {
   enabled?: boolean | null;
-  races?: 'people' | 'stores' | 'both' | null;
   cards?: Partial<
-    Record<
-      RaceKey,
-      { on?: boolean | null; prizePeopleCents?: number | null; prizeStoreCents?: number | null }
-    >
+    Record<RaceKey, { on?: boolean | null; prizePeopleCents?: number | null }>
   > | null;
   sweep?: { four?: number | null; five?: number | null; six?: number | null } | null;
   payoutDay?: number | null;
@@ -71,22 +67,16 @@ export function CompetitionsCard<
       boolean
     >,
   );
-  const [races, setRaces] = useState<'people' | 'stores' | 'both'>(comp.races ?? 'both');
   const [people, setPeople] = useState<Record<RaceKey, string>>(
     Object.fromEntries(
       RACES.map((r) => [r.key, dollars(comp.cards?.[r.key]?.prizePeopleCents, DEFAULTS.prize)]),
     ) as Record<RaceKey, string>,
   );
-  const [stores, setStores] = useState<Record<RaceKey, string>>(
-    Object.fromEntries(
-      RACES.map((r) => [r.key, dollars(comp.cards?.[r.key]?.prizeStoreCents, DEFAULTS.prize)]),
-    ) as Record<RaceKey, string>,
-  );
 
-  const sum = (m: Record<RaceKey, string>) =>
-    RACES.reduce((n, r) => n + (on[r.key] ? Math.round(Number(m[r.key]) || 0) : 0), 0);
-  const peopleTotal = races === 'stores' ? 0 : sum(people);
-  const storesTotal = races === 'people' ? 0 : sum(stores);
+  const peopleTotal = RACES.reduce(
+    (n, r) => n + (on[r.key] ? Math.round(Number(people[r.key]) || 0) : 0),
+    0,
+  );
   const sweep = comp.sweep ?? {};
   const nextMonth = new Date();
   nextMonth.setDate(1);
@@ -109,12 +99,10 @@ export function CompetitionsCard<
         cards[r.key] = {
           on: on[r.key],
           prizePeopleCents: Math.round((Number(people[r.key]) || 0) * 100),
-          prizeStoreCents: Math.round((Number(stores[r.key]) || 0) * 100),
         };
       }
       const body: CompetitionSettings = {
         enabled: data.get('enabled') === 'on',
-        races,
         cards,
         sweep: {
           four: Math.round(num('sweepFour', DEFAULTS.sweep.four / 100) * 100),
@@ -148,7 +136,7 @@ export function CompetitionsCard<
   return (
     <Card
       title="Sales competitions"
-      description="Six cards, two races. Changes apply from the next month unless you say otherwise."
+      description="Six cards, one race between people. Changes apply from the next month unless you say otherwise."
     >
       <form onSubmit={submit} data-testid="competitions-form">
         <div className="cset">
@@ -158,13 +146,11 @@ export function CompetitionsCard<
                 <tr>
                   <th className="first">Card</th>
                   <th>On</th>
-                  <th>Races</th>
-                  <th className="num">Prize · people</th>
-                  <th className="num last">Prize · stores</th>
+                  <th className="num last">Prize</th>
                 </tr>
               </thead>
               <tbody>
-                {RACES.map((r, i) => (
+                {RACES.map((r) => (
                   <tr key={r.key} data-testid={`cset-row-${r.key}`}>
                     <td className="first" style={{ fontWeight: 500 }}>
                       {r.title}
@@ -180,41 +166,14 @@ export function CompetitionsCard<
                         <span />
                       </label>
                     </td>
-                    <td>
-                      {i === 0 ? (
-                        <Select
-                          value={races}
-                          onChange={(e) => setRaces(e.target.value as typeof races)}
-                          aria-label="Races"
-                          data-testid="cset-races"
-                        >
-                          <option value="both">People and Stores</option>
-                          <option value="people">People only</option>
-                          <option value="stores">Stores only</option>
-                        </Select>
-                      ) : (
-                        <span className="sub">·</span>
-                      )}
-                    </td>
-                    <td className="num">
+                    <td className="num last">
                       <Input
                         className="input-num"
                         value={people[r.key]}
                         onChange={(e) => setPeople({ ...people, [r.key]: e.target.value })}
                         inputMode="numeric"
-                        disabled={races === 'stores' || !on[r.key]}
-                        aria-label={`${r.title} people prize`}
-                        style={{ width: 96, textAlign: 'right' }}
-                      />
-                    </td>
-                    <td className="num last">
-                      <Input
-                        className="input-num"
-                        value={stores[r.key]}
-                        onChange={(e) => setStores({ ...stores, [r.key]: e.target.value })}
-                        inputMode="numeric"
-                        disabled={races === 'people' || !on[r.key]}
-                        aria-label={`${r.title} store prize`}
+                        disabled={!on[r.key]}
+                        aria-label={`${r.title} prize`}
                         style={{ width: 96, textAlign: 'right' }}
                       />
                     </td>
@@ -228,9 +187,7 @@ export function CompetitionsCard<
               <span className="mono">${dollars(sweep.five, DEFAULTS.sweep.five)}</span> for 5 of 6,{' '}
               <span className="mono">${dollars(sweep.six, DEFAULTS.sweep.six)}</span> for all 6
               (replaces the per-card prizes) ·{' '}
-              <strong>${peopleTotal.toLocaleString()} people</strong> ·{' '}
-              <strong>${storesTotal.toLocaleString()} stores</strong> ·{' '}
-              <strong>${(peopleTotal + storesTotal).toLocaleString()} total</strong>
+              <strong>${peopleTotal.toLocaleString()} in card prizes</strong>
             </div>
             <div className="cset-grid">
               <Field label="Sweep · 4 of 6 ($)">

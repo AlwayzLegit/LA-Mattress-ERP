@@ -7454,6 +7454,14 @@ select.picker-from {
   background: var(--accent-soft);
   font-weight: 600;
 }
+/* Nothing to rank yet: listed under the ranked rows, quieter, no number. */
+.cs-top li.is-unranked,
+.lb-table tr.is-unranked td {
+  color: var(--muted);
+}
+.cs-top li.is-unranked.is-you {
+  color: inherit;
+}
 .cs-rank {
   font-family: var(--font-mono);
   font-size: 11px;
