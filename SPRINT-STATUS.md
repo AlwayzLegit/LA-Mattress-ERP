@@ -5543,3 +5543,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] **Local chat visitor context (2026-09-13):** Organized expandable visitor controls and prominent pending follow-up card with contact preference, timestamps and completion state. Web typecheck/lint and synthetic browser flow verified.
 
 - [x] **Local guided chat handoff (2026-09-13):** Preference/next-step capture saved as private notes, plus editable sales replies. Typecheck/lint pass; browser save and visitor-history exclusion verified.
+
+- [x] **Chat redesign source alignment (2026-09-13):** Applied current upstream design tokens/fonts, flat queue and semantic status badges. Typecheck/lint and local rendering pass. Authenticated live visual comparison remains pending sign-in.

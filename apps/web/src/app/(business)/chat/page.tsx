@@ -235,7 +235,7 @@ export default function ChatPage() {
                   </time>
                 </div>
                 {unread.includes(conversation.id) && (
-                  <span className={styles.badge}>New message</span>
+                  <span className={styles.badge}>● New message</span>
                 )}
                 <small>
                   {conversation.assignedToMe
@@ -244,9 +244,15 @@ export default function ChatPage() {
                       ? `With ${conversation.assignedName || 'a teammate'}`
                       : 'Unassigned'}
                 </small>
-                {conversation.overdue && <span className={styles.badge}>Reply overdue</span>}
+                {conversation.overdue && (
+                  <span className={styles.badge} data-tone="risk">
+                    ▲ Reply overdue
+                  </span>
+                )}
                 {conversation.followupPending && (
-                  <span className={styles.badge}>Follow-up requested</span>
+                  <span className={styles.badge} data-tone="waiting">
+                    ◔ Follow-up requested
+                  </span>
                 )}
                 <p className={styles.messagePreview}>
                   {conversation.preview || 'Open conversation to view messages'}

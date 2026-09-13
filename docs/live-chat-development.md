@@ -350,3 +350,18 @@ steps. They make no inventory, price or delivery promises and require staff to s
 Validation: web typecheck and changed-file lint pass. Browser-tested a synthetic
 handoff save; it appeared as an internal note in staff history. The authenticated
 visitor history returned HTTP 200 and excluded the handoff. Local only.
+
+## ERP redesign alignment - September 13, 2026
+
+Compared against the latest GitHub main design handoff and globals.css
+(blob 414afb64fcabea61ffa7058b418927c43176bce4). Chat adopts the warm neutral
+ramp, navy accent, 3/5px radii, compact management controls, flat queue rows,
+visible composer labels and semantic red/amber status chips.
+Public Sans, Archivo and JetBrains Mono Latin font files were fetched from
+the live ERP's public font paths and checked for WOFF2 signatures.
+
+Tokens remain scoped to chat and its global alert while this local checkout's
+older shell awaits upstream reconciliation. No shared shell or global stylesheet
+was replaced. Web typecheck and changed-file lint pass; local browser rendering
+checked. The live dashboard redirected to sign-in; authenticated visual comparison
+is still pending user sign-in. Deployment preparation is paused for that check.
