@@ -2397,6 +2397,7 @@ it('shares completed website transcripts with chat staff without exposing privat
     expect((await service.archive(reader, { q: publicText })).data.map((row) => row.id)).toEqual([
       start.conversationId,
     ]);
+    expect(JSON.stringify(await service.archive(reader, {}))).toContain(publicText);
     const transcript = await service.archive(reader, {}, start.conversationId);
     expect(JSON.stringify(transcript)).toContain(publicText);
     expect(JSON.stringify(transcript)).not.toContain(privateText);

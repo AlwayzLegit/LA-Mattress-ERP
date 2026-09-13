@@ -1803,7 +1803,7 @@ export class ChatService {
             >`(select u.name from memberships a join users u on u.id = a.user_id where a.id = ${conversations.assignedMembershipId} and a.business_id = ${conversations.businessId} limit 1)`,
             preview: sql<
               string | null
-            >`(select left(m.body,160) from chat_messages m where m.business_id = ${conversations.businessId} and m.conversation_id = ${conversations.id} and m.audience = 'public' order by m.sequence desc limit 1)`,
+            >`(select left(m.body,160) from chat_messages m where m.business_id = "chat_conversations"."business_id" and m.conversation_id = "chat_conversations"."id" and m.audience = 'public' order by m.sequence desc limit 1)`,
           })
           .from(conversations)
           .where(
