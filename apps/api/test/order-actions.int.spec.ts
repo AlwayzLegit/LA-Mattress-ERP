@@ -145,6 +145,14 @@ async function seed() {
       .insert(schema.brands)
       .values({ businessId, name: 'Harbour' })
       .returning();
+    const [furniture] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Bedroom Furniture', position: 0 })
+      .returning();
+    const [daybeds] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Daybeds & Sofa Beds', parentId: furniture!.id, position: 0 })
+      .returning();
     const [p] = await db
       .insert(schema.products)
       .values({
@@ -152,6 +160,7 @@ async function seed() {
         sku: 'SOFA',
         name: 'Harbour Sofa',
         brandId: brand!.id,
+        categoryId: daybeds!.id,
         description: 'Kiln-dried frame, 10-year warranty',
       })
       .returning();
@@ -621,6 +630,8 @@ describe('A20 — Enter a Sales Order actions', () => {
     expect(product).toMatchObject({
       name: 'Harbour Sofa',
       brand: 'Harbour',
+      // A22.1: the full nested category, not the leaf.
+      category: 'Bedroom Furniture › Daybeds & Sofa Beds',
       sku: 'SOFA-1',
       priceCents: 100_000,
       attributes: { size: 'Queen' },

@@ -67,6 +67,13 @@ export interface VendorReplenishment {
 export interface ReplenishmentProduct {
   variantId: string;
   categoryId: string | null;
+  /**
+   * The category itself first, then its parent, then the root (A22.1
+   * categories nest). A vendor exception on "Mattresses" then covers
+   * "Mattresses › Hybrid"; the nearest ancestor with a value wins.
+   * Omit to match on categoryId alone.
+   */
+  categoryLineage?: string[];
   unitsSold: number;
   unitsReturned: number;
   warehouseOnHand: number;
@@ -124,26 +131,38 @@ function roundQty(value: number, standardRounding: boolean): number {
   return standardRounding ? Math.round(value) : Math.trunc(value);
 }
 
+/** A category id, or its lineage (self first, then ancestors up to the root). */
+export type CategoryRef = string | string[] | null | undefined;
+
+/**
+ * The nearest category exception with the field set: the product's own
+ * category first, then its parent, then the root.
+ */
+function findException<K extends 'minimumStockDays' | 'leadDays'>(
+  vendor: VendorReplenishment,
+  category: CategoryRef,
+  field: K,
+): number | undefined {
+  const lineage = Array.isArray(category) ? category : category ? [category] : [];
+  for (const id of lineage) {
+    const exc = vendor.categoryExceptions?.find(
+      (e) => e.categoryId === id && e[field] !== undefined,
+    );
+    if (exc) return exc[field];
+  }
+  return undefined;
+}
+
 /** First-match-wins resolution (§2.1/§2.2); category exception → vendor. */
 export function resolveMinimumStockDays(
   vendor: VendorReplenishment,
-  categoryId: string | null,
+  category: CategoryRef,
 ): number {
-  const exc = categoryId
-    ? vendor.categoryExceptions?.find(
-        (e) => e.categoryId === categoryId && e.minimumStockDays !== undefined,
-      )
-    : undefined;
-  return exc?.minimumStockDays ?? vendor.minimumStockDays;
+  return findException(vendor, category, 'minimumStockDays') ?? vendor.minimumStockDays;
 }
 
-export function resolveLeadDays(vendor: VendorReplenishment, categoryId: string | null): number {
-  const exc = categoryId
-    ? vendor.categoryExceptions?.find(
-        (e) => e.categoryId === categoryId && e.leadDays !== undefined,
-      )
-    : undefined;
-  return exc?.leadDays ?? vendor.leadDays;
+export function resolveLeadDays(vendor: VendorReplenishment, category: CategoryRef): number {
+  return findException(vendor, category, 'leadDays') ?? vendor.leadDays;
 }
 
 export function validateCriteria(criteria: RunCriteria, vendor: VendorReplenishment): void {
@@ -200,11 +219,12 @@ export function calculateRow(
   const rate = rawRate * (variancePct / 100);
   if (rate < vendor.minimumSalesRate) return null; // strict < (§3.5)
 
-  const minDays = resolveMinimumStockDays(vendor, p.categoryId);
+  const category = p.categoryLineage ?? p.categoryId;
+  const minDays = resolveMinimumStockDays(vendor, category);
   // §2.1 — ALWAYS ÷7 (calendar days); the weekend switch never touches it.
   const required = roundQty((minDays / 7) * rate, control.standardRounding);
 
-  const leadDays = resolveLeadDays(vendor, p.categoryId);
+  const leadDays = resolveLeadDays(vendor, category);
   const daysPerWeek = control.excludeWeekendsInVendorLeadDays ? 5 : 7;
   const additional = roundQty((leadDays / daysPerWeek) * rate, control.standardRounding);
 

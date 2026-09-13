@@ -9,6 +9,7 @@ import {
   PRODUCT_PURCHASE_STATUSES,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { categoryList, categoryOptions, type CategoryFlat } from '@/lib/categories';
 import { useOptionalActingStore } from '@/lib/acting-store';
 import { CsvImport } from '@/components/csv-import';
 import { Money } from '@/components/money';
@@ -85,35 +86,10 @@ interface RefOption {
   id: string;
   name: string;
 }
-interface CategoryFlat {
-  id: string;
-  parentId: string | null;
-  name: string;
-  position: number;
-}
 interface ReasonCodeOption {
   id: string;
   code: string;
   description: string;
-}
-
-/** Categories nest, so the picker reads "Mattresses › Hybrid". */
-function categoryOptions(flat: CategoryFlat[]): RefOption[] {
-  const byParent = new Map<string | null, CategoryFlat[]>();
-  for (const c of flat) byParent.set(c.parentId, [...(byParent.get(c.parentId) ?? []), c]);
-  const out: RefOption[] = [];
-  const walk = (parentId: string | null, prefix: string) => {
-    const kids = [...(byParent.get(parentId) ?? [])].sort(
-      (a, b) => a.position - b.position || a.name.localeCompare(b.name),
-    );
-    for (const c of kids) {
-      const label = prefix ? `${prefix} › ${c.name}` : c.name;
-      out.push({ id: c.id, name: label });
-      walk(c.id, label);
-    }
-  };
-  walk(null, '');
-  return out;
 }
 
 /** Advanced search (canvas 6a): ten fields behind a disclosure. */
@@ -423,7 +399,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     void api<CategoryFlat[] | { flat: CategoryFlat[] }>('/v1/categories')
-      .then((r) => setCategories(categoryOptions(Array.isArray(r) ? r : r.flat)))
+      .then((r) => setCategories(categoryOptions(categoryList(r))))
       .catch(() => setCategories([]));
     void api<LocationRow[]>('/v1/business/locations')
       .then((l) => setLocations(l))

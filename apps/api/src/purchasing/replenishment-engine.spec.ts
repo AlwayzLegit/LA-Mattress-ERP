@@ -272,6 +272,33 @@ describe('sales-rate replenishment engine — §8 acceptance tests', () => {
     expect(other.required).toBe(20);
   });
 
+  it('category exceptions follow the lineage: the nearest ancestor with a value wins', () => {
+    const v = vendor({
+      categoryExceptions: [
+        { categoryId: 'mattresses', minimumStockDays: 28, leadDays: 7 },
+        { categoryId: 'hybrid', leadDays: 14 },
+      ],
+    });
+    // "Mattresses › Hybrid": min-stock days come from the root, lead days from the leaf.
+    const hybrid = calculateRow(
+      product({ categoryId: 'hybrid', categoryLineage: ['hybrid', 'mattresses'] }),
+      v,
+      control(),
+      criteria(),
+    )!;
+    expect(hybrid.required).toBe(40); // (28/7)*10
+    expect(hybrid.additional).toBe(20); // (14/7)*10
+    // A sibling subcategory without its own exception inherits the root's.
+    const latex = calculateRow(
+      product({ categoryId: 'latex', categoryLineage: ['latex', 'mattresses'] }),
+      v,
+      control(),
+      criteria(),
+    )!;
+    expect(latex.required).toBe(40);
+    expect(latex.additional).toBe(10);
+  });
+
   it('returns subtract from the rate (§9.1 typo decision)', () => {
     const row = calculateRow(
       product({ unitsSold: 80, unitsReturned: 40 }),

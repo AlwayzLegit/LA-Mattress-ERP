@@ -121,6 +121,41 @@ async function seed() {
       .insert(schema.productVariants)
       .values({ businessId, productId: p!.id, sku: 'CP-MAT-Q', name: 'Queen', priceCents: 120_000 })
       .returning();
+    // A22.1 tree: the base counts on the Beds race, the remote under
+    // "Base Accessories & Parts" does not even though its name says so.
+    const [adjustable] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Adjustable Bases', position: 1 })
+      .returning();
+    const [bases] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Adjustable Bed Bases', parentId: adjustable!.id, position: 0 })
+      .returning();
+    const [parts] = await db
+      .insert(schema.categories)
+      .values({
+        businessId,
+        name: 'Base Accessories & Parts',
+        parentId: adjustable!.id,
+        position: 1,
+      })
+      .returning();
+    const [base] = await db
+      .insert(schema.products)
+      .values({ businessId, sku: 'CP-BASE', name: 'Ergo Base', categoryId: bases!.id })
+      .returning();
+    const [baseV] = await db
+      .insert(schema.productVariants)
+      .values({ businessId, productId: base!.id, sku: 'CP-BASE-Q', name: 'Queen', priceCents: 0 })
+      .returning();
+    const [remote] = await db
+      .insert(schema.products)
+      .values({ businessId, sku: 'CP-REMOTE', name: 'Base Remote', categoryId: parts!.id })
+      .returning();
+    const [remoteV] = await db
+      .insert(schema.productVariants)
+      .values({ businessId, productId: remote!.id, sku: 'CP-REMOTE', priceCents: 0 })
+      .returning();
     const [cust] = await db
       .insert(schema.customers)
       .values({ businessId, firstName: 'Noah', lastName: 'Feldman', phone: '3105550100' })
@@ -141,16 +176,38 @@ async function seed() {
         completedAt: new Date(),
       })
       .returning();
-    await db.insert(schema.orderLines).values({
-      businessId,
-      orderId: order!.id,
-      variantId: v!.id,
-      description: 'Compete Mattress — Queen',
-      quantity: 1,
-      unitPriceCents: 120_000,
-      totalCents: 120_000,
-      lineType: 'stock',
-    });
+    await db.insert(schema.orderLines).values([
+      {
+        businessId,
+        orderId: order!.id,
+        variantId: v!.id,
+        description: 'Compete Mattress — Queen',
+        quantity: 1,
+        unitPriceCents: 120_000,
+        totalCents: 120_000,
+        lineType: 'stock',
+      },
+      {
+        businessId,
+        orderId: order!.id,
+        variantId: baseV!.id,
+        description: 'Ergo Base — Queen',
+        quantity: 1,
+        unitPriceCents: 0,
+        totalCents: 0,
+        lineType: 'stock',
+      },
+      {
+        businessId,
+        orderId: order!.id,
+        variantId: remoteV!.id,
+        description: 'ADJUSTABLE BASE REMOTE',
+        quantity: 2,
+        unitPriceCents: 0,
+        totalCents: 0,
+        lineType: 'stock',
+      },
+    ]);
   });
 }
 
@@ -230,6 +287,9 @@ describe('GET /v1/competitions/current', () => {
 
     const sales = card(board, 'sales');
     expect(sales.rows[0]).toMatchObject({ name: 'Priya Nair', rank: 1, value: 1, valueLabel: '1' });
+    // Beds: the base counts, the two remotes filed under accessories do not.
+    const beds = card(board, 'beds');
+    expect(beds.rows[0]).toMatchObject({ name: 'Priya Nair', rank: 1, value: 1 });
     // A count race can rank a zero: everyone else shares the value 0.
     const maya = sales.rows.find((r) => r.name === 'Maya Torres')!;
     expect(maya.value).toBe(0);

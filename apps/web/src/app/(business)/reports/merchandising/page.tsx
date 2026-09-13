@@ -23,6 +23,7 @@ import {
   useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { categoryList, categoryOptions } from '@/lib/categories';
 import { downloadFile } from '@/lib/download';
 import { Money } from '@/components/money';
 
@@ -33,6 +34,7 @@ interface MerchRow {
   sku: string | null;
   vendorName: string | null;
   categoryName: string | null;
+  categoryPath: string | null;
   brandName: string | null;
   onHand: number;
   reserved: number;
@@ -76,6 +78,12 @@ const MERCH_COLUMNS: ColumnDef<MerchRow>[] = [
     label: 'Vendor',
     sortValue: (r) => r.vendorName,
     render: (r) => r.vendorName ?? '—',
+  },
+  {
+    id: 'category',
+    label: 'Category',
+    sortValue: (r) => r.categoryPath ?? r.categoryName,
+    render: (r) => r.categoryPath ?? r.categoryName ?? '—',
   },
   {
     id: 'onHand',
@@ -190,7 +198,7 @@ export default function MerchandisingPage() {
         // Vendors and brands come back as arrays; categories as `{ flat, tree }`.
         const arr = (x: Lookup) => (Array.isArray(x) ? x : (x.data ?? x.flat ?? []));
         setVendors(arr(v));
-        setCategories(arr(c));
+        setCategories(categoryOptions(categoryList(c as Parameters<typeof categoryList>[0])));
         setBrands(arr(b));
       } catch {
         // Filters degrade to "all" when a lookup fails; the report still loads.

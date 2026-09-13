@@ -137,10 +137,12 @@ export interface WinnersSheet {
 }
 
 export const LEAD_SIZES = ['Twin', 'Twin XL', 'Full', 'Queen', 'King', 'Cal King'];
+/** Mirrors the API list: the Mattresses subcategories of the catalog tree, a base, or a named product. */
 export const LEAD_CATEGORIES = [
   'Hybrid',
-  'Memory foam',
+  'Memory Foam',
   'Innerspring',
+  'Latex',
   'Adjustable base',
   'Specific product',
 ];

@@ -33,6 +33,7 @@ let app: INestApplication;
 let businessId = '';
 let locationId = '';
 let variantAId = '';
+let mattressesCategoryId = '';
 let variantBId = '';
 let cashierCookie = '';
 let ownerCookie = '';
@@ -155,9 +156,19 @@ async function seed() {
         .values({ membershipId: m!.id, locationId, businessId });
     }
 
+    // A sits on a subcategory (A22.1 tree): "Mattresses › Hybrid".
+    const [mattresses] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Mattresses', position: 0 })
+      .returning();
+    mattressesCategoryId = mattresses!.id;
+    const [hybrid] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Hybrid', parentId: mattresses!.id, position: 1 })
+      .returning();
     const [pA] = await db
       .insert(schema.products)
-      .values({ businessId, sku: 'A', name: 'Widget' })
+      .values({ businessId, sku: 'A', name: 'Widget', categoryId: hybrid!.id })
       .returning();
     const [vA] = await db
       .insert(schema.productVariants)
@@ -432,16 +443,33 @@ describe('Epic 1.11 — Reports & cash drawer', () => {
     expect(res.body.netCents).toBe(2000);
   });
 
-  it('Sales by category groups uncategorized lines together', async () => {
+  it('Sales by category reads the full category path and groups uncategorized lines together', async () => {
     const res = await request(app.getHttpServer())
       .get('/v1/reports/sales/by-category')
       .set('Cookie', ownerCookie)
       .set('X-Business-Id', businessId);
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(1);
-    expect(res.body[0].categoryName).toBe('Uncategorized');
-    expect(res.body[0].quantity).toBe(3);
-    expect(res.body[0].revenueCents).toBe(2500);
+    expect(res.body).toHaveLength(2);
+    // Highest revenue first: the two Widgets ($20) on "Mattresses › Hybrid".
+    expect(res.body[0]).toMatchObject({
+      categoryName: 'Hybrid',
+      categoryPath: 'Mattresses › Hybrid',
+      quantity: 2,
+      revenueCents: 2000,
+    });
+    expect(res.body[1]).toMatchObject({
+      categoryId: null,
+      categoryName: 'Uncategorized',
+      categoryPath: 'Uncategorized',
+      quantity: 1,
+      revenueCents: 500,
+    });
+    const csv = await request(app.getHttpServer())
+      .get('/v1/reports/sales/by-category?format=csv')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(csv.text).toContain('Mattresses › Hybrid,2,2000');
   });
 
   it('Inventory valuation multiplies on-hand by cost and retail; cashier is 403', async () => {
@@ -1216,6 +1244,16 @@ describe('Sales Views — merchandising activity (buyer report)', () => {
     expect(gadget).toBeTruthy();
     // Jeopardy fixture put 5 units of B on an ordered PO.
     expect(gadget.onOrder).toBe(5);
+    // A22.1: rows carry the category path, and filtering by the root
+    // category keeps the products filed on its subcategories.
+    expect(widget.categoryPath).toBe('Mattresses › Hybrid');
+    expect(gadget.categoryPath).toBeNull();
+    const byRoot = await request(app.getHttpServer())
+      .get(`/v1/reports/merchandising?categoryId=${mattressesCategoryId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(byRoot.body.rows.map((r: { sku: string | null }) => r.sku)).toEqual(['A-1']);
 
     // Bookkeeper lacks reports.financial.view -> 403 (cost-bearing report).
     await request(app.getHttpServer())

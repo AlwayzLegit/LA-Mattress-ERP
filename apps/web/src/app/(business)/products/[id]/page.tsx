@@ -979,7 +979,11 @@ export default function ProductDetailPage() {
                     <Input value={p.firmness ?? ''} readOnly aria-label="Firmness" />
                   </Field>
                   <Field label="Category">
-                    <Input value={p.categoryName ?? ''} readOnly aria-label="Category" />
+                    <Input
+                      value={p.categoryPath ?? p.categoryName ?? ''}
+                      readOnly
+                      aria-label="Category"
+                    />
                   </Field>
                 </FormGrid>
               </Card>

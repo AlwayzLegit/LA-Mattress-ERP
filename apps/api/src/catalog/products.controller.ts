@@ -277,9 +277,11 @@ export function sortProductRows(
   dir: 'asc' | 'desc',
 ): ProductListRow[] {
   const sign = dir === 'desc' ? -1 : 1;
+  // A22.1: the category column reads the full path, so sort on it too.
+  const field = key === 'categoryName' ? 'categoryPath' : key;
   const cmp = (a: ProductListRow, b: ProductListRow): number => {
-    const av = a[key];
-    const bv = b[key];
+    const av = a[field];
+    const bv = b[field];
     const aBlank = av == null || av === '';
     const bBlank = bv == null || bv === '';
     if (aBlank && bBlank) return 0;
