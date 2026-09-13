@@ -91,3 +91,23 @@ it('does not cache development chunks with stable filenames on localhost', () =>
     },
   });
 });
+
+it.each(['team-chat', 'chat-help'])('renders safe generic %s notifications', async (type) => {
+  const w = worker();
+  let promise: Promise<unknown> | undefined;
+  w.handlers.push!({
+    data: { json: () => ({ type, title: 'SECRET', body: 'PRIVATE', url: 'https://bad.test' }) },
+    waitUntil: (p: Promise<unknown>) => {
+      promise = p;
+    },
+  });
+  await promise;
+  expect(w.shown).toHaveLength(1);
+  expect(JSON.stringify(w.shown)).not.toMatch(/SECRET|PRIVATE|bad.test/);
+  expect(JSON.stringify(w.shown)).toContain('/chat');
+});
+it.each(['constructor', '__proto__', 'unknown'])('ignores unknown push type %s', (type) => {
+  const w = worker();
+  w.handlers.push!({ data: { json: () => ({ type }) } });
+  expect(w.shown).toEqual([]);
+});

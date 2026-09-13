@@ -55,6 +55,9 @@ export function PushControls() {
       <Button disabled={busy} onClick={() => void change(false)}>
         Disable background push
       </Button>
+      <p>
+        Get visitor chat, specialist help, and team message notifications when ERP tabs are closed.
+      </p>
       <p role="status">{status}</p>
     </div>
   );

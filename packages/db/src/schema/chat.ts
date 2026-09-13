@@ -225,7 +225,10 @@ export const chatPushDeliveries = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     businessId: businessId(),
     subscriptionId: uuid('subscription_id').notNull(),
-    conversationId: uuid('conversation_id').notNull(),
+    conversationId: uuid('conversation_id'),
+    helpRequestId: uuid('help_request_id'),
+    teamRoomId: uuid('team_room_id'),
+    kind: text('kind').notNull().default('visitor'),
     sequence: integer('sequence').notNull(),
     attempts: integer('attempts').notNull().default(0),
     availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
@@ -239,6 +242,29 @@ export const chatPushDeliveries = pgTable(
       t.subscriptionId,
       t.conversationId,
       t.sequence,
+    ),
+    helpEventKey: uniqueIndex('chat_push_help_event').on(
+      t.subscriptionId,
+      t.helpRequestId,
+      t.kind,
+      t.sequence,
+    ),
+    teamEventKey: uniqueIndex('chat_push_team_event').on(
+      t.subscriptionId,
+      t.teamRoomId,
+      t.sequence,
+    ),
+    helpFk: foreignKey({
+      columns: [t.businessId, t.helpRequestId],
+      foreignColumns: [chatHelpRequests.businessId, chatHelpRequests.id],
+    }).onDelete('cascade'),
+    teamFk: foreignKey({
+      columns: [t.businessId, t.teamRoomId],
+      foreignColumns: [chatTeamRooms.businessId, chatTeamRooms.id],
+    }).onDelete('cascade'),
+    targetCheck: check(
+      'chat_push_target',
+      sql`(${t.kind} = 'visitor' and ${t.conversationId} is not null and ${t.helpRequestId} is null and ${t.teamRoomId} is null) or (${t.kind} in ('help_request','help_message') and ${t.conversationId} is null and ${t.helpRequestId} is not null and ${t.teamRoomId} is null) or (${t.kind} = 'team_message' and ${t.conversationId} is null and ${t.helpRequestId} is null and ${t.teamRoomId} is not null)`,
     ),
     due: index('chat_push_deliveries_due').on(t.businessId, t.availableAt),
     subscriptionFk: foreignKey({

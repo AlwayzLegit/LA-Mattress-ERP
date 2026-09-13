@@ -426,7 +426,7 @@ the team-help attention alert on the dashboard.
 
 Local implementation only. Production rollout, authenticated live design comparison,
 upstream reconciliation, and physical desktop push delivery checks remain separate.
-Phase 3 (team channels, direct messages and shared help desk) is not implemented.
+Phase 3 is documented in the subsequent entry.
 
 ## Team workspace Phase 3 - September 13, 2026
 
@@ -469,3 +469,35 @@ store and direct messages, preservation of an unsent draft across channels, and
 an unread direct-message alert while working on the ERP dashboard.
 
 Local only. No production accounts, permissions, deployments or integrations changed.
+
+## Production readiness: internal background push — September 13, 2026
+
+Migration 0109 extends the existing durable push queue with typed visitor, help-request,
+help-message, and team-message targets. New internal messages and help invitations enqueue
+notifications in the same transaction as the message/request. Retrying a message does not
+create duplicate deliveries. Messages are queued only for subscribed eligible recipients,
+excluding the sender; store and direct-room scopes remain intact.
+
+Internal deliveries wait five seconds, then recheck active membership, current view/reply
+permissions, location access, unread state, and help ownership/status. Retries repeat those
+checks. Already-read messages and stale requests are completed without delivery. Existing
+worker leases, retry backoff, failed-job controls, and expired-subscription cleanup apply.
+Notification text is generic; customer names, questions, and private message text are absent.
+Clicking opens or focuses /chat, where the existing Help/Team unread controls locate the work.
+Accept/finish/resolve actions do not generate separate background notifications in this slice.
+
+The existing per-browser Enable background push setting now covers visitor and internal
+messages. An active ERP session still uses its existing chime/desktop alerts; this feature
+adds Web Push for closed ERP tabs. Browser permission and supported browser/OS behavior are
+required. Physical device delivery, notification sound, and closed-tab operation must still
+be tested on the staging HTTPS origin. No permissions were requested or enabled automatically.
+
+Validation: 36 Postgres/API integration tests and 8 service-worker tests pass; DB/API builds,
+changed-file lint, and migration drift check pass. Fresh copies of both projects passed
+Next.js production builds. The storefront used fixture data with tracking disabled; those
+builds do not validate live Shopify, Ably, push-provider, or deployment credentials. Existing
+non-chat warnings include ERP Sentry/OpenTelemetry and unrelated lint warnings, plus storefront
+edge/static configuration and local-inventory fixture-count warnings.
+
+Deployment sequence and outstanding external checks: [live-chat-deployment.md](live-chat-deployment.md).
+This is local readiness work, not a production deployment or a claim that the staging pilot passed.

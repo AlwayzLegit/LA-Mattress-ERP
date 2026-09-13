@@ -124,6 +124,140 @@ afterAll(async () => {
 });
 
 describe('chat persistence foundation on Postgres', () => {
+  it('delivers internal push privately and suppresses read, revoked, and stale work', async () => {
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email: randomUUID() + '@example.test' })
+      .returning();
+    const [member] = await db
+      .insert(schema.memberships)
+      .values({ businessId, userId: user!.id, roleId: staff.roleId!, status: 'active' })
+      .returning();
+    const helper = { ...staff, userId: user!.id, membershipId: member!.id };
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/' + randomUUID();
+    const sent: string[] = [];
+    const now = () => new Date(Date.now() + 60000);
+    const worker = new ChatPushWorker(
+      db,
+      async (_subscription, payload) => {
+        sent.push(payload);
+      },
+      'staging',
+      now,
+    );
+    const drain = async () => {
+      for (let i = 0; i < 20; i++) {
+        if (!(await worker.runOnce(businessId))) return;
+      }
+      throw Error('Push queue did not drain');
+    };
+    try {
+      await service.subscribePush(helper, {
+        endpoint,
+        keys: { p256dh: 'a'.repeat(87), auth: 'b'.repeat(22) },
+      });
+      const room = await service.openTeamRoom(staff, { kind: 'direct', memberId: member!.id });
+      const message = { id: randomUUID(), body: 'PRIVATE customer discussion' };
+      await service.sendTeamMessage(staff, room.id, message);
+      await service.sendTeamMessage(staff, room.id, message);
+      expect(
+        await new ChatPushWorker(
+          db,
+          async () => {
+            throw Error('Wrong environment');
+          },
+          'production',
+          now,
+        ).runOnce(businessId),
+      ).toBe(false);
+      await drain();
+      expect(sent).toHaveLength(1);
+      expect(JSON.parse(sent[0]!).type).toBe('team-chat');
+      expect(sent[0]).not.toContain('PRIVATE');
+      const read = await service.sendTeamMessage(staff, room.id, {
+        id: randomUUID(),
+        body: 'Already read',
+      });
+      await service.teamActivity(helper, room.id, { readSequence: read!.sequence });
+      await drain();
+      expect(sent).toHaveLength(1);
+      await service.sendTeamMessage(staff, room.id, {
+        id: randomUUID(),
+        body: 'Permission removed before delivery',
+      });
+      const [override] = await db
+        .insert(schema.membershipPermissionOverrides)
+        .values({ businessId, membershipId: member!.id, permission: 'chat.reply', allowed: false })
+        .returning();
+      await drain();
+      expect(sent).toHaveLength(1);
+      await db
+        .delete(schema.membershipPermissionOverrides)
+        .where(eq(schema.membershipPermissionOverrides.id, override!.id));
+      const [location] = await db
+        .insert(schema.locations)
+        .values({ businessId, name: 'Push scope test', timezone: 'America/Los_Angeles' })
+        .returning();
+      const store = await service.openTeamRoom(staff, { kind: 'store', locationId: location!.id });
+      await service.sendTeamMessage(staff, store.id, { id: randomUUID(), body: 'Store private' });
+      await db
+        .update(schema.memberships)
+        .set({ dataScope: 'store' })
+        .where(eq(schema.memberships.id, member!.id));
+      await drain();
+      expect(sent).toHaveLength(1);
+      await db
+        .update(schema.memberships)
+        .set({ dataScope: 'all' })
+        .where(eq(schema.memberships.id, member!.id));
+      await service.availability(helper, { available: true, capacity: 5 });
+      const conversation = await service.startConversation(auth, randomUUID(), input());
+      await db
+        .update(schema.chatConversations)
+        .set({ assignedMembershipId: staff.membershipId!, status: 'open' })
+        .where(eq(schema.chatConversations.id, conversation.conversationId));
+      // Clear the independent visitor event before checking private help events.
+      await drain();
+      sent.length = 0;
+      const request = { id: randomUUID(), helperId: member!.id, question: 'PRIVATE help question' };
+      const help = await service.requestHelp(staff, conversation.conversationId, request);
+      await service.requestHelp(staff, conversation.conversationId, request);
+      await drain();
+      expect(sent).toHaveLength(1);
+      expect(JSON.parse(sent[0]!).type).toBe('chat-help');
+      expect(sent[0]).not.toContain('PRIVATE');
+      await service.updateHelp(helper, help!.id, { action: 'accept', version: help!.version });
+      const answer = await service.sendHelpMessage(staff, help!.id, {
+        id: randomUUID(),
+        body: 'PRIVATE owner message',
+      });
+      await service.helpActivity(helper, help!.id, { readSequence: answer!.sequence });
+      await drain();
+      expect(sent).toHaveLength(1);
+      await service.sendHelpMessage(staff, help!.id, {
+        id: randomUUID(),
+        body: 'Unread help message',
+      });
+      await drain();
+      expect(sent).toHaveLength(2);
+      await service.sendHelpMessage(staff, help!.id, {
+        id: randomUUID(),
+        body: 'Ownership changed',
+      });
+      await db
+        .update(schema.chatConversations)
+        .set({ assignedMembershipId: member!.id })
+        .where(eq(schema.chatConversations.id, conversation.conversationId));
+      await drain();
+      expect(sent).toHaveLength(2);
+    } finally {
+      await db
+        .delete(schema.chatPushSubscriptions)
+        .where(eq(schema.chatPushSubscriptions.endpoint, endpoint));
+      await db.delete(schema.memberships).where(eq(schema.memberships.id, member!.id));
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
+  });
   it('isolates team rooms, atomically claims shared questions, and keeps saved answers scoped', async () => {
     const locations = await db
       .insert(schema.locations)

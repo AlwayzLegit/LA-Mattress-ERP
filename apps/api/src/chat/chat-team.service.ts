@@ -1,3 +1,4 @@
+import { queueInternalPush } from './chat-internal-push';
 import {
   BadRequestException,
   ConflictException,
@@ -36,6 +37,7 @@ export class ChatTeamService {
       tx: DrizzleTransaction,
       tenant: RequestTenantContext,
     ) => Promise<Member>,
+    private readonly environment: string,
   ) {}
   private uuid(id: string) {
     if (!z.string().uuid().safeParse(id).success)
@@ -486,6 +488,13 @@ export class ChatTeamService {
             eq(a.membershipId, member.id),
           ),
         );
+      await queueInternalPush(
+        tx,
+        tenant.businessId!,
+        this.environment,
+        people.filter((p) => p.id !== member.id).map((p) => p.id),
+        { kind: 'team_message', teamRoomId: id, sequence: message!.sequence },
+      );
       await this.audit(tx, tenant, 'message', id, {
         messageId: message!.id,
         question: input.question,

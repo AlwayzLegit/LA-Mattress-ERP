@@ -1,3 +1,4 @@
+import { queueInternalPush } from './chat-internal-push';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   BadRequestException,
@@ -62,7 +63,11 @@ export class ChatService {
   ) {}
 
   private get team() {
-    return new ChatTeamService(this.db, (tx, tenant) => this.requireStaff(tx, tenant, true));
+    return new ChatTeamService(
+      this.db,
+      (tx, tenant) => this.requireStaff(tx, tenant, true),
+      this.environment,
+    );
   }
   teamDirectory(tenant: RequestTenantContext) {
     return this.team.directory(tenant);
@@ -514,6 +519,13 @@ export class ChatService {
               eq(schema.chatHelpRequests.id, id),
             ),
           );
+        await queueInternalPush(
+          tx,
+          tenant.businessId!,
+          this.environment,
+          [incoming ? request.requesterId : request.helperId],
+          { kind: 'help_message', helpRequestId: id, sequence: message!.sequence },
+        );
         await this.audit(tx, tenant, 'chat.help_message', request.conversationId, {
           requestId: id,
           messageId: message!.id,
@@ -619,6 +631,11 @@ export class ChatService {
             question: parsed.data.question,
           })
           .returning();
+        await queueInternalPush(tx, tenant.businessId!, this.environment, [agent.id], {
+          kind: 'help_request',
+          helpRequestId: created!.id,
+          sequence: created!.version,
+        });
         await this.audit(tx, tenant, 'chat.help_requested', id, {
           requestId: created!.id,
           helperId: agent.id,

@@ -1,3 +1,4 @@
+import { internalPushAllowed } from './chat-internal-push';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, lte, or } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -67,6 +68,7 @@ export class ChatPushWorker {
         );
       let authorized = false;
       let canViewTeam = false;
+      let canReply = false;
       if (member) {
         const roles = await tx
           .select()
@@ -87,88 +89,99 @@ export class ChatPushWorker {
           else effective.delete(entry.permission);
         }
         canViewTeam = effective.has('chat.view_team');
+        canReply = effective.has('chat.reply');
         authorized = canViewTeam || effective.has('chat.view_assigned');
       }
       if (!authorized) {
         await tx.delete(subscriptions).where(eq(subscriptions.id, subscription.id));
         return { skipped: true } as const;
       }
-      const [conversation] = await tx
-        .select()
-        .from(schema.chatConversations)
-        .where(
-          and(
-            eq(schema.chatConversations.businessId, businessId),
-            eq(schema.chatConversations.id, job.conversationId),
-          ),
+      if (job.kind === 'visitor') {
+        const [conversation] = await tx
+          .select()
+          .from(schema.chatConversations)
+          .where(
+            and(
+              eq(schema.chatConversations.businessId, businessId),
+              eq(schema.chatConversations.id, job.conversationId!),
+            ),
+          );
+        const scopes =
+          member?.dataScope === 'store'
+            ? await tx
+                .select()
+                .from(schema.membershipLocationScopes)
+                .where(
+                  and(
+                    eq(schema.membershipLocationScopes.businessId, businessId),
+                    eq(schema.membershipLocationScopes.membershipId, member.id),
+                  ),
+                )
+            : [];
+        const [settings] = await tx
+          .select()
+          .from(schema.chatSettings)
+          .where(eq(schema.chatSettings.businessId, businessId));
+        const chatEnabled =
+          (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false;
+        const shared = Boolean(
+          member &&
+          conversation &&
+          !conversation.locationId &&
+          (settings?.configJson as { sharedInbox?: boolean } | undefined)?.sharedInbox &&
+          (conversation.assignedMembershipId === member.id ||
+            (!conversation.assignedMembershipId &&
+              ['queued', 'open'].includes(conversation.status))),
         );
-      const scopes =
-        member?.dataScope === 'store'
+        const scoped =
+          shared ||
+          Boolean(
+            member &&
+            conversation &&
+            (canViewTeam || conversation.assignedMembershipId === member.id) &&
+            (member.dataScope === 'all' ||
+              (member.dataScope === 'store' &&
+                scopes.some((row) => row.locationId === conversation.locationId))),
+          );
+        const [source] = conversation
           ? await tx
-              .select()
-              .from(schema.membershipLocationScopes)
+              .select({
+                enabled: schema.chatIntegrations.enabled,
+                revokedAt: schema.chatSessions.revokedAt,
+                environment: schema.chatIntegrations.environment,
+              })
+              .from(schema.chatSessions)
+              .innerJoin(
+                schema.chatIntegrations,
+                and(
+                  eq(schema.chatIntegrations.id, schema.chatSessions.integrationId),
+                  eq(schema.chatIntegrations.businessId, businessId),
+                ),
+              )
               .where(
                 and(
-                  eq(schema.membershipLocationScopes.businessId, businessId),
-                  eq(schema.membershipLocationScopes.membershipId, member.id),
+                  eq(schema.chatSessions.id, conversation.sessionId),
+                  eq(schema.chatSessions.businessId, businessId),
                 ),
               )
           : [];
-      const [settings] = await tx
-        .select()
-        .from(schema.chatSettings)
-        .where(eq(schema.chatSettings.businessId, businessId));
-      const chatEnabled =
-        (settings?.configJson as { enabled?: boolean } | undefined)?.enabled !== false;
-      const shared = Boolean(
-        member &&
-        conversation &&
-        !conversation.locationId &&
-        (settings?.configJson as { sharedInbox?: boolean } | undefined)?.sharedInbox &&
-        (conversation.assignedMembershipId === member.id ||
-          (!conversation.assignedMembershipId && ['queued', 'open'].includes(conversation.status))),
-      );
-      const scoped =
-        shared ||
-        Boolean(
-          member &&
-          conversation &&
-          (canViewTeam || conversation.assignedMembershipId === member.id) &&
-          (member.dataScope === 'all' ||
-            (member.dataScope === 'store' &&
-              scopes.some((row) => row.locationId === conversation.locationId))),
-        );
-      const [source] = conversation
-        ? await tx
-            .select({
-              enabled: schema.chatIntegrations.enabled,
-              revokedAt: schema.chatSessions.revokedAt,
-              environment: schema.chatIntegrations.environment,
-            })
-            .from(schema.chatSessions)
-            .innerJoin(
-              schema.chatIntegrations,
-              and(
-                eq(schema.chatIntegrations.id, schema.chatSessions.integrationId),
-                eq(schema.chatIntegrations.businessId, businessId),
-              ),
-            )
-            .where(
-              and(
-                eq(schema.chatSessions.id, conversation.sessionId),
-                eq(schema.chatSessions.businessId, businessId),
-              ),
-            )
-        : [];
-      if (
-        !chatEnabled ||
-        !scoped ||
-        !source?.enabled ||
-        source.revokedAt ||
-        source.environment !== this.environment ||
-        !conversation ||
-        conversation.staffReadSequence >= job.sequence ||
-        ['resolved', 'spam'].includes(conversation.status)
+        if (
+          !chatEnabled ||
+          !scoped ||
+          !source?.enabled ||
+          source.revokedAt ||
+          source.environment !== this.environment ||
+          !conversation ||
+          conversation.staffReadSequence >= job.sequence ||
+          ['resolved', 'spam'].includes(conversation.status)
+        ) {
+          await tx.update(jobs).set({ completedAt: this.now() }).where(eq(jobs.id, job.id));
+          return { skipped: true } as const;
+        }
+      } else if (
+        !member ||
+        !canReply ||
+        !(await internalPushAllowed(tx, businessId, this.environment, job, member))
       ) {
         await tx.update(jobs).set({ completedAt: this.now() }).where(eq(jobs.id, job.id));
         return { skipped: true } as const;
@@ -195,11 +208,14 @@ export class ChatPushWorker {
           keys: { p256dh: claimed.subscription.p256dh, auth: claimed.subscription.auth },
         },
         JSON.stringify({
-          type: 'chat',
-          title: 'New website chat',
-          body: 'A visitor is waiting in your LA Mattress inbox.',
+          type:
+            claimed.job.kind === 'visitor'
+              ? 'chat'
+              : claimed.job.kind === 'team_message'
+                ? 'team-chat'
+                : 'chat-help',
           url: '/chat',
-          tag: `chat-${claimed.job.conversationId}`,
+          tag: `chat-${claimed.job.conversationId ?? claimed.job.teamRoomId ?? claimed.job.helpRequestId}`,
         }),
       );
       success = true;

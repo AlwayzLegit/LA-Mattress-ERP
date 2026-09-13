@@ -135,10 +135,22 @@ self.addEventListener('push', (event) => {
   } catch {
     return;
   }
-  if (data?.type !== 'chat') return;
+  const labels = {
+    chat: ['LA Mattress · New chat', 'A website visitor is waiting. Open the inbox to reply.'],
+    'chat-help': [
+      'LA Mattress · Specialist help',
+      'You have a help request or an unread specialist message. Open chat to respond.',
+    ],
+    'team-chat': [
+      'LA Mattress · Team message',
+      'You have an unread team message. Open chat to catch up.',
+    ],
+  };
+  if (!Object.prototype.hasOwnProperty.call(labels, data?.type)) return;
+  const [title, body] = labels[data.type];
   event.waitUntil(
-    self.registration.showNotification('LA Mattress · New chat', {
-      body: 'A website visitor is waiting. Open the inbox to reply.',
+    self.registration.showNotification(title, {
+      body,
       tag: typeof data.tag === 'string' ? data.tag : 'la-chat',
       data: { url: '/chat' },
     }),
