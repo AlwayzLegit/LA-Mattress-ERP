@@ -334,3 +334,19 @@ and collapses the card; the queue's existing follow-up indicator clears.
 No email, phone call or other outbound message is sent by this action.
 Validated with web typecheck, changed-file lint and the local synthetic follow-up
 request/completion flow in the browser.
+
+## Guided sales handoff - September 13, 2026
+
+An expandable composer section captures mattress size, comfort, budget, purchase
+timing, products/showroom discussed and an agreed next step. Only populated fields
+are included in a previewable private note. Saving uses the existing scoped notes
+endpoint and a stable retry key; empty saves and concurrent clicks are blocked.
+The public reply draft is independent. This records a team handoff, not a scheduled
+task, CRM lead record or outbound follow-up.
+
+Editable saved replies now cover budget, purchase timing, comparison and next
+steps. They make no inventory, price or delivery promises and require staff to send.
+
+Validation: web typecheck and changed-file lint pass. Browser-tested a synthetic
+handoff save; it appeared as an internal note in staff history. The authenticated
+visitor history returned HTTP 200 and excluded the handoff. Local only.

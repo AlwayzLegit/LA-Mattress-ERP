@@ -5541,3 +5541,5 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] **Local chat queue/alerts (2026-09-13):** Public visitor previews, waiting time, assignment names, oldest-first shared queue and inline acceptance. Persistent ERP-layout live provider keeps sound, unread alerts and availability across navigation. API build, web typecheck, lint and 33 chat integration tests pass. Local only.
 
 - [x] **Local chat visitor context (2026-09-13):** Organized expandable visitor controls and prominent pending follow-up card with contact preference, timestamps and completion state. Web typecheck/lint and synthetic browser flow verified.
+
+- [x] **Local guided chat handoff (2026-09-13):** Preference/next-step capture saved as private notes, plus editable sales replies. Typecheck/lint pass; browser save and visitor-history exclusion verified.

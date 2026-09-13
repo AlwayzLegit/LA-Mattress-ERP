@@ -810,3 +810,60 @@
   line-height: 1.5;
   margin: 8px 0;
 }
+
+.salesHandoff {
+  border: 1px solid #dce0df;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  background: #f8faf8;
+}
+.salesHandoff summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 24px;
+}
+.salesHandoff p {
+  color: #65716a;
+  line-height: 1.5;
+  margin: 8px 0 12px;
+}
+.handoffFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.handoffFields label {
+  display: grid;
+  gap: 5px;
+}
+.handoffFields input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #bcc8c0;
+  border-radius: 6px;
+  background: white;
+}
+.handoffPreview {
+  margin-bottom: 12px;
+}
+.handoffPreview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.5;
+  padding: 10px;
+  background: #fff9eb;
+}
+.salesHandoff > span {
+  display: block;
+  margin-top: 8px;
+}
+@media (max-width: 760px) {
+  .handoffFields {
+    grid-template-columns: 1fr;
+  }
+}

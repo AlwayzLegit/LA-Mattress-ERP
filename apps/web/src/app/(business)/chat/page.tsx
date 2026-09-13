@@ -7,6 +7,7 @@ import { Form, FormRootError, useZodForm } from '@/components/form/form';
 import { Button, PageHeader } from '@/components/ui';
 import styles from './chat.module.css';
 import { AdminControls } from './admin-controls';
+import { SalesHandoff } from './sales-handoff';
 import { ContextPanel } from './context-panel';
 import { TeamControls } from './team-controls';
 import { PushControls } from './push-controls';
@@ -658,6 +659,11 @@ function ConversationPanel({
               Private note
             </Button>
           </div>
+          <SalesHandoff
+            id={id}
+            enabled={Boolean(conversation?.assignedToMe)}
+            onSaved={() => refresh.current()}
+          />
           {!note && (
             <label className={styles.quickReply}>
               Saved reply
@@ -679,6 +685,18 @@ function ConversationPanel({
                 </option>
                 <option value="Which showroom would you like to visit, and what day works for you?">
                   Showroom visit
+                </option>
+                <option value="Do you have a budget range in mind? I can use that to help narrow down the options.">
+                  Budget
+                </option>
+                <option value="When are you hoping to have your new mattress?">
+                  Purchase timing
+                </option>
+                <option value="Which mattresses are you considering, and what matters most to you when comparing them?">
+                  Compare options
+                </option>
+                <option value="What would be most helpful next: comparing a few options, planning a showroom visit, or checking delivery details?">
+                  Agree on next step
                 </option>
                 <option value="Thank you for your patience. I am checking that for you.">
                   Checking details
