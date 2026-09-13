@@ -10,12 +10,17 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -72,7 +77,69 @@ export default function RolesPage() {
   }
 
   const total = BUSINESS_PERMISSIONS.length;
-  const colSpan = memberCounts ? 4 : 3;
+
+  // The Members column only exists once the count lookup succeeds, and
+  // the actions cell calls `remove`, so the columns are built here. Rows
+  // navigate on click; the actions span swallows the click.
+  const columns: ColumnDef<Role>[] = [
+    {
+      id: 'role',
+      label: 'Role',
+      sortValue: (r) => r.name,
+      render: (r) => (
+        <>
+          <span className="inline-flex items-center gap-2">
+            <Link href={`/roles/${r.id}`} onClick={(e) => e.stopPropagation()}>
+              <strong>{r.name}</strong>
+            </Link>
+            {r.isSystem ? (
+              <span className="badge badge-neutral">System</span>
+            ) : (
+              <span className="badge badge-success">Custom</span>
+            )}
+          </span>
+          {r.description && <div className="muted text-xs">{r.description}</div>}
+        </>
+      ),
+    },
+    {
+      id: 'permissions',
+      label: 'Permissions',
+      sortValue: (r) => r.permissions.length,
+      render: (r) => <PermissionMeter granted={r.permissions.length} total={total} />,
+    },
+    ...(memberCounts
+      ? [
+          {
+            id: 'members',
+            label: 'Members',
+            num: true,
+            sortValue: (r) => memberCounts.get(r.id) ?? 0,
+            render: (r) => memberCounts.get(r.id) ?? 0,
+          } satisfies ColumnDef<Role>,
+        ]
+      : []),
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <span onClick={(e) => e.stopPropagation()}>
+          <LinkButton size="sm" variant="ghost" href={`/roles/new?basedOn=${r.id}`}>
+            Duplicate
+          </LinkButton>
+          {!r.isSystem && (
+            <Button size="sm" variant="danger" onClick={() => remove(r)}>
+              Delete
+            </Button>
+          )}
+        </span>
+      ),
+    },
+  ];
+  const cols = useListColumns('roles', columns, roles);
 
   return (
     <div>
@@ -98,52 +165,24 @@ export default function RolesPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Role</th>
-                    <th>Permissions</th>
-                    {memberCounts && <th className="num">Members</th>}
-                    <th className="actions">Actions</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="roles" />
                 </thead>
                 <tbody>
-                  {roles.length === 0 && <TableEmpty colSpan={colSpan}>No roles yet.</TableEmpty>}
-                  {roles.map((r) => (
+                  {roles.length === 0 && (
+                    <TableEmpty colSpan={cols.ordered.length}>No roles yet.</TableEmpty>
+                  )}
+                  {cols.sorted.map((r) => (
                     <tr
                       key={r.id}
                       className="cursor-pointer"
                       onClick={() => router.push(`/roles/${r.id}`)}
                     >
-                      <td>
-                        <span className="inline-flex items-center gap-2">
-                          <Link href={`/roles/${r.id}`} onClick={(e) => e.stopPropagation()}>
-                            <strong>{r.name}</strong>
-                          </Link>
-                          {r.isSystem ? (
-                            <span className="badge badge-neutral">System</span>
-                          ) : (
-                            <span className="badge badge-success">Custom</span>
-                          )}
-                        </span>
-                        {r.description && <div className="muted text-xs">{r.description}</div>}
-                      </td>
-                      <td>
-                        <PermissionMeter granted={r.permissions.length} total={total} />
-                      </td>
-                      {memberCounts && <td className="num">{memberCounts.get(r.id) ?? 0}</td>}
-                      <td className="actions" onClick={(e) => e.stopPropagation()}>
-                        <LinkButton size="sm" variant="ghost" href={`/roles/new?basedOn=${r.id}`}>
-                          Duplicate
-                        </LinkButton>
-                        {!r.isSystem && (
-                          <Button size="sm" variant="danger" onClick={() => remove(r)}>
-                            Delete
-                          </Button>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

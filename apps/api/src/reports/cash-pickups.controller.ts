@@ -302,10 +302,14 @@ export class CashPickupsController {
     if (stores.length === 0) return out;
     const locationExpr = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const customerExpr = sql<string>`COALESCE(${schema.orders.customerId}, ${schema.sales.customerId}, ${schema.serviceOrders.customerId})`;
+    // Drizzle's postgres-js driver hands timestamptz params through
+    // untouched, so a raw Date here reached the wire as an object and the
+    // driver threw ERR_INVALID_ARG_TYPE — the "Cash on hand is unavailable"
+    // 500 of 2026-09-12. Bind the ISO string and cast.
     const window = sql`(${locationExpr} IN (${sql.join(
       stores.map((s) => sql`${s.id}::uuid`),
       sql`, `,
-    )}) AND ${schema.payments.createdAt} >= ${floor})`;
+    )}) AND ${schema.payments.createdAt} >= ${floor.toISOString()}::timestamptz)`;
     const rows = await this.db
       .select({
         paymentId: schema.payments.id,

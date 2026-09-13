@@ -8,14 +8,19 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   Input,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { code128Svg } from '@/lib/code128';
@@ -101,6 +106,52 @@ export default function LabelsPage() {
   });
   const layout = SHEETS[sheet];
 
+  // The Add button queues into component state, so the columns live here.
+  const HIT_COLUMNS: ColumnDef<LookupRow>[] = [
+    {
+      id: 'product',
+      label: 'Product',
+      sortValue: (h) => h.productName,
+      render: (h) => (
+        <>
+          {h.productName}
+          {h.variantName && <span className="muted"> — {h.variantName}</span>}
+        </>
+      ),
+    },
+    {
+      id: 'sku',
+      label: 'SKU',
+      sortValue: (h) => h.barcode ?? h.sku,
+      render: (h) => <code>{h.barcode ?? h.sku ?? '—'}</code>,
+    },
+    {
+      id: 'price',
+      label: 'Price',
+      num: true,
+      sortValue: (h) => h.priceCents,
+      render: (h) => formatMoney(h.priceCents),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (h) => (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => add(h)}
+          data-testid={`add-label-${h.sku}`}
+        >
+          Add
+        </Button>
+      ),
+    },
+  ];
+  const hitCols = useListColumns('products-labels-results', HIT_COLUMNS, hits);
+
   return (
     <div>
       <PageHeader
@@ -152,38 +203,17 @@ export default function LabelsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>SKU</th>
-                      <th className="num">Price</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={hitCols} testIdPrefix="products-labels-results" />
                   </thead>
                   <tbody>
-                    {hits.map((h) => (
+                    {hitCols.sorted.map((h) => (
                       <tr key={h.variantId}>
-                        <td>
-                          {h.productName}
-                          {h.variantName && <span className="muted"> — {h.variantName}</span>}
-                        </td>
-                        <td>
-                          <code>{h.barcode ?? h.sku ?? '—'}</code>
-                        </td>
-                        <td className="num">{formatMoney(h.priceCents)}</td>
-                        <td className="actions">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => add(h)}
-                            data-testid={`add-label-${h.sku}`}
-                          >
-                            Add
-                          </Button>
-                        </td>
+                        <ColumnCells list={hitCols} row={h} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={hitCols} />
               </TableWrap>
               {hits.length >= 200 && (
                 <p className="muted">Showing first 200 matches — refine your search.</p>

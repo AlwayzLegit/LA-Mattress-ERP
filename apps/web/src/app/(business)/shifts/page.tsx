@@ -9,6 +9,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -17,10 +20,12 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface ShiftRow {
@@ -41,6 +46,59 @@ interface LocationRow {
   name: string;
 }
 
+const SHIFT_COLUMNS: ColumnDef<ShiftRow>[] = [
+  {
+    id: 'opened',
+    label: 'Opened',
+    className: 'nowrap',
+    sortValue: (r) => r.openedAt,
+    render: (r) => new Date(r.openedAt).toLocaleString(),
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName,
+    render: (r) => r.locationName ?? '—',
+  },
+  {
+    id: 'float',
+    label: 'Float',
+    num: true,
+    sortValue: (r) => r.openingFloatCents,
+    render: (r) => <Money cents={r.openingFloatCents} />,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => (r.closedAt ? 'closed' : 'open'),
+    render: (r) => (
+      <>
+        <StatusBadge status={r.closedAt ? 'closed' : 'open'} />
+        {r.closedAt && <span className="muted"> {new Date(r.closedAt).toLocaleString()}</span>}
+      </>
+    ),
+  },
+  {
+    id: 'variance',
+    label: 'Variance',
+    num: true,
+    sortValue: (r) => r.varianceCents,
+    render: (r) => (r.varianceCents == null ? '—' : <Money cents={r.varianceCents} />),
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (r) => (
+      <LinkButton size="sm" href={`/shifts/${r.id}`}>
+        Open
+      </LinkButton>
+    ),
+  },
+];
+
 export default function ShiftsPage() {
   const list = useCursorList<ShiftRow>('/v1/cash-shifts');
   const [locations, setLocations] = useState<LocationRow[]>([]);
@@ -50,6 +108,7 @@ export default function ShiftsPage() {
   const [floatStr, setFloatStr] = useState('');
   const [openNotes, setOpenNotes] = useState('');
   const { rows } = list;
+  const cols = useListColumns('shifts', SHIFT_COLUMNS, rows);
 
   useEffect(() => {
     void list.load();
@@ -151,41 +210,17 @@ export default function ShiftsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Opened</th>
-                      <th>Location</th>
-                      <th className="num">Float</th>
-                      <th>Status</th>
-                      <th className="num">Variance</th>
-                      <th className="actions" />
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="shifts" />
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
+                    {cols.sorted.map((r) => (
                       <tr key={r.id}>
-                        <td className="nowrap">{new Date(r.openedAt).toLocaleString()}</td>
-                        <td>{r.locationName ?? '—'}</td>
-                        <td className="num">
-                          <Money cents={r.openingFloatCents} />
-                        </td>
-                        <td>
-                          <StatusBadge status={r.closedAt ? 'closed' : 'open'} />
-                          {r.closedAt && (
-                            <span className="muted"> {new Date(r.closedAt).toLocaleString()}</span>
-                          )}
-                        </td>
-                        <td className="num">
-                          {r.varianceCents == null ? '—' : <Money cents={r.varianceCents} />}
-                        </td>
-                        <td className="actions">
-                          <LinkButton size="sm" href={`/shifts/${r.id}`}>
-                            Open
-                          </LinkButton>
-                        </td>
+                        <ColumnCells list={cols} row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
               <LoadMore state={list} noun="shifts" />
             </>

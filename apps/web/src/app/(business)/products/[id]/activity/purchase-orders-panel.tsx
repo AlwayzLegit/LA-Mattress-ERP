@@ -1,15 +1,116 @@
 'use client';
 
 import Link from 'next/link';
-import { Card, LoadingRows, Stack, StatusBadge, TableEmpty, TableWrap } from '@/components/ui';
+import {
+  Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
+  LoadingRows,
+  ResetColumns,
+  Stack,
+  StatusBadge,
+  TableEmpty,
+  TableWrap,
+  useListColumns,
+} from '@/components/ui';
 import { fmtDate, SectionError, StripTiles, useSection } from './kit';
 import type { PurchaseOrderRow, Strip } from './types';
+
+const PO_TYPE_LABEL: Record<PurchaseOrderRow['purchaseOrderType'], string> = {
+  standard: 'Standard',
+  special_order: 'Special order',
+  direct_ship: 'Direct ship',
+};
+
+const PO_COLUMNS: ColumnDef<PurchaseOrderRow>[] = [
+  {
+    id: 'number',
+    label: 'PO number',
+    sortValue: (r) => r.number,
+    render: (r) => <Link href={`/purchase-orders/${r.purchaseOrderId}`}>{r.number}</Link>,
+  },
+  {
+    id: 'vendor',
+    label: 'Vendor',
+    sortValue: (r) => r.vendorName,
+    render: (r) => r.vendorName ?? '—',
+  },
+  {
+    id: 'receivingLocation',
+    label: 'Receiving location',
+    sortValue: (r) => r.receivingLocationName,
+    render: (r) => r.receivingLocationName ?? '—',
+  },
+  {
+    id: 'sku',
+    label: 'SKU',
+    sortValue: (r) => r.sku,
+    render: (r) => <code>{r.sku ?? '—'}</code>,
+  },
+  {
+    id: 'quantityDue',
+    label: 'Quantity due',
+    num: true,
+    sortValue: (r) => r.quantityDue,
+    render: (r) => (
+      <>
+        {r.quantityDue}
+        <span className="muted"> / {r.quantityOrdered}</span>
+      </>
+    ),
+  },
+  {
+    id: 'placed',
+    label: 'Acknowledged (placed)',
+    sortValue: (r) => r.placedAt,
+    render: (r) => fmtDate(r.placedAt),
+  },
+  {
+    id: 'delivery',
+    label: 'Delivery date',
+    sortValue: (r) => r.expectedAt,
+    render: (r) => fmtDate(r.expectedAt),
+  },
+  {
+    id: 'created',
+    label: 'Created',
+    sortValue: (r) => r.createdAt,
+    render: (r) => fmtDate(r.createdAt),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.status,
+    render: (r) => <StatusBadge status={r.status} />,
+  },
+  {
+    id: 'transactionType',
+    label: 'Transaction type',
+    sortValue: (r) => r.transactionType,
+    render: (r) => (r.transactionType === 'direct_ship' ? 'Direct ship' : 'Merchandise'),
+  },
+  {
+    id: 'poType',
+    label: 'PO type',
+    sortValue: (r) => PO_TYPE_LABEL[r.purchaseOrderType],
+    render: (r) => PO_TYPE_LABEL[r.purchaseOrderType],
+  },
+  {
+    id: 'atDock',
+    label: 'At dock',
+    title: 'Units received at the dock and not yet accepted',
+    sortValue: (r) => (r.atDock ? r.quantityAtDock : 0),
+    render: (r) => (r.atDock ? `Yes · ${r.quantityAtDock}` : 'No'),
+  },
+];
 
 /** STORIS Purchase Orders tab (A21 D7). */
 export function PurchaseOrdersPanel({ productId }: { productId: string }) {
   const { data, error, loading } = useSection<{ strip: Strip; rows: PurchaseOrderRow[] }>(
     `/v1/products/${productId}/activity/purchase-orders`,
   );
+  const cols = useListColumns('products-activity-purchase-orders', PO_COLUMNS, data?.rows ?? null);
   return (
     <Stack>
       <StripTiles strip={data?.strip} />
@@ -26,58 +127,22 @@ export function PurchaseOrdersPanel({ productId }: { productId: string }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>PO number</th>
-                  <th>Vendor</th>
-                  <th>Receiving location</th>
-                  <th>SKU</th>
-                  <th className="num">Quantity due</th>
-                  <th>Acknowledged (placed)</th>
-                  <th>Delivery date</th>
-                  <th>Created</th>
-                  <th>Status</th>
-                  <th>Transaction type</th>
-                  <th>PO type</th>
-                  <th title="Units received at the dock and not yet accepted">At dock</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products-activity-purchase-orders" />
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={12}>No open purchase orders for this product.</TableEmpty>
+                  <TableEmpty colSpan={cols.ordered.length}>
+                    No open purchase orders for this product.
+                  </TableEmpty>
                 )}
-                {data?.rows.map((r, i) => (
+                {cols.sorted.map((r, i) => (
                   <tr key={`${r.purchaseOrderId}:${i}`} data-testid="activity-po-row">
-                    <td>
-                      <Link href={`/purchase-orders/${r.purchaseOrderId}`}>{r.number}</Link>
-                    </td>
-                    <td>{r.vendorName ?? '—'}</td>
-                    <td>{r.receivingLocationName ?? '—'}</td>
-                    <td>
-                      <code>{r.sku ?? '—'}</code>
-                    </td>
-                    <td className="num">
-                      {r.quantityDue}
-                      <span className="muted"> / {r.quantityOrdered}</span>
-                    </td>
-                    <td>{fmtDate(r.placedAt)}</td>
-                    <td>{fmtDate(r.expectedAt)}</td>
-                    <td>{fmtDate(r.createdAt)}</td>
-                    <td>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td>{r.transactionType === 'direct_ship' ? 'Direct ship' : 'Merchandise'}</td>
-                    <td>
-                      {r.purchaseOrderType === 'special_order'
-                        ? 'Special order'
-                        : r.purchaseOrderType === 'direct_ship'
-                          ? 'Direct ship'
-                          : 'Standard'}
-                    </td>
-                    <td>{r.atDock ? `Yes · ${r.quantityAtDock}` : 'No'}</td>
+                    <ColumnCells list={cols} row={r} index={i} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

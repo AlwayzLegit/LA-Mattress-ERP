@@ -8,11 +8,16 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -100,6 +105,79 @@ export default function ActiveSessionsPage() {
     }
   }
 
+  // Built inline: the Sign out cell needs `busy` and `signOut`.
+  const columns: ColumnDef<SessionRow>[] = [
+    {
+      id: 'member',
+      label: 'Member',
+      sortValue: (r) => r.name ?? r.email,
+      render: (r) => (
+        <>
+          <div className="font-semibold">{r.name ?? r.email}</div>
+          <div className="muted text-xs">
+            {r.email}
+            {r.current ? ' · this session' : ''}
+          </div>
+        </>
+      ),
+    },
+    {
+      id: 'role',
+      label: 'Role',
+      sortValue: (r) => r.roleName,
+      render: (r) => r.roleName ?? '—',
+    },
+    {
+      id: 'device',
+      label: 'Device',
+      sortValue: (r) => device(r.userAgent),
+      render: (r) => <span title={r.userAgent ?? undefined}>{device(r.userAgent)}</span>,
+    },
+    {
+      id: 'ip',
+      label: 'IP',
+      sortValue: (r) => r.ipAddress,
+      render: (r) => <code>{r.ipAddress ?? '—'}</code>,
+    },
+    {
+      id: 'signedIn',
+      label: 'Signed in',
+      sortValue: (r) => r.createdAt,
+      render: (r) => new Date(r.createdAt).toLocaleString(),
+    },
+    {
+      id: 'lastSeen',
+      label: 'Last seen',
+      sortValue: (r) => r.lastSeenAt,
+      render: (r) => new Date(r.lastSeenAt).toLocaleString(),
+    },
+    {
+      id: 'expires',
+      label: 'Expires',
+      sortValue: (r) => r.expiresAt,
+      render: (r) => new Date(r.expiresAt).toLocaleDateString(),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={busy === r.id}
+          onClick={() => void signOut(r)}
+          data-testid="session-sign-out"
+        >
+          Sign out
+        </Button>
+      ),
+    },
+  ];
+  const cols = useListColumns('settings-sessions', columns, rows);
+
   return (
     <div data-testid="active-sessions">
       <PageHeader
@@ -127,50 +205,17 @@ export default function ActiveSessionsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Role</th>
-                    <th>Device</th>
-                    <th>IP</th>
-                    <th>Signed in</th>
-                    <th>Last seen</th>
-                    <th>Expires</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="settings-sessions" />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id} data-testid="session-row">
-                      <td>
-                        <div className="font-semibold">{r.name ?? r.email}</div>
-                        <div className="muted text-xs">
-                          {r.email}
-                          {r.current ? ' · this session' : ''}
-                        </div>
-                      </td>
-                      <td>{r.roleName ?? '—'}</td>
-                      <td title={r.userAgent ?? undefined}>{device(r.userAgent)}</td>
-                      <td>
-                        <code>{r.ipAddress ?? '—'}</code>
-                      </td>
-                      <td>{new Date(r.createdAt).toLocaleString()}</td>
-                      <td>{new Date(r.lastSeenAt).toLocaleString()}</td>
-                      <td>{new Date(r.expiresAt).toLocaleDateString()}</td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={busy === r.id}
-                          onClick={() => void signOut(r)}
-                          data-testid="session-sign-out"
-                        >
-                          Sign out
-                        </Button>
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

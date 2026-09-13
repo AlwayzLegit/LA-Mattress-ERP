@@ -819,3 +819,37 @@ describe('GET /v1/dashboard/changes', () => {
     await as('rep').get('/v1/dashboard/changes').expect(403);
   });
 });
+
+describe('GET /v1/dashboard/cash-pickups/queue', () => {
+  it('lists each store’s pending cash for the owner', async () => {
+    // 2026-09-12: this 500ed in production for every owner load — the
+    // 60-day floor went to postgres-js as a raw Date, which the driver
+    // refuses (ERR_INVALID_ARG_TYPE). Nothing here exercised the queue.
+    const res = await as('owner').get('/v1/dashboard/cash-pickups/queue').expect(200);
+    expect(res.body.viewer.canRecord).toBe(true);
+    expect(res.body.rule).toEqual({ dueCents: 150_000, dueDays: 3 });
+    const stores = res.body.stores as {
+      locationId: string;
+      status: string;
+      pendingCents: number;
+      payments: { paymentId: string; amountCents: number }[];
+    }[];
+    expect(stores.length).toBeGreaterThan(0);
+    const pending = stores.flatMap((s) => s.payments);
+    const deposit = pending.find((p) => p.paymentId === fx.cashDepositPaymentId);
+    expect(deposit).toBeTruthy();
+    expect(deposit!.amountCents).toBeGreaterThan(0);
+    expect(stores.find((s) => s.payments.includes(deposit!))?.pendingCents).toBeGreaterThanOrEqual(
+      deposit!.amountCents,
+    );
+  });
+
+  it('narrows to the stores asked for', async () => {
+    const all = await as('owner').get('/v1/dashboard/cash-pickups/queue').expect(200);
+    const first = (all.body.stores as { locationId: string }[])[0]!.locationId;
+    const one = await as('owner')
+      .get(`/v1/dashboard/cash-pickups/queue?locationIds=${first}`)
+      .expect(200);
+    expect((one.body.stores as { locationId: string }[]).map((s) => s.locationId)).toEqual([first]);
+  });
+});

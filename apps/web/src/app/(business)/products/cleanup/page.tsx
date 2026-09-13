@@ -12,13 +12,18 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   StatGrid,
   StatTile,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface Proposal {
@@ -232,6 +237,23 @@ function pct(score: number): string {
   return `${Math.round(score * 100)}%`;
 }
 
+const PRICE_COLUMNS: ColumnDef<ShopifyPriced>[] = [
+  {
+    id: 'sku',
+    label: 'SKU',
+    sortValue: (p) => p.sku,
+    render: (p) => <Link href={`/products/${p.productId}`}>{p.sku ?? '—'}</Link>,
+  },
+  { id: 'name', label: 'Name', sortValue: (p) => p.name, render: (p) => p.name },
+  {
+    id: 'price',
+    label: 'Price from Shopify',
+    num: true,
+    sortValue: (p) => p.priceCents,
+    render: (p) => <Money cents={p.priceCents} />,
+  },
+];
+
 /**
  * Shopify listings cleanup (owner ask 2026-09-06). The Shopify sync left
  * mixed-case listings next to the STORIS catalog and some sales were
@@ -384,6 +406,245 @@ export default function ShopifyCleanupPage() {
     [report],
   );
 
+  // The line and listing columns read the page's choices, so they live in
+  // the component (the hook keys on ids, not array identity).
+  const choiceFor = (l: CleanupLine): LineChoice =>
+    choices[l.lineId] ?? { on: false, target: '', adjustStock: false };
+  const LINE_COLUMNS: ColumnDef<CleanupLine>[] = [
+    {
+      id: 'select',
+      label: '',
+      srLabel: 'Select',
+      fixed: true,
+      render: (l) => (
+        <input
+          type="checkbox"
+          checked={choiceFor(l).on}
+          disabled={l.serialTracked}
+          title={l.serialTracked ? 'Serial units picked — release first' : undefined}
+          onChange={(e) => setChoice(l.lineId, { on: e.target.checked })}
+        />
+      ),
+    },
+    {
+      id: 'document',
+      label: 'Document',
+      sortValue: (l) => l.number,
+      render: (l) => (
+        <>
+          <Link href={l.doc === 'sale' ? `/sales/${l.docId}` : `/orders/${l.docId}`}>
+            {l.number}
+          </Link>
+          <div className="muted small">
+            {l.doc} · {l.status}
+            {l.imported ? ' · imported' : ''}
+            {l.qtyReserved > 0 ? ` · ${l.qtyReserved} reserved` : ''}
+          </div>
+        </>
+      ),
+    },
+    {
+      id: 'date',
+      label: 'Date',
+      sortValue: (l) => l.date,
+      render: (l) => new Date(l.date).toLocaleDateString(),
+    },
+    {
+      id: 'customer',
+      label: 'Customer',
+      sortValue: (l) => l.customer,
+      render: (l) => l.customer ?? <span className="muted">—</span>,
+    },
+    {
+      id: 'rungAs',
+      label: 'Rung as',
+      sortValue: (l) => l.name,
+      render: (l) => (
+        <>
+          <div>{l.name}</div>
+          <div className="muted small">{l.sku}</div>
+        </>
+      ),
+    },
+    {
+      id: 'qty',
+      label: 'Qty',
+      num: true,
+      sortValue: (l) => l.quantity,
+      render: (l) => l.quantity,
+    },
+    {
+      id: 'unitPrice',
+      label: 'Unit price',
+      num: true,
+      sortValue: (l) => l.unitPriceCents,
+      render: (l) => <Money cents={l.unitPriceCents} />,
+    },
+    {
+      id: 'changeTo',
+      label: 'Change to',
+      render: (l) => {
+        const c = choiceFor(l);
+        const isSku = c.target.startsWith('sku:');
+        return (
+          <>
+            <select
+              className="input"
+              value={isSku ? 'sku:' : c.target}
+              onChange={(e) =>
+                setChoice(l.lineId, {
+                  target: e.target.value === 'sku:' ? 'sku:' : e.target.value,
+                  on: true,
+                })
+              }
+            >
+              <option value="">— choose —</option>
+              {l.alternates.map((a) => (
+                <option key={a.variantId} value={a.variantId}>
+                  {a.sku ?? a.name} · {a.name} ({pct(a.score)})
+                </option>
+              ))}
+              <option value="sku:">Type a SKU…</option>
+            </select>
+            {isSku && (
+              <input
+                className="input mt-1"
+                placeholder="STORIS SKU"
+                value={c.target.slice(4)}
+                onChange={(e) => setChoice(l.lineId, { target: `sku:${e.target.value}` })}
+              />
+            )}
+          </>
+        );
+      },
+    },
+    {
+      id: 'moveStock',
+      label: 'Move stock',
+      render: (l) => (
+        <input
+          type="checkbox"
+          checked={choiceFor(l).adjustStock}
+          disabled={l.imported}
+          title={
+            l.imported
+              ? 'Imported history never moves stock'
+              : 'Hand the sold units back to the Shopify SKU and take them off the STORIS SKU'
+          }
+          onChange={(e) => setChoice(l.lineId, { adjustStock: e.target.checked })}
+        />
+      ),
+    },
+  ];
+  const PRODUCT_COLUMNS: ColumnDef<CleanupProduct>[] = [
+    {
+      id: 'sku',
+      label: 'SKU',
+      sortValue: (p) => p.sku,
+      render: (p) => (
+        <>
+          <Link href={`/products/${p.id}`}>{p.sku ?? '—'}</Link>
+          {!p.isActive && <div className="muted small">inactive</div>}
+        </>
+      ),
+    },
+    { id: 'name', label: 'Name', sortValue: (p) => p.name, render: (p) => p.name },
+    {
+      id: 'source',
+      label: 'Source',
+      sortValue: (p) => p.source ?? 'app',
+      render: (p) => p.source ?? 'app',
+    },
+    {
+      id: 'onHand',
+      label: 'On hand',
+      num: true,
+      sortValue: (p) => p.onHand,
+      render: (p) => p.onHand,
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved',
+      num: true,
+      sortValue: (p) => p.reserved,
+      render: (p) => p.reserved,
+    },
+    {
+      id: 'sales',
+      label: 'Sales',
+      num: true,
+      sortValue: (p) => p.saleLines,
+      render: (p) => p.saleLines,
+    },
+    {
+      id: 'orders',
+      label: 'Orders',
+      num: true,
+      sortValue: (p) => p.orderLines,
+      render: (p) => p.orderLines,
+    },
+    {
+      id: 'other',
+      label: 'Other',
+      num: true,
+      sortValue: (p) => p.otherRefs,
+      render: (p) => p.otherRefs,
+    },
+    {
+      id: 'proposed',
+      label: 'Proposed STORIS listing',
+      sortValue: (p) => p.proposed?.score ?? null,
+      render: (p) =>
+        p.proposed ? (
+          <>
+            <div>{p.proposed.name}</div>
+            <div className="muted small">
+              {p.proposed.sku} · {pct(p.proposed.score)}
+            </div>
+          </>
+        ) : (
+          <span className="muted">no confident match</span>
+        ),
+    },
+    {
+      id: 'retire',
+      label: 'Retire',
+      sortValue: (p) => productOn[p.id] ?? '',
+      render: (p) => {
+        const referenced = p.saleLines + p.orderLines + p.otherRefs > 0;
+        return (
+          <select
+            className="input"
+            value={productOn[p.id] ?? ''}
+            onChange={(e) =>
+              setProductOn((prev) => ({
+                ...prev,
+                [p.id]: e.target.value as 'deactivate' | 'delete' | '',
+              }))
+            }
+          >
+            <option value="">— keep for now —</option>
+            {p.isActive && <option value="deactivate">Deactivate</option>}
+            <option value="delete" disabled={referenced}>
+              Delete{referenced ? ' (still referenced)' : ''}
+            </option>
+          </select>
+        );
+      },
+    },
+  ];
+  const priceCols = useListColumns(
+    'products-cleanup-prices',
+    PRICE_COLUMNS,
+    report?.shopifyPriced ?? null,
+  );
+  const lineCols = useListColumns('products-cleanup-lines', LINE_COLUMNS, report?.lines ?? null);
+  const productCols = useListColumns(
+    'products-cleanup-products',
+    PRODUCT_COLUMNS,
+    report?.products ?? null,
+  );
+
   return (
     <div data-testid="shopify-cleanup">
       <PageHeader
@@ -493,26 +754,17 @@ export default function ShopifyCleanupPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>SKU</th>
-                      <th>Name</th>
-                      <th className="num">Price from Shopify</th>
-                    </tr>
+                    <ColumnHeadRow list={priceCols} testIdPrefix="products-cleanup-prices" />
                   </thead>
                   <tbody>
-                    {report.shopifyPriced.map((p) => (
+                    {priceCols.sorted.map((p) => (
                       <tr key={p.variantId}>
-                        <td>
-                          <Link href={`/products/${p.productId}`}>{p.sku ?? '—'}</Link>
-                        </td>
-                        <td>{p.name}</td>
-                        <td className="num">
-                          <Money cents={p.priceCents} />
-                        </td>
+                        <ColumnCells list={priceCols} row={p} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={priceCols} />
               </TableWrap>
             )}
           </Card>
@@ -584,113 +836,17 @@ export default function ShopifyCleanupPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th />
-                        <th>Document</th>
-                        <th>Date</th>
-                        <th>Customer</th>
-                        <th>Rung as</th>
-                        <th className="num">Qty</th>
-                        <th className="num">Unit price</th>
-                        <th>Change to</th>
-                        <th>Move stock</th>
-                      </tr>
+                      <ColumnHeadRow list={lineCols} testIdPrefix="products-cleanup-lines" />
                     </thead>
                     <tbody>
-                      {report.lines.map((l) => {
-                        const c = choices[l.lineId] ?? {
-                          on: false,
-                          target: '',
-                          adjustStock: false,
-                        };
-                        const isSku = c.target.startsWith('sku:');
-                        return (
-                          <tr key={l.lineId} data-testid="cleanup-line">
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={c.on}
-                                disabled={l.serialTracked}
-                                title={
-                                  l.serialTracked
-                                    ? 'Serial units picked — release first'
-                                    : undefined
-                                }
-                                onChange={(e) => setChoice(l.lineId, { on: e.target.checked })}
-                              />
-                            </td>
-                            <td>
-                              <Link
-                                href={l.doc === 'sale' ? `/sales/${l.docId}` : `/orders/${l.docId}`}
-                              >
-                                {l.number}
-                              </Link>
-                              <div className="muted small">
-                                {l.doc} · {l.status}
-                                {l.imported ? ' · imported' : ''}
-                                {l.qtyReserved > 0 ? ` · ${l.qtyReserved} reserved` : ''}
-                              </div>
-                            </td>
-                            <td>{new Date(l.date).toLocaleDateString()}</td>
-                            <td>{l.customer ?? <span className="muted">—</span>}</td>
-                            <td>
-                              <div>{l.name}</div>
-                              <div className="muted small">{l.sku}</div>
-                            </td>
-                            <td className="num">{l.quantity}</td>
-                            <td className="num">
-                              <Money cents={l.unitPriceCents} />
-                            </td>
-                            <td>
-                              <select
-                                className="input"
-                                value={isSku ? 'sku:' : c.target}
-                                onChange={(e) =>
-                                  setChoice(l.lineId, {
-                                    target: e.target.value === 'sku:' ? 'sku:' : e.target.value,
-                                    on: true,
-                                  })
-                                }
-                              >
-                                <option value="">— choose —</option>
-                                {l.alternates.map((a) => (
-                                  <option key={a.variantId} value={a.variantId}>
-                                    {a.sku ?? a.name} · {a.name} ({pct(a.score)})
-                                  </option>
-                                ))}
-                                <option value="sku:">Type a SKU…</option>
-                              </select>
-                              {isSku && (
-                                <input
-                                  className="input mt-1"
-                                  placeholder="STORIS SKU"
-                                  value={c.target.slice(4)}
-                                  onChange={(e) =>
-                                    setChoice(l.lineId, { target: `sku:${e.target.value}` })
-                                  }
-                                />
-                              )}
-                            </td>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={c.adjustStock}
-                                disabled={l.imported}
-                                title={
-                                  l.imported
-                                    ? 'Imported history never moves stock'
-                                    : 'Hand the sold units back to the Shopify SKU and take them off the STORIS SKU'
-                                }
-                                onChange={(e) =>
-                                  setChoice(l.lineId, { adjustStock: e.target.checked })
-                                }
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {lineCols.sorted.map((l) => (
+                        <tr key={l.lineId} data-testid="cleanup-line">
+                          <ColumnCells list={lineCols} row={l} />
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={lineCols} />
                 </TableWrap>
               )}
               {report.counts.linesTruncated && (
@@ -728,70 +884,17 @@ export default function ShopifyCleanupPage() {
                 <TableWrap>
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>SKU</th>
-                        <th>Name</th>
-                        <th>Source</th>
-                        <th className="num">On hand</th>
-                        <th className="num">Reserved</th>
-                        <th className="num">Sales</th>
-                        <th className="num">Orders</th>
-                        <th className="num">Other</th>
-                        <th>Proposed STORIS listing</th>
-                        <th>Retire</th>
-                      </tr>
+                      <ColumnHeadRow list={productCols} testIdPrefix="products-cleanup-products" />
                     </thead>
                     <tbody>
-                      {report.products.map((p) => {
-                        const referenced = p.saleLines + p.orderLines + p.otherRefs > 0;
-                        return (
-                          <tr key={p.id} data-testid="cleanup-product">
-                            <td>
-                              <Link href={`/products/${p.id}`}>{p.sku ?? '—'}</Link>
-                              {!p.isActive && <div className="muted small">inactive</div>}
-                            </td>
-                            <td>{p.name}</td>
-                            <td>{p.source ?? 'app'}</td>
-                            <td className="num">{p.onHand}</td>
-                            <td className="num">{p.reserved}</td>
-                            <td className="num">{p.saleLines}</td>
-                            <td className="num">{p.orderLines}</td>
-                            <td className="num">{p.otherRefs}</td>
-                            <td>
-                              {p.proposed ? (
-                                <>
-                                  <div>{p.proposed.name}</div>
-                                  <div className="muted small">
-                                    {p.proposed.sku} · {pct(p.proposed.score)}
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="muted">no confident match</span>
-                              )}
-                            </td>
-                            <td>
-                              <select
-                                className="input"
-                                value={productOn[p.id] ?? ''}
-                                onChange={(e) =>
-                                  setProductOn((prev) => ({
-                                    ...prev,
-                                    [p.id]: e.target.value as 'deactivate' | 'delete' | '',
-                                  }))
-                                }
-                              >
-                                <option value="">— keep for now —</option>
-                                {p.isActive && <option value="deactivate">Deactivate</option>}
-                                <option value="delete" disabled={referenced}>
-                                  Delete{referenced ? ' (still referenced)' : ''}
-                                </option>
-                              </select>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {productCols.sorted.map((p) => (
+                        <tr key={p.id} data-testid="cleanup-product">
+                          <ColumnCells list={productCols} row={p} />
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+                  <ResetColumns list={productCols} />
                 </TableWrap>
               )}
             </Card>

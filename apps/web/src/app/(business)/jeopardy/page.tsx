@@ -4,17 +4,23 @@ import { RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
+  type ListColumns,
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -49,8 +55,81 @@ interface JeopardyReport {
  * risk states — a line with no supply and a line that is merely late are
  * different problems.
  */
+const JEOPARDY_COLUMNS: ColumnDef<JeopardyRow>[] = [
+  {
+    id: 'promised',
+    label: 'Promised',
+    className: 'nowrap',
+    sortValue: (r) => r.deliveryDate,
+    render: (r) => r.deliveryDate,
+  },
+  {
+    id: 'order',
+    label: 'Order',
+    sortValue: (r) => r.orderNumber,
+    render: (r) => <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>,
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (r) => r.customerName,
+    render: (r) => r.customerName ?? '—',
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName,
+    render: (r) => r.locationName ?? '—',
+  },
+  {
+    id: 'product',
+    label: 'Product',
+    sortValue: (r) => r.productName,
+    render: (r) => (
+      <>
+        {r.productName}
+        {r.sku && <span className="muted"> {r.sku}</span>}
+      </>
+    ),
+  },
+  {
+    id: 'short',
+    label: 'Short',
+    num: true,
+    sortValue: (r) => r.shortfall,
+    render: (r) => r.shortfall,
+  },
+  {
+    id: 'risk',
+    label: 'Risk',
+    sortValue: (r) => (r.risk === 'no_supply' ? Number.MAX_SAFE_INTEGER : r.daysLate),
+    render: (r) =>
+      r.risk === 'no_supply' ? (
+        <span className="badge badge-danger">No supply</span>
+      ) : (
+        <span className="badge badge-warning">{r.daysLate}d late</span>
+      ),
+  },
+  {
+    id: 'supply',
+    label: 'Inbound supply',
+    sortValue: (r) => r.supplyDate,
+    render: (r) =>
+      r.supplyReference ? (
+        <>
+          {r.supplySource === 'po' ? 'PO ' : 'Transfer '}
+          {r.supplyReference}
+          <span className="muted"> → {r.supplyDate}</span>
+        </>
+      ) : (
+        '—'
+      ),
+  },
+];
+
 export default function JeopardyPage() {
   const [report, setReport] = useState<JeopardyReport | null>(null);
+  const cols = useListColumns('jeopardy', JEOPARDY_COLUMNS, report?.rows ?? null);
   const [horizon, setHorizon] = useState('30');
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -129,28 +208,20 @@ export default function JeopardyPage() {
             <TableWrap>
               <table className="table" data-testid="jeopardy-table">
                 <thead>
-                  <tr>
-                    <th>Promised</th>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Location</th>
-                    <th>Product</th>
-                    <th className="num">Short</th>
-                    <th>Risk</th>
-                    <th>Inbound supply</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="jeopardy" />
                 </thead>
                 <tbody>
                   {report.rows.length === 0 && (
-                    <TableEmpty colSpan={8}>
+                    <TableEmpty colSpan={cols.ordered.length}>
                       Nothing at risk — every short line has supply arriving in time.
                     </TableEmpty>
                   )}
-                  {groupBySalesperson(report.rows).map((group) => (
-                    <SalespersonGroup key={group.key} group={group} />
+                  {groupBySalesperson(cols.sorted).map((group) => (
+                    <SalespersonGroup key={group.key} group={group} list={cols} />
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           )}
         </Card>
@@ -189,47 +260,19 @@ function groupBySalesperson(rows: JeopardyRow[]): SpGroup[] {
   });
 }
 
-function SalespersonGroup({ group }: { group: SpGroup }) {
+function SalespersonGroup({ group, list }: { group: SpGroup; list: ListColumns<JeopardyRow> }) {
   return (
     <>
       {/* A row-group header: `th` inside tbody picks up the table's own
           uppercase muted header styling, so no inline colours are needed. */}
       <tr data-testid="jeopardy-salesperson">
-        <th scope="rowgroup" colSpan={8}>
+        <th scope="rowgroup" colSpan={list.ordered.length}>
           {group.name} · {group.rows.length} at-risk line{group.rows.length === 1 ? '' : 's'}
         </th>
       </tr>
       {group.rows.map((r) => (
         <tr key={r.lineId}>
-          <td className="nowrap">{r.deliveryDate}</td>
-          <td>
-            <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>
-          </td>
-          <td>{r.customerName ?? '—'}</td>
-          <td>{r.locationName ?? '—'}</td>
-          <td>
-            {r.productName}
-            {r.sku && <span className="muted"> {r.sku}</span>}
-          </td>
-          <td className="num">{r.shortfall}</td>
-          <td>
-            {r.risk === 'no_supply' ? (
-              <span className="badge badge-danger">No supply</span>
-            ) : (
-              <span className="badge badge-warning">{r.daysLate}d late</span>
-            )}
-          </td>
-          <td>
-            {r.supplyReference ? (
-              <>
-                {r.supplySource === 'po' ? 'PO ' : 'Transfer '}
-                {r.supplyReference}
-                <span className="muted"> → {r.supplyDate}</span>
-              </>
-            ) : (
-              '—'
-            )}
-          </td>
+          <ColumnCells list={list} row={r} />
         </tr>
       ))}
     </>

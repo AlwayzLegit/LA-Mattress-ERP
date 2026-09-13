@@ -8,13 +8,18 @@ import {
   Alert,
   BackLink,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   Input,
   LinkButton,
   PageHeader,
+  ResetColumns,
   Stack,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -32,11 +37,53 @@ interface Hit {
   email: string | null;
 }
 
+function hitName(h: Hit): string {
+  return [h.firstName, h.lastName].filter(Boolean).join(' ');
+}
+
+const HIT_COLUMNS: ColumnDef<Hit>[] = [
+  {
+    id: 'customer',
+    label: 'Customer',
+    sortValue: (h) => hitName(h),
+    render: (h) => <strong>{hitName(h) || '(no name)'}</strong>,
+  },
+  {
+    id: 'phone',
+    label: 'Phone',
+    sortValue: (h) => h.phone ?? h.phone2,
+    render: (h) => h.phone ?? h.phone2 ?? '—',
+  },
+  {
+    id: 'email',
+    label: 'Email',
+    sortValue: (h) => h.email,
+    render: (h) => h.email ?? '—',
+  },
+  {
+    id: 'actions',
+    label: '',
+    srLabel: 'Actions',
+    className: 'actions',
+    fixed: true,
+    render: (h) => (
+      <LinkButton
+        size="sm"
+        href={`/customers/${h.id}/activity`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        View activity
+      </LinkButton>
+    ),
+  },
+];
+
 export default function CustomerActivityLookupPage() {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cols = useListColumns('customers-activity', HIT_COLUMNS, hits);
 
   useEffect(() => {
     const term = q.trim();
@@ -81,8 +128,9 @@ export default function CustomerActivityLookupPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && hits && hits[0]) {
-                    router.push(`/customers/${hits[0].id}/activity`);
+                  const first = cols.sorted[0];
+                  if (e.key === 'Enter' && hits && first) {
+                    router.push(`/customers/${first.id}/activity`);
                   }
                 }}
                 data-testid="activity-lookup"
@@ -103,43 +151,22 @@ export default function CustomerActivityLookupPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Phone</th>
-                    <th>Email</th>
-                    <th className="actions">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="customers-activity" />
                 </thead>
                 <tbody>
-                  {hits.map((h) => (
+                  {cols.sorted.map((h) => (
                     <tr
                       key={h.id}
                       data-testid="activity-lookup-hit"
                       onClick={() => router.push(`/customers/${h.id}/activity`)}
                       className="cursor-pointer"
                     >
-                      <td>
-                        <strong>
-                          {[h.firstName, h.lastName].filter(Boolean).join(' ') || '(no name)'}
-                        </strong>
-                      </td>
-                      <td>{h.phone ?? h.phone2 ?? '—'}</td>
-                      <td>{h.email ?? '—'}</td>
-                      <td className="actions">
-                        <LinkButton
-                          size="sm"
-                          href={`/customers/${h.id}/activity`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          View activity
-                        </LinkButton>
-                      </td>
+                      <ColumnCells list={cols} row={h} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           )}
         </Stack>

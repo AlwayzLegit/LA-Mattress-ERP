@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { GripVertical } from 'lucide-react';
 import {
   MATTRESS_SIZES,
   PRODUCT_PURCHASE_STATUS_LABELS,
@@ -17,12 +16,16 @@ import { ProductsNav } from '@/components/products-nav';
 import {
   Alert,
   Button,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   Input,
   LinkButton,
   LoadingRows,
   Select,
   StatusBadge,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -289,25 +292,19 @@ const FIXED_AFTER_STORES: Column[] = [
   },
 ];
 
-const COLUMN_ORDER_KEY = 'jetnine.products.columns';
-function readColumnOrder(defaultOrder: string[]): string[] {
+/**
+ * The column order used to live under its own key before every list got
+ * the shared primitive (2026-09-13); carry a saved order across once.
+ */
+function migrateLegacyColumnOrder(): void {
   try {
-    const raw = localStorage.getItem(COLUMN_ORDER_KEY);
-    if (!raw) return defaultOrder;
-    const saved = JSON.parse(raw) as unknown;
-    if (!Array.isArray(saved)) return defaultOrder;
-    const known = saved.filter((id): id is string => defaultOrder.includes(String(id)));
-    return [...known, ...defaultOrder.filter((id) => !known.includes(id))];
+    const legacy = localStorage.getItem('jetnine.products.columns');
+    if (legacy && !localStorage.getItem('jetnine.columns.products')) {
+      localStorage.setItem('jetnine.columns.products', legacy);
+    }
+    localStorage.removeItem('jetnine.products.columns');
   } catch {
-    return defaultOrder;
-  }
-}
-function writeColumnOrder(order: string[], defaultOrder: string[]): void {
-  try {
-    if (order.join() === defaultOrder.join()) localStorage.removeItem(COLUMN_ORDER_KEY);
-    else localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(order));
-  } catch {
-    // storage unavailable — the order lasts for this page only
+    // storage unavailable
   }
 }
 
@@ -357,9 +354,6 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<RefOption[]>([]);
   const [asIsReasons, setAsIsReasons] = useState<ReasonCodeOption[]>([]);
   const [refsLoaded, setRefsLoaded] = useState(false);
-  const [order, setOrder] = useState<string[] | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropId, setDropId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
 
@@ -402,16 +396,29 @@ export default function ProductsPage() {
     () => [...FIXED_BEFORE_STORES, ...storeColumns, ...FIXED_AFTER_STORES],
     [storeColumns],
   );
-  const defaultOrder = useMemo(() => allColumns.map((c) => c.id), [allColumns]);
-  const byId = useMemo(() => new Map(allColumns.map((c) => [c.id, c])), [allColumns]);
   // `canSeeCost` comes from /members/me; until it loads, fall back to
   // "any row carries a cost" so the column never flashes in and out.
   const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
   const showCost = canSeeCost ?? (rows ?? []).some((r) => r.costCents != null);
-  const columns = (order ?? defaultOrder)
-    .map((id) => byId.get(id))
-    .filter((c): c is Column => !!c && (c.id !== 'cost' || showCost));
-  const customOrder = !!order && order.join() !== defaultOrder.join();
+  const visibleColumns = useMemo<ColumnDef<ProductRow>[]>(
+    () =>
+      allColumns
+        .filter((c) => c.id !== 'cost' || showCost)
+        .map((c) => ({
+          id: c.id,
+          label: c.label,
+          sortKey: c.sort,
+          num: c.num,
+          thClassName: c.store ? 'pb-store-th' : undefined,
+          cellClassName: c.id === 'description' ? () => 'pb-desc-cell' : undefined,
+          render: c.render,
+        })),
+    [allColumns, showCost],
+  );
+  useEffect(migrateLegacyColumnOrder, []);
+  const cols = useListColumns('products', visibleColumns, rows, {
+    server: { sort, dir, onSort: toggleSort },
+  });
 
   useEffect(() => {
     void api<CategoryFlat[] | { flat: CategoryFlat[] }>('/v1/categories')
@@ -421,12 +428,6 @@ export default function ProductsPage() {
       .then((l) => setLocations(l))
       .catch(() => setLocations([]));
   }, []);
-  // The column order is read once the store columns are known.
-  useEffect(() => {
-    if (locations.length === 0 && order !== null) return;
-    setOrder(readColumnOrder(defaultOrder));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultOrder]);
 
   const loadRefs = useCallback(() => {
     if (refsLoaded) return;
@@ -515,17 +516,6 @@ export default function ProductsPage() {
       setSort(key);
       setDir('asc');
     }
-  }
-  function moveColumn(from: string, to: string) {
-    if (from === to || !order) return;
-    const next = order.filter((id) => id !== from);
-    next.splice(next.indexOf(to), 0, from);
-    setOrder(next);
-    writeColumnOrder(next, defaultOrder);
-  }
-  function resetColumns() {
-    setOrder(defaultOrder);
-    writeColumnOrder(defaultOrder, defaultOrder);
   }
   function clearAll() {
     setQ('');
@@ -680,11 +670,11 @@ export default function ProductsPage() {
                 Clear filters
               </Button>
             )}
-            {customOrder && (
+            {cols.isCustom && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={resetColumns}
+                onClick={cols.reset}
                 data-testid="products-reset-columns"
               >
                 Reset columns
@@ -862,58 +852,7 @@ export default function ProductsPage() {
           {rows && (
             <table className="table table-sticky pb-table" data-testid="products-table">
               <thead>
-                <tr>
-                  {columns.map((c) => {
-                    const on = sort === c.sort;
-                    return (
-                      <th
-                        key={c.id}
-                        draggable
-                        onDragStart={() => setDragId(c.id)}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          if (dropId !== c.id) setDropId(c.id);
-                        }}
-                        onDragLeave={() => dropId === c.id && setDropId(null)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          if (dragId) moveColumn(dragId, c.id);
-                          setDragId(null);
-                          setDropId(null);
-                        }}
-                        onDragEnd={() => {
-                          setDragId(null);
-                          setDropId(null);
-                        }}
-                        aria-sort={on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className={[
-                          c.num ? 'num' : '',
-                          c.store ? 'pb-store-th' : '',
-                          dropId === c.id && dragId !== c.id ? 'th-drop' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        title="Click to sort · drag to move this column"
-                        data-testid={`products-col-${c.id}`}
-                      >
-                        <span className="th-grip" aria-hidden>
-                          <GripVertical size={12} />
-                        </span>
-                        <button
-                          type="button"
-                          className={`pb-sort${on ? ' is-on' : ''}`}
-                          onClick={() => toggleSort(c.sort)}
-                          data-testid={`products-sort-${c.id}`}
-                        >
-                          {c.label}
-                          <span className="pb-sort-arrow" aria-hidden>
-                            {on ? (dir === 'asc' ? '▲' : '▼') : ''}
-                          </span>
-                        </button>
-                      </th>
-                    );
-                  })}
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products" />
               </thead>
               <tbody>
                 {rows.map((p) => (
@@ -923,23 +862,12 @@ export default function ProductsPage() {
                     className={p.isActive ? undefined : 'is-inactive'}
                     onClick={() => router.push(`/products/${p.id}`)}
                   >
-                    {columns.map((c) => (
-                      <td
-                        key={c.id}
-                        className={
-                          [c.num ? 'num' : '', c.id === 'description' ? 'pb-desc-cell' : '']
-                            .filter(Boolean)
-                            .join(' ') || undefined
-                        }
-                      >
-                        {c.render(p)}
-                      </td>
-                    ))}
+                    <ColumnCells list={cols} row={p} />
                   </tr>
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={columns.length} className="pb-empty">
+                    <td colSpan={cols.ordered.length} className="pb-empty">
                       <div className="pb-empty-title">Nothing matches</div>
                       <div>Try fewer words or clear a filter.</div>
                       {filtered && (

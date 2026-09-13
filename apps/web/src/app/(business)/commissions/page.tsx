@@ -8,6 +8,9 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -15,6 +18,7 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatGrid,
@@ -23,6 +27,7 @@ import {
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
@@ -67,6 +72,57 @@ function currentPeriod(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+const STATEMENT_COLUMNS: ColumnDef<StatementEntry>[] = [
+  {
+    id: 'date',
+    label: 'Date',
+    sortValue: (e) => e.accruedAt,
+    render: (e) => new Date(e.accruedAt).toLocaleDateString(),
+  },
+  {
+    id: 'document',
+    label: 'Document',
+    sortValue: (e) => e.documentNumber,
+    render: (e) => (
+      <>
+        <code>{e.documentNumber ?? '—'}</code>
+        {e.notes && <div className="muted">{e.notes}</div>}
+      </>
+    ),
+  },
+  {
+    id: 'basis',
+    label: 'Basis',
+    num: true,
+    sortValue: (e) => e.basisCents,
+    render: (e) => <Money cents={e.basisCents} />,
+  },
+  {
+    id: 'rate',
+    label: 'Rate',
+    num: true,
+    sortValue: (e) => e.rateBps,
+    render: (e) => `${(e.rateBps / 100).toFixed(2)}%`,
+  },
+  {
+    id: 'commission',
+    label: 'Commission',
+    num: true,
+    sortValue: (e) => e.amountCents,
+    render: (e) => (
+      <strong style={{ color: e.amountCents < 0 ? 'var(--danger)' : undefined }}>
+        {formatMoney(e.amountCents)}
+      </strong>
+    ),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (e) => e.status,
+    render: (e) => <StatusBadge status={e.status} />,
+  },
+];
+
 /**
  * The payroll view: monthly totals per associate, and a per-associate
  * statement that prints as the payroll-day paper trail. Approve/paid
@@ -80,6 +136,67 @@ export default function CommissionsPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Built inline: the Statement button needs `openStatement`.
+  const accrualColumns: ColumnDef<ReportRow>[] = [
+    {
+      id: 'associate',
+      label: 'Associate',
+      sortValue: (r) => r.salesperson,
+      render: (r) => r.salesperson,
+    },
+    {
+      id: 'entries',
+      label: 'Entries',
+      num: true,
+      sortValue: (r) => r.entries,
+      render: (r) => r.entries,
+    },
+    {
+      id: 'pending',
+      label: 'Pending',
+      num: true,
+      sortValue: (r) => r.pendingCents,
+      render: (r) => <Money cents={r.pendingCents} />,
+    },
+    {
+      id: 'total',
+      label: 'Total',
+      num: true,
+      sortValue: (r) => r.totalCents,
+      render: (r) => (
+        <strong>
+          <Money cents={r.totalCents} />
+        </strong>
+      ),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <Button
+          size="sm"
+          onClick={() => void openStatement(r.membershipId)}
+          data-testid={`statement-${r.salesperson}`}
+        >
+          Statement
+        </Button>
+      ),
+    },
+  ];
+  const accrualCols = useListColumns(
+    'commissions-accruals',
+    accrualColumns,
+    report?.bySalesperson ?? null,
+  );
+  const statementCols = useListColumns(
+    'commissions-statement',
+    STATEMENT_COLUMNS,
+    statement?.entries ?? null,
+  );
 
   async function load(p: string) {
     setStatement(null);
@@ -168,43 +285,22 @@ export default function CommissionsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Associate</th>
-                    <th className="num">Entries</th>
-                    <th className="num">Pending</th>
-                    <th className="num">Total</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={accrualCols} testIdPrefix="commissions-accruals" />
                 </thead>
                 <tbody>
                   {report.bySalesperson.length === 0 && (
-                    <TableEmpty colSpan={5}>No commission entries for {period}.</TableEmpty>
+                    <TableEmpty colSpan={accrualCols.ordered.length}>
+                      No commission entries for {period}.
+                    </TableEmpty>
                   )}
-                  {report.bySalesperson.map((r) => (
+                  {accrualCols.sorted.map((r) => (
                     <tr key={r.membershipId}>
-                      <td>{r.salesperson}</td>
-                      <td className="num">{r.entries}</td>
-                      <td className="num">
-                        <Money cents={r.pendingCents} />
-                      </td>
-                      <td className="num">
-                        <strong>
-                          <Money cents={r.totalCents} />
-                        </strong>
-                      </td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          onClick={() => void openStatement(r.membershipId)}
-                          data-testid={`statement-${r.salesperson}`}
-                        >
-                          Statement
-                        </Button>
-                      </td>
+                      <ColumnCells list={accrualCols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={accrualCols} />
             </TableWrap>
           )}
         </Card>
@@ -243,43 +339,22 @@ export default function CommissionsPage() {
               <TableWrap>
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Document</th>
-                      <th className="num">Basis</th>
-                      <th className="num">Rate</th>
-                      <th className="num">Commission</th>
-                      <th>Status</th>
-                    </tr>
+                    <ColumnHeadRow list={statementCols} testIdPrefix="commissions-statement" />
                   </thead>
                   <tbody>
                     {statement.entries.length === 0 && (
-                      <TableEmpty colSpan={6}>No entries this period.</TableEmpty>
+                      <TableEmpty colSpan={statementCols.ordered.length}>
+                        No entries this period.
+                      </TableEmpty>
                     )}
-                    {statement.entries.map((e) => (
+                    {statementCols.sorted.map((e) => (
                       <tr key={e.id}>
-                        <td>{new Date(e.accruedAt).toLocaleDateString()}</td>
-                        <td>
-                          <code>{e.documentNumber ?? '—'}</code>
-                          {e.notes && <div className="muted">{e.notes}</div>}
-                        </td>
-                        <td className="num">
-                          <Money cents={e.basisCents} />
-                        </td>
-                        <td className="num">{(e.rateBps / 100).toFixed(2)}%</td>
-                        <td
-                          className="num"
-                          style={{ color: e.amountCents < 0 ? 'var(--danger)' : undefined }}
-                        >
-                          <strong>{formatMoney(e.amountCents)}</strong>
-                        </td>
-                        <td>
-                          <StatusBadge status={e.status} />
-                        </td>
+                        <ColumnCells list={statementCols} row={e} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                <ResetColumns list={statementCols} />
               </TableWrap>
             </Stack>
           </Card>
@@ -300,13 +375,36 @@ export default function CommissionsPage() {
  * ("No commission entries", QA 2026-08-26 D7). Accrual works; it just
  * had no way to be switched on.
  */
+interface Plan {
+  id: string;
+  name: string;
+  basis: string;
+  rateBps: number;
+}
+
+const PLAN_COLUMNS: ColumnDef<Plan>[] = [
+  {
+    id: 'plan',
+    label: 'Plan',
+    sortValue: (p) => p.name,
+    render: (p) => p.name,
+  },
+  {
+    id: 'basis',
+    label: 'Basis',
+    sortValue: (p) => p.basis,
+    render: (p) => (p.basis === 'percent_of_margin' ? 'of margin' : 'of sale'),
+  },
+  {
+    id: 'rate',
+    label: 'Rate',
+    num: true,
+    sortValue: (p) => p.rateBps,
+    render: (p) => `${(p.rateBps / 100).toFixed(2)}%`,
+  },
+];
+
 function CommissionPlansCard() {
-  interface Plan {
-    id: string;
-    name: string;
-    basis: string;
-    rateBps: number;
-  }
   interface Member {
     membershipId: string;
     email: string;
@@ -319,6 +417,7 @@ function CommissionPlansCard() {
   const [rate, setRate] = useState('');
   const [basis, setBasis] = useState('percent_of_sale');
   const [busy, setBusy] = useState(false);
+  const planCols = useListColumns('commissions-plans', PLAN_COLUMNS, plans);
 
   async function load() {
     try {
@@ -389,22 +488,17 @@ function CommissionPlansCard() {
           <TableWrap>
             <table className="table" data-testid="commission-plans-table">
               <thead>
-                <tr>
-                  <th>Plan</th>
-                  <th>Basis</th>
-                  <th className="num">Rate</th>
-                </tr>
+                <ColumnHeadRow list={planCols} testIdPrefix="commissions-plans" />
               </thead>
               <tbody>
-                {plans.map((p) => (
+                {planCols.sorted.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.name}</td>
-                    <td>{p.basis === 'percent_of_margin' ? 'of margin' : 'of sale'}</td>
-                    <td className="num">{(p.rateBps / 100).toFixed(2)}%</td>
+                    <ColumnCells list={planCols} row={p} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={planCols} />
           </TableWrap>
         )}
 

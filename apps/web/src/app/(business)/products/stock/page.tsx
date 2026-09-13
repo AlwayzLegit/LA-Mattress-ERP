@@ -12,16 +12,21 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Input,
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 
 interface Location {
@@ -173,6 +178,119 @@ export default function InventoryPage() {
   const filtered = q.trim() !== '' || vendor != null;
   const activeBins = bins.filter((b) => b.isActive);
 
+  // Cells reach the bins list and the dialog setters, so the columns live
+  // in the component (the hook keys on ids, not array identity).
+  const STOCK_COLUMNS: ColumnDef<Level>[] = [
+    {
+      id: 'product',
+      label: 'Product',
+      sortValue: (l) => l.productName,
+      render: (l) => l.productName,
+    },
+    {
+      id: 'sku',
+      label: 'SKU',
+      sortValue: (l) => l.variantSku,
+      render: (l) => <code>{l.variantSku ?? '—'}</code>,
+    },
+    {
+      id: 'barcode',
+      label: 'Barcode',
+      sortValue: (l) => l.variantBarcode,
+      render: (l) => <code>{l.variantBarcode ?? '—'}</code>,
+    },
+    {
+      id: 'onHand',
+      label: 'On hand',
+      num: true,
+      sortValue: (l) => l.onHand,
+      render: (l) => l.onHand,
+    },
+    {
+      id: 'reserved',
+      label: 'Reserved',
+      num: true,
+      sortValue: (l) => l.reserved,
+      render: (l) =>
+        l.reserved > 0 ? (
+          <button
+            type="button"
+            className="btn-link"
+            title="See which orders hold these units — back order one to sell the piece today, or reserve it elsewhere"
+            data-testid="reserved-count"
+            onClick={() => setResFor(l)}
+          >
+            {l.reserved}
+          </button>
+        ) : (
+          l.reserved
+        ),
+    },
+    {
+      id: 'floor',
+      label: 'Floor',
+      num: true,
+      title: 'Floor samples — on hand but never sellable as new',
+      sortValue: (l) => l.floorSample,
+      render: (l) => (
+        <button
+          type="button"
+          className="btn-link"
+          title="Click to set the floor-sample hold"
+          onClick={() => void setFloor(l)}
+        >
+          {l.floorSample > 0 ? l.floorSample : '—'}
+        </button>
+      ),
+    },
+    {
+      id: 'available',
+      label: 'Available',
+      num: true,
+      sortValue: (l) => l.available,
+      render: (l) => l.available,
+    },
+    {
+      id: 'bin',
+      label: 'Bin',
+      sortValue: (l) => l.storageBinCode,
+      render: (l) => (
+        <Select
+          value={l.storageBinId ?? ''}
+          onChange={(e) => void assignBin(l, e.target.value || null)}
+          aria-label={`Bin for ${l.variantSku ?? l.productName}`}
+        >
+          <option value="">—</option>
+          {bins
+            .filter((b) => b.isActive || b.id === l.storageBinId)
+            .map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.code}
+              </option>
+            ))}
+        </Select>
+      ),
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (l) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setAdjustFor(l)}
+          data-testid="stock-adjust"
+        >
+          Adjust
+        </Button>
+      ),
+    },
+  ];
+  const cols = useListColumns('products-stock', STOCK_COLUMNS, levels);
+
   return (
     <div>
       <PageHeader
@@ -280,94 +398,24 @@ export default function InventoryPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>SKU</th>
-                    <th>Barcode</th>
-                    <th className="num">On hand</th>
-                    <th className="num">Reserved</th>
-                    <th className="num" title="Floor samples — on hand but never sellable as new">
-                      Floor
-                    </th>
-                    <th className="num">Available</th>
-                    <th>Bin</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="products-stock" />
                 </thead>
                 <tbody>
                   {levels.length === 0 && (
-                    <TableEmpty colSpan={9}>
+                    <TableEmpty colSpan={cols.ordered.length}>
                       {q.trim()
                         ? `No stock matches "${q.trim()}" at this location.`
                         : 'No stock from this vendor at this location.'}
                     </TableEmpty>
                   )}
-                  {levels.map((l) => (
+                  {cols.sorted.map((l) => (
                     <tr key={`${l.variantId}-${l.locationId}`}>
-                      <td>{l.productName}</td>
-                      <td>
-                        <code>{l.variantSku ?? '—'}</code>
-                      </td>
-                      <td>
-                        <code>{l.variantBarcode ?? '—'}</code>
-                      </td>
-                      <td className="num">{l.onHand}</td>
-                      <td className="num">
-                        {l.reserved > 0 ? (
-                          <button
-                            type="button"
-                            className="btn-link"
-                            title="See which orders hold these units — back order one to sell the piece today, or reserve it elsewhere"
-                            data-testid="reserved-count"
-                            onClick={() => setResFor(l)}
-                          >
-                            {l.reserved}
-                          </button>
-                        ) : (
-                          l.reserved
-                        )}
-                      </td>
-                      <td className="num">
-                        <button
-                          type="button"
-                          className="btn-link"
-                          title="Click to set the floor-sample hold"
-                          onClick={() => void setFloor(l)}
-                        >
-                          {l.floorSample > 0 ? l.floorSample : '—'}
-                        </button>
-                      </td>
-                      <td className="num">{l.available}</td>
-                      <td>
-                        <Select
-                          value={l.storageBinId ?? ''}
-                          onChange={(e) => void assignBin(l, e.target.value || null)}
-                          aria-label={`Bin for ${l.variantSku ?? l.productName}`}
-                        >
-                          <option value="">—</option>
-                          {bins
-                            .filter((b) => b.isActive || b.id === l.storageBinId)
-                            .map((b) => (
-                              <option key={b.id} value={b.id}>
-                                {b.code}
-                              </option>
-                            ))}
-                        </Select>
-                      </td>
-                      <td className="actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setAdjustFor(l)}
-                          data-testid="stock-adjust"
-                        >
-                          Adjust
-                        </Button>
-                      </td>
+                      <ColumnCells list={cols} row={l} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

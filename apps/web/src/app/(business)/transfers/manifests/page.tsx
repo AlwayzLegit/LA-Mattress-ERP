@@ -10,6 +10,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   FormActions,
@@ -17,12 +20,14 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   SectionHeading,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -56,6 +61,49 @@ interface DraftTransfer {
   createdAt: string;
 }
 
+const MANIFEST_COLUMNS: ColumnDef<ManifestRow>[] = [
+  {
+    id: 'number',
+    label: 'Manifest',
+    sortValue: (m) => m.number,
+    render: (m) => (
+      <Link href={`/transfers/manifests/${m.id}`}>
+        <code>{m.number}</code>
+      </Link>
+    ),
+  },
+  { id: 'date', label: 'Date', sortValue: (m) => m.manifestDate, render: (m) => m.manifestDate },
+  {
+    id: 'route',
+    label: 'Route',
+    sortValue: (m) => m.routeName,
+    render: (m) => m.routeName ?? '—',
+  },
+  {
+    id: 'lane',
+    label: 'Lane',
+    sortValue: (m) => `${m.fromLocationName ?? '—'} → ${m.toLocationName ?? '—'}`,
+    render: (m) => (
+      <>
+        {m.fromLocationName ?? '—'} → {m.toLocationName ?? '—'}
+      </>
+    ),
+  },
+  {
+    id: 'transfers',
+    label: 'Transfers',
+    num: true,
+    sortValue: (m) => m.transferCount,
+    render: (m) => m.transferCount,
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (m) => m.status,
+    render: (m) => <StatusBadge status={m.status} />,
+  },
+];
+
 export default function ManifestsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<ManifestRow[] | null>(null);
@@ -70,6 +118,48 @@ export default function ManifestsPage() {
   const [drafts, setDrafts] = useState<DraftTransfer[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [building, setBuilding] = useState(false);
+
+  const draftColumns: ColumnDef<DraftTransfer>[] = [
+    {
+      id: 'select',
+      label: <span className="sr-only">Select</span>,
+      thClassName: 'w-8',
+      fixed: true,
+      render: (t) => (
+        <input
+          type="checkbox"
+          aria-label={`Select ${t.number}`}
+          checked={selected.has(t.id)}
+          onChange={(e) => {
+            const next = new Set(selected);
+            if (e.target.checked) next.add(t.id);
+            else next.delete(t.id);
+            setSelected(next);
+          }}
+        />
+      ),
+    },
+    {
+      id: 'number',
+      label: 'Transfer',
+      sortValue: (t) => t.number,
+      render: (t) => <code>{t.number}</code>,
+    },
+    {
+      id: 'type',
+      label: 'Type',
+      sortValue: (t) => t.transferType,
+      render: (t) => t.transferType.replace('_', ' '),
+    },
+    {
+      id: 'created',
+      label: 'Created',
+      sortValue: (t) => t.createdAt,
+      render: (t) => new Date(t.createdAt).toLocaleDateString(),
+    },
+  ];
+  const draftCols = useListColumns('transfers-manifests-drafts', draftColumns, drafts);
+  const cols = useListColumns('transfers-manifests', MANIFEST_COLUMNS, rows);
 
   async function load() {
     try {
@@ -194,40 +284,17 @@ export default function ManifestsPage() {
                   <TableWrap>
                     <table className="table">
                       <thead>
-                        <tr>
-                          <th className="w-8">
-                            <span className="sr-only">Select</span>
-                          </th>
-                          <th>Transfer</th>
-                          <th>Type</th>
-                          <th>Created</th>
-                        </tr>
+                        <ColumnHeadRow list={draftCols} testIdPrefix="transfers-manifests-drafts" />
                       </thead>
                       <tbody>
-                        {drafts.map((t) => (
+                        {draftCols.sorted.map((t) => (
                           <tr key={t.id}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                aria-label={`Select ${t.number}`}
-                                checked={selected.has(t.id)}
-                                onChange={(e) => {
-                                  const next = new Set(selected);
-                                  if (e.target.checked) next.add(t.id);
-                                  else next.delete(t.id);
-                                  setSelected(next);
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <code>{t.number}</code>
-                            </td>
-                            <td>{t.transferType.replace('_', ' ')}</td>
-                            <td>{new Date(t.createdAt).toLocaleDateString()}</td>
+                            <ColumnCells list={draftCols} row={t} />
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    <ResetColumns list={draftCols} />
                   </TableWrap>
                 )}
                 <FormActions>
@@ -261,37 +328,20 @@ export default function ManifestsPage() {
             <TableWrap>
               <table className="table">
                 <thead>
-                  <tr>
-                    <th>Manifest</th>
-                    <th>Date</th>
-                    <th>Route</th>
-                    <th>Lane</th>
-                    <th className="num">Transfers</th>
-                    <th>Status</th>
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="transfers-manifests" />
                 </thead>
                 <tbody>
-                  {rows.length === 0 && <TableEmpty colSpan={6}>No manifests yet.</TableEmpty>}
-                  {rows.map((m) => (
+                  {rows.length === 0 && (
+                    <TableEmpty colSpan={cols.ordered.length}>No manifests yet.</TableEmpty>
+                  )}
+                  {cols.sorted.map((m) => (
                     <tr key={m.id}>
-                      <td>
-                        <Link href={`/transfers/manifests/${m.id}`}>
-                          <code>{m.number}</code>
-                        </Link>
-                      </td>
-                      <td>{m.manifestDate}</td>
-                      <td>{m.routeName ?? '—'}</td>
-                      <td>
-                        {m.fromLocationName ?? '—'} → {m.toLocationName ?? '—'}
-                      </td>
-                      <td className="num">{m.transferCount}</td>
-                      <td>
-                        <StatusBadge status={m.status} />
-                      </td>
+                      <ColumnCells list={cols} row={m} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
           </Card>
         )}

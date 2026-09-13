@@ -3,9 +3,103 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { Money } from '@/components/money';
-import { Card, LoadingRows, Stack, TableEmpty, TableWrap, Toolbar } from '@/components/ui';
+import {
+  Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
+  LoadingRows,
+  ResetColumns,
+  Stack,
+  TableEmpty,
+  TableWrap,
+  Toolbar,
+  useListColumns,
+} from '@/components/ui';
 import { fmtDate, LocationPicker, SectionError, StripTiles, titleCase, useSection } from './kit';
 import type { AsIsRow, Strip } from './types';
+
+const AS_IS_COLUMNS: ColumnDef<AsIsRow>[] = [
+  {
+    id: 'piece',
+    label: 'Piece',
+    sortValue: (r) => r.pieceNumber,
+    render: (r) => (
+      <>
+        <code>{r.pieceNumber ?? '—'}</code>
+        {r.quantity > 1 && <span className="muted"> ×{r.quantity}</span>}
+      </>
+    ),
+  },
+  {
+    id: 'sku',
+    label: 'SKU',
+    sortValue: (r) => r.sku,
+    render: (r) => <code>{r.sku ?? '—'}</code>,
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    sortValue: (r) => r.locationName,
+    render: (r) => r.locationName ?? '—',
+  },
+  {
+    id: 'received',
+    label: 'Received date',
+    sortValue: (r) => r.receivedAt,
+    render: (r) => fmtDate(r.receivedAt),
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    sortValue: (r) => r.condition,
+    render: (r) => (
+      <>
+        As-Is
+        {r.condition && <span className="muted"> · {titleCase(r.condition)}</span>}
+      </>
+    ),
+  },
+  {
+    id: 'reason',
+    label: 'Reason code',
+    sortValue: (r) => r.reasonCode?.code ?? null,
+    render: (r) =>
+      r.reasonCode ? <span title={r.reasonCode.description}>{r.reasonCode.code}</span> : '—',
+  },
+  {
+    id: 'price',
+    label: 'Selling price',
+    num: true,
+    sortValue: (r) => r.asIsPriceCents,
+    render: (r) => (r.asIsPriceCents != null ? <Money cents={r.asIsPriceCents} /> : '—'),
+  },
+  {
+    id: 'sellable',
+    label: 'Sellable',
+    sortValue: (r) => r.sellable,
+    render: (r) => (r.sellable ? 'Yes' : 'No'),
+  },
+  {
+    id: 'storage',
+    label: 'Storage location',
+    sortValue: (r) => r.storageLocation,
+    render: (r) => r.storageLocation ?? '—',
+  },
+  {
+    id: 'source',
+    label: 'Source',
+    sortValue: (r) => r.source,
+    render: (r) => titleCase(r.source),
+  },
+  {
+    id: 'comments',
+    label: 'Piece comments',
+    className: 'muted',
+    sortValue: (r) => r.notes,
+    render: (r) => r.notes ?? '—',
+  },
+];
 
 /** STORIS As-Is tab (A21 D11): pieces in review at a location. */
 export function AsIsPanel({ productId }: { productId: string }) {
@@ -13,6 +107,7 @@ export function AsIsPanel({ productId }: { productId: string }) {
   const { data, error, loading } = useSection<{ strip: Strip; rows: AsIsRow[] }>(
     `/v1/products/${productId}/activity/as-is${locationId ? `?locationId=${locationId}` : ''}`,
   );
+  const cols = useListColumns('products-activity-as-is', AS_IS_COLUMNS, data?.rows ?? null);
   return (
     <Stack>
       <Toolbar>
@@ -37,57 +132,22 @@ export function AsIsPanel({ productId }: { productId: string }) {
           <TableWrap>
             <table className="table">
               <thead>
-                <tr>
-                  <th>Piece</th>
-                  <th>SKU</th>
-                  <th>Location</th>
-                  <th>Received date</th>
-                  <th>Status</th>
-                  <th>Reason code</th>
-                  <th className="num">Selling price</th>
-                  <th>Sellable</th>
-                  <th>Storage location</th>
-                  <th>Source</th>
-                  <th>Piece comments</th>
-                </tr>
+                <ColumnHeadRow list={cols} testIdPrefix="products-activity-as-is" />
               </thead>
               <tbody>
                 {data && data.rows.length === 0 && (
-                  <TableEmpty colSpan={11}>No as-is pieces in review for this product.</TableEmpty>
+                  <TableEmpty colSpan={cols.ordered.length}>
+                    No as-is pieces in review for this product.
+                  </TableEmpty>
                 )}
-                {data?.rows.map((r) => (
+                {cols.sorted.map((r) => (
                   <tr key={r.id} data-testid="activity-as-is-row">
-                    <td>
-                      <code>{r.pieceNumber ?? '—'}</code>
-                      {r.quantity > 1 && <span className="muted"> ×{r.quantity}</span>}
-                    </td>
-                    <td>
-                      <code>{r.sku ?? '—'}</code>
-                    </td>
-                    <td>{r.locationName ?? '—'}</td>
-                    <td>{fmtDate(r.receivedAt)}</td>
-                    <td>
-                      As-Is
-                      {r.condition && <span className="muted"> · {titleCase(r.condition)}</span>}
-                    </td>
-                    <td>
-                      {r.reasonCode ? (
-                        <span title={r.reasonCode.description}>{r.reasonCode.code}</span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="num">
-                      {r.asIsPriceCents != null ? <Money cents={r.asIsPriceCents} /> : '—'}
-                    </td>
-                    <td>{r.sellable ? 'Yes' : 'No'}</td>
-                    <td>{r.storageLocation ?? '—'}</td>
-                    <td>{titleCase(r.source)}</td>
-                    <td className="muted">{r.notes ?? '—'}</td>
+                    <ColumnCells list={cols} row={r} />
                   </tr>
                 ))}
               </tbody>
             </table>
+            <ResetColumns list={cols} />
           </TableWrap>
         )}
       </Card>

@@ -10,14 +10,19 @@ import {
   Alert,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
   Toolbar,
+  useListColumns,
 } from '@/components/ui';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 
@@ -185,6 +190,141 @@ export default function AsIsPage() {
     }
   }
 
+  // Cells reach into the review dialogs and the busy flag, so the columns
+  // are built here rather than at module level.
+  const columns: ColumnDef<AsIsRow>[] = [
+    {
+      id: 'item',
+      label: 'Item',
+      sortValue: (r) => r.productName,
+      render: (r) => (
+        <>
+          {r.productName ?? '(deleted)'}
+          {r.variantName && <span className="muted"> — {r.variantName}</span>}
+          {r.sku && (
+            <>
+              {' '}
+              <code className="muted">{r.sku}</code>
+            </>
+          )}
+          {r.notes && <div className="field-hint">{r.notes}</div>}
+          <div className="field-hint">
+            {r.pieceNumber && <code>{r.pieceNumber}</code>}
+            {r.condition && <> · {r.condition.replace(/_/g, ' ')}</>}
+            {r.storageLocation && <> · {r.storageLocation}</>}
+            {r.asIsPriceCents != null && <> · as-is ${(r.asIsPriceCents / 100).toFixed(2)}</>}
+            {r.status === 'pending_review' && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="btn-link"
+                  disabled={busy}
+                  onClick={() => setPricingId(r.id)}
+                >
+                  price…
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      ),
+    },
+    { id: 'qty', label: 'Qty', num: true, sortValue: (r) => r.quantity, render: (r) => r.quantity },
+    {
+      id: 'location',
+      label: 'Location',
+      sortValue: (r) => r.locationName,
+      render: (r) => r.locationName ?? '—',
+    },
+    {
+      id: 'origin',
+      label: 'Came from',
+      sortValue: (r) => (r.origin ? `${r.source} ${r.origin.documentNumber}` : r.source),
+      render: (r) => <Origin r={r} />,
+    },
+    {
+      id: 'received',
+      label: 'Received',
+      className: 'nowrap',
+      sortValue: (r) => r.createdAt,
+      render: (r) => new Date(r.createdAt).toLocaleDateString(),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      id: 'actions',
+      label: '',
+      srLabel: 'Actions',
+      className: 'actions',
+      fixed: true,
+      render: (r) => (
+        <>
+          {r.status === 'pending_review' && (
+            <>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                onClick={() => void review(r.id, 'restock')}
+                data-testid="review-restock"
+              >
+                Restock
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setVendorReturnId(r.id)}
+              >
+                Vendor
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={busy}
+                data-testid="review-scrap"
+                onClick={() => setScrapId(r.id)}
+              >
+                Scrap
+              </Button>
+            </>
+          )}
+          {r.status === 'vendor_return' && r.vendorCreditStatus === 'open' && (
+            <>
+              <span className="muted">
+                R/A {r.vendorRaNumber}
+                {r.vendorCreditCents != null &&
+                  ` · $${(r.vendorCreditCents / 100).toFixed(2)} open`}
+              </span>{' '}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void vendorCredit(r.id, 'received')}
+              >
+                Credit received
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void vendorCredit(r.id, 'write_off')}
+              >
+                Give up
+              </Button>
+            </>
+          )}
+        </>
+      ),
+    },
+  ];
+  const cols = useListColumns('as-is', columns, rows);
+
   return (
     <div>
       <PageHeader
@@ -226,128 +366,24 @@ export default function AsIsPage() {
             <TableWrap>
               <table className="table" data-testid="as-is-table">
                 <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th className="num">Qty</th>
-                    <th>Location</th>
-                    <th>Came from</th>
-                    <th>Received</th>
-                    <th>Status</th>
-                    <th className="actions" />
-                  </tr>
+                  <ColumnHeadRow list={cols} testIdPrefix="as-is" />
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
-                    <TableEmpty colSpan={7}>
+                    <TableEmpty colSpan={cols.ordered.length}>
                       {status
                         ? `No pieces ${STATUS_LABELS[status] ?? status.replace(/_/g, ' ')}.`
                         : 'No as-is pieces yet.'}
                     </TableEmpty>
                   )}
-                  {rows.map((r) => (
+                  {cols.sorted.map((r) => (
                     <tr key={r.id} data-testid="as-is-row">
-                      <td>
-                        {r.productName ?? '(deleted)'}
-                        {r.variantName && <span className="muted"> — {r.variantName}</span>}
-                        {r.sku && (
-                          <>
-                            {' '}
-                            <code className="muted">{r.sku}</code>
-                          </>
-                        )}
-                        {r.notes && <div className="field-hint">{r.notes}</div>}
-                        <div className="field-hint">
-                          {r.pieceNumber && <code>{r.pieceNumber}</code>}
-                          {r.condition && <> · {r.condition.replace(/_/g, ' ')}</>}
-                          {r.storageLocation && <> · {r.storageLocation}</>}
-                          {r.asIsPriceCents != null && (
-                            <> · as-is ${(r.asIsPriceCents / 100).toFixed(2)}</>
-                          )}
-                          {r.status === 'pending_review' && (
-                            <>
-                              {' '}
-                              <button
-                                type="button"
-                                className="btn-link"
-                                disabled={busy}
-                                onClick={() => setPricingId(r.id)}
-                              >
-                                price…
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                      <td className="num">{r.quantity}</td>
-                      <td>{r.locationName ?? '—'}</td>
-                      <td>
-                        <Origin r={r} />
-                      </td>
-                      <td className="nowrap">{new Date(r.createdAt).toLocaleDateString()}</td>
-                      <td>
-                        <StatusBadge status={r.status} />
-                      </td>
-                      <td className="actions">
-                        {r.status === 'pending_review' && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              disabled={busy}
-                              onClick={() => void review(r.id, 'restock')}
-                              data-testid="review-restock"
-                            >
-                              Restock
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => setVendorReturnId(r.id)}
-                            >
-                              Vendor
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="danger"
-                              disabled={busy}
-                              data-testid="review-scrap"
-                              onClick={() => setScrapId(r.id)}
-                            >
-                              Scrap
-                            </Button>
-                          </>
-                        )}
-                        {r.status === 'vendor_return' && r.vendorCreditStatus === 'open' && (
-                          <>
-                            <span className="muted">
-                              R/A {r.vendorRaNumber}
-                              {r.vendorCreditCents != null &&
-                                ` · $${(r.vendorCreditCents / 100).toFixed(2)} open`}
-                            </span>{' '}
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => void vendorCredit(r.id, 'received')}
-                            >
-                              Credit received
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void vendorCredit(r.id, 'write_off')}
-                            >
-                              Give up
-                            </Button>
-                          </>
-                        )}
-                      </td>
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <ResetColumns list={cols} />
             </TableWrap>
             <LoadMore state={list} noun="pieces" />
           </Card>
