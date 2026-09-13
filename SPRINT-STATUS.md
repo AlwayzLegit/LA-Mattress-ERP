@@ -5531,3 +5531,7 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 ## Chat notification chime — 2026-09-13
 
 - [x] Replaced the generated beep with the user-supplied shopify-sales.mp3. Same-origin audio is decoded once when enabled, previews on activation, stops on mute and restarts instead of overlapping on new alerts. Loading errors leave sound disabled.
+
+## Chat reception coverage — 2026-09-13
+
+- [x] Added Chat Receptionist system role for team inbox, replies and assignment. No chat.manage, export or customer permissions. Assign all-store member scope for company-wide unassigned coverage. No staff member was assigned automatically.

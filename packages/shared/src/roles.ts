@@ -1,6 +1,7 @@
 import { ALL_PERMISSIONS, SUPER_ADMIN_ONLY_PERMISSIONS, type Permission } from './permissions.js';
 
 export type SystemRoleName =
+  | 'Chat Receptionist'
   | 'Owner'
   | 'Manager'
   | 'Operations'
@@ -213,6 +214,12 @@ const bookkeeperPermissions: Permission[] = [
 ];
 
 export const SYSTEM_ROLES: SystemRoleDefinition[] = [
+  {
+    name: 'Chat Receptionist',
+    description:
+      'Handles incoming chats, replies and assignments. Set member access to all stores to cover the full inbox.',
+    permissions: ['chat.view_team', 'chat.reply', 'chat.assign'],
+  },
   { name: 'Owner', description: 'Full control of the business', permissions: ownerPermissions },
   {
     name: 'Manager',
