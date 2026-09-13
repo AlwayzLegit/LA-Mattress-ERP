@@ -10,9 +10,15 @@
  *      the same row;
  *   2. creates the missing top-level categories and subcategories;
  *   3. moves each product whose SKU is in the file onto its subcategory
- *      (or the top-level category when the file leaves SUBCATEGORY empty);
- *   4. deletes a legacy code category that ends up with no products and no
- *      children (RF folds into Services & Fees), and writes one audit row.
+ *      (or the top-level category when the file leaves SUBCATEGORY empty),
+ *      and files an As-Is sibling the file does not name (`<SKU>-AS`,
+ *      `<SKU>-PROMO-AS`) with its base product;
+ *   4. prunes every category the file does not name once nothing points at
+ *      it — the legacy code categories (RF folds into Services & Fees), the
+ *      STORIS GROUP codes an earlier import created (CAKING, CKADJ, …) and
+ *      stray names from connector syncs ("Bed in a Box") — deepest first. A
+ *      stray category that still holds products the file does not name is
+ *      reported and left alone; then writes one audit row.
  *
  * Idempotent: a second run reports 0 changes. `--mode validate` runs the
  * whole plan inside a transaction and rolls it back, so the numbers it
@@ -26,7 +32,7 @@
  *     --mode validate --expect-rows 1948
  */
 import { readFileSync } from 'node:fs';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -43,6 +49,8 @@ export interface CategorizeOptions {
   mode: 'validate' | 'commit';
   /** Exact data-row count the file must have; a mismatch fails before any read of the database. */
   expectRows?: number;
+  /** Delete empty categories the file does not name (default true). Off for partial files. */
+  prune?: boolean;
   log?: (line: string) => void;
 }
 
@@ -59,7 +67,14 @@ export interface CategorizeSummary {
   created: string[];
   assigned: number;
   unchanged: number;
+  /** As-Is siblings (`-AS`) the file does not name, filed with their base product. */
+  derived: number;
+  /** Legacy CATG code categories that emptied and went. */
   deletedLegacy: string[];
+  /** Other categories the file does not name that emptied and went (paths). */
+  deletedStray: string[];
+  /** Categories the file does not name that still hold products it does not name. */
+  strayKept: { path: string; products: number }[];
 }
 
 export class CategorizeGateError extends Error {
@@ -154,7 +169,7 @@ export async function runCategorizeProducts(opts: CategorizeOptions): Promise<Ca
 
     try {
       return await db.transaction(async (tx) => {
-        const summary = await apply(tx, biz.id, rows, opts.mode, log);
+        const summary = await apply(tx, biz.id, rows, opts.mode, opts.prune ?? true, log);
         if (opts.mode === 'validate') throw new Rollback(summary);
         return summary;
       });
@@ -177,6 +192,7 @@ async function apply(
   businessId: string,
   rows: MappingRow[],
   mode: 'validate' | 'commit',
+  prune: boolean,
   log: (line: string) => void,
 ): Promise<CategorizeSummary> {
   const summary: CategorizeSummary = {
@@ -189,7 +205,10 @@ async function apply(
     created: [],
     assigned: 0,
     unchanged: 0,
+    derived: 0,
     deletedLegacy: [],
+    deletedStray: [],
+    strayKept: [],
   };
 
   // --- products by SKU -------------------------------------------------
@@ -293,9 +312,10 @@ async function apply(
     log(`Created category "${parentName} / ${name}"`);
     return row!.id;
   };
+  const keyOf = (r: MappingRow) => `${r.category}\u0000${r.subcategory ?? ''}`;
   const targetFor = new Map<string, string>();
   for (const r of rows) {
-    const key = `${r.category} ${r.subcategory ?? ''}`;
+    const key = keyOf(r);
     if (targetFor.has(key)) continue;
     const rootId = await ensureRoot(r.category);
     targetFor.set(
@@ -309,7 +329,7 @@ async function apply(
   for (const r of rows) {
     const p = bySku.get(r.sku);
     if (!p) continue;
-    const target = targetFor.get(`${r.category} ${r.subcategory ?? ''}`)!;
+    const target = targetFor.get(keyOf(r))!;
     if (p.categoryId === target) {
       summary.unchanged += 1;
       continue;
@@ -319,6 +339,21 @@ async function apply(
     moves.set(target, list);
     summary.assigned += 1;
   }
+  // 3b. As-Is siblings the export never lists (STORIS carried "<SKU>-AS"
+  //     and "<SKU>-PROMO-AS" as their own products): file each with the
+  //     product it was split from.
+  const targetOfSku = new Map<string, string>();
+  for (const r of rows) targetOfSku.set(r.sku, targetFor.get(keyOf(r))!);
+  for (const p of products) {
+    if (!p.sku || fileSkus.has(p.sku) || !/-AS$/i.test(p.sku)) continue;
+    const base = p.sku.slice(0, -3);
+    const target = targetOfSku.get(base) ?? targetOfSku.get(base.replace(/-PROMO$/i, ''));
+    if (!target || p.categoryId === target) continue;
+    const list = moves.get(target) ?? [];
+    list.push(p.id);
+    moves.set(target, list);
+    summary.derived += 1;
+  }
   for (const [categoryId, ids] of moves) {
     for (let i = 0; i < ids.length; i += 500) {
       await tx
@@ -327,30 +362,78 @@ async function apply(
         .where(inArray(schema.products.id, ids.slice(i, i + 500)));
     }
   }
-  log(`Assigned ${summary.assigned} products, ${summary.unchanged} already in place`);
+  log(
+    `Assigned ${summary.assigned} products, ${summary.unchanged} already in place, ` +
+      `${summary.derived} As-Is siblings filed with their base product`,
+  );
 
-  // 4. Drop legacy code categories that are now empty leaves.
-  for (const id of legacyRoots) {
-    const [row] = await tx
-      .select({ name: schema.categories.name })
+  // 4. Prune. Everything the file names is canonical: its roots and
+  //    subcategories (the renamed code categories are those roots now).
+  //    Any other category — a code category that emptied (RF), a STORIS
+  //    GROUP code the pre-#134 import created (CAKING, CKADJ, DINE, …), a
+  //    connector product type ("Bed in a Box") — goes once it holds no
+  //    products and no children, deepest first. One still holding products
+  //    the file does not name is reported and left for the next mapping.
+  if (prune) {
+    const canonical = new Set<string>(targetFor.values());
+    for (const name of topOrder) canonical.add(roots.get(norm(name))!.id);
+    const current = await tx
+      .select({
+        id: schema.categories.id,
+        parentId: schema.categories.parentId,
+        name: schema.categories.name,
+      })
       .from(schema.categories)
-      .where(eq(schema.categories.id, id))
-      .limit(1);
-    if (!row || !(row.name.toUpperCase() in LEGACY_CATEGORY_NAMES)) continue;
-    const [productCount] = await tx
-      .select({ n: sql<number>`count(*)::int` })
+      .where(eq(schema.categories.businessId, businessId));
+    const counts = new Map<string, number>();
+    for (const c of await tx
+      .select({ categoryId: schema.products.categoryId, n: sql<number>`count(*)::int` })
       .from(schema.products)
-      .where(eq(schema.products.categoryId, id));
-    const [childCount] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(schema.categories)
-      .where(eq(schema.categories.parentId, id));
-    if ((productCount?.n ?? 0) === 0 && (childCount?.n ?? 0) === 0) {
-      await tx
-        .delete(schema.categories)
-        .where(and(eq(schema.categories.id, id), isNull(schema.categories.parentId)));
-      summary.deletedLegacy.push(row.name);
-      log(`Deleted empty legacy category "${row.name}"`);
+      .where(eq(schema.products.businessId, businessId))
+      .groupBy(schema.products.categoryId)) {
+      if (c.categoryId) counts.set(c.categoryId, c.n);
+    }
+    const byId = new Map(current.map((c) => [c.id, c]));
+    const kids = new Map<string, string[]>();
+    for (const c of current) {
+      if (!c.parentId) continue;
+      kids.set(c.parentId, [...(kids.get(c.parentId) ?? []), c.id]);
+    }
+    const pathOf = (id: string): string => {
+      const names: string[] = [];
+      let cur: string | null | undefined = id;
+      while (cur && byId.has(cur) && names.length < 8) {
+        names.unshift(byId.get(cur)!.name);
+        cur = byId.get(cur)!.parentId;
+      }
+      return names.join(' / ');
+    };
+    const visit = async (id: string): Promise<boolean> => {
+      // Returns true when the category is gone (or was never stray).
+      let childrenGone = true;
+      for (const child of kids.get(id) ?? []) if (!(await visit(child))) childrenGone = false;
+      if (canonical.has(id)) return false;
+      const row = byId.get(id)!;
+      const held = counts.get(id) ?? 0;
+      if (held > 0 || !childrenGone) {
+        if (held > 0) summary.strayKept.push({ path: pathOf(id), products: held });
+        return false;
+      }
+      await tx.delete(schema.categories).where(eq(schema.categories.id, id));
+      if (row.parentId === null && row.name.toUpperCase() in LEGACY_CATEGORY_NAMES) {
+        summary.deletedLegacy.push(row.name);
+        log(`Deleted empty legacy category "${row.name}"`);
+      } else {
+        summary.deletedStray.push(pathOf(id));
+        log(`Deleted empty stray category "${pathOf(id)}"`);
+      }
+      return true;
+    };
+    for (const c of current) if (c.parentId === null) await visit(c.id);
+    summary.strayKept.sort((a, b) => a.path.localeCompare(b.path));
+    if (summary.strayKept.length > 0) {
+      log(`Stray categories still holding products the file does not name (left alone):`);
+      for (const k of summary.strayKept) log(`  ${k.path}: ${k.products}`);
     }
   }
 
@@ -370,7 +453,10 @@ async function apply(
       created: summary.created,
       assigned: summary.assigned,
       unchanged: summary.unchanged,
+      derived: summary.derived,
       deletedLegacy: summary.deletedLegacy,
+      deletedStray: summary.deletedStray,
+      strayKept: summary.strayKept,
     },
   });
   return summary;
@@ -426,7 +512,9 @@ async function main() {
     });
     process.stdout.write(
       `Summary: ${s.matched}/${s.rowCount} matched, ${s.assigned} assigned, ${s.unchanged} unchanged, ` +
+        `${s.derived} As-Is siblings filed, ` +
         `${s.renamed.length} renamed, ${s.created.length} created, ${s.deletedLegacy.length} legacy removed, ` +
+        `${s.deletedStray.length} stray removed, ${s.strayKept.length} stray kept, ` +
         `${s.unmatchedSkus.length} file SKUs not carried, ${s.unlistedSkus.length} products not in file\n`,
     );
   } catch (err) {
