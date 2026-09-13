@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
@@ -279,6 +280,10 @@ interface OrderPaymentBody {
   processorRef?: string;
   financingProvider?: string;
   financingRef?: string;
+  /** Card tenders: 'visa' | 'mastercard' | 'amex' | 'discover' | 'jcb' | 'diners' | 'other'. */
+  cardBrand?: string;
+  /** Financing tenders: the promo term signed — 6 | 12 | 15 | 18 | 24 | 36 | 48. */
+  financingMonths?: number;
 }
 
 /** Body of PATCH /orders/:id/lines/:lineId (money fields + A20 line details). */
@@ -382,6 +387,8 @@ interface OrderPaymentRow {
   processorRef: string | null;
   financingProvider: string | null;
   financingRef: string | null;
+  cardBrand: string | null;
+  financingMonths: number | null;
   createdAt: Date;
 }
 
@@ -2650,6 +2657,8 @@ export class OrdersController {
           processorRef: p.processorRef,
           financingProvider: p.financingProvider,
           financingRef: p.financingRef,
+          cardBrand: p.cardBrand,
+          financingMonths: p.financingMonths,
           status: 'succeeded',
           createdAt: p.createdAt,
         });
@@ -3372,6 +3381,26 @@ export class OrdersController {
     if (body.method === 'financing' && !body.financingProvider) {
       throw new BadRequestException('financing payments must name a financingProvider');
     }
+    // Tender subcategories: brand goes with card tenders, term with
+    // financing tenders — a value on the wrong method is a client bug.
+    if (body.cardBrand !== undefined) {
+      if (!isCardMethod(body.method)) {
+        throw new BadRequestException('cardBrand only applies to card payments');
+      }
+      if (!isCardBrand(body.cardBrand)) {
+        throw new BadRequestException(
+          'cardBrand must be one of: visa, mastercard, amex, discover, jcb, diners, other',
+        );
+      }
+    }
+    if (body.financingMonths !== undefined) {
+      if (!isFinancingMethod(body.method)) {
+        throw new BadRequestException('financingMonths only applies to financing payments');
+      }
+      if (!Number.isInteger(body.financingMonths) || !isFinancingTerm(body.financingMonths)) {
+        throw new BadRequestException('financingMonths must be one of: 6, 12, 15, 18, 24, 36, 48');
+      }
+    }
 
     const existing = await this.db
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
@@ -3484,6 +3513,8 @@ export class OrdersController {
           processorRef: body.processorRef ?? null,
           financingProvider: body.financingProvider ?? null,
           financingRef: body.financingRef ?? null,
+          cardBrand: body.cardBrand ?? null,
+          financingMonths: body.financingMonths ?? null,
           status: 'succeeded',
         })
         .returning();
@@ -5448,6 +5479,8 @@ export class OrdersController {
         processorRef: p.processorRef,
         financingProvider: p.financingProvider,
         financingRef: p.financingRef,
+        cardBrand: p.cardBrand,
+        financingMonths: p.financingMonths,
         createdAt: p.createdAt,
       })),
     };

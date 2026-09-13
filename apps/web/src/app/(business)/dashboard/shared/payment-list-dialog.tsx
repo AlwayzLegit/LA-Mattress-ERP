@@ -2,10 +2,46 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { cardBrandLabel } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { ShimmerRows, usdWhole } from '../owner/owner-kit';
 import { dayShort, docHref, plural, rangeLabel, stamp, tenderMeta } from './kit';
-import type { PaymentListResponse, StorePeriod } from './types';
+import type { CashPaymentRow, PaymentListResponse, StorePeriod } from './types';
+
+/**
+ * Per-subcategory totals for the strip above the footer: card panels
+ * group by brand, financing panels by months signed. Untagged rows
+ * (recorded before brands/terms existed) group under "untagged" so the
+ * strip always sums to the panel total.
+ */
+function breakdown(rows: CashPaymentRow[]): { label: string; cents: number; count: number }[] {
+  const groups = new Map<string, { label: string; cents: number; count: number }>();
+  let tagged = 0;
+  for (const r of rows) {
+    const label = r.cardBrand
+      ? (cardBrandLabel(r.cardBrand) ?? r.cardBrand)
+      : r.financingMonths
+        ? `${r.financingMonths} mo`
+        : null;
+    if (!label) continue;
+    tagged++;
+    const g = groups.get(label) ?? { label, cents: 0, count: 0 };
+    g.cents += r.amountCents;
+    g.count += 1;
+    groups.set(label, g);
+  }
+  if (groups.size === 0) return [];
+  const out = [...groups.values()].sort((a, b) => b.cents - a.cents);
+  const untagged = rows.length - tagged;
+  if (untagged > 0) {
+    out.push({
+      label: 'untagged',
+      cents: rows.reduce((s, r) => s + r.amountCents, 0) - out.reduce((s, g) => s + g.cents, 0),
+      count: untagged,
+    });
+  }
+  return out;
+}
 
 /**
  * Screen 3 — the payment list behind a tender row (hand-off 2026-09-10):
@@ -137,6 +173,13 @@ export function PaymentListDialog({
                   <td style={{ color: 'var(--text2)' }}>{r.salespersonName ?? '—'}</td>
                   <td>
                     <div>{r.kind}</div>
+                    {(r.cardBrand || r.financingMonths) && (
+                      <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                        {r.cardBrand
+                          ? cardBrandLabel(r.cardBrand)
+                          : `${r.financingMonths} mo financing`}
+                      </div>
+                    )}
                     {method === 'cash' && (
                       <div
                         style={{
@@ -157,6 +200,30 @@ export function PaymentListDialog({
               ))}
             </tbody>
           </table>
+        )}
+        {data && breakdown(data.rows).length > 0 && (
+          <div
+            style={{
+              padding: '8px 16px',
+              borderTop: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text2)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '4px 14px',
+            }}
+            data-testid="payment-breakdown"
+          >
+            {breakdown(data.rows).map((b) => (
+              <span key={b.label}>
+                {b.label}{' '}
+                <span className="mono" style={{ fontWeight: 600 }}>
+                  {usdWhole(b.cents)}
+                </span>{' '}
+                <span style={{ color: 'var(--muted)' }}>({b.count})</span>
+              </span>
+            ))}
+          </div>
         )}
         {data && (
           <div className="dialog-foot" style={{ justifyContent: 'space-between', fontSize: 12.5 }}>

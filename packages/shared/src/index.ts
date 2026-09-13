@@ -5,3 +5,4 @@ export * from './reason-codes.js';
 export * from './collaboration.js';
 export * from './phone.js';
 export * from './catalog.js';
+export * from './tenders.js';
