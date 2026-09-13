@@ -891,7 +891,10 @@ export class CompetitionsService {
 
     const data = await this.loadMonth(businessId, month, tz, cfg);
     const names = await this.memberNames(businessId);
-    const competitors = await this.competitors(businessId);
+    // Today's roster only joins the live month. A closed month is what its
+    // ledger says: no zero-sale "winner" from an empty month, no rank for
+    // someone hired since.
+    const competitors = month === today.slice(0, 7) ? await this.competitors(businessId) : [];
     const subjects = this.buildSubjects(data, names, stores, competitors);
     const viewerStore = await this.viewerStore(tenant, stores, subjects);
     const meId = tenant.membershipId;
@@ -921,7 +924,8 @@ export class CompetitionsService {
         isYou: r.s.id === meId,
       }));
       const top = rows.filter((r) => r.rank !== null).slice(0, 3);
-      const leader = top[0] ?? null;
+      // A zero cannot lead a count race; fewest exchanges (with sales) can.
+      const leader = top[0] && (top[0].value > 0 || def.key === 'ex') ? top[0] : null;
       const mineRow = rows.find((r) => r.isYou) ?? null;
       const mine = mineRow && mineRow.rank !== null ? mineRow : null;
       const mineSubject = meId ? subjects.get(meId) : undefined;
@@ -943,27 +947,28 @@ export class CompetitionsService {
         prizeCents: card.prizePeopleCents,
         rows,
         top,
-        you: mine
-          ? {
-              rank: mine.rank,
-              value: mine.value,
-              valueLabel: mine.valueLabel,
-              gap:
-                mine.rank === 1
-                  ? 'you lead'
-                  : this.gapText(def.key, leader!.value, mine.value, leader!.name),
-            }
-          : meId
+        you:
+          mine && leader
             ? {
-                rank: null,
-                value: null,
-                valueLabel: mineRow?.valueLabel ?? '—',
+                rank: mine.rank,
+                value: mine.value,
+                valueLabel: mine.valueLabel,
                 gap:
-                  def.key === 'ex' && mineSubject && mineSubject.sales === 0
-                    ? 'sell one to be ranked'
-                    : 'nothing yet',
+                  mine.rank === 1
+                    ? 'you lead'
+                    : this.gapText(def.key, leader.value, mine.value, leader.name),
               }
-            : null,
+            : meId
+              ? {
+                  rank: mine?.rank ?? null,
+                  value: mine?.value ?? null,
+                  valueLabel: mineRow?.valueLabel ?? '—',
+                  gap:
+                    def.key === 'ex' && mineSubject && mineSubject.sales === 0
+                      ? 'sell one to be ranked'
+                      : 'nothing yet',
+                }
+              : null,
         unranked:
           def.key === 'ex' && mineSubject && mineSubject.sales === 0
             ? 'sell one to be ranked'
@@ -1400,12 +1405,14 @@ export class CompetitionsService {
           rank,
         });
         const before = prev.get(`${def.key}:${r.s.id}`);
+        // A zero-sale row shuffling down when someone sells is not an overtake.
         if (
           cfg.visibility.notices &&
           before != null &&
           rank > before &&
           r.s.id !== order?.repId &&
-          i > 0
+          i > 0 &&
+          (r.v > 0 || def.key === 'ex')
         ) {
           const leader = ranked[0]!;
           const passer = ranked[i - 1]!;

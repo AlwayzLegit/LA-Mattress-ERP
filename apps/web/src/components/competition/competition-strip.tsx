@@ -322,7 +322,7 @@ function RaceCardView({
 }) {
   const you = card.you;
   // Day one keeps each card's own empty copy instead of a column of zeros.
-  const empty = card.rows.length === 0 || (board.isDayOne && card.top.length === 0);
+  const empty = card.rows.length === 0 || board.isDayOne;
   // Collapsed keeps the top three; expanded lists everyone who competes.
   const shown = collapsed ? card.top : card.rows;
   return (

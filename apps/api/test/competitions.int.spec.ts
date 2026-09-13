@@ -258,10 +258,16 @@ describe('GET /v1/competitions/current', () => {
     expect(you.gap).toMatch(/behind Priya/);
   });
 
-  it('prints a people-only winners sheet', async () => {
+  it('prints a people-only winners sheet, and an empty past month crowns nobody', async () => {
     const res = await as('owner').get('/v1/competitions/sheet').expect(200);
     expect(res.body).not.toHaveProperty('stores');
     expect(res.body).not.toHaveProperty('storesLine');
-    expect(Array.isArray(res.body.winners)).toBe(true);
+    // Last month had no orders: today's roster must not be seeded into it
+    // and frozen as zero-sale winners.
+    const winners = res.body.winners as { race: string; name: string | null }[];
+    expect(winners).toHaveLength(6);
+    expect(winners.every((w) => w.name === null)).toBe(true);
+    const history = await as('owner').get('/v1/competitions/history').expect(200);
+    expect(history.body).toEqual([]);
   });
 });
