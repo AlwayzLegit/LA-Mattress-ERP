@@ -1796,7 +1796,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
     // ---- Sales competitions (Phase 11) ----
     if (p.startsWith('/v1/competitions/')) {
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, string>) : {};
-      const scope = q.get('scope') === 'stores' ? 'stores' : 'people';
       const dim = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0).getDate();
       const dom = Number(today.slice(8, 10));
       const daysLeft = Math.max(0, dim - dom);
@@ -1811,6 +1810,9 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         ['p-geoff', 'Geoff Lam', 'kt'],
         ['p-wayne', 'Wayne Brooks', 'lb'],
         ['p-brandon', 'Brandon Cole', 'sc'],
+        // Two people with nothing yet: on every card, unranked, under the rest.
+        ['p-nadia', 'Nadia Okafor', 'kt'],
+        ['p-theo', 'Theo Marsh', 'wl'],
       ] as const;
       const STAT: Record<
         string,
@@ -1830,6 +1832,8 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         'p-geoff': { leads: [3, 8], sales: 9, net: 1_720_000, high: 410_000, beds: 2, ex: 1 },
         'p-wayne': { leads: [2, 4], sales: 6, net: 1_160_000, high: 390_000, beds: 1, ex: 0 },
         'p-brandon': { leads: [1, 6], sales: 8, net: 1_984_000, high: 736_000, beds: 3, ex: 0 },
+        'p-nadia': { leads: [0, 2], sales: 0, net: 0, high: 0, beds: 0, ex: 0 },
+        'p-theo': { leads: [0, 0], sales: 0, net: 0, high: 0, beds: 0, ex: 0 },
       };
       const CODE: Record<string, string> = { gl: 'GL', wl: 'WL', sc: 'SC', kt: 'KT', lb: 'LB' };
       const usd = (c: number) => `$${Math.round(c / 100).toLocaleString('en-US')}`;
@@ -1846,39 +1850,14 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
         beds: number;
         ex: number;
       };
-      let subjects: Subj[] = PEOPLE.map(([id, name, st]) => ({
+      const subjects: Subj[] = PEOPLE.map(([id, name, st]) => ({
         id,
         name,
         storeId: st,
         storeName: STORES.find((s) => s.id === st)!.name,
         ...STAT[id]!,
       }));
-      if (scope === 'stores') {
-        const byStore = new Map<string, Subj>();
-        for (const s of subjects) {
-          const cur = byStore.get(s.storeId) ?? {
-            id: s.storeId,
-            name: s.storeName,
-            storeId: s.storeId,
-            storeName: s.storeName,
-            leads: [0, 0] as [number, number],
-            sales: 0,
-            net: 0,
-            high: 0,
-            beds: 0,
-            ex: 0,
-          };
-          cur.leads = [cur.leads[0] + s.leads[0], cur.leads[1] + s.leads[1]];
-          cur.sales += s.sales;
-          cur.net += s.net;
-          cur.high = Math.max(cur.high, s.high);
-          cur.beds += s.beds;
-          cur.ex += s.ex;
-          byStore.set(s.storeId, cur);
-        }
-        subjects = [...byStore.values()];
-      }
-      const meId = scope === 'people' ? 'm1' : 'gl';
+      const meId = 'm1';
       const defs = [
         {
           key: 'leads',
@@ -1941,18 +1920,29 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
           empty: 'Nobody has sold, so nobody is ranked. Sell first.',
         },
       ] as const;
-      const metric = (s: Subj, k: string) =>
+      // null = the race cannot rank this person yet (mirrors the API).
+      const metric = (s: Subj, k: string): number | null =>
         k === 'leads'
-          ? s.leads[0]
+          ? s.leads[0] > 0 || s.sales > 0
+            ? s.leads[0]
+            : null
           : k === 'avg'
-            ? Math.round(s.net / s.sales)
+            ? s.sales
+              ? Math.round(s.net / s.sales)
+              : null
             : k === 'high'
-              ? s.high
+              ? s.sales
+                ? s.high
+                : null
               : k === 'sales'
                 ? s.sales
                 : k === 'beds'
-                  ? s.beds
-                  : s.ex;
+                  ? s.beds > 0 || s.sales > 0
+                    ? s.beds
+                    : null
+                  : s.sales
+                    ? s.ex
+                    : null;
       const fmt = (v: number, k: string) => (k === 'avg' || k === 'high' ? usd(v) : String(v));
       const detail = (s: Subj, k: string) =>
         k === 'leads'
@@ -1980,19 +1970,25 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
       };
       const leadCount = new Map<string, number>();
       const cards = defs.map((d) => {
-        const ranked = subjects
-          .map((s) => ({ s, v: metric(s, d.key) }))
-          .sort((a, b) => (d.key === 'ex' ? a.v - b.v : b.v - a.v) || b.s.net - a.s.net);
-        const rows = ranked.map((r, i) => ({
+        const all = subjects.map((s) => ({ s, v: metric(s, d.key) }));
+        const ranked = all
+          .filter((r): r is { s: Subj; v: number } => r.v !== null)
+          .sort((a, b) => (d.key === 'ex' ? a.v - b.v : b.v - a.v) || b.s.net - a.s.net)
+          .map((r, i) => ({ ...r, rank: (i + 1) as number | null }));
+        const rest = all
+          .filter((r) => r.v === null)
+          .sort((a, b) => a.s.name.localeCompare(b.s.name))
+          .map((r) => ({ ...r, v: 0, rank: null }));
+        const rows = [...ranked, ...rest].map((r, i) => ({
           id: r.s.id,
           name: r.s.name,
           storeId: r.s.storeId,
           storeCode: CODE[r.s.storeId] ?? null,
           storeName: r.s.storeName,
-          rank: i + 1,
+          rank: r.rank,
           value: r.v,
-          valueLabel: fmt(r.v, d.key),
-          detail: detail(r.s, d.key),
+          valueLabel: r.rank === null && d.key !== 'sales' ? '—' : fmt(r.v, d.key),
+          detail: r.rank === null ? 'no sales yet' : detail(r.s, d.key),
           netCents: r.s.net,
           sales: r.s.sales,
           spark: Array.from({ length: 10 }, (_, j) =>
@@ -2020,7 +2016,7 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
           on: true,
           prizeCents: 10_000,
           rows,
-          top: rows.slice(0, 3),
+          top: rows.filter((r) => r.rank !== null).slice(0, 3),
           you: mine
             ? {
                 rank: mine.rank,
@@ -2053,8 +2049,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
           endsAt: `${new Date(`${today.slice(0, 7)}-${dim}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, 11:59 PM`,
           last48: daysLeft <= 2 && daysLeft > 0,
           isDayOne: false,
-          scope,
-          scopes: ['people', 'stores'],
           config: {
             prizeCents: 10_000,
             sweep: { four: 100_000, five: 150_000, six: 200_000 },
@@ -2068,7 +2062,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
             storeId: 'gl',
             storeName: 'Glendale',
             canLog: opts.role !== 'warehouse' && opts.role !== 'ops',
-            defaultScope: opts.role === 'owner' ? 'stores' : 'people',
           },
           cards,
           sweep:
@@ -2101,7 +2094,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
                     },
                   ],
                   until: `${today.slice(0, 7)}-03`,
-                  storesLine: 'Stores race: Studio City took 3 of 6. Store prize to the manager.',
                 }
               : null,
         });
@@ -2131,7 +2123,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
                 'La Brea',
               ][i],
               result: ['9 converted', '$2,480 avg', '$11,400', '21 sales', '8 beds', '0 of 9'][i],
-              storeWinner: 'Studio City',
               yourRank: [4, 3, 5, 3, 3, 4][i],
               paid: 'paid Sep 5',
             },
@@ -2143,7 +2134,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
               winner: 'Elyse Nakamura',
               winnerStore: 'Studio City',
               result: ['7 converted', '$2,310 avg', '$9,800', '18 sales', '6 beds', '0 of 12'][i],
-              storeWinner: 'Glendale',
               yourRank: 2,
               paid: 'paid Aug 5',
             },
@@ -2156,8 +2146,6 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
           label: 'August 2026',
           payoutLabel: 'September 5',
           prizeCents: 10_000,
-          storesLine: 'Stores race: Studio City took 3 of 6. Store prize to the manager.',
-          stores: [],
           winners: [
             {
               race: 'leads',

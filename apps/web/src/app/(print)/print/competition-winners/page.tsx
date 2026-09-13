@@ -89,7 +89,7 @@ function Sheet() {
               </div>
             ))}
             <div className="cw-foot">
-              <span>{data.storesLine ?? 'People race only this month.'}</span>
+              <span>People race.</span>
               <span>Next month is live — check the strip.</span>
             </div>
           </>

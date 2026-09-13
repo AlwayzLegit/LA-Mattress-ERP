@@ -814,6 +814,19 @@ Sales competitions are Phase 11.
 
 ## Phase 11 — Sales competitions (2026-09-12)
 
+> **Amendment 2026-09-13 (owner):** _people only, everyone listed._ The Stores race is
+> retired: no People | Stores toggle, no store prizes, no store winner column in History, no
+> stores line on the banner or the printable sheet; `?scope` is gone from
+> `GET /v1/competitions/current` and `races` / `prizeStoreCents` are no longer settings (a
+> stored value is ignored). Every active member whose role can log a lead
+> (`competitions.leads.log` — Owner, Manager, Cashier by default) is on every card from day
+> one, sales or not: the ranked rows come first, then the people the race cannot rank yet
+> (no sales for a $ race or Least Exchanges; neither a lead nor a sale for a count race) in
+> name order with `rank: null`, "—" for a $ value and "no sales yet" as the secondary. The
+> strip lists everyone when expanded and the top three when collapsed; the leaderboard
+> lists everyone; day one keeps the empty copy. `competition_results.scope` and
+> `competition_ranks.scope` keep the value `people`.
+
 **Branch:** `claude/new-session-q4kc7l` · **Scope:** README §3.6 / canvas 10 (`Proto Competition`,
 `Redesign 10 Competitions`): the strip above every role home, six races for People and Stores,
 the leaderboard, leads (form, list, auto-conversion, attach by hand), the winner banner and
