@@ -12,7 +12,10 @@
  *   3. moves each product whose SKU is in the file onto its subcategory
  *      (or the top-level category when the file leaves SUBCATEGORY empty),
  *      and files an As-Is sibling the file does not name (`<SKU>-AS`,
- *      `<SKU>-PROMO-AS`) with its base product;
+ *      `<SKU>-PROMO-AS`) with its base product; a product the file does
+ *      not name that sits in a stray category the tree can read (a STORIS
+ *      GROUP code, a connector product type — `stray-categories.ts`)
+ *      moves to that branch;
  *   4. prunes every category the file does not name once nothing points at
  *      it — the legacy code categories (RF folds into Services & Fees), the
  *      STORIS GROUP codes an earlier import created (CAKING, CKADJ, …) and
@@ -39,6 +42,7 @@ import postgres from 'postgres';
 import { schema } from '@jetnine/db';
 import { LEGACY_CATEGORY_NAMES } from '../import/legacy-categories';
 import { resolveImportFile } from './catalog-import';
+import { classifyStray } from './stray-categories';
 
 export { LEGACY_CATEGORY_NAMES } from '../import/legacy-categories';
 
@@ -69,6 +73,8 @@ export interface CategorizeSummary {
   unchanged: number;
   /** As-Is siblings (`-AS`) the file does not name, filed with their base product. */
   derived: number;
+  /** Unlisted products moved out of a stray category the tree can read (`stray-categories.ts`). */
+  aliased: number;
   /** Legacy CATG code categories that emptied and went. */
   deletedLegacy: string[];
   /** Other categories the file does not name that emptied and went (paths). */
@@ -206,6 +212,7 @@ async function apply(
     assigned: 0,
     unchanged: 0,
     derived: 0,
+    aliased: 0,
     deletedLegacy: [],
     deletedStray: [],
     strayKept: [],
@@ -216,6 +223,7 @@ async function apply(
     .select({
       id: schema.products.id,
       sku: schema.products.sku,
+      name: schema.products.name,
       categoryId: schema.products.categoryId,
     })
     .from(schema.products)
@@ -342,6 +350,7 @@ async function apply(
   // 3b. As-Is siblings the export never lists (STORIS carried "<SKU>-AS"
   //     and "<SKU>-PROMO-AS" as their own products): file each with the
   //     product it was split from.
+  const moved = new Set<string>();
   const targetOfSku = new Map<string, string>();
   for (const r of rows) targetOfSku.set(r.sku, targetFor.get(keyOf(r))!);
   for (const p of products) {
@@ -353,7 +362,38 @@ async function apply(
     list.push(p.id);
     moves.set(target, list);
     summary.derived += 1;
+    moved.add(p.id);
   }
+
+  // 3c. Products the file does not name, sitting in a stray category the
+  //     tree can read (STORIS GROUP codes, connector product types): move
+  //     each to the branch the code and its name say (stray-categories.ts).
+  const canonicalIds = new Set<string>(targetFor.values());
+  for (const name of topOrder) canonicalIds.add(roots.get(norm(name))!.id);
+  const categoryName = new Map(all.map((c) => [c.id, c.name]));
+  const aliasCounts = new Map<string, number>();
+  for (const p of products) {
+    if (!p.categoryId || moved.has(p.id) || (p.sku && fileSkus.has(p.sku))) continue;
+    if (canonicalIds.has(p.categoryId)) continue;
+    const stray = categoryName.get(p.categoryId);
+    const where = stray ? classifyStray(stray, p.name) : null;
+    if (!where) continue;
+    const rootHit = roots.get(norm(where.category));
+    const target = where.subcategory
+      ? rootHit
+        ? children.get(rootHit.id)?.get(norm(where.subcategory))?.id
+        : undefined
+      : rootHit?.id;
+    if (!target || target === p.categoryId) continue;
+    const list = moves.get(target) ?? [];
+    list.push(p.id);
+    moves.set(target, list);
+    moved.add(p.id);
+    summary.aliased += 1;
+    const label = `${stray} -> ${where.category}${where.subcategory ? ` / ${where.subcategory}` : ''}`;
+    aliasCounts.set(label, (aliasCounts.get(label) ?? 0) + 1);
+  }
+  for (const [label, n] of [...aliasCounts].sort()) log(`Stray ${label}: ${n}`);
   for (const [categoryId, ids] of moves) {
     for (let i = 0; i < ids.length; i += 500) {
       await tx
@@ -364,7 +404,8 @@ async function apply(
   }
   log(
     `Assigned ${summary.assigned} products, ${summary.unchanged} already in place, ` +
-      `${summary.derived} As-Is siblings filed with their base product`,
+      `${summary.derived} As-Is siblings filed with their base product, ` +
+      `${summary.aliased} moved out of stray categories`,
   );
 
   // 4. Prune. Everything the file names is canonical: its roots and
@@ -375,8 +416,7 @@ async function apply(
   //    products and no children, deepest first. One still holding products
   //    the file does not name is reported and left for the next mapping.
   if (prune) {
-    const canonical = new Set<string>(targetFor.values());
-    for (const name of topOrder) canonical.add(roots.get(norm(name))!.id);
+    const canonical = canonicalIds;
     const current = await tx
       .select({
         id: schema.categories.id,
@@ -454,6 +494,7 @@ async function apply(
       assigned: summary.assigned,
       unchanged: summary.unchanged,
       derived: summary.derived,
+      aliased: summary.aliased,
       deletedLegacy: summary.deletedLegacy,
       deletedStray: summary.deletedStray,
       strayKept: summary.strayKept,
@@ -512,7 +553,7 @@ async function main() {
     });
     process.stdout.write(
       `Summary: ${s.matched}/${s.rowCount} matched, ${s.assigned} assigned, ${s.unchanged} unchanged, ` +
-        `${s.derived} As-Is siblings filed, ` +
+        `${s.derived} As-Is siblings filed, ${s.aliased} moved out of stray categories, ` +
         `${s.renamed.length} renamed, ${s.created.length} created, ${s.deletedLegacy.length} legacy removed, ` +
         `${s.deletedStray.length} stray removed, ${s.strayKept.length} stray kept, ` +
         `${s.unmatchedSkus.length} file SKUs not carried, ${s.unlistedSkus.length} products not in file\n`,

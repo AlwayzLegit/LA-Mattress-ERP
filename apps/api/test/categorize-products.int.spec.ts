@@ -127,13 +127,37 @@ beforeAll(async () => {
     { businessId, sku: '7703-6/6-AS', name: 'E KING MICAH FIRM AS-IS', categoryId: caking!.id },
     { businessId, sku: '10203261-PROMO-AS', name: 'TEMPUR PROMO AS-IS', categoryId: caking!.id },
   ]);
-  const [bib] = await db
+  // Strays the tree can read (stray-categories.ts) empty into it: a
+  // GROUP code refined by the name, a connector product type. "Gizmos"
+  // says nothing the tree knows, so its product stays and it is reported.
+  const [qufnd] = await db
     .insert(schema.categories)
-    .values({ businessId, name: 'Bed in a Box', position: 91 })
+    .values({ businessId, name: 'QUFND', position: 91 })
     .returning();
-  await db
-    .insert(schema.products)
-    .values({ businessId, sku: 'BIB-NEW', name: 'New bed in a box', categoryId: bib!.id });
+  const [queen] = await db
+    .insert(schema.categories)
+    .values({ businessId, name: 'QUEEN', position: 92 })
+    .returning();
+  const [hybridType] = await db
+    .insert(schema.categories)
+    .values({ businessId, name: 'Hybrid Mattress', position: 93 })
+    .returning();
+  const [gizmos] = await db
+    .insert(schema.categories)
+    .values({ businessId, name: 'Gizmos', position: 94 })
+    .returning();
+  await db.insert(schema.products).values([
+    { businessId, sku: 'NEW-FND-LP', name: 'QUEEN LP FND 5"', categoryId: qufnd!.id },
+    { businessId, sku: 'NEW-Q-LATEX', name: 'QUEEN NATASHA LATEX PLUSH', categoryId: queen!.id },
+    { businessId, sku: 'NEW-Q-PLAIN', name: 'QUEEN COBALT FIRM', categoryId: queen!.id },
+    {
+      businessId,
+      sku: 'helix-midnight-luxe-queen',
+      name: 'Helix Midnight Luxe Queen',
+      categoryId: hybridType!.id,
+    },
+    { businessId, sku: 'BIB-NEW', name: 'New bed in a box', categoryId: gizmos!.id },
+  ]);
 }, 300_000);
 
 afterAll(async () => {
@@ -166,16 +190,25 @@ describe('product-categories.csv (A22.1)', () => {
     });
     expect(s.matched).toBe(ROWS);
     expect(s.unmatchedSkus).toEqual([]);
-    expect([...s.unlistedSkus].sort()).toEqual(['10203261-PROMO-AS', '7703-6/6-AS', 'BIB-NEW']);
+    expect([...s.unlistedSkus].sort()).toEqual([
+      '10203261-PROMO-AS',
+      '7703-6/6-AS',
+      'BIB-NEW',
+      'NEW-FND-LP',
+      'NEW-Q-LATEX',
+      'NEW-Q-PLAIN',
+      'helix-midnight-luxe-queen',
+    ]);
     expect(s.derived).toBe(2);
+    expect(s.aliased).toBe(4);
     // NONINV and RF both map to Services & Fees: NONINV is renamed, RF
     // empties into it and goes.
     expect(s.renamed).toHaveLength(10);
     expect(s.deletedLegacy).toEqual(['RF']);
     // The GROUP-code category empties once its SKU moves and goes; the
     // connector one still holds a product the file does not name.
-    expect(s.deletedStray).toEqual(['CAKING']);
-    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
+    expect([...s.deletedStray].sort()).toEqual(['CAKING', 'Hybrid Mattress', 'QUEEN', 'QUFND']);
+    expect(s.strayKept).toEqual([{ path: 'Gizmos', products: 1 }]);
     expect(s.created.length).toBeGreaterThan(30);
     expect(s.assigned + s.unchanged).toBe(ROWS);
     // Rolled back: the code categories are still there, nothing new.
@@ -226,10 +259,16 @@ describe('product-categories.csv (A22.1)', () => {
     expect(await pathOf('10203261-PROMO-AS')).toBe(await pathOf('10203261'));
     expect(s.derived).toBe(2);
     expect(await root('CAKING')).toBeNull();
-    expect(await root('Bed in a Box')).not.toBeNull();
-    expect(await pathOf('BIB-NEW')).toBe('Bed in a Box');
-    expect(s.deletedStray).toEqual(['CAKING']);
-    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
+    expect(await root('Gizmos')).not.toBeNull();
+    expect(await pathOf('BIB-NEW')).toBe('Gizmos');
+    expect(await pathOf('NEW-FND-LP')).toBe('Foundations & Box Springs › Low Profile (4–5")');
+    expect(await pathOf('NEW-Q-LATEX')).toBe('Mattresses › Latex');
+    expect(await pathOf('NEW-Q-PLAIN')).toBe('Mattresses');
+    expect(await pathOf('helix-midnight-luxe-queen')).toBe('Mattresses › Hybrid');
+    expect(s.aliased).toBe(4);
+    for (const gone of ['QUFND', 'QUEEN', 'Hybrid Mattress']) expect(await root(gone)).toBeNull();
+    expect([...s.deletedStray].sort()).toEqual(['CAKING', 'Hybrid Mattress', 'QUEEN', 'QUFND']);
+    expect(s.strayKept).toEqual([{ path: 'Gizmos', products: 1 }]);
     expect(await pathOf('10746131')).toBe('Mattresses › Hybrid'); // TEMPUR-Adapt 2.0 Medium Hybrid
     expect(await pathOf('10745130')).toBe('Mattresses › Memory Foam'); // TEMPUR-Adapt 2.0 Medium
     expect(await pathOf('LOLUFM-1010')).toBe('Mattresses › Latex'); // Diamond Lucille Latex Firm
@@ -274,11 +313,12 @@ describe('product-categories.csv (A22.1)', () => {
     expect(s.assigned).toBe(0);
     expect(s.unchanged).toBe(ROWS);
     expect(s.derived).toBe(0);
+    expect(s.aliased).toBe(0);
     expect(s.created).toEqual([]);
     expect(s.renamed).toEqual([]);
     expect(s.deletedLegacy).toEqual([]);
     expect(s.deletedStray).toEqual([]);
-    expect(s.strayKept).toEqual([{ path: 'Bed in a Box', products: 1 }]);
+    expect(s.strayKept).toEqual([{ path: 'Gizmos', products: 1 }]);
   }, 60_000);
 
   it('re-importing products.csv keeps the finer categories and creates no code category', async () => {
@@ -353,7 +393,7 @@ describe('product-categories.csv (A22.1)', () => {
     });
     expect(s.matched).toBe(1);
     expect(s.unmatchedSkus).toEqual(['NOT-A-SKU']);
-    expect(s.unlistedSkus).toHaveLength(ROWS + 2); // 1947 file SKUs + BIB-NEW + two As-Is
+    expect(s.unlistedSkus).toHaveLength(ROWS + 6); // 1947 file SKUs + the seven unlisted
     expect(s.unchanged).toBe(1);
     // A partial file names one branch, so an empty category anywhere else
     // reads as stray to the prune; prune: false leaves it for a full file.
