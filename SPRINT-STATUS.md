@@ -5610,3 +5610,8 @@ all 48 list routes against a seeded local stack (no page errors, headers carry
 That sweep caught a pre-existing crash: Reports → Merchandising read `/v1/categories` as
 an array-or-`{data}` while it returns `{ flat, tree }`, so the filter lookup was
 `undefined` and the page threw on `.map` — fixed in the same PR.
+Also in this PR: the four order-writer e2e tests still completed a sale with no money
+down and recorded a card tender without a brand, which #175's no-money completion gate
+and card-brand rule now refuse (main's E2E job has been red since that merge; its own
+run was cancelled by the next push). They now take a cash deposit at the register, pick
+the tender on the order page, and name the brand on the card deposit.

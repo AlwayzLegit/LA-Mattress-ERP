@@ -85,6 +85,28 @@ async function loginAndPickBusiness(page: import('@playwright/test').Page): Prom
 }
 
 /**
+ * Record a cash payment at the register. Complete stays disabled until the
+ * order carries money (no-money completion gate); cash needs no brand or
+ * term, so it is the shortest path through the payment panel.
+ */
+async function payCashAtRegister(page: Page, amount: string) {
+  await page.getByTestId('take-payment').click();
+  await page.getByTestId('pay-method').selectOption('cash');
+  await page.getByTestId('pay-amount').fill(amount);
+  await page.getByTestId('add-payment').click();
+  // The panel closes itself once the balance is paid; otherwise close it.
+  const done = page.getByTestId('pay-done');
+  if (await done.isVisible()) await done.click();
+}
+
+/** Record a cash payment on the full order page (card is the default tender and needs a brand). */
+async function payCashOnOrder(page: Page, amount: string) {
+  await page.getByTestId('order-pay-method').selectOption('cash');
+  await page.getByTestId('payment-amount').fill(amount);
+  await page.getByTestId('take-payment').click();
+}
+
+/**
  * Redesign Phase 6: `/orders/[id]` is the slide-over over the book — the
  * quick answer. Editing lines, taking money and scheduling happen on the
  * full order page at `/orders/[id]/full`.
@@ -117,12 +139,13 @@ test.describe('Day 2 — order writer', () => {
     await expect(result).toBeVisible();
     await result.click();
 
-    // ...and complete with no money down (deposit is taken on the detail page).
+    // ...take a $2.50 deposit (Complete needs money on the order), and complete.
+    await payCashAtRegister(page, '2.50');
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
 
-    // --- Detail: open, line reserved, no money yet ---
+    // --- Detail: open, line reserved, the register deposit on it ---
     await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
     await openFullOrder(page);
     const lineRow = page.locator('tbody tr').first();
@@ -133,13 +156,14 @@ test.describe('Day 2 — order writer', () => {
     await expect(lineRow.getByTestId('order-line-qty')).toHaveValue('1');
     await expect(lineRow).toContainText('1 reserved');
     await expect(lineRow.getByTestId('order-line-price')).toHaveValue('10.00');
-    await expect(page.getByTestId('balance-due')).toContainText('$10.00');
-
-    // --- Take the deposit ---
-    await page.getByTestId('payment-amount').fill('2.50');
-    await page.getByTestId('take-payment').click();
-    await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
+
+    // --- Take a second deposit on the detail page ---
+    await payCashOnOrder(page, '2.50');
+    // The register's money is the deposit; a later payment is against the balance.
+    await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
+    await expect(page.locator('tbody tr', { hasText: 'balance' })).toContainText('$2.50');
+    await expect(page.getByTestId('balance-due')).toContainText('$5.00');
     const orderId = /\/orders\/([0-9a-f-]{36})/.exec(page.url())![1]!;
 
     // --- Committed stock visible in inventory ---
@@ -167,10 +191,10 @@ test.describe('Day 2 — order writer', () => {
     await expect(page.getByTestId('activity-name')).toContainText('Dana Buyer');
     await page.getByTestId('activity-tab-open-orders').click();
     await expect(page.getByTestId('open-order-row')).toHaveCount(1);
-    await expect(page.getByTestId('sum-deposits')).toContainText('$2.50');
-    await expect(page.getByTestId('sum-unpaid')).toContainText('$7.50');
+    await expect(page.getByTestId('sum-deposits')).toContainText('$5.00');
+    await expect(page.getByTestId('sum-unpaid')).toContainText('$5.00');
     await page.getByTestId('activity-tab-deposits').click();
-    await expect(page.getByTestId('deposits-total')).toContainText('$2.50');
+    await expect(page.getByTestId('deposits-total')).toContainText('$5.00');
     await page.getByTestId('activity-tab-order-lines').click();
     await expect(page.getByTestId('order-line-row').first()).toContainText('Reserved');
   });
@@ -215,6 +239,7 @@ test.describe('Day 2 — order writer', () => {
     const result = page.getByTestId('product-result').first();
     await expect(result).toBeVisible();
     await result.click();
+    await payCashAtRegister(page, '10.00');
     await page.getByTestId('complete-sale').click();
     await page.getByTestId('new-sale-again').click();
     await openPanel();
@@ -242,6 +267,7 @@ test.describe('Day 2 — order writer', () => {
     const result = page.getByTestId('product-result').first();
     await expect(result).toBeVisible();
     await result.click();
+    await payCashAtRegister(page, '2.50');
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
@@ -271,8 +297,7 @@ test.describe('Day 2 — order writer', () => {
     await openFullOrder(page);
 
     // Collect the whole balance, then complete.
-    await page.getByTestId('payment-amount').fill('10.00');
-    await page.getByTestId('take-payment').click();
+    await payCashOnOrder(page, '7.50');
     await expect(page.getByTestId('balance-due')).toContainText('$0.00');
     await page.getByTestId('complete-order').click();
     await expect(page.getByTestId('order-status')).toHaveText(/delivered/i);
@@ -295,8 +320,11 @@ test.describe('Day 2 — order writer', () => {
     await expect(result).toBeVisible();
     await result.click();
 
-    // Partial payment = a deposit on a delivery order.
+    // Partial payment = a deposit on a delivery order. A card tender must
+    // name its brand before the register records it.
     await page.getByTestId('take-payment').click();
+    await page.getByTestId('pay-method').selectOption('card');
+    await page.getByTestId('pay-card-brand').selectOption('visa');
     await page.getByTestId('pay-amount').fill('2.50');
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
