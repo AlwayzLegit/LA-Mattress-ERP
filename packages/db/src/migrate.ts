@@ -2,6 +2,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient } from './client';
+import { retryPolicySetup } from './retry-policy-setup';
 
 const MIGRATIONS_FOLDER = join(__dirname, '..', 'drizzle');
 
@@ -67,7 +68,18 @@ async function main() {
     // 4. RLS / roles / policies. Idempotent; safe to re-run on every deploy.
     const rlsPath = join(__dirname, 'migrations', 'rls.sql');
     const rls = readFileSync(rlsPath, 'utf8');
-    await sql.unsafe(rls);
+    // Fail quickly on a busy table rather than holding earlier table locks
+    // while the old API waits on them. Each failed attempt rolls back all
+    // grants and policies; the API only starts after a complete successful run.
+    await retryPolicySetup(
+      async () => {
+        await sql.begin(async (tx) => {
+          await tx.unsafe("SET LOCAL lock_timeout = '250ms'");
+          await tx.unsafe(rls);
+        });
+      },
+      { onRetry: (attempt) => console.error(`RLS setup lock contention; retry ${attempt}/20.`) },
+    );
 
     console.error('Migrations applied (schema + RLS).');
   } finally {

@@ -5836,3 +5836,14 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - Verified Written Sales in desktop, 720×640 and 390×640 browser views; preset
   selection and Apply work. Web TypeScript and all 5 date-range tests pass.
 - Local only; no API or database changes for this fix.
+
+## 2026-09-14 — Rolling deployment policy-lock recovery
+
+Production API startup twice encountered PostgreSQL deadlocks while reapplying the
+unchanged RLS policy script alongside requests served by the previous instance.
+Policy setup now uses an explicit transaction with a 250ms lock timeout and up to
+20 bounded, jittered retries for lock contention only. Each failed attempt rolls
+back, all policies remain required, and exhausted retries still fail startup.
+
+Validated DB build/typecheck/lint, four retry tests, and a real local PostgreSQL
+lock-timeout test proving rollback before retry and RLS enabled after success.
