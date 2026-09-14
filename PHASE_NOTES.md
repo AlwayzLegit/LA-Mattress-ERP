@@ -1096,3 +1096,7 @@ Owner requested all website/admin statistics inside ERP. Added an owner-only Web
 ## 2026-09-14 — Written sales cost column
 
 Owner amendment: show extended Cost beside Merch Amount and remove Customer Discount from detail, summary, print and CSV columns. Derive cost from the report's existing merchandise and gross-profit values, including negative cancellation costs and zero-cost price adjustments. Cost follows financial-report permissions. Discount accounting and sale/order totals remain unchanged. CSV integration checks cover cost, quantity, cancellation/adjustment signs, grand totals and masking.
+
+## 2026-09-14 — Compact Written Sales print layout
+
+Added report-scoped landscape print styling: 0.3-inch margins, compact rows, repeated table headings and preserved totals, with screen controls/duplicate summary tiles omitted. A print-only heading line identifies the loaded date range and report type. No API, accounting or permission changes.

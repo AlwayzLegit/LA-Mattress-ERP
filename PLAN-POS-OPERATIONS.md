@@ -623,6 +623,11 @@ row cost (merchandise minus existing gross profit), with matching order,
 type, location and grand totals. Cost follows `reports.financial.view`
 masking. Keep discount accounting and existing sale/order totals unchanged.
 
+**Print amendment — 2026-09-14:** Print Written Sales Dollars on US Letter
+landscape with compact rows, narrow margins and repeated table headings.
+Omit screen controls and duplicate summary tiles; preserve the report date,
+transaction details, cost/profit columns and all totals on paper.
+
 Owner ask (STORIS TE.320 parameter screen + sample output): "We also need
 this built".
 

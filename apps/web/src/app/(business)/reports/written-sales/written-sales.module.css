@@ -1,0 +1,155 @@
+.printMeta {
+  display: none;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+@media print {
+  /* A named page keeps landscape sizing specific to this report. */
+  @page written-sales {
+    size: letter landscape;
+    margin: 0.3in;
+  }
+
+  :global(main):has(.report) {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .report {
+    page: written-sales;
+    color: #000;
+    font-size: 8.5pt;
+    line-height: 1.2;
+  }
+
+  .report :global(.page-actions),
+  .report :global(.page-sub),
+  .report :global(.th-grip),
+  .report :global(.col-sort-arrow),
+  .report :global(.col-reset) {
+    display: none !important;
+  }
+
+  .report :global(.page-head),
+  .report :global(.page-header) {
+    margin: 0 0 3pt;
+    padding: 0;
+  }
+
+  .report :global(.page-title) {
+    font-size: 13pt;
+    line-height: 1.2;
+  }
+
+  .printMeta {
+    display: block;
+    margin: 0 0 6pt;
+    font-size: 8pt;
+  }
+
+  .body > * {
+    margin-block: 0 6pt !important;
+  }
+
+  .report :global(.card) {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    break-inside: auto;
+  }
+
+  .report :global(.card-header) {
+    margin: 0 0 3pt;
+    break-after: avoid;
+  }
+
+  .report :global(.card-title) {
+    font-size: 9pt;
+  }
+
+  .tableWrap {
+    overflow: visible;
+  }
+
+  .report table {
+    width: 100%;
+    font-size: 8pt;
+    line-height: 1.2;
+  }
+
+  .report thead {
+    display: table-header-group;
+  }
+
+  .report tr {
+    break-inside: avoid;
+  }
+
+  .report th,
+  .report td {
+    height: auto;
+    padding: 2pt 3pt;
+    color: #000;
+    border-bottom: 0.5pt solid #ddd;
+    overflow-wrap: anywhere;
+  }
+
+  .report th {
+    font-size: 7pt;
+    letter-spacing: 0;
+    overflow-wrap: normal;
+    white-space: normal !important;
+  }
+
+  .report :global(.col-sort) {
+    display: inline;
+    text-align: inherit;
+  }
+
+  .report td:global(.num) {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .documentMeta {
+    column-gap: 8pt;
+    row-gap: 1pt;
+    font-size: 8pt;
+    line-height: 1.2;
+  }
+
+  .report [data-testid='ws-address-line'],
+  .report [data-testid='ws-comments'],
+  .report [data-testid='ws-grand'] > p {
+    font-size: 7pt;
+    line-height: 1.2;
+  }
+
+  .typeHeading,
+  .report [data-testid='ws-document'] {
+    break-after: avoid;
+  }
+
+  .report [data-testid='ws-order-total'],
+  .report [data-testid='ws-type-total'],
+  .report [data-testid='ws-location-total'] {
+    break-before: avoid;
+  }
+
+  .report [data-testid='ws-grand'] {
+    break-inside: avoid;
+  }
+
+  .report [data-testid='ws-grand'] > p {
+    margin-top: 3pt;
+  }
+
+  .report a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

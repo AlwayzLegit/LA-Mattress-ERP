@@ -5,7 +5,9 @@ export default function WrittenSalesPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
     <main style={{ padding: 24 }}>
-      <p>Development preview · use an authenticated API or a local sample report server.</p>
+      <p className="no-print">
+        Development preview · use an authenticated API or a local sample report server.
+      </p>
       <WrittenSalesPage />
     </main>
   );

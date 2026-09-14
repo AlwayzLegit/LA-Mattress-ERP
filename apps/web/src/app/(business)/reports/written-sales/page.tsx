@@ -9,6 +9,7 @@ import { downloadFile } from '@/lib/download';
 import { rangeToSearch } from '@/lib/date-range';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { Money } from '@/components/money';
+import styles from './written-sales.module.css';
 import {
   Button,
   Card,
@@ -471,8 +472,8 @@ export default function WrittenSalesPage() {
   }
 
   return (
-    <div data-testid="written-sales">
-      <p style={{ margin: '0 0 12px' }}>
+    <div data-testid="written-sales" className={styles.report}>
+      <p style={{ margin: '0 0 12px' }} className="no-print">
         <Link href="/reports">← Reports</Link>
       </p>
       <PageHeader
@@ -491,9 +492,21 @@ export default function WrittenSalesPage() {
           </>
         }
       />
+      {report && (
+        <p className={styles.printMeta}>
+          {fmtDate(report.range.start)}
+          {report.range.end !== report.range.start ? ` – ${fmtDate(report.range.end)}` : ''}
+          {' · '}
+          {ORDER_TYPES.find((t) => t.key === report.orderType)?.label}
+          {' · '}
+          {REPORT_TYPES.find((t) => t.key === report.reportType)?.label}
+          {' · '}
+          {report.totals.documents} {report.totals.documents === 1 ? 'document' : 'documents'}
+        </p>
+      )}
 
-      <div className="space-y-6">
-        <Card title="Parameters" data-testid="ws-params">
+      <div className={`space-y-6 ${styles.body}`}>
+        <Card title="Parameters" data-testid="ws-params" className="no-print">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -619,7 +632,7 @@ export default function WrittenSalesPage() {
 
         {report && (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="no-print grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <Stat label="Documents" value={String(report.totals.documents)} />
               <Stat label="Merch" value={<Money cents={report.totals.merchCents} />} />
               <Stat
@@ -647,7 +660,7 @@ export default function WrittenSalesPage() {
             ) : (
               report.locations.map((loc) => (
                 <Card key={loc.locationId} title={`Location · ${loc.locationName}`}>
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className={styles.tableWrap}>
                     <table className="table" data-testid="ws-location">
                       <thead>
                         <ColumnHeadRow list={cols} testIdPrefix="reports-written-sales" />
@@ -655,7 +668,7 @@ export default function WrittenSalesPage() {
                       <tbody>
                         {loc.types.map((t) => (
                           <Fragment key={t.key}>
-                            <tr className="bg-surface-muted">
+                            <tr className={`bg-surface-muted ${styles.typeHeading}`}>
                               <td colSpan={cols.ordered.length} className="font-semibold">
                                 Type {t.label}
                               </td>
@@ -664,7 +677,9 @@ export default function WrittenSalesPage() {
                               <Fragment key={docKey(d)}>
                                 <tr data-testid="ws-document">
                                   <td colSpan={cols.ordered.length}>
-                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                                    <div
+                                      className={`flex flex-wrap gap-x-4 gap-y-1 text-sm ${styles.documentMeta}`}
+                                    >
                                       <span>
                                         <span className="text-muted">Order number </span>
                                         <Link href={docHref(d)} className="font-semibold">
@@ -770,7 +785,7 @@ export default function WrittenSalesPage() {
             )}
 
             <Card title="Grand total" data-testid="ws-grand">
-              <div style={{ overflowX: 'auto' }}>
+              <div className={styles.tableWrap}>
                 <table className="table">
                   <thead>
                     <tr>
