@@ -1,5 +1,20 @@
 # Sprint Status — STORIS Cutover
 
+## Owner location cutover — 2026-09-14
+
+- New-sale prefixes: KO Koreatown, WE West LA, LB La Brea, ST Studio City, WA Warehouse.
+  Settings now exposes the existing per-store prefix field. Historical order numbers
+  and counters are preserved; the cutover also skips any previously used suffixes.
+- Glendale retirement: `ops-la-locations.yml` runs the bounded, audited cutover in
+  validate (transaction rollback) or commit mode. Moves Glendale member scopes and
+  current/future scheduled shifts to Warehouse, retaining other scopes and roles.
+  Deletes only an unreferenced location; historical foreign keys keep it archived.
+- Inactive locations are excluded from operational lists, member selling choices,
+  and new sales. Locations admin can explicitly show inactive locations.
+- Validation: API/web typechecks passed; database integration coverage added for
+  rollback, idempotency, existing counters/orders, mixed member scopes, historical
+  shifts, cross-tenant isolation and safe deletion. CI and production cutover pending.
+
 > **Living tracker for `PLAN-STORIS-CUTOVER.md`.** Protocol: pick the first unchecked
 > **Build** item, ship it as a vertical slice, check it off with a dated note, commit the
 > tracker with the work. **Ops** items are the human's — surface them, don't do them.

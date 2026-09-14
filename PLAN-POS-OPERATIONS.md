@@ -40,10 +40,15 @@ fulfillment.
 
 ## 1. Locations & Order Numbering
 
-Store prefixes (final, no duplicates): WH Warehouse · SC Studio City · WL West LA ·
-K Koreatown · LB La Brea.
+Owner amendment 2026-09-14 supersedes A2's codes: WA Warehouse · ST Studio City ·
+WE West LA · KO Koreatown · LB La Brea. Apply to new orders only. Retire Glendale
+Store and replace its member location assignments and future scheduled shifts with
+Warehouse, retaining their other assignments and permissions. Preserve historical
+records; delete the location only if no records reference it after reassignment.
+Inactive locations stay out of operational selectors and new sales. The location
+administrator can explicitly show inactive locations for historical maintenance.
 
-- Order numbers: `{PREFIX}-{sequence}` e.g. `SC-10234`. Sequential **per store** (each
+- Order numbers: `{PREFIX}-{sequence}` e.g. `ST-10234`. Sequential **per store** (each
   store has its own counter). Existing `SO-YYYY-######` numbers on already-created
   orders are preserved; new numbering applies from cutover of this feature.
 - Prefixes/locations admin-manageable (add/edit stores without code changes).
