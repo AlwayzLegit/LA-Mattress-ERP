@@ -1,7 +1,8 @@
 'use client';
 
 import { Calendar, ChevronDown } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DayPicker, type DateRange as DayRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import {
@@ -77,6 +78,65 @@ export function DateRangePicker({
   const [lastUnit, setLastUnit] = useState<LastUnit>('days');
   const [includeToday, setIncludeToday] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [singleMonth, setSingleMonth] = useState(false);
+
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  // Anchor to the trigger, but clamp to the visible viewport rather than the
+  // report card. A portal also avoids clipping by scrolling tables/cards.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const panel = panelRef.current;
+      const trigger = triggerRef.current;
+      if (!panel || !trigger) return;
+      const viewport = window.visualViewport;
+      const width = viewport?.width ?? document.documentElement.clientWidth;
+      const height = viewport?.height ?? window.innerHeight;
+      const x = viewport?.offsetLeft ?? 0;
+      const y = viewport?.offsetTop ?? 0;
+      const gutter = 12;
+      setSingleMonth(width < 740);
+      panel.style.width = `${Math.min(720, Math.max(0, width - gutter * 2))}px`;
+      panel.style.maxHeight = `${Math.max(0, height - gutter * 2)}px`;
+      const anchor = trigger.getBoundingClientRect();
+      const box = panel.getBoundingClientRect();
+      let preferredLeft = align === 'right' ? anchor.right - box.width : anchor.left;
+      const alternateLeft = align === 'right' ? anchor.left : anchor.right - box.width;
+      if (
+        (preferredLeft < x + gutter || preferredLeft + box.width > x + width - gutter) &&
+        alternateLeft >= x + gutter &&
+        alternateLeft + box.width <= x + width - gutter
+      )
+        preferredLeft = alternateLeft;
+      const left = Math.max(x + gutter, Math.min(preferredLeft, x + width - box.width - gutter));
+      const below = anchor.bottom + 6;
+      const above = anchor.top - box.height - 6;
+      const preferredTop = below + box.height <= y + height - gutter ? below : above;
+      const top = Math.max(y + gutter, Math.min(preferredTop, y + height - box.height - gutter));
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    if (panelRef.current) observer.observe(panelRef.current);
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    window.visualViewport?.addEventListener('resize', position);
+    window.visualViewport?.addEventListener('scroll', position);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', position);
+      window.removeEventListener('scroll', position, true);
+      window.visualViewport?.removeEventListener('resize', position);
+      window.visualViewport?.removeEventListener('scroll', position);
+    };
+  }, [open, align]);
 
   // Re-seed the draft each time the panel opens from the committed value.
   useEffect(() => {
@@ -98,10 +158,17 @@ export function DateRangePicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (
+        !rootRef.current?.contains(e.target as Node) &&
+        !panelRef.current?.contains(e.target as Node)
+      )
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -147,7 +214,7 @@ export function DateRangePicker({
   const apply = () => {
     if (invalid) return;
     onChange(draft);
-    setOpen(false);
+    close();
   };
 
   const { q, year } = quarterOf(today);
@@ -194,6 +261,7 @@ export function DateRangePicker({
   return (
     <div ref={rootRef} className="drp" data-testid={testid}>
       <button
+        ref={triggerRef}
         type="button"
         className={`btn drp-trigger${compact ? ' is-compact' : ''}`}
         onClick={() => setOpen((o) => !o)}
@@ -210,155 +278,158 @@ export function DateRangePicker({
         <ChevronDown size={compact ? 12 : 14} aria-hidden className="drp-icon" />
       </button>
 
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Choose a date range"
-          data-testid={`${testid}-panel`}
-          className={`drp-panel ${align === 'right' ? 'is-right' : 'is-left'}`}
-        >
-          <ul role="listbox" aria-label="Presets" className="drp-presets">
-            {allowAllTime &&
-              item('all', 'All time', draft.preset === 'all', () => {
-                setDraft({ preset: 'all', start: '2000-01-01', end: today });
-                setMode('quick');
-              })}
-            {PRESETS.filter((p) => p.group === 'quick').map((p) =>
-              item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key)),
-            )}
-            <li className="drp-sep" aria-hidden />
-            {item('last', 'Last…', mode === 'last', () => setLast(lastN, lastUnit, includeToday))}
-            {mode === 'last' &&
-              PRESETS.filter((p) => p.group === 'last').map((p) =>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label="Choose a date range"
+            data-testid={`${testid}-panel`}
+            className={`drp-panel${singleMonth ? ' is-single-month' : ''}`}
+          >
+            <ul role="listbox" aria-label="Presets" className="drp-presets">
+              {allowAllTime &&
+                item('all', 'All time', draft.preset === 'all', () => {
+                  setDraft({ preset: 'all', start: '2000-01-01', end: today });
+                  setMode('quick');
+                })}
+              {PRESETS.filter((p) => p.group === 'quick').map((p) =>
+                item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key)),
+              )}
+              <li className="drp-sep" aria-hidden />
+              {item('last', 'Last…', mode === 'last', () => setLast(lastN, lastUnit, includeToday))}
+              {mode === 'last' &&
+                PRESETS.filter((p) => p.group === 'last').map((p) =>
+                  item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key), true),
+                )}
+              {item('to_date', 'Period to date', mode === 'to_date', () => setPreset('mtd'))}
+              {mode === 'to_date' &&
+                PRESETS.filter((p) => p.group === 'to_date').map((p) =>
+                  item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key), true),
+                )}
+              {item('previous', 'Previous period', mode === 'quick' && false, () =>
+                setPreset('last_month'),
+              )}
+              {PRESETS.filter((p) => p.group === 'previous').map((p) =>
                 item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key), true),
               )}
-            {item('to_date', 'Period to date', mode === 'to_date', () => setPreset('mtd'))}
-            {mode === 'to_date' &&
-              PRESETS.filter((p) => p.group === 'to_date').map((p) =>
-                item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key), true),
-              )}
-            {item('previous', 'Previous period', mode === 'quick' && false, () =>
-              setPreset('last_month'),
-            )}
-            {PRESETS.filter((p) => p.group === 'previous').map((p) =>
-              item(p.key, p.label, draft.preset === p.key, () => setPreset(p.key), true),
-            )}
-            <li className="drp-sep" aria-hidden />
-            {item('quarters', 'Quarters', mode === 'quarters', () => setPreset(quarters[0]!.key))}
-            {mode === 'quarters' &&
-              quarters.map((qq) =>
-                item(qq.key, qq.label, draft.preset === qq.key, () => setPreset(qq.key), true),
-              )}
-            <li className="drp-sep" aria-hidden />
-            {item('custom', 'Custom range', mode === 'custom', () => setMode('custom'))}
-          </ul>
+              <li className="drp-sep" aria-hidden />
+              {item('quarters', 'Quarters', mode === 'quarters', () => setPreset(quarters[0]!.key))}
+              {mode === 'quarters' &&
+                quarters.map((qq) =>
+                  item(qq.key, qq.label, draft.preset === qq.key, () => setPreset(qq.key), true),
+                )}
+              <li className="drp-sep" aria-hidden />
+              {item('custom', 'Custom range', mode === 'custom', () => setMode('custom'))}
+            </ul>
 
-          <div className="drp-main">
-            <div className="drp-last">
-              <span>Last</span>
-              <input
-                type="number"
-                min={1}
-                max={366}
-                className="input drp-last-n"
-                value={lastN}
-                onChange={(e) => setLast(Number(e.target.value), lastUnit, includeToday)}
-                data-testid={`${testid}-last-n`}
-                aria-label="Number of periods"
-              />
-              <select
-                className="input drp-last-unit"
-                value={lastUnit}
-                onChange={(e) => setLast(lastN, e.target.value as LastUnit, includeToday)}
-                data-testid={`${testid}-last-unit`}
-                aria-label="Period unit"
-              >
-                <option value="days">Days</option>
-                <option value="weeks">Weeks</option>
-                <option value="months">Months</option>
-              </select>
-              <label className="drp-include">
+            <div className="drp-main">
+              <div className="drp-last">
+                <span>Last</span>
                 <input
-                  type="checkbox"
-                  checked={includeToday}
-                  onChange={(e) => setLast(lastN, lastUnit, e.target.checked)}
-                  data-testid={`${testid}-include-today`}
+                  type="number"
+                  min={1}
+                  max={366}
+                  className="input drp-last-n"
+                  value={lastN}
+                  onChange={(e) => setLast(Number(e.target.value), lastUnit, includeToday)}
+                  data-testid={`${testid}-last-n`}
+                  aria-label="Number of periods"
                 />
-                Include today
-              </label>
-            </div>
-
-            <DayPicker
-              mode="range"
-              numberOfMonths={2}
-              selected={selected}
-              onSelect={onSelectDays}
-              defaultMonth={fromDay(draft.start)}
-              disabled={{ after: fromDay(today) }}
-              weekStartsOn={0}
-              showOutsideDays={false}
-              className="drp-calendar"
-            />
-
-            <div className="drp-footer">
-              <div className="drp-summary" data-testid={`${testid}-summary`}>
-                {invalid
-                  ? 'Pick a start on or before the end.'
-                  : draft.preset === 'all'
-                    ? 'All time'
-                    : formatRange(draft)}
-              </div>
-              <div className="drp-actions">
-                <label className="drp-custom-dates">
+                <select
+                  className="input drp-last-unit"
+                  value={lastUnit}
+                  onChange={(e) => setLast(lastN, e.target.value as LastUnit, includeToday)}
+                  data-testid={`${testid}-last-unit`}
+                  aria-label="Period unit"
+                >
+                  <option value="days">Days</option>
+                  <option value="weeks">Weeks</option>
+                  <option value="months">Months</option>
+                </select>
+                <label className="drp-include">
                   <input
-                    type="date"
-                    className="input"
-                    value={draft.start}
-                    max={draft.end || today}
-                    onChange={(e) => {
-                      setDraft({ preset: 'custom', start: e.target.value, end: draft.end });
-                      setMode('custom');
-                    }}
-                    data-testid={`${testid}-start`}
-                    aria-label="Start date"
+                    type="checkbox"
+                    checked={includeToday}
+                    onChange={(e) => setLast(lastN, lastUnit, e.target.checked)}
+                    data-testid={`${testid}-include-today`}
                   />
-                  <span aria-hidden>–</span>
-                  <input
-                    type="date"
-                    className="input"
-                    value={draft.end}
-                    min={draft.start}
-                    max={today}
-                    onChange={(e) => {
-                      setDraft({ preset: 'custom', start: draft.start, end: e.target.value });
-                      setMode('custom');
-                    }}
-                    data-testid={`${testid}-end`}
-                    aria-label="End date"
-                  />
+                  Include today
                 </label>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setOpen(false)}
-                  data-testid={`${testid}-cancel`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={apply}
-                  disabled={invalid || unchanged}
-                  data-testid={`${testid}-apply`}
-                >
-                  Apply
-                </button>
+              </div>
+
+              <DayPicker
+                mode="range"
+                numberOfMonths={singleMonth ? 1 : 2}
+                selected={selected}
+                onSelect={onSelectDays}
+                defaultMonth={fromDay(draft.start)}
+                disabled={{ after: fromDay(today) }}
+                weekStartsOn={0}
+                showOutsideDays={false}
+                className="drp-calendar"
+              />
+
+              <div className="drp-footer">
+                <div className="drp-summary" data-testid={`${testid}-summary`}>
+                  {invalid
+                    ? 'Pick a start on or before the end.'
+                    : draft.preset === 'all'
+                      ? 'All time'
+                      : formatRange(draft)}
+                </div>
+                <div className="drp-actions">
+                  <label className="drp-custom-dates">
+                    <input
+                      type="date"
+                      className="input"
+                      value={draft.start}
+                      max={draft.end || today}
+                      onChange={(e) => {
+                        setDraft({ preset: 'custom', start: e.target.value, end: draft.end });
+                        setMode('custom');
+                      }}
+                      data-testid={`${testid}-start`}
+                      aria-label="Start date"
+                    />
+                    <span aria-hidden>–</span>
+                    <input
+                      type="date"
+                      className="input"
+                      value={draft.end}
+                      min={draft.start}
+                      max={today}
+                      onChange={(e) => {
+                        setDraft({ preset: 'custom', start: draft.start, end: e.target.value });
+                        setMode('custom');
+                      }}
+                      data-testid={`${testid}-end`}
+                      aria-label="End date"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={close}
+                    data-testid={`${testid}-cancel`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={apply}
+                    disabled={invalid || unchanged}
+                    data-testid={`${testid}-apply`}
+                  >
+                    Apply
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

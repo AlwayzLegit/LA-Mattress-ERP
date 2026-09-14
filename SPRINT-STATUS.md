@@ -5812,3 +5812,27 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 - [x] **Internal chat background push / local production readiness (2026-09-13):** Transactional help/team notifications, fresh permission/scope/read-state checks, generic service-worker previews and existing delivery retries. Migration 0109; 36 API tests, 8 service-worker tests, DB/API builds, both Next.js production builds and migration drift check pass. Physical push, staging credentials, upstream reconciliation and authenticated live-design comparison remain rollout gates. See docs/live-chat-deployment.md.
 
 - [x] **ERP chat release reconciliation (2026-09-13):** Separate `codex/chat-erp-release` branch incorporates upstream f884801, current shell/acting-store provider and inherited global design. Preserves upstream migration history through 0104 and consolidates undeployed chat schema into 0105_live_chat. Fixes raw-header logging regression. Shared/db/API and ERP production builds, 36 chat API + 3 logging + 10 navigation/push tests, migration drift check and authenticated live-design review passed. Draft review/staging rollout follows; no production changes. See docs/erp-chat-release.md.
+
+## 2026-09-14 — Store-first staff schedule
+
+- [x] Owner request: replace staff rows with stores and daily roster dropdowns.
+- Names, shift times and draft/day-off status appear inside each day; staff can be
+  added through a name selector and the existing shift editor. Publish moved to
+  the card header so ERP-wide chat alerts do not cover it.
+- API now includes each shift's actual location. Empty stores stay visible;
+  unlocated/legacy shifts are shown separately, never guessed from home store.
+  Existing schedule permissions, one-shift-per-day and publish behavior remain.
+- Validation: web/API TypeScript, API build, 3 roster unit tests; local browser
+  exercised two-person assignment, other-store availability, publishing and day off.
+- Local only. Ship the additive API response before the web update; no migration.
+
+## 2026-09-14 — Report calendar viewport fix
+
+- [x] Shared date-range picker now uses a body portal, flips alignment when needed,
+      and clamps its width, height and position to the visible viewport. Repositions on
+      resize/scroll; smaller windows show one month and allow internal scrolling.
+- Increased calendar token specificity so the library stylesheet cannot restore
+  oversized day cells and force the two-month desktop view into a tall stack.
+- Verified Written Sales in desktop, 720×640 and 390×640 browser views; preset
+  selection and Apply work. Web TypeScript and all 5 date-range tests pass.
+- Local only; no API or database changes for this fix.

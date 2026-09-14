@@ -18,7 +18,8 @@ import { ChatBackground, createChatBackground } from './chat-background';
     {
       provide: ChatBackground,
       inject: [ROOT_DRIZZLE, ChatService],
-      useFactory: (db: PostgresJsDatabase, chat: ChatService) => createChatBackground(db, chat, process.env),
+      useFactory: (db: PostgresJsDatabase, chat: ChatService) =>
+        createChatBackground(db, chat, process.env),
     },
     {
       provide: ChatService,

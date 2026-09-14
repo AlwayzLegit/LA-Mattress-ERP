@@ -10,6 +10,12 @@ Read `CLAUDE_CODE_PROMPT.md` for the phase-by-phase instructions. Read this READ
 
 ## 1. Design system (Phase 2 canvas: `Redesign 2 System.dc.html`)
 
+**Staff schedule amendment (2026-09-14, owner request):** show stores as rows and
+days as columns. Each day has a roster dropdown with names and shift times; editors
+can add a person or edit a shift there. Preserve store access, one shift per person
+per day, draft/publish behavior, and read-only roles. Group by the shift's actual
+location, not the person's home store.
+
 ### Type
 - Text: **Public Sans** 400/500/600 (Google Fonts). Body 13px / register body 14px, line-height 1.5.
 - Numbers & headings: **Archivo** 500/600/700, always `font-variant-numeric: tabular-nums`. display-xl 44–56px / −.02em, display-l 26–30px, heading 18px, title 15px.
