@@ -1,0 +1,87 @@
+name: Ops — configure LA locations
+
+# Owner-requested store prefixes and Glendale retirement, run inside the
+# deployed API image. Always validate before commit; validation rolls back.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: validate previews and rolls back; commit applies the owner-approved cutover
+        required: true
+        type: choice
+        options: [validate, commit]
+
+concurrency:
+  group: ops-la-locations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: ${{ inputs.mode }} LA location cutover
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RENDER_SERVICE_ID: srv-da4tua3m8hqs73apsflg
+      RENDER_OWNER_ID: tea-da4l4hgjo6nc73db7i10
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          [ -n "$RENDER_API_KEY" ] || { echo "::error::RENDER_API_KEY is missing"; exit 1; }
+          case "$MODE" in validate|commit) ;; *) exit 1 ;; esac
+          cmd="s=apps/api/dist/ops/configure-la-locations.js; [ -f \$s ] || s=dist/ops/configure-la-locations.js; node \$s $MODE"
+          echo "Will run: $cmd"
+          echo "CMD=$cmd" >> "$GITHUB_ENV"
+
+      - name: Start Render job
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          job=$(curl -sSf -X POST -H "$auth" -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg c "$CMD" '{startCommand: $c}')" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/jobs")
+          id=$(echo "$job" | jq -r '.id')
+          echo "Job $id created"
+          echo "JOB_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Wait for job
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          api="https://api.render.com/v1/services/$RENDER_SERVICE_ID/jobs/$JOB_ID"
+          final=""
+          for i in $(seq 1 90); do
+            status=$(curl -sSf -H "$auth" "$api" | jq -r '.status // "pending"')
+            echo "[$i] $status"
+            case "$status" in
+              succeeded) final=ok; break ;;
+              failed|canceled) final=bad; break ;;
+            esac
+            sleep 10
+          done
+          echo "JOB_RESULT=$final" >> "$GITHUB_ENV"
+          if [ -z "$final" ]; then
+            echo "::error::Timed out waiting for job $JOB_ID"
+            exit 1
+          fi
+
+      - name: Job log
+        if: always() && env.JOB_ID != ''
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer $RENDER_API_KEY"
+          # Logs land a few seconds after the job finishes.
+          sleep 8
+          curl -sS -H "$auth" \
+            "https://api.render.com/v1/logs?ownerId=$RENDER_OWNER_ID&resource=$JOB_ID&limit=100&direction=forward" \
+            | jq -r '.logs[]? | "\(.timestamp)  \(.message)"' || echo "(could not fetch logs; see the Render dashboard)"
+          echo "Dashboard: https://dashboard.render.com/web/$RENDER_SERVICE_ID/jobs"
+          if [ "${JOB_RESULT:-}" != "ok" ]; then
+            echo "::error::Job $JOB_ID did not succeed"
+            exit 1
+          fi

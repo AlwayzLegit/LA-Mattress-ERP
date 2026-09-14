@@ -200,7 +200,12 @@ export class MembersController {
           schema.locations,
           eq(schema.locations.id, schema.membershipLocationScopes.locationId),
         )
-        .where(eq(schema.membershipLocationScopes.membershipId, tenant.membershipId))
+        .where(
+          and(
+            eq(schema.membershipLocationScopes.membershipId, tenant.membershipId),
+            eq(schema.locations.isActive, true),
+          ),
+        )
         .orderBy(schema.locations.name);
     }
     return {
@@ -344,6 +349,7 @@ export class MembersController {
         and(
           eq(schema.locations.id, locationId),
           eq(schema.locations.businessId, tenant.businessId!),
+          eq(schema.locations.isActive, true),
         ),
       )
       .limit(1);
@@ -486,6 +492,7 @@ export class MembersController {
             and(
               inArray(schema.locations.id, ids),
               eq(schema.locations.businessId, tenant.businessId!),
+              eq(schema.locations.isActive, true),
             ),
           );
         if (found.length !== ids.length) {

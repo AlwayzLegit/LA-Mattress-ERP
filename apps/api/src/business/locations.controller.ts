@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
@@ -104,7 +105,10 @@ export class LocationsController {
 
   @Get()
   @RequirePermission('locations.view')
-  async list(@CurrentTenant() tenant: RequestTenantContext): Promise<LocationRow[]> {
+  async list(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query('includeInactive') includeInactive?: string,
+  ): Promise<LocationRow[]> {
     return this.db
       .select({
         id: schema.locations.id,
@@ -121,7 +125,12 @@ export class LocationsController {
         createdAt: schema.locations.createdAt,
       })
       .from(schema.locations)
-      .where(eq(schema.locations.businessId, tenant.businessId!))
+      .where(
+        and(
+          eq(schema.locations.businessId, tenant.businessId!),
+          includeInactive === 'true' ? undefined : eq(schema.locations.isActive, true),
+        ),
+      )
       .orderBy(asc(schema.locations.name));
   }
 

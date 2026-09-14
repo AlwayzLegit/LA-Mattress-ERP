@@ -36,6 +36,7 @@ interface Location {
   /** J5: weekdays (0=Sun…6=Sat) accepting auto transfers; null = all. */
   replenishmentDays: number[] | null;
   isActive: boolean;
+  orderPrefix: string | null;
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -44,10 +45,11 @@ export default function LocationsPage() {
   const [rows, setRows] = useState<Location[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   async function load() {
     try {
-      setRows(await api<Location[]>('/v1/business/locations'));
+      setRows(await api<Location[]>('/v1/business/locations?includeInactive=true'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -72,6 +74,10 @@ export default function LocationsPage() {
           locationType: String(data.get('locationType') ?? 'store'),
           timezone: String(data.get('timezone') ?? ''),
           taxRateBps: taxRaw ? Number(taxRaw) : null,
+          orderPrefix:
+            String(data.get('orderPrefix') ?? '')
+              .trim()
+              .toUpperCase() || null,
         }),
       });
       form.reset();
@@ -172,6 +178,12 @@ export default function LocationsPage() {
     },
     { id: 'timezone', label: 'Timezone', sortValue: (l) => l.timezone, render: (l) => l.timezone },
     {
+      id: 'orderPrefix',
+      label: 'Order prefix',
+      sortValue: (l) => l.orderPrefix ?? '',
+      render: (l) => <OrderPrefix key={`${l.id}:${l.orderPrefix}`} location={l} onSaved={load} />,
+    },
+    {
       id: 'tax',
       label: 'Tax',
       num: true,
@@ -229,7 +241,11 @@ export default function LocationsPage() {
       ),
     },
   ];
-  const cols = useListColumns('locations', columns, rows);
+  const cols = useListColumns(
+    'locations',
+    columns,
+    rows?.filter((l) => showInactive || l.isActive) ?? null,
+  );
 
   return (
     <div>
@@ -256,6 +272,9 @@ export default function LocationsPage() {
               <Field label="Tax override (bps)" hint="Blank = inherit the business tax rate.">
                 <Input name="taxRateBps" type="number" min={0} />
               </Field>
+              <Field label="Order prefix" hint="1–4 letters. New orders use this store's sequence.">
+                <Input name="orderPrefix" maxLength={4} pattern="[A-Za-z]{1,4}" />
+              </Field>
             </FormGrid>
             <FormActions>
               <Button type="submit" variant="primary" disabled={creating}>
@@ -273,6 +292,14 @@ export default function LocationsPage() {
         )}
         {rows && (
           <Card flush>
+            <label className="flex items-center gap-2 p-4 text-sm">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+              />
+              Show inactive locations
+            </label>
             <TableWrap>
               <table className="table">
                 <thead>
@@ -297,5 +324,42 @@ export default function LocationsPage() {
         )}
       </Stack>
     </div>
+  );
+}
+
+function OrderPrefix({ location, onSaved }: { location: Location; onSaved: () => Promise<void> }) {
+  const [prefix, setPrefix] = useState(location.orderPrefix ?? '');
+  const [saving, setSaving] = useState(false);
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api(`/v1/business/locations/${location.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ orderPrefix: prefix.trim().toUpperCase() || null }),
+      });
+      await onSaved();
+      toast.success(`Order prefix saved for ${location.name}. Existing orders keep their numbers.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <form onSubmit={save} className="flex items-center gap-2">
+      <Input
+        aria-label={`Order prefix for ${location.name}`}
+        value={prefix}
+        onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+        maxLength={4}
+        pattern="[A-Za-z]{1,4}"
+        className="w-20"
+        placeholder="SO"
+      />
+      <Button size="sm" type="submit" disabled={saving || prefix === (location.orderPrefix ?? '')}>
+        {saving ? 'Saving…' : 'Save'}
+      </Button>
+    </form>
   );
 }

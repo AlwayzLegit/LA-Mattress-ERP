@@ -1811,11 +1811,17 @@ export class OrdersController {
     }
 
     const [location] = await this.db
-      .select({ id: schema.locations.id, taxRateBps: schema.locations.taxRateBps })
+      .select({
+        id: schema.locations.id,
+        taxRateBps: schema.locations.taxRateBps,
+        isActive: schema.locations.isActive,
+      })
       .from(schema.locations)
       .where(eq(schema.locations.id, body.locationId))
       .limit(1);
     if (!location) throw new NotFoundException('Location not found');
+    if (!location.isActive)
+      throw new BadRequestException('Choose an active location for new sales');
 
     const [customer] = await this.db
       .select({ id: schema.customers.id })

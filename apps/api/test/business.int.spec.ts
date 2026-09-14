@@ -21,6 +21,7 @@ import type { INestApplication } from '@nestjs/common';
 import { schema } from '@jetnine/db';
 import { SYSTEM_ROLES } from '@jetnine/shared';
 import { AppModule } from '../src/app.module';
+import { verifyLocationCutover } from './la-location-cutover';
 
 const TEST_DB_URL =
   process.env.BUSINESS_TEST_DATABASE_URL ??
@@ -253,6 +254,10 @@ describe('Epic 1.6 — Business admin console', () => {
     expect(badUpdate.body.message).toContain('invalid timezone');
   });
 
+  it('LA location cutover previews, preserves history, migrates scopes and safely repeats', async () => {
+    await verifyLocationCutover(TEST_DB_URL);
+  });
+
   it('Per-store order numbering: prefixed locations use their own counter', async () => {
     const server = app.getHttpServer();
     const mkLoc = async (name: string, orderPrefix: string) => {
@@ -392,7 +397,30 @@ describe('Epic 1.6 — Business admin console', () => {
       .set('X-Business-Id', businessId);
     const names = (list.body as { name: string }[]).map((l) => l.name);
     expect(names).not.toContain('Delete Guard Clean');
-    expect(names).toContain('Delete Guard Referenced');
+    expect(names).not.toContain('Delete Guard Referenced');
+    const archived = await request(server)
+      .get('/v1/business/locations?includeInactive=true')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(archived.body.map((l: { name: string }) => l.name)).toContain('Delete Guard Referenced');
+    await request(server)
+      .post('/v1/business/members/me/acting-store')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ locationId: referencedId })
+      .expect(404);
+    const newSale = await request(server)
+      .post('/v1/orders')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId: referencedId,
+        customerId: ownerUserId,
+        lines: [{ variantId: refVariantId, quantity: 1 }],
+      });
+    expect(newSale.status).toBe(400);
+    expect(newSale.body.message).toContain('active location');
   });
 
   it('Owner invites a cashier — invite captured by memory transport', async () => {
