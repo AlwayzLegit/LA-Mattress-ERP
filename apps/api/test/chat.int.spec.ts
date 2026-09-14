@@ -1833,7 +1833,9 @@ describe('transfer and response targets', () => {
         'staging',
         () => new Date(Date.now() + 6000),
       );
-      for (let i = 0; i < 50 && (await worker.runOnce(businessId)); i++) {}
+      for (let i = 0; i < 50 && (await worker.runOnce(businessId)); i++) {
+        // Drain queued push jobs; runOnce performs the work in the loop condition.
+      }
       expect(sent.some((payload) => JSON.parse(payload).type === 'chat-handoff')).toBe(true);
       await expect(service.acceptAssignment(staff, first.conversationId)).rejects.toThrow(
         'assigned teammate',
