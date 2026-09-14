@@ -128,6 +128,8 @@ export interface ChangesResponse {
 
 export interface ShiftCell {
   date: string;
+  /** Actual shift location; optional while an older API is rolling out. */
+  locationId?: string | null;
   /** null = pending day off (an unpublished removal). */
   startMinutes: number | null;
   endMinutes: number | null;

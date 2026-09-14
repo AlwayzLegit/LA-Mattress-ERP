@@ -39,6 +39,7 @@ import { addDays, isDay, mondayOf, weekDays } from './week';
 
 export interface ShiftCell {
   date: string;
+  locationId: string | null;
   /** null = pending day off (an unpublished removal). */
   startMinutes: number | null;
   endMinutes: number | null;
@@ -291,6 +292,7 @@ export class ScheduleController {
           )
           .map((s) => ({
             date: s.date,
+            locationId: s.locationId,
             startMinutes: s.startMinutes,
             endMinutes: s.endMinutes,
             published: s.publishedAt != null,
@@ -404,7 +406,14 @@ export class ScheduleController {
       targetId: membershipId,
       metadata: { date: body.date, startMinutes, endMinutes, locationId },
     });
-    return { membershipId, date: body.date, startMinutes, endMinutes, published: false };
+    return {
+      membershipId,
+      date: body.date,
+      locationId,
+      startMinutes,
+      endMinutes,
+      published: false,
+    };
   }
 
   /** Day off: clears the shift (a pending removal until published). */

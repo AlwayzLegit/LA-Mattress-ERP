@@ -1369,9 +1369,8 @@ td > .alert,
   color: var(--text-secondary);
 }
 .drp-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  z-index: 60;
+  position: fixed;
+  z-index: 1100;
   display: grid;
   grid-template-columns: 176px minmax(0, 1fr);
   width: min(720px, calc(100vw - 32px));
@@ -1379,13 +1378,8 @@ td > .alert,
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
-  overflow: hidden;
-}
-.drp-panel.is-right {
-  right: 0;
-}
-.drp-panel.is-left {
-  left: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .drp-presets {
   list-style: none;
@@ -1429,6 +1423,7 @@ td > .alert,
 }
 .drp-last {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-size: 13px;
@@ -1446,7 +1441,7 @@ td > .alert,
   margin-left: 4px;
   font-size: 13px;
 }
-.drp-calendar {
+.drp-panel .drp-calendar {
   --rdp-accent-color: var(--brand);
   --rdp-accent-background-color: color-mix(in srgb, var(--brand) 14%, transparent);
   --rdp-range_start-color: #fff;
@@ -1460,8 +1455,9 @@ td > .alert,
   font-size: 13px;
   margin: 0 auto;
 }
-.drp-calendar .rdp-months {
+.drp-panel .drp-calendar .rdp-months {
   gap: 20px;
+  flex-wrap: nowrap;
 }
 .drp-calendar .rdp-range_start .rdp-day_button,
 .drp-calendar .rdp-range_end .rdp-day_button {
@@ -1489,6 +1485,7 @@ td > .alert,
 }
 .drp-custom-dates {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   font-size: 12px;
@@ -1507,7 +1504,14 @@ td > .alert,
   .drp-presets {
     border-right: none;
     border-bottom: 1px solid var(--border);
-    max-height: 160px;
+    max-height: 120px;
+  }
+  .drp-main {
+    padding: 12px 10px;
+  }
+  .drp-custom-dates .input {
+    width: 124px;
+    min-width: 0;
   }
 }
 
@@ -3118,6 +3122,119 @@ kbd.key {
 }
 .sched-cell:disabled {
   cursor: default;
+}
+.sched-store-table {
+  min-width: 960px;
+  table-layout: fixed;
+}
+.sched-store-table th:first-child {
+  width: 160px;
+}
+.sched-store-table th:last-child {
+  width: 64px;
+}
+.sched-store-table td {
+  vertical-align: top;
+  padding: 8px 4px;
+}
+.sched-store-table .sched-store-name {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: var(--text);
+  white-space: normal;
+  vertical-align: top;
+  padding-top: 15px;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.sched-roster summary {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.sched-roster summary.is-covered {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.sched-roster summary.is-uncovered {
+  background: var(--surface);
+  border-style: dashed;
+}
+.sched-roster summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sched-roster-preview {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sched-roster-list {
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+}
+.sched-roster-person {
+  text-align: left;
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  cursor: pointer;
+}
+.sched-roster-person strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.sched-roster-person span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.sched-roster-person.is-off {
+  border-style: dashed;
+}
+.sched-roster-person:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.sched-add-staff {
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+}
+.sched-store-hours {
+  text-align: center;
+  color: var(--text2);
+}
+.sched-empty {
+  padding: 24px !important;
+  text-align: center;
+  color: var(--muted);
+}
+@media print {
+  .sched-roster-list {
+    display: grid !important;
+  }
+  .sched-add-staff {
+    display: none;
+  }
+  .sched-store-table {
+    min-width: 0;
+  }
 }
 .sched-nav {
   width: 26px;

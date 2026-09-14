@@ -5828,3 +5828,38 @@ Owner amendment: use a report-specific US Letter landscape page with 0.3-inch ma
 ## 2026-09-14 — Compact Cash Drawer Balancing print and PDF
 
 Owner sample requires the AR.317 header/business/as-of date/generated clock/page number, customer and tender/reference fields, drawer/operator/Mgr/Batch columns, pay-class/payment-type/store subtotals, grand total and cash/check/deposit reconciliation. Browser Print now receives the same paginated snapshot as the PDF. Both use Letter landscape, 8pt Courier, 9.2pt leading, 0.3-inch margins and 60 lines per page. Compact output removes blank spacer rows and keeps the parameter echo together at the end, sharing the final register page when space allows. Legacy TXT byte layout remains available. Mgr/Batch values remain blank because no source fields exist. Ten layout/PDF unit tests passed; API build, web typecheck and scoped lint passed. One-page and 123-payment/three-page synthetic PDFs were rendered and visually inspected. Full database integration assertions run in CI.
+
+## 2026-09-14 — Store-first staff schedule
+
+- [x] Owner request: replace staff rows with stores and daily roster dropdowns.
+- Names, shift times and draft/day-off status appear inside each day; staff can be
+  added through a name selector and the existing shift editor. Publish moved to
+  the card header so ERP-wide chat alerts do not cover it.
+- API now includes each shift's actual location. Empty stores stay visible;
+  unlocated/legacy shifts are shown separately, never guessed from home store.
+  Existing schedule permissions, one-shift-per-day and publish behavior remain.
+- Validation: web/API TypeScript, API build, 3 roster unit tests; local browser
+  exercised two-person assignment, other-store availability, publishing and day off.
+- Local only. Ship the additive API response before the web update; no migration.
+
+## 2026-09-14 — Report calendar viewport fix
+
+- [x] Shared date-range picker now uses a body portal, flips alignment when needed,
+      and clamps its width, height and position to the visible viewport. Repositions on
+      resize/scroll; smaller windows show one month and allow internal scrolling.
+- Increased calendar token specificity so the library stylesheet cannot restore
+  oversized day cells and force the two-month desktop view into a tall stack.
+- Verified Written Sales in desktop, 720×640 and 390×640 browser views; preset
+  selection and Apply work. Web TypeScript and all 5 date-range tests pass.
+- Local only; no API or database changes for this fix.
+
+## 2026-09-14 — Rolling deployment policy-lock recovery
+
+Production API startup twice encountered PostgreSQL deadlocks while reapplying the
+unchanged RLS policy script alongside requests served by the previous instance.
+Policy setup now uses an explicit transaction with a 250ms lock timeout and up to
+20 bounded, jittered retries for lock contention only. Each failed attempt rolls
+back, all policies remain required, and exhausted retries still fail startup.
+
+Validated DB build/typecheck/lint, four retry tests, and a real local PostgreSQL
+lock-timeout test proving rollback before retry and RLS enabled after success.
