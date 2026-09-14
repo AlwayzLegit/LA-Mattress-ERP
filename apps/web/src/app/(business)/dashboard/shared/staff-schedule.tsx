@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
 import { Panel, ShimmerRows } from '../owner/owner-kit';
@@ -17,10 +17,11 @@ import {
 } from './kit';
 import { ShiftEditorDialog } from './shift-editor-dialog';
 import type { ScheduleWeek, SchedulePerson } from './types';
+import { availableStaff, storeRosters } from './schedule-roster';
 
 /**
  * Screen 5 — the staff schedule card (hand-off 2026-09-10, step 2): one
- * week, Monday → Sunday, every person in scope with a cell per day. Owner
+ * week, Monday → Sunday, every store in scope with a roster per day. Owner
  * and Operations click a cell to set a shift and publish the week; Manager
  * and Warehouse read it, locked to their own location.
  */
@@ -31,6 +32,8 @@ interface EditCell {
   person: SchedulePerson;
   date: string;
   dow: string;
+  locationId: string | null;
+  locationName: string;
   start: number | null;
   end: number | null;
 }
@@ -53,6 +56,7 @@ export function StaffSchedule({
   const [data, setData] = useState<ScheduleWeek | null | undefined>(undefined);
   const [edit, setEdit] = useState<EditCell | null>(null);
   const [busy, setBusy] = useState(false);
+  const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const w = readLocal<number>(WEEK_KEY, 0);
@@ -70,41 +74,49 @@ export function StaffSchedule({
 
   const locationId = lockedLocationId ?? (store || null);
   const load = useCallback(() => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     const qs = new URLSearchParams({ week: mondayOf(localToday(), weekOffset) });
-    if (locationId) qs.set('locationId', locationId);
-    return api<ScheduleWeek>(`/v1/schedule?${qs.toString()}`)
-      .then(setData)
+    // Load all permitted locations so assignments at another store stay visible.
+    // The server still enforces the viewer's location scope.
+    return api<ScheduleWeek>(`/v1/schedule?${qs.toString()}`, { signal: controller.signal })
+      .then((next) => {
+        if (!controller.signal.aborted) setData(next);
+      })
       .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
         if (e instanceof ApiError && e.status === 403) setData(null);
         else setData((d) => d ?? null);
       });
-  }, [weekOffset, locationId]);
+  }, [weekOffset]);
   useEffect(() => {
+    setData(undefined);
     void load();
+    return () => request.current?.abort();
   }, [load]);
 
   const canEdit = !!data?.canEdit && !readOnly;
 
+  const rosters = useMemo(() => (data ? storeRosters(data, locationId) : []), [data, locationId]);
   const stats = useMemo(() => {
-    const people = data?.people ?? [];
-    let shifts = 0;
-    let minutes = 0;
-    const covered = new Set<string>();
-    const perPerson = new Map<string, number>();
-    for (const p of people) {
-      let mine = 0;
-      for (const s of p.shifts) {
-        if (s.startMinutes == null || s.endMinutes == null) continue;
-        shifts += 1;
-        mine += s.endMinutes - s.startMinutes;
-        covered.add(s.date);
-      }
-      minutes += mine;
-      perPerson.set(p.membershipId, mine / 60);
-    }
-    const uncovered = (data?.week.days ?? []).filter((d) => !covered.has(d.date));
-    return { people: people.length, shifts, hours: minutes / 60, uncovered, perPerson };
-  }, [data]);
+    const entries = rosters.flatMap((r) => [...r.days.values()].flat());
+    const working = entries.filter(
+      ({ shift }) => shift.startMinutes != null && shift.endMinutes != null,
+    );
+    const uncovered = rosters.flatMap((r) =>
+      (data?.week.days ?? [])
+        .filter((d) => !(r.days.get(d.date) ?? []).some(({ shift }) => shift.startMinutes != null))
+        .map((d) => `${r.name} · ${d.dow}`),
+    );
+    return {
+      people: new Set(working.map(({ person }) => person.membershipId)).size,
+      shifts: working.length,
+      hours: rosters.reduce((sum, r) => sum + r.hours, 0),
+      unpublished: entries.filter(({ shift }) => !shift.published).length,
+      uncovered,
+    };
+  }, [rosters, data]);
 
   const save = async (start: number, end: number) => {
     if (!edit) return;
@@ -118,7 +130,7 @@ export function StaffSchedule({
           date: edit.date,
           startMinutes: start,
           endMinutes: end,
-          locationId: locationId ?? edit.person.locationId ?? undefined,
+          locationId: edit.locationId ?? undefined,
         }),
       });
       toast.success(
@@ -251,9 +263,20 @@ export function StaffSchedule({
             data-testid="sched-permission"
           >
             {canEdit
-              ? 'You can edit · click a shift'
+              ? 'Open a day to view or schedule staff'
               : 'View only · Operations and the owner edit shifts'}
           </span>
+          {canEdit && data && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={busy || stats.unpublished === 0}
+              onClick={() => void publish()}
+              data-testid="sched-publish"
+            >
+              Publish week
+            </button>
+          )}
           {handle}
         </>
       }
@@ -263,91 +286,129 @@ export function StaffSchedule({
       ) : (
         <>
           <div style={{ overflowX: 'auto' }}>
-            <table className="sched-table" data-testid="sched-grid">
+            <table className="sched-table sched-store-table" data-testid="sched-grid">
               <thead>
                 <tr>
-                  <th>Staff</th>
+                  <th scope="col">Store</th>
                   {data.week.days.map((d) => (
-                    <th key={d.date} className={d.isToday ? 'is-today' : undefined}>
+                    <th scope="col" key={d.date} className={d.isToday ? 'is-today' : undefined}>
                       {d.dow}
                       <span className="date">{d.date.slice(5).replace('-', '/')}</span>
                     </th>
                   ))}
-                  <th style={{ textAlign: 'right', paddingRight: 'var(--pad)' }}>Hrs</th>
+                  <th scope="col">Hours</th>
                 </tr>
               </thead>
               <tbody>
-                {data.people.length === 0 && (
+                {rosters.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={9}
-                      style={{
-                        padding: '24px var(--pad)',
-                        textAlign: 'center',
-                        color: 'var(--muted)',
-                      }}
-                    >
-                      Nobody is set up at this location yet.
+                    <td colSpan={9} className="sched-empty">
+                      No stores available in this view.
                     </td>
                   </tr>
                 )}
-                {data.people.map((p) => {
-                  const h = stats.perPerson.get(p.membershipId) ?? 0;
-                  return (
-                    <tr key={p.membershipId} data-testid="sched-row">
-                      <td>
-                        <div style={{ fontWeight: p.isLead ? 600 : 400 }}>{p.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                          {p.roleName ?? 'Member'} · {p.locationName}
-                        </div>
-                      </td>
-                      {data.week.days.map((d) => {
-                        const s = p.shifts.find((x) => x.date === d.date);
-                        const hasShift = !!s && s.startMinutes != null && s.endMinutes != null;
-                        const pending = !!s && s.startMinutes == null;
-                        return (
-                          <td key={d.date} className={d.isToday ? 'is-today' : undefined}>
-                            <button
-                              type="button"
-                              className={`sched-cell${hasShift ? ' is-shift' : pending ? ' is-pending' : ' is-off'}`}
-                              disabled={!canEdit}
-                              onClick={() =>
-                                canEdit &&
-                                setEdit({
-                                  person: p,
-                                  date: d.date,
-                                  dow: d.dow,
-                                  start: hasShift ? s!.startMinutes : null,
-                                  end: hasShift ? s!.endMinutes : null,
-                                })
-                              }
-                              title={
-                                hasShift
-                                  ? `${shiftLabel(s!.startMinutes!, s!.endMinutes!)}${s!.published ? '' : ' · unpublished'}`
-                                  : pending
-                                    ? 'Day off · unpublished'
-                                    : 'Day off'
-                              }
-                              data-testid="sched-cell"
+                {rosters.map((row) => (
+                  <tr key={row.id ?? 'unassigned'} data-testid="sched-row">
+                    <th scope="row" className="sched-store-name">
+                      {row.name}
+                      <span className="date">
+                        {row.locationType === 'warehouse' ? 'Warehouse' : 'Weekly coverage'}
+                      </span>
+                    </th>
+                    {data.week.days.map((d) => {
+                      const entries = row.days.get(d.date) ?? [];
+                      const working = entries.filter(({ shift }) => shift.startMinutes != null);
+                      const available = availableStaff(data.people, d.date);
+                      const openEditor = (
+                        person: SchedulePerson,
+                        start: number | null,
+                        end: number | null,
+                      ) => {
+                        setEdit({
+                          person,
+                          date: d.date,
+                          dow: d.dow,
+                          locationId: row.id,
+                          locationName: row.name,
+                          start,
+                          end,
+                        });
+                      };
+                      return (
+                        <td key={d.date} className={d.isToday ? 'is-today' : undefined}>
+                          <details className="sched-roster" key={`${row.id}-${d.date}`}>
+                            <summary
+                              className={working.length ? 'is-covered' : 'is-uncovered'}
+                              aria-label={`${row.name}, ${dowDate(d.dow, d.date)}, ${working.length} scheduled`}
                             >
-                              {hasShift ? shiftCompact(s!.startMinutes!, s!.endMinutes!) : 'off'}
-                            </button>
-                          </td>
-                        );
-                      })}
-                      <td
-                        className="mono"
-                        style={{
-                          textAlign: 'right',
-                          paddingRight: 'var(--pad)',
-                          color: h > 40 ? 'var(--warn)' : 'var(--text2)',
-                        }}
-                      >
-                        {h > 0 ? hours1(h) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
+                              <span>
+                                {working.length ? `${working.length} scheduled` : 'No staff'}
+                              </span>
+                              <span className="sched-roster-preview">
+                                {working.length
+                                  ? working.map(({ person }) => person.name).join(', ')
+                                  : canEdit
+                                    ? 'Add staff'
+                                    : 'No coverage'}
+                              </span>
+                            </summary>
+                            <div className="sched-roster-list">
+                              {entries.map(({ person, shift }) => (
+                                <button
+                                  key={person.membershipId}
+                                  type="button"
+                                  className={`sched-roster-person${shift.startMinutes == null ? ' is-off' : ''}`}
+                                  disabled={!canEdit || busy}
+                                  onClick={() =>
+                                    openEditor(person, shift.startMinutes, shift.endMinutes)
+                                  }
+                                  data-testid="sched-cell"
+                                >
+                                  <strong>{person.name}</strong>
+                                  <span>
+                                    {shift.startMinutes != null && shift.endMinutes != null
+                                      ? shiftCompact(shift.startMinutes, shift.endMinutes)
+                                      : 'Day off'}
+                                    {!shift.published && ' · Draft'}
+                                  </span>
+                                </button>
+                              ))}
+                              {canEdit && row.id && data.locations.some((l) => l.id === row.id) && (
+                                <select
+                                  className="select sched-add-staff"
+                                  value=""
+                                  disabled={busy || !available.length}
+                                  aria-label={`Add staff at ${row.name} on ${dowDate(d.dow, d.date)}`}
+                                  onChange={(e) => {
+                                    const person = available.find(
+                                      (p) => p.membershipId === e.target.value,
+                                    );
+                                    if (person) openEditor(person, null, null);
+                                  }}
+                                >
+                                  <option value="">
+                                    {available.length ? '+ Add staff' : 'Everyone scheduled'}
+                                  </option>
+                                  {available.map((person) => (
+                                    <option key={person.membershipId} value={person.membershipId}>
+                                      {person.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              {!entries.length && !canEdit && (
+                                <span className="sched-roster-preview">Nobody scheduled.</span>
+                              )}
+                            </div>
+                          </details>
+                        </td>
+                      );
+                    })}
+                    <td className="mono sched-store-hours">
+                      {row.hours ? hours1(row.hours) : '—'}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -357,15 +418,18 @@ export function StaffSchedule({
             data-testid="sched-footer"
           >
             <span style={{ color: 'var(--muted)' }}>
-              {stats.people} {stats.people === 1 ? 'person' : 'people'} · {stats.shifts}{' '}
-              {stats.shifts === 1 ? 'shift' : 'shifts'} · {hours1(stats.hours)} scheduled hours
+              {rosters.length} stores · {stats.people} {stats.people === 1 ? 'person' : 'people'} ·{' '}
+              {stats.shifts} {stats.shifts === 1 ? 'shift' : 'shifts'} · {hours1(stats.hours)}{' '}
+              scheduled hours
             </span>
             <span
               style={{ color: stats.uncovered.length === 0 ? 'var(--accent-ink)' : 'var(--warn)' }}
             >
-              {stats.uncovered.length === 0
-                ? 'Every day covered'
-                : `${stats.uncovered.length} day${stats.uncovered.length === 1 ? '' : 's'} with no coverage: ${stats.uncovered.map((d) => d.dow).join(', ')}`}
+              {rosters.length === 0
+                ? 'Add a store to start scheduling'
+                : stats.uncovered.length === 0
+                  ? 'Every store covered each day'
+                  : `${stats.uncovered.length} store-day${stats.uncovered.length === 1 ? '' : 's'} need coverage`}
             </span>
             {canEdit && (
               <span
@@ -376,20 +440,11 @@ export function StaffSchedule({
                   gap: 10,
                 }}
               >
-                <span style={{ color: data.unpublishedCount > 0 ? 'var(--warn)' : 'var(--muted)' }}>
-                  {data.unpublishedCount > 0
-                    ? `${data.unpublishedCount} unpublished change${data.unpublishedCount === 1 ? '' : 's'}`
+                <span style={{ color: stats.unpublished > 0 ? 'var(--warn)' : 'var(--muted)' }}>
+                  {stats.unpublished > 0
+                    ? `${stats.unpublished} unpublished change${stats.unpublished === 1 ? '' : 's'}`
                     : 'Published'}
                 </span>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={busy || data.unpublishedCount === 0}
-                  onClick={() => void publish()}
-                  data-testid="sched-publish"
-                >
-                  Publish week
-                </button>
               </span>
             )}
           </div>
@@ -398,13 +453,15 @@ export function StaffSchedule({
       {edit && (
         <ShiftEditorDialog
           name={edit.person.name}
-          dayLabel={dowDate(edit.dow, edit.date)}
+          dayLabel={`${edit.locationName} · ${dowDate(edit.dow, edit.date)}`}
           start={edit.start}
           end={edit.end}
           busy={busy}
           onSave={(s, e) => void save(s, e)}
           onDayOff={() => void dayOff()}
-          onClose={() => setEdit(null)}
+          onClose={() => {
+            if (!busy) setEdit(null);
+          }}
         />
       )}
     </Panel>
