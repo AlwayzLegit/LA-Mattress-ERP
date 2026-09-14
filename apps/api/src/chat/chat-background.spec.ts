@@ -28,13 +28,20 @@ describe('embedded chat lifecycle', () => {
   it('waits for an active job and never overlaps it', async () => {
     vi.useFakeTimers();
     let finish!: () => void;
-    const run = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const run = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const runner = new ChatBackground([{ name: 'delivery', interval: 100, run }]);
     runner.onApplicationBootstrap();
     await vi.advanceTimersByTimeAsync(5000);
     expect(run).toHaveBeenCalledTimes(1);
     let closed = false;
-    const stopping = runner.onModuleDestroy().then(() => { closed = true; });
+    const stopping = runner.onModuleDestroy().then(() => {
+      closed = true;
+    });
     await Promise.resolve();
     expect(closed).toBe(false);
     finish();

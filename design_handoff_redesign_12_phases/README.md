@@ -115,3 +115,7 @@ Delivery fee rule (flat $99 assumed) · cancel deposit default (store credit ass
 
 ## 6. Files in this folder
 `Redesign Index.dc.html`, `Redesign 1…10 *.dc.html` (canvases with notes), `Proto New Sale.dc.html`, `Proto Orders.dc.html`, `Proto Products.dc.html`, `Proto Dashboard.dc.html`, `Proto Competition.dc.html`, `support.js` (runtime for viewing the prototypes), `CLAUDE_CODE_PROMPT.md`.
+
+### Owner dashboard amendment — September 14, 2026
+
+Add Website statistics below the owner headline figures. Keep every existing ERP dashboard card. Eleven selectable report sections mirror the website admin: Overview, Revenue, Customers, Conversion, Chat, Traffic, Attribution, Store actions, Calls, Catalog & search, and Site health. Website periods are 7/30/90 days and do not inherit store/sales filters. Reuse current design tokens and owner typography; show source/window qualifications and unavailable states. Endpoint access is owner-only and business-bound. See ../docs/owner-website-statistics.md.

@@ -1088,3 +1088,7 @@ migrated onto the primitive; its saved order carries across from the old key. Te
 - Keyboard column reordering (a Move-left / Move-right menu on the header) — drag only for now.
 - Client-side sort covers the loaded pages of a cursor list, not the whole result set; a
   server sort per list needs API `sort`/`dir` support the way Orders and Products have.
+
+## Amendment — 2026-09-14 (Owner website statistics)
+
+Owner requested all website/admin statistics inside ERP. Added an owner-only Website statistics area below the owner's headline figures, with all eleven source sections and a separate 7/30/90-day period. Existing provider windows and availability states are explicit. The paired website/API connection is server-to-server and business-bound. See docs/owner-website-statistics.md for coverage, validation, and the paired release configuration. This implementation has not changed production configuration or deployed the connection.

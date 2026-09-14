@@ -11,6 +11,7 @@ import { StoresSection } from '../shared/stores-section';
 import { MorningBriefCard, type MorningBrief } from './morning-brief';
 import { CardHandle, Panel, pctDelta, shortDay, usdWhole } from './owner-kit';
 import { WrittenBusinessChart, type TrendPoint } from './written-business';
+import { WebsiteStatsPanel } from './website-stats';
 
 /**
  * The owner home (redesign Phase 9, README §3.5, canvas 8): one
@@ -96,7 +97,15 @@ function longDate(day: string): string {
   });
 }
 
-export default function OwnerHome({ userName, email }: { userName: string; email: string }) {
+export default function OwnerHome({
+  userName,
+  email,
+  websiteBusinessId,
+}: {
+  userName: string;
+  email: string;
+  websiteBusinessId?: string;
+}) {
   const f = useDashboardFilters();
   const [data, setData] = useState<OwnerData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -462,6 +471,10 @@ export default function OwnerHome({ userName, email }: { userName: string; email
             );
           })}
         </div>
+      )}
+
+      {websiteBusinessId && (
+        <WebsiteStatsPanel key={websiteBusinessId} businessId={websiteBusinessId} />
       )}
 
       <div className="dh-grid">

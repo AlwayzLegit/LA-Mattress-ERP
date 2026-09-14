@@ -152,7 +152,11 @@ export default function DashboardClient() {
     ) : view === 'manager' ? (
       <ManagerDashboardView userName={userName} />
     ) : (
-      <OwnerHome userName={userName} email={session.data.user.email} />
+      <OwnerHome
+        userName={userName}
+        email={session.data.user.email}
+        websiteBusinessId={me.roleName === 'Owner' ? checklist.businessId : undefined}
+      />
     );
   return (
     <>

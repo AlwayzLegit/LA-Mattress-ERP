@@ -59,18 +59,33 @@ export function createChatBackground(
   if (env.CHAT_EMBEDDED_WORKERS !== 'true') return new ChatBackground([]);
   const business = env.CHAT_BUSINESS_ID;
   const environment = env.CHAT_ENVIRONMENT;
-  if (env.CHAT_ENABLED !== 'true' || !business || !env.ABLY_API_KEY ||
-      (environment !== 'staging' && environment !== 'production')) {
-    throw new Error('Embedded chat requires enabled chat, business, environment and Ably configuration');
+  if (
+    env.CHAT_ENABLED !== 'true' ||
+    !business ||
+    !env.ABLY_API_KEY ||
+    (environment !== 'staging' && environment !== 'production')
+  ) {
+    throw new Error(
+      'Embedded chat requires enabled chat, business, environment and Ably configuration',
+    );
   }
-  const delivery = new ChatWorker(db, new AblyChatPublisher(env.ABLY_API_KEY, environment), environment);
+  const delivery = new ChatWorker(
+    db,
+    new AblyChatPublisher(env.ABLY_API_KEY, environment),
+    environment,
+  );
   const jobs: Job[] = [
     { name: 'Chat delivery', interval: 100, run: () => delivery.runOnce(business) },
     { name: 'Chat maintenance', interval: 3000, run: () => chat.maintenance(business) },
   ];
   if (env.CHAT_PUSH_ENABLED === 'true') {
-    const { CHAT_VAPID_PUBLIC_KEY: publicKey, CHAT_VAPID_PRIVATE_KEY: privateKey, CHAT_VAPID_SUBJECT: subject } = env;
-    if (!publicKey || !privateKey || !subject) throw new Error('Embedded chat push requires VAPID configuration');
+    const {
+      CHAT_VAPID_PUBLIC_KEY: publicKey,
+      CHAT_VAPID_PRIVATE_KEY: privateKey,
+      CHAT_VAPID_SUBJECT: subject,
+    } = env;
+    if (!publicKey || !privateKey || !subject)
+      throw new Error('Embedded chat push requires VAPID configuration');
     const push = new ChatPushWorker(db, vapidSender(subject, publicKey, privateKey), environment);
     jobs.push({ name: 'Chat push', interval: 250, run: () => push.runOnce(business) });
   }
