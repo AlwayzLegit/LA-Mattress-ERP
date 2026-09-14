@@ -1092,3 +1092,7 @@ migrated onto the primitive; its saved order carries across from the old key. Te
 ## Amendment — 2026-09-14 (Owner website statistics)
 
 Owner requested all website/admin statistics inside ERP. Added an owner-only Website statistics area below the owner's headline figures, with all eleven source sections and a separate 7/30/90-day period. Existing provider windows and availability states are explicit. The paired website/API connection is server-to-server and business-bound. See docs/owner-website-statistics.md for coverage, validation, and the paired release configuration. This implementation has not changed production configuration or deployed the connection.
+
+## 2026-09-14 — Written sales cost column
+
+Owner amendment: show extended Cost beside Merch Amount and remove Customer Discount from detail, summary, print and CSV columns. Derive cost from the report's existing merchandise and gross-profit values, including negative cancellation costs and zero-cost price adjustments. Cost follows financial-report permissions. Discount accounting and sale/order totals remain unchanged. CSV integration checks cover cost, quantity, cancellation/adjustment signs, grand totals and masking.

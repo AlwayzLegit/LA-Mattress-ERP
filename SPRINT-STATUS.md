@@ -5816,3 +5816,7 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 ## 2026-09-14 — Owner website statistics integration
 
 Implemented the owner-requested website reports in the ERP owner home, reusing the website's Shopify/PostHog/Clarity/Callcap queries through a dedicated read-only feed. All eleven source sections are covered. The feed requires matching business IDs and a dedicated server-only secret on the website and ERP API. No database migration. See docs/owner-website-statistics.md. Local builds and scoped tests are recorded in the review; live release still requires the paired configuration and deployment.
+
+## 2026-09-14 — Written sales cost column
+
+Owner amendment: show extended Cost beside Merch Amount and remove Customer Discount from detail, summary, print and CSV columns. Derive cost from the report's existing merchandise and gross-profit values, including negative cancellation costs and zero-cost price adjustments. Cost follows financial-report permissions. Discount accounting and sale/order totals remain unchanged. CSV integration checks cover cost, quantity, cancellation/adjustment signs, grand totals and masking.

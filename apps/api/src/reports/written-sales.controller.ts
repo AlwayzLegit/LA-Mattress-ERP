@@ -15,8 +15,8 @@ import { toCsv } from './csv';
 /**
  * Report Written Sales Dollars (STORIS TE.320, owner 2026-09-02): what
  * was written in a date window, per location, per transaction type, per
- * order, per line — merchandise, gross profit and profit %, then the
- * order's charges, customer discount, misc fee, sales tax and total —
+ * order, per line — merchandise, cost, gross profit and profit %, then the
+ * order's charges, misc fee, sales tax and total —
  * with totals per order, type, location and grand.
  *
  * Jetnine mapping of the STORIS screen:
@@ -349,6 +349,8 @@ export class WrittenSalesController {
 
     if (format === 'csv') {
       const money = (c: number | null) => (c == null ? null : (c / 100).toFixed(2));
+      const cost = (row: Pick<WrittenTotals, 'merchCents' | 'profitCents'>) =>
+        money(row.profitCents == null ? null : row.merchCents - row.profitCents);
       const headers = [
         'Location',
         'Type',
@@ -364,10 +366,10 @@ export class WrittenSalesController {
         'Product number',
         'Description',
         'Merch amount',
+        'Cost',
         'Gross profit',
         'Profit pct',
         'Charges',
-        'Customer discount',
         'Misc fee',
         'Sales tax',
         'Total order',
@@ -389,10 +391,10 @@ export class WrittenSalesController {
         '',
         '',
         money(t.merchCents),
+        cost(t),
         money(t.profitCents),
         t.profitPct,
         money(t.chargesCents),
-        money(t.discountCents),
         money(t.miscFeeCents),
         money(t.taxCents),
         money(t.totalCents),
@@ -420,9 +422,9 @@ export class WrittenSalesController {
                 l.productNumber,
                 l.description,
                 money(l.merchCents),
+                cost(l),
                 money(l.profitCents),
                 l.profitPct,
-                '',
                 '',
                 '',
                 '',
@@ -436,10 +438,10 @@ export class WrittenSalesController {
               '',
               `Total for order ${d.number}`,
               money(d.totals.merchCents),
+              cost(d.totals),
               money(d.totals.profitCents),
               d.totals.profitPct,
               money(d.totals.chargesCents),
-              money(d.totals.discountCents),
               money(d.totals.miscFeeCents),
               money(d.totals.taxCents),
               money(d.totals.totalCents),

@@ -617,6 +617,12 @@ locationName / operatorName` for the echoes.
 
 ### 12.9 Report Written Sales Dollars (amendment A13, owner 2026-09-02)
 
+**Owner amendment — 2026-09-14:** Add a Cost column beside Merch Amount and
+remove Customer Discount from the visible report and CSV. Cost is extended
+row cost (merchandise minus existing gross profit), with matching order,
+type, location and grand totals. Cost follows `reports.financial.view`
+masking. Keep discount accounting and existing sale/order totals unchanged.
+
 Owner ask (STORIS TE.320 parameter screen + sample output): "We also need
 this built".
 
