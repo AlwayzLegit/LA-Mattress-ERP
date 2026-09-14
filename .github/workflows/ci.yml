@@ -84,6 +84,7 @@ jobs:
       CASHIER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_cashier
       ORDER_NOTES_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_order_notes
       TEAM_WORKFLOWS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_team_workflows
+      CHAT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_chat
       PRODUCT_FILTERS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_product_filters
       AS_IS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_as_is
       ORDER_DETAIL_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jetnine_order_detail
@@ -176,6 +177,7 @@ jobs:
           createdb -h localhost -U postgres jetnine_cashier
           createdb -h localhost -U postgres jetnine_order_notes
           createdb -h localhost -U postgres jetnine_team_workflows
+          createdb -h localhost -U postgres jetnine_chat
           createdb -h localhost -U postgres jetnine_product_filters
           createdb -h localhost -U postgres jetnine_as_is
           createdb -h localhost -U postgres jetnine_order_detail

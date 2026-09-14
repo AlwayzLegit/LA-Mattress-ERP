@@ -406,7 +406,14 @@ export class ScheduleController {
       targetId: membershipId,
       metadata: { date: body.date, startMinutes, endMinutes, locationId },
     });
-    return { membershipId, date: body.date, locationId, startMinutes, endMinutes, published: false };
+    return {
+      membershipId,
+      date: body.date,
+      locationId,
+      startMinutes,
+      endMinutes,
+      published: false,
+    };
   }
 
   /** Day off: clears the shift (a pending removal until published). */

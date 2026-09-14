@@ -5829,8 +5829,8 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 ## 2026-09-14 — Report calendar viewport fix
 
 - [x] Shared date-range picker now uses a body portal, flips alignment when needed,
-  and clamps its width, height and position to the visible viewport. Repositions on
-  resize/scroll; smaller windows show one month and allow internal scrolling.
+      and clamps its width, height and position to the visible viewport. Repositions on
+      resize/scroll; smaller windows show one month and allow internal scrolling.
 - Increased calendar token specificity so the library stylesheet cannot restore
   oversized day cells and force the two-month desktop view into a tall stack.
 - Verified Written Sales in desktop, 720×640 and 390×640 browser views; preset
