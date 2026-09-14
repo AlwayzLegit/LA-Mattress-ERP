@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Logger } from '@nestjs/common';
 import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema, withDrizzleTenantContext } from '@jetnine/db';
@@ -22,6 +23,7 @@ const {
 
 /** Lease/commit before network I/O; abandoned leases can be reclaimed. */
 export class ChatWorker {
+  private readonly logger = new Logger(ChatWorker.name);
   constructor(
     private readonly db: PostgresJsDatabase,
     private readonly publisher: ChatPublisher,
@@ -117,12 +119,35 @@ export class ChatWorker {
         sequence: event.sequence,
         audience: event.audience as ChatChange['audience'],
       });
-    } catch {
+    } catch (error) {
       await this.settle(event, false);
+      // Provider bodies and network errors can contain credentials or message data.
+      // Log only numeric provider diagnostics and our own delivery identifiers.
+      const diagnostic = {
+        event: 'chat_delivery_failed',
+        eventId: event.id,
+        attempts: event.attempts,
+        exhausted: event.attempts >= 8,
+        ...(error instanceof ChatDeliveryError
+          ? { providerStatus: error.status, providerCode: error.code }
+          : { reason: 'network_or_provider_failure' }),
+      };
+      if (event.attempts >= 8) this.logger.error(diagnostic);
+      else this.logger.warn(diagnostic);
       return true;
     }
     await this.settle(event, true);
     return true;
+  }
+}
+
+export class ChatDeliveryError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code?: number,
+  ) {
+    super('Chat event delivery failed');
+    this.name = 'ChatDeliveryError';
   }
 }
 
@@ -152,6 +177,15 @@ export class AblyChatPublisher implements ChatPublisher {
         }),
       },
     );
-    if (!response.ok) throw new Error('Chat event delivery failed');
+    if (!response.ok) {
+      const body: unknown = await response.json().catch(() => null);
+      const providerCode = (body as { error?: { code?: unknown } } | null)?.error?.code;
+      throw new ChatDeliveryError(
+        response.status,
+        typeof providerCode === 'number' && Number.isFinite(providerCode)
+          ? providerCode
+          : undefined,
+      );
+    }
   }
 }
