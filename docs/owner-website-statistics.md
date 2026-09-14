@@ -26,13 +26,13 @@ No production configuration or deployment was performed during implementation.
 
 Set a newly generated random secret of at least 32 characters in the hosting secret stores, using the same value on both sides:
 
-| Host           | Variable                      | Value                                |
-| -------------- | ----------------------------- | ------------------------------------ |
-| Website Vercel | ERP_WEBSITE_STATS_TOKEN       | Dedicated read-only secret           |
-| Website Vercel | ERP_WEBSITE_STATS_BUSINESS_ID | Actual LA Mattress ERP business UUID |
-| ERP Render API | WEBSITE_STATS_TOKEN           | Same dedicated secret                |
-| ERP Render API | WEBSITE_STATS_BUSINESS_ID     | Same business UUID                   |
-| ERP Render API | WEBSITE_STATS_ORIGIN          | https://mattressstoreslosangeles.com |
+| Host           | Variable                      | Value                                    |
+| -------------- | ----------------------------- | ---------------------------------------- |
+| Website Vercel | ERP_WEBSITE_STATS_TOKEN       | Dedicated read-only secret               |
+| Website Vercel | ERP_WEBSITE_STATS_BUSINESS_ID | Actual LA Mattress ERP business UUID     |
+| ERP Render API | WEBSITE_STATS_TOKEN           | Same dedicated secret                    |
+| ERP Render API | WEBSITE_STATS_BUSINESS_ID     | Same business UUID                       |
+| ERP Render API | WEBSITE_STATS_ORIGIN          | https://www.mattressstoreslosangeles.com |
 
 Do not commit real values or expose the token through NEXT_PUBLIC variables. This integration does not require copying Shopify/PostHog/Clarity/Callcap credentials into ERP.
 
