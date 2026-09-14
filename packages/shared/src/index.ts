@@ -7,3 +7,4 @@ export * from './phone.js';
 export * from './catalog.js';
 export * from './chat.js';
 export * from './tenders.js';
+export * from './website-stats.js';

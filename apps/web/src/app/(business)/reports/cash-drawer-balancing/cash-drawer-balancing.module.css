@@ -1,0 +1,54 @@
+.printPages {
+  display: none;
+}
+
+@media print {
+  @page cash-drawer-balancing {
+    size: letter landscape;
+    margin: 0.3in;
+  }
+
+  :global(main):has(.report) {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .report {
+    page: cash-drawer-balancing;
+  }
+
+  .report > :not(.printPages) {
+    display: none !important;
+  }
+
+  .printPages {
+    display: block;
+    color: #000;
+    background: #fff;
+  }
+
+  .printPage {
+    margin: 0;
+    padding: 0;
+    break-inside: avoid;
+    break-after: page;
+  }
+
+  .printPage:last-child {
+    break-after: auto;
+  }
+
+  /* Match CASH_DRAWER_PRINT_OPTIONS in the API; 60 lines fit per page. */
+  .printPage pre {
+    margin: 0;
+    padding: 0;
+    font-family: Courier, 'Courier New', monospace;
+    font-size: 8pt;
+    line-height: 9.2pt;
+    font-weight: 400;
+    letter-spacing: 0;
+    white-space: pre;
+    overflow: visible;
+    font-variant-ligatures: none;
+  }
+}

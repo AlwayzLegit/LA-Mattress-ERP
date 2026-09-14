@@ -9,6 +9,7 @@ import { downloadFile } from '@/lib/download';
 import { rangeToSearch } from '@/lib/date-range';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { Money } from '@/components/money';
+import styles from './written-sales.module.css';
 import {
   Button,
   Card,
@@ -30,7 +31,7 @@ import {
  * Type both / orders / adjustments, Report Type detail / summary, Include
  * Audit Comments / All Salespeople / Customer's Full Address — and the
  * output is the STORIS body: location → type → order → lines with merch,
- * gross profit, profit %, then charges / discount / misc fee / tax /
+ * cost, gross profit, profit %, then charges / misc fee / tax /
  * total, totalled per order, type, location and grand.
  */
 
@@ -133,6 +134,21 @@ function Pct({ value }: { value: number | null }) {
   return <>{value == null ? '—' : `${value.toFixed(1)}`}</>;
 }
 
+/** Extended cost uses the same cost basis as the report's existing gross profit. */
+function Cost({
+  value,
+  visible,
+}: {
+  value: Pick<Totals, 'merchCents' | 'profitCents'>;
+  visible: boolean;
+}) {
+  return visible && value.profitCents != null ? (
+    <Money cents={value.merchCents - value.profitCents} />
+  ) : (
+    <>—</>
+  );
+}
+
 function Stat({
   label,
   value,
@@ -233,10 +249,10 @@ function TotalsRow({
         totalClassName={strong ? 'font-bold' : 'font-semibold'}
         totals={{
           merch: <Money cents={t.merchCents} />,
+          cost: <Cost value={t} visible={profit} />,
           profit: profit && t.profitCents != null ? <Money cents={t.profitCents} /> : '—',
           profitPct: profit ? <Pct value={t.profitPct} /> : '—',
           charges: <Money cents={t.chargesCents} />,
-          discount: <Money cents={t.discountCents} />,
           miscFee: <Money cents={t.miscFeeCents} />,
           tax: <Money cents={t.taxCents} />,
           total: <Money cents={t.totalCents} />,
@@ -267,7 +283,7 @@ export default function WrittenSalesPage() {
 
   const profit = report?.canSeeProfit ?? false;
 
-  // Line columns: the STORIS body's charges / discount / misc fee / tax
+  // Line columns: the STORIS body's charges / misc fee / tax
   // cells are only filled on totals rows; "entered by" prints under the
   // order-total column, as on the spool.
   const lineColumns = useMemo<ColumnDef<LineRow>[]>(
@@ -299,6 +315,15 @@ export default function WrittenSalesPage() {
         render: (r) => <Money cents={r.l.merchCents} />,
       },
       {
+        id: 'cost',
+        label: 'Cost',
+        title: 'Total cost for the quantity on this row',
+        num: true,
+        sortValue: (r) =>
+          profit && r.l.profitCents != null ? r.l.merchCents - r.l.profitCents : null,
+        render: (r) => <Cost value={r.l} visible={profit} />,
+      },
+      {
         id: 'profit',
         label: 'Gross profit',
         num: true,
@@ -314,7 +339,6 @@ export default function WrittenSalesPage() {
         render: (r) => (profit ? <Pct value={r.l.profitPct} /> : '—'),
       },
       { id: 'charges', label: 'Charges', num: true, render: () => null },
-      { id: 'discount', label: 'Customer discount', num: true, render: () => null },
       { id: 'miscFee', label: 'Misc fee charge', num: true, render: () => null },
       { id: 'tax', label: 'Sales tax', num: true, render: () => null },
       {
@@ -448,13 +472,13 @@ export default function WrittenSalesPage() {
   }
 
   return (
-    <div data-testid="written-sales">
-      <p style={{ margin: '0 0 12px' }}>
+    <div data-testid="written-sales" className={styles.report}>
+      <p style={{ margin: '0 0 12px' }} className="no-print">
         <Link href="/reports">← Reports</Link>
       </p>
       <PageHeader
         title="Report Written Sales Dollars"
-        sub="What was written in the window, per location and transaction type, with merchandise, gross profit, charges, discounts, tax and order totals."
+        sub="What was written in the window, per location and transaction type, with merchandise, cost, gross profit, charges, tax and order totals."
         actions={
           <>
             <Button variant="secondary" onClick={() => window.print()} disabled={!report}>
@@ -468,9 +492,21 @@ export default function WrittenSalesPage() {
           </>
         }
       />
+      {report && (
+        <p className={styles.printMeta}>
+          {fmtDate(report.range.start)}
+          {report.range.end !== report.range.start ? ` – ${fmtDate(report.range.end)}` : ''}
+          {' · '}
+          {ORDER_TYPES.find((t) => t.key === report.orderType)?.label}
+          {' · '}
+          {REPORT_TYPES.find((t) => t.key === report.reportType)?.label}
+          {' · '}
+          {report.totals.documents} {report.totals.documents === 1 ? 'document' : 'documents'}
+        </p>
+      )}
 
-      <div className="space-y-6">
-        <Card title="Parameters" data-testid="ws-params">
+      <div className={`space-y-6 ${styles.body}`}>
+        <Card title="Parameters" data-testid="ws-params" className="no-print">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -596,7 +632,7 @@ export default function WrittenSalesPage() {
 
         {report && (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="no-print grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <Stat label="Documents" value={String(report.totals.documents)} />
               <Stat label="Merch" value={<Money cents={report.totals.merchCents} />} />
               <Stat
@@ -624,7 +660,7 @@ export default function WrittenSalesPage() {
             ) : (
               report.locations.map((loc) => (
                 <Card key={loc.locationId} title={`Location · ${loc.locationName}`}>
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className={styles.tableWrap}>
                     <table className="table" data-testid="ws-location">
                       <thead>
                         <ColumnHeadRow list={cols} testIdPrefix="reports-written-sales" />
@@ -632,7 +668,7 @@ export default function WrittenSalesPage() {
                       <tbody>
                         {loc.types.map((t) => (
                           <Fragment key={t.key}>
-                            <tr className="bg-surface-muted">
+                            <tr className={`bg-surface-muted ${styles.typeHeading}`}>
                               <td colSpan={cols.ordered.length} className="font-semibold">
                                 Type {t.label}
                               </td>
@@ -641,7 +677,9 @@ export default function WrittenSalesPage() {
                               <Fragment key={docKey(d)}>
                                 <tr data-testid="ws-document">
                                   <td colSpan={cols.ordered.length}>
-                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                                    <div
+                                      className={`flex flex-wrap gap-x-4 gap-y-1 text-sm ${styles.documentMeta}`}
+                                    >
                                       <span>
                                         <span className="text-muted">Order number </span>
                                         <Link href={docHref(d)} className="font-semibold">
@@ -747,16 +785,16 @@ export default function WrittenSalesPage() {
             )}
 
             <Card title="Grand total" data-testid="ws-grand">
-              <div style={{ overflowX: 'auto' }}>
+              <div className={styles.tableWrap}>
                 <table className="table">
                   <thead>
                     <tr>
                       <th colSpan={3} />
                       <th className="num">Merch amount</th>
+                      <th className="num">Cost</th>
                       <th className="num">Gross profit</th>
                       <th className="num">Profit pct</th>
                       <th className="num">Charges</th>
-                      <th className="num">Customer discount</th>
                       <th className="num">Misc fee charge</th>
                       <th className="num">Sales tax</th>
                       <th className="num">Total order</th>
@@ -771,6 +809,9 @@ export default function WrittenSalesPage() {
                         <Money cents={report.totals.merchCents} />
                       </td>
                       <td className="num font-bold">
+                        <Cost value={report.totals} visible={profit} />
+                      </td>
+                      <td className="num font-bold">
                         {profit && report.totals.profitCents != null ? (
                           <Money cents={report.totals.profitCents} />
                         ) : (
@@ -782,9 +823,6 @@ export default function WrittenSalesPage() {
                       </td>
                       <td className="num font-bold">
                         <Money cents={report.totals.chargesCents} />
-                      </td>
-                      <td className="num font-bold">
-                        <Money cents={report.totals.discountCents} />
                       </td>
                       <td className="num font-bold">
                         <Money cents={report.totals.miscFeeCents} />
@@ -804,7 +842,9 @@ export default function WrittenSalesPage() {
                 {report.range.end !== report.range.start ? ` – ${fmtDate(report.range.end)}` : ''} ·
                 order type {report.orderType} · {report.reportType} · generated{' '}
                 {new Date(report.generatedAt).toLocaleString()}
-                {!profit ? ' · gross profit hidden (needs financial reports permission)' : ''}
+                {!profit
+                  ? ' · cost and gross profit hidden (needs financial reports permission)'
+                  : ''}
               </p>
             </Card>
           </>

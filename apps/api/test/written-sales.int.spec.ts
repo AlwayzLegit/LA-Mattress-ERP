@@ -1,8 +1,8 @@
 /**
  * Report Written Sales Dollars (STORIS TE.320, owner 2026-09-02).
  *
- * Location → type → order → line, with merchandise, gross profit and
- * profit %, then charges / customer discount / misc fee / sales tax /
+ * Location → type → order → line, with merchandise, cost, gross profit and
+ * profit %, then charges / misc fee / sales tax /
  * total order, totalled per order, type, location and grand. Order Type
  * both / orders / adjustments, Report Type detail / summary, the three
  * include flags, the store filter, profit masking without
@@ -582,6 +582,9 @@ describe('Report Written Sales Dollars', () => {
     expect(o1.totals.profitCents).toBeNull();
     expect(o1.totals.merchCents).toBe(171_800);
     expect(r.totals.profitCents).toBeNull();
+    const csv = await get({ format: 'csv' }, analystCookie).expect(200);
+    expect(csv.text).toContain('E KING AURO,1700.00,,,,');
+    expect(csv.text).not.toContain('1700.00,640.00');
   });
 
   it('exports CSV', async () => {
@@ -589,8 +592,18 @@ describe('Report Written Sales Dollars', () => {
     expect(res.headers['content-type']).toContain('text/csv');
     expect(res.headers['content-disposition']).toContain(`written-sales-${day}-to-${day}.csv`);
     expect(res.text).toContain('Location,Type,Order number,Order date');
+    expect(res.text).toContain('Merch amount,Cost,Gross profit,Profit pct,Charges,Misc fee');
+    expect(res.text).not.toContain('Customer discount');
+    expect(res.text).toContain('E KING AURO,1700.00,640.00,1060.00,62.4');
+    expect(res.text).toContain('RECYCLING F,36.00,13.00,23.00');
+    expect(res.text).toContain('Order cancelled,-500.00,-640.00,140.00');
+    expect(res.text).toContain('Price adjustment — Price match,-200.00,0.00,-200.00');
     expect(res.text).toContain('201 Western,New Transactions excluding Layaway,01108587');
     expect(res.text).toContain('Total for order 01108587');
     expect(res.text).toContain('Grand total');
+    const grand = res.text.split('\r\n').find((row: string) => row.startsWith('Grand total,'))!;
+    expect(grand.split(',').slice(13, 16)).toEqual(['2072.00', '666.00', '1406.00']);
+    const summary = await get({ format: 'csv', reportType: 'summary' }).expect(200);
+    expect(summary.text).toContain(grand);
   });
 });

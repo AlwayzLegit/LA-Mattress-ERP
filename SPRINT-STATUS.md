@@ -5813,6 +5813,22 @@ See `docs/live-chat-development.md` slice 3 for transport limits and remaining w
 
 - [x] **ERP chat release reconciliation (2026-09-13):** Separate `codex/chat-erp-release` branch incorporates upstream f884801, current shell/acting-store provider and inherited global design. Preserves upstream migration history through 0104 and consolidates undeployed chat schema into 0105_live_chat. Fixes raw-header logging regression. Shared/db/API and ERP production builds, 36 chat API + 3 logging + 10 navigation/push tests, migration drift check and authenticated live-design review passed. Draft review/staging rollout follows; no production changes. See docs/erp-chat-release.md.
 
+## 2026-09-14 — Owner website statistics integration
+
+Implemented the owner-requested website reports in the ERP owner home, reusing the website's Shopify/PostHog/Clarity/Callcap queries through a dedicated read-only feed. All eleven source sections are covered. The feed requires matching business IDs and a dedicated server-only secret on the website and ERP API. No database migration. See docs/owner-website-statistics.md. Local builds and scoped tests are recorded in the review; live release still requires the paired configuration and deployment.
+
+## 2026-09-14 — Written sales cost column
+
+Owner amendment: show extended Cost beside Merch Amount and remove Customer Discount from detail, summary, print and CSV columns. Derive cost from the report's existing merchandise and gross-profit values, including negative cancellation costs and zero-cost price adjustments. Cost follows financial-report permissions. Discount accounting and sale/order totals remain unchanged. CSV integration checks cover cost, quantity, cancellation/adjustment signs, grand totals and masking.
+
+## 2026-09-14 — Compact Written Sales print layout
+
+Owner amendment: use a report-specific US Letter landscape page with 0.3-inch margins, compact 8-point tables, repeated column headings and row/totals break controls. Print omits parameters, navigation, actions and duplicate summary tiles; keeps the loaded report dates/type, transaction details, Cost and all totals. Screen layout remains unchanged. Local layout verification uses the real report with print styles at the landscape content width, including long descriptions and large amounts.
+
+## 2026-09-14 — Compact Cash Drawer Balancing print and PDF
+
+Owner sample requires the AR.317 header/business/as-of date/generated clock/page number, customer and tender/reference fields, drawer/operator/Mgr/Batch columns, pay-class/payment-type/store subtotals, grand total and cash/check/deposit reconciliation. Browser Print now receives the same paginated snapshot as the PDF. Both use Letter landscape, 8pt Courier, 9.2pt leading, 0.3-inch margins and 60 lines per page. Compact output removes blank spacer rows and keeps the parameter echo together at the end, sharing the final register page when space allows. Legacy TXT byte layout remains available. Mgr/Batch values remain blank because no source fields exist. Ten layout/PDF unit tests passed; API build, web typecheck and scoped lint passed. One-page and 123-payment/three-page synthetic PDFs were rendered and visually inspected. Full database integration assertions run in CI.
+
 ## 2026-09-14 — Store-first staff schedule
 
 - [x] Owner request: replace staff rows with stores and daily roster dropdowns.

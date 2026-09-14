@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { CashDrawerBalancingReport } from './cash-drawer-balancing.controller';
 import {
+  CASH_DRAWER_PRINT_OPTIONS,
+  COMPACT_LINES_PER_PAGE,
   LINES_PER_PAGE,
   REPORT_WIDTH,
   renderCashDrawerBalancingBody,
@@ -8,6 +10,7 @@ import {
   renderCashDrawerBalancingText,
   renderParameterPage,
 } from './cash-drawer-balancing.text';
+import { textPagesToPdf, textPdfLinesPerPage } from './text-pdf';
 
 /** The owner's 09/01/26 sample: one store, one pay class, three card types. */
 function sample(): CashDrawerBalancingReport {
@@ -126,6 +129,52 @@ const ctx = {
 };
 
 describe('AR.317 text layout', () => {
+  it('fits a compact report and its filters together without losing any sample fields', () => {
+    const report = sample();
+    const pages = renderCashDrawerBalancingPages(report, ctx, { compact: true });
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.slice(0, 6)).toEqual(
+      renderCashDrawerBalancingPages(report, ctx)[0]!.slice(0, 6),
+    );
+    expect(pages.flat()).toEqual([
+      ...pages[0]!.slice(0, 6),
+      ...renderCashDrawerBalancingBody(report).filter(Boolean),
+      '',
+      ...renderParameterPage(report),
+    ]);
+    expect(pages[0]![4]).toContain('Number Mgr   Init   Batch');
+    const pdf = textPagesToPdf(pages, CASH_DRAWER_PRINT_OPTIONS).toString('latin1');
+    expect(pdf).toContain('/MediaBox [0 0 792 612]');
+    expect(pdf).toContain('/F1 8 Tf');
+    expect(pdf).toContain('/Count 1');
+    expect(COMPACT_LINES_PER_PAGE).toBeLessThanOrEqual(
+      textPdfLinesPerPage(CASH_DRAWER_PRINT_OPTIONS),
+    );
+  });
+
+  it('preserves every tender and subtotal across compact pages with repeated numbered headers', () => {
+    const report = sample();
+    const pt = report.groups[0]!.payClasses[0]!.paymentTypes[0]!;
+    pt.lines = Array.from({ length: 120 }, (_, i) => ({
+      ...pt.lines[0]!,
+      paymentId: `p${i}`,
+      reference: `0210${String(i).padStart(4, '0')}`,
+    }));
+    const pages = renderCashDrawerBalancingPages(report, ctx, { compact: true });
+    expect(pages.length).toBeGreaterThan(1);
+    for (const [index, page] of pages.entries()) {
+      expect(page.length).toBeLessThanOrEqual(COMPACT_LINES_PER_PAGE);
+      expect(page[0]).toContain('Reference: AR.317.RPT');
+      expect(page[1]).toContain(`Page: ${index + 1}`);
+      expect(page[4]).toContain('Gift Cert./Chk. No.');
+    }
+    expect(pages.flatMap((page) => page.slice(6)).filter(Boolean)).toEqual([
+      ...renderCashDrawerBalancingBody(report).filter(Boolean),
+      ...renderParameterPage(report),
+    ]);
+    expect(pages.at(-1)!.slice(-8)).toEqual(renderParameterPage(report));
+  });
+
   it('reproduces the STORIS register lines column for column', () => {
     const body = renderCashDrawerBalancingBody(sample());
     expect(body[0]).toBe('Store 02 - WEST LA MATTRESS STOR');

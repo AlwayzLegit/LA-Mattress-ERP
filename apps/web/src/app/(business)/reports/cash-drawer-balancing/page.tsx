@@ -9,6 +9,7 @@ import { rangeToSearch } from '@/lib/date-range';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { Money } from '@/components/money';
 import Link from 'next/link';
+import styles from './cash-drawer-balancing.module.css';
 import {
   Button,
   Card,
@@ -99,6 +100,7 @@ interface BalanceGroup {
 }
 interface Report {
   generatedAt: string;
+  printPages?: string[][];
   range: { start: string; end: string; startTime: string; endTime: string };
   balanceBy: BalanceBy;
   toleranceCents: number;
@@ -559,7 +561,7 @@ export default function CashDrawerBalancingPage() {
     : [];
 
   return (
-    <div data-testid="cash-drawer-balancing">
+    <div data-testid="cash-drawer-balancing" className={styles.report}>
       <p style={{ margin: '0 0 12px' }}>
         <Link href="/reports">← Reports</Link>
       </p>
@@ -568,7 +570,11 @@ export default function CashDrawerBalancingPage() {
         sub="Every tender taken in the balance window under its store, operator or drawer, with pay-class subtotals and the cash + check deposit."
         actions={
           <>
-            <Button variant="secondary" onClick={() => window.print()} disabled={!report}>
+            <Button
+              variant="secondary"
+              onClick={() => window.print()}
+              disabled={!report?.printPages?.length || busy}
+            >
               <Printer size={14} />
               Print
             </Button>
@@ -576,7 +582,7 @@ export default function CashDrawerBalancingPage() {
               variant="secondary"
               onClick={() => void exportAs('pdf')}
               disabled={exporting}
-              title="Download the STORIS-layout Basic PDF"
+              title="Download the compact landscape report"
             >
               <FileText size={14} />
               PDF
@@ -915,6 +921,15 @@ export default function CashDrawerBalancingPage() {
           </>
         )}
       </div>
+      {report?.printPages && (
+        <div className={styles.printPages} data-testid="cdb-print-pages">
+          {report.printPages.map((lines, index) => (
+            <section key={index} className={styles.printPage}>
+              <pre>{lines.join('\n')}</pre>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

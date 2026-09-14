@@ -554,6 +554,14 @@ itemization beyond the $0 Removal line · signature capture at POS · dark mode.
 
 ### 12.8 Report Cash Drawer Balancing Totals (amendment A12, owner 2026-09-02)
 
+**Print amendment — 2026-09-14:** Browser Print and PDF use the same compact
+AR.317 register, in Letter landscape, Courier 8pt with 9.2pt line spacing
+and 0.3-inch margins. Preserve every sample header/column, group and tender
+subtotal, grand total and cash/check/deposit reconciliation. Repeat headers
+and page numbers; place the filter echo after the register when space allows.
+Manager and Batch stay blank because ERP does not capture those values.
+The legacy TXT spool keeps its existing byte layout for parallel-run comparisons.
+
 Owner ask (STORIS AR.317 parameter screen + sample output): "create this too".
 
 - **Endpoint** `GET /v1/reports/cash-drawer-balancing` (`reports.sales.view`,
@@ -616,6 +624,17 @@ locationName / operatorName` for the echoes.
   header and register lines), `text-pdf.spec.ts` (3).
 
 ### 12.9 Report Written Sales Dollars (amendment A13, owner 2026-09-02)
+
+**Owner amendment — 2026-09-14:** Add a Cost column beside Merch Amount and
+remove Customer Discount from the visible report and CSV. Cost is extended
+row cost (merchandise minus existing gross profit), with matching order,
+type, location and grand totals. Cost follows `reports.financial.view`
+masking. Keep discount accounting and existing sale/order totals unchanged.
+
+**Print amendment — 2026-09-14:** Print Written Sales Dollars on US Letter
+landscape with compact rows, narrow margins and repeated table headings.
+Omit screen controls and duplicate summary tiles; preserve the report date,
+transaction details, cost/profit columns and all totals on paper.
 
 Owner ask (STORIS TE.320 parameter screen + sample output): "We also need
 this built".

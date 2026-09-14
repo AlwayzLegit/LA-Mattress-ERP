@@ -23,6 +23,15 @@ import { clockStamp, fit, mmddyy, put, putRight, trimTo } from './text-layout';
 
 export const REPORT_WIDTH = 132;
 export const LINES_PER_PAGE = 52;
+/** 60 lines fit inside a Letter landscape page with these compact print settings. */
+export const COMPACT_LINES_PER_PAGE = 60;
+export const CASH_DRAWER_PRINT_OPTIONS = {
+  fontSize: 8,
+  leading: 9.2,
+  landscape: true,
+  marginX: 21.6,
+  marginTop: 21.6,
+} as const;
 
 export interface RenderContext {
   businessName: string;
@@ -221,15 +230,24 @@ export function renderParameterPage(report: CashDrawerBalancingReport): string[]
 export function renderCashDrawerBalancingPages(
   report: CashDrawerBalancingReport,
   ctx: RenderContext,
+  options: { compact?: boolean } = {},
 ): string[][] {
-  const body = renderCashDrawerBalancingBody(report);
+  const fullBody = renderCashDrawerBalancingBody(report);
+  const body = options.compact ? fullBody.filter((line) => line !== '') : fullBody;
   const pages: string[][] = [];
   const header = (n: number) => pageHeader(report, ctx, n);
-  const room = LINES_PER_PAGE - header(1).length;
+  const room = (options.compact ? COMPACT_LINES_PER_PAGE : LINES_PER_PAGE) - header(1).length;
   for (let i = 0; i < Math.max(1, body.length); i += room) {
     pages.push([...header(pages.length + 1), ...body.slice(i, i + room)]);
   }
-  pages.push([...header(pages.length + 1), ...renderParameterPage(report)]);
+  const parameters = renderParameterPage(report);
+  const lastPage = pages[pages.length - 1]!;
+  if (options.compact && lastPage.length + 1 + parameters.length <= COMPACT_LINES_PER_PAGE) {
+    lastPage.push('', ...parameters);
+  } else {
+    // Keep the complete filter echo together when it needs another page.
+    pages.push([...header(pages.length + 1), ...parameters]);
+  }
   return pages;
 }
 

@@ -12,6 +12,7 @@ import { ReportsController } from './reports.controller';
 import { StoreDashboardController } from './store-dashboard.controller';
 import { TransfersByLocationController } from './transfers-by-location.controller';
 import { WrittenSalesController } from './written-sales.controller';
+import { WebsiteStatsController, WebsiteStatsService } from './website-stats.controller';
 
 @Module({
   imports: [AuthModule, TenancyModule, CostingModule, ControlsModule],
@@ -19,6 +20,7 @@ import { WrittenSalesController } from './written-sales.controller';
     ReportsController,
     MorningDashboardController,
     OwnerDashboardController,
+    WebsiteStatsController,
     CashDrawerBalancingController,
     WrittenSalesController,
     StoreDashboardController,
@@ -26,5 +28,6 @@ import { WrittenSalesController } from './written-sales.controller';
     OrderChangesController,
     TransfersByLocationController,
   ],
+  providers: [WebsiteStatsService],
 })
 export class ReportsModule {}

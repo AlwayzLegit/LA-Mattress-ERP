@@ -586,8 +586,15 @@ describe('Report Cash Drawer Balancing Totals', () => {
     const raw = (pdf.body as Buffer).toString('latin1');
     expect(raw.startsWith('%PDF-1.4')).toBe(true);
     expect(raw).toContain('/BaseFont /Courier');
+    expect(raw).toContain('/MediaBox [0 0 792 612]');
+    expect(raw).toContain('/F1 8 Tf');
     expect(raw).toContain('(Reference: AR.317.RPT');
     expect(raw).toContain('Total For Store 02:');
+    const browser = await get({ locationId: aStoreId }).expect(200);
+    expect(browser.body.printPages[0][0]).toContain('Drawer Test Co');
+    expect(browser.body.printPages[0][4]).toContain('Number Mgr   Init   Batch');
+    expect(browser.body.printPages.flat().join('\n')).toContain('Total Deposit');
+    expect(browser.body.printPages.flat().join('\n')).toContain('Total For Store 02:');
     // WinAnsi characters survive as octal bytes (Ë = 0xCB).
     const bPdf = await get({ format: 'pdf', locationId: bStoreId })
       .buffer(true)
