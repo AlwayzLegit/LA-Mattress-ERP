@@ -72,6 +72,58 @@ GRANT EXECUTE ON FUNCTION is_super_admin() TO app_user;
 -- RLS on tenant-scoped tables (the ones with a `business_id` column)
 -- ============================================================================
 
+-- Avoid ACCESS EXCLUSIVE lock upgrades when row security already has the
+-- required flags. The helper is session-local; every policy is still applied.
+CREATE OR REPLACE FUNCTION pg_temp.ensure_row_security(target regclass)
+RETURNS void LANGUAGE plpgsql AS $ensure_rls$
+DECLARE
+  enabled boolean;
+  forced boolean;
+BEGIN
+  SELECT relrowsecurity, relforcerowsecurity INTO STRICT enabled, forced
+  FROM pg_class WHERE oid = target;
+  IF NOT enabled THEN
+    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', target);
+  END IF;
+  IF NOT forced THEN
+    EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', target);
+  END IF;
+END
+$ensure_rls$;
+
+-- Compare PostgreSQL's canonical policy definitions on a temporary table before
+-- taking a DDL lock on the live table. Changed policies still replace atomically.
+CREATE OR REPLACE FUNCTION pg_temp.ensure_policy(target regclass, policy_name text, definition text)
+RETURNS void LANGUAGE plpgsql AS $ensure_policy$
+DECLARE
+  target_name text;
+  target_schema text;
+  qualified_target text;
+  desired record;
+  existing record;
+BEGIN
+  SELECT c.relname, n.nspname INTO STRICT target_name, target_schema
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = target;
+  qualified_target := format('%I.%I', target_schema, target_name);
+  EXECUTE format('CREATE TEMP TABLE %I (LIKE %s) ON COMMIT DROP', target_name, qualified_target);
+  EXECUTE format(definition, format('pg_temp.%I', target_name));
+  SELECT polcmd, polpermissive, polroles,
+    pg_get_expr(polqual, polrelid) AS qual,
+    pg_get_expr(polwithcheck, polrelid) AS check_expr
+    INTO STRICT desired FROM pg_policy
+    WHERE polrelid = to_regclass(format('pg_temp.%I', target_name)) AND polname = policy_name;
+  SELECT polcmd, polpermissive, polroles,
+    pg_get_expr(polqual, polrelid) AS qual,
+    pg_get_expr(polwithcheck, polrelid) AS check_expr
+    INTO existing FROM pg_policy WHERE polrelid = target AND polname = policy_name;
+  EXECUTE format('DROP TABLE pg_temp.%I', target_name);
+  IF existing IS DISTINCT FROM desired THEN
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %s', policy_name, qualified_target);
+    EXECUTE format(definition, qualified_target);
+  END IF;
+END
+$ensure_policy$;
+
 DO $$
 DECLARE
   t text;
@@ -81,7 +133,6 @@ DECLARE
     'memberships',
     'roles',
     'membership_location_scopes',
-    'audit_logs',
     'products',
     'product_variants',
     'product_images',
@@ -185,25 +236,23 @@ DECLARE
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP
-    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
-    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    PERFORM pg_temp.ensure_row_security(t::regclass);
 
-    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
-    EXECUTE format(
-      'CREATE POLICY tenant_isolation ON %I
+    PERFORM pg_temp.ensure_policy(t::regclass, 'tenant_isolation',
+      'CREATE POLICY tenant_isolation ON %s
          USING (business_id = current_business_id() OR is_super_admin())
-         WITH CHECK (business_id = current_business_id() OR is_super_admin())',
-      t
+         WITH CHECK (business_id = current_business_id() OR is_super_admin())'
     );
   END LOOP;
 END
 $$;
 
+SELECT pg_temp.ensure_row_security('public.audit_logs'::regclass);
+
 -- audit_logs has a nullable business_id (platform-level events). Allow super
 -- admins to insert/select rows with NULL business_id; everyone else is bound
 -- to their tenant.
-DROP POLICY IF EXISTS tenant_isolation ON audit_logs;
-CREATE POLICY tenant_isolation ON audit_logs
+SELECT pg_temp.ensure_policy('public.audit_logs'::regclass, 'tenant_isolation', $policy$CREATE POLICY tenant_isolation ON %s
   USING (
     is_super_admin()
     OR (business_id IS NOT NULL AND business_id = current_business_id())
@@ -211,15 +260,13 @@ CREATE POLICY tenant_isolation ON audit_logs
   WITH CHECK (
     is_super_admin()
     OR (business_id IS NOT NULL AND business_id = current_business_id())
-  );
+  )$policy$);
 
 -- role_permissions has no business_id; isolation is enforced via the parent
 -- role row.
-ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE role_permissions FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('role_permissions'::regclass);
 
-DROP POLICY IF EXISTS tenant_isolation ON role_permissions;
-CREATE POLICY tenant_isolation ON role_permissions
+SELECT pg_temp.ensure_policy('public.role_permissions'::regclass, 'tenant_isolation', $policy$CREATE POLICY tenant_isolation ON %s
   USING (
     is_super_admin()
     OR EXISTS (
@@ -235,19 +282,17 @@ CREATE POLICY tenant_isolation ON role_permissions
       WHERE r.id = role_permissions.role_id
         AND r.business_id = current_business_id()
     )
-  );
+  )$policy$);
 
 -- ============================================================================
 -- Platform tables: not tenant-scoped, but app_user must not list every user
 -- ============================================================================
 
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('users'::regclass);
 
-DROP POLICY IF EXISTS users_self_or_member ON users;
 -- An app_user query can see itself, or users who share a membership with the
 -- current business. Super admins see everyone.
-CREATE POLICY users_self_or_member ON users
+SELECT pg_temp.ensure_policy('public.users'::regclass, 'users_self_or_member', $policy$CREATE POLICY users_self_or_member ON %s
   USING (
     is_super_admin()
     OR id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
@@ -260,13 +305,11 @@ CREATE POLICY users_self_or_member ON users
   WITH CHECK (
     is_super_admin()
     OR id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
-  );
+  )$policy$);
 
-ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sessions FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('sessions'::regclass);
 
-DROP POLICY IF EXISTS sessions_owner_only ON sessions;
-CREATE POLICY sessions_owner_only ON sessions
+SELECT pg_temp.ensure_policy('public.sessions'::regclass, 'sessions_owner_only', $policy$CREATE POLICY sessions_owner_only ON %s
   USING (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
@@ -274,13 +317,11 @@ CREATE POLICY sessions_owner_only ON sessions
   WITH CHECK (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
-  );
+  )$policy$);
 
-ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE businesses FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('businesses'::regclass);
 
-DROP POLICY IF EXISTS businesses_member_only ON businesses;
-CREATE POLICY businesses_member_only ON businesses
+SELECT pg_temp.ensure_policy('public.businesses'::regclass, 'businesses_member_only', $policy$CREATE POLICY businesses_member_only ON %s
   USING (
     is_super_admin()
     OR id = current_business_id()
@@ -288,7 +329,7 @@ CREATE POLICY businesses_member_only ON businesses
   WITH CHECK (
     is_super_admin()
     OR id = current_business_id()
-  );
+  )$policy$);
 
 -- ============================================================================
 -- Auth tables (better-auth managed)
@@ -298,11 +339,9 @@ CREATE POLICY businesses_member_only ON businesses
 -- run as the postgres superuser (bypassing RLS) when handling sign-up and
 -- login; this policy protects against any code that drops to app_user and
 -- tries to read someone else's password hash.
-ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('accounts'::regclass);
 
-DROP POLICY IF EXISTS accounts_owner_only ON accounts;
-CREATE POLICY accounts_owner_only ON accounts
+SELECT pg_temp.ensure_policy('public.accounts'::regclass, 'accounts_owner_only', $policy$CREATE POLICY accounts_owner_only ON %s
   USING (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
@@ -310,14 +349,12 @@ CREATE POLICY accounts_owner_only ON accounts
   WITH CHECK (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
-  );
+  )$policy$);
 
 -- two_factors: same shape as accounts.
-ALTER TABLE two_factors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE two_factors FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('two_factors'::regclass);
 
-DROP POLICY IF EXISTS two_factors_owner_only ON two_factors;
-CREATE POLICY two_factors_owner_only ON two_factors
+SELECT pg_temp.ensure_policy('public.two_factors'::regclass, 'two_factors_owner_only', $policy$CREATE POLICY two_factors_owner_only ON %s
   USING (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
@@ -325,39 +362,33 @@ CREATE POLICY two_factors_owner_only ON two_factors
   WITH CHECK (
     is_super_admin()
     OR user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
-  );
+  )$policy$);
 
 -- verifications: short-lived random tokens never exposed to clients. Only
 -- ever read/written server-side by better-auth (which runs as superuser).
 -- Block all access from app_user; the table stays reachable to postgres.
-ALTER TABLE verifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE verifications FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('verifications'::regclass);
 
-DROP POLICY IF EXISTS verifications_super_admin_only ON verifications;
-CREATE POLICY verifications_super_admin_only ON verifications
+SELECT pg_temp.ensure_policy('public.verifications'::regclass, 'verifications_super_admin_only', $policy$CREATE POLICY verifications_super_admin_only ON %s
   USING (is_super_admin())
-  WITH CHECK (is_super_admin());
+  WITH CHECK (is_super_admin())$policy$);
 
 -- business_templates: platform-level config snapshots, super-admin
 -- surface only.
-ALTER TABLE business_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE business_templates FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('business_templates'::regclass);
 
-DROP POLICY IF EXISTS business_templates_super_admin_only ON business_templates;
-CREATE POLICY business_templates_super_admin_only ON business_templates
+SELECT pg_temp.ensure_policy('public.business_templates'::regclass, 'business_templates_super_admin_only', $policy$CREATE POLICY business_templates_super_admin_only ON %s
   USING (is_super_admin())
-  WITH CHECK (is_super_admin());
+  WITH CHECK (is_super_admin())$policy$);
 
 -- stripe_webhook_events: platform-internal log; the webhook handler runs
 -- as the postgres role (RLS bypassed there) and tenant code never needs
 -- to read this table.
-ALTER TABLE stripe_webhook_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE stripe_webhook_events FORCE ROW LEVEL SECURITY;
+SELECT pg_temp.ensure_row_security('stripe_webhook_events'::regclass);
 
-DROP POLICY IF EXISTS stripe_webhook_events_super_admin_only ON stripe_webhook_events;
-CREATE POLICY stripe_webhook_events_super_admin_only ON stripe_webhook_events
+SELECT pg_temp.ensure_policy('public.stripe_webhook_events'::regclass, 'stripe_webhook_events_super_admin_only', $policy$CREATE POLICY stripe_webhook_events_super_admin_only ON %s
   USING (is_super_admin())
-  WITH CHECK (is_super_admin());
+  WITH CHECK (is_super_admin())$policy$);
 
 -- ============================================================================
 -- Root-connection bypass (managed Postgres)
@@ -388,10 +419,8 @@ BEGIN
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public' AND rowsecurity
   LOOP
-    EXECUTE format('DROP POLICY IF EXISTS root_bypass ON %I', t);
-    EXECUTE format(
-      'CREATE POLICY root_bypass ON %I TO %I USING (true) WITH CHECK (true)',
-      t, current_user
+    PERFORM pg_temp.ensure_policy(format('public.%I', t)::regclass, 'root_bypass',
+      format('CREATE POLICY root_bypass ON %%s TO %I USING (true) WITH CHECK (true)', current_user)
     );
   END LOOP;
 END
