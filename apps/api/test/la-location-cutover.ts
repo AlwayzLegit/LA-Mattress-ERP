@@ -5,9 +5,10 @@ import { configureLaLocations, STORE_PREFIXES } from '../src/ops/configure-la-lo
 /** Runs inside the business integration suite's freshly migrated database. */
 export async function verifyLocationCutover(databaseUrl: string) {
   const pg = postgres(databaseUrl, { max: 1, prepare: false });
+  const slug = `location-cutover-${Date.now()}`;
   try {
     const [biz] = await pg`INSERT INTO businesses (slug, name, status)
-      VALUES ('location-cutover-test', 'Cutover Test', 'active') RETURNING id`;
+      VALUES (${slug}, 'Cutover Test', 'active') RETURNING id`;
     const businessId = biz!.id;
     const ids: Record<string, string> = {};
     for (const name of [...Object.keys(STORE_PREFIXES), 'Glendale Store']) {
@@ -20,7 +21,7 @@ export async function verifyLocationCutover(databaseUrl: string) {
     const members: string[] = [];
     for (const status of ['active', 'invited', 'disabled']) {
       const [user] =
-        await pg`INSERT INTO users (email, name) VALUES (${`cutover-${status}@test.local`}, ${status}) RETURNING id`;
+        await pg`INSERT INTO users (email, name) VALUES (${`${slug}-${status}@test.local`}, ${status}) RETURNING id`;
       const [member] =
         await pg`INSERT INTO memberships (business_id, user_id, role_id, status, data_scope, selling_scope)
         VALUES (${businessId}, ${user!.id}, ${role!.id}, ${status}, 'store', 'approved') RETURNING id`;
@@ -38,8 +39,8 @@ export async function verifyLocationCutover(databaseUrl: string) {
       ['Glendale Store', 'SO-2026-000123'],
       ['Koreatown', 'KO-10050'],
     ]) {
-      await pg`INSERT INTO orders (business_id, location_id, customer_id, number)
-        VALUES (${businessId}, ${ids[name!]!}, ${customer!.id}, ${number!})`;
+      await pg`INSERT INTO orders (business_id, location_id, customer_id, number, status)
+        VALUES (${businessId}, ${ids[name!]!}, ${customer!.id}, ${number!}, 'completed')`;
     }
     await pg`INSERT INTO order_sequences (business_id, location_id, next_value)
       VALUES (${businessId}, ${ids.Warehouse!}, 10222)`;
@@ -50,7 +51,7 @@ export async function verifyLocationCutover(databaseUrl: string) {
     }
     const before =
       await pg`SELECT id, number, location_id FROM orders WHERE business_id = ${businessId} ORDER BY id`;
-    const options = { databaseUrl, businessSlug: 'location-cutover-test' };
+    const options = { databaseUrl, businessSlug: slug };
     const preview = await configureLaLocations({ ...options, mode: 'validate' });
     expect(preview.prefixes).toHaveLength(5);
     expect(preview.reassignedMembers.sort()).toEqual(members.sort());
@@ -104,7 +105,7 @@ export async function verifyLocationCutover(databaseUrl: string) {
     ).toBe(1);
     // Another tenant's location and number remain untouched.
     const [other] =
-      await pg`INSERT INTO businesses (slug, name) VALUES ('location-cutover-other', 'Other') RETURNING id`;
+      await pg`INSERT INTO businesses (slug, name, status) VALUES (${`${slug}-other`}, 'Other', 'active') RETURNING id`;
     await pg`INSERT INTO locations (business_id, name, timezone, order_prefix)
       VALUES (${other!.id}, 'Koreatown', 'America/Los_Angeles', 'ZZ')`;
     await pg`DELETE FROM staff_shifts WHERE business_id = ${businessId}`;

@@ -11,7 +11,8 @@
   Deletes only an unreferenced location; historical foreign keys keep it archived.
 - Inactive locations are excluded from operational lists, member selling choices,
   and new sales. Locations admin can explicitly show inactive locations.
-- Validation: API/web typechecks passed; database integration coverage added for
+- Validation: API/web typechecks and changed-source lint passed; the isolated
+  PostgreSQL cutover test passed, including
   rollback, idempotency, existing counters/orders, mixed member scopes, historical
   shifts, cross-tenant isolation and safe deletion. CI and production cutover pending.
 

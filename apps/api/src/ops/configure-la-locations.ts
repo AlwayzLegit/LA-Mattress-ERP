@@ -86,7 +86,7 @@ export async function configureLaLocations(options: {
           const warehouse = locations.find((l) => l.name === 'Warehouse' && l.is_active)!;
           const assigned = await tx<{ membership_id: string }[]>`
             SELECT membership_id FROM membership_location_scopes
-            WHERE business_id = ${business.id} AND location_id = ${glendale.id} FOR UPDATE`;
+            WHERE business_id = ${business.id} AND location_id = ${glendale.id} ORDER BY membership_id FOR UPDATE`;
           summary.reassignedMembers = assigned.map((m) => m.membership_id);
           // Preserve every other scope and every role/permission, including invited/disabled members.
           await tx`INSERT INTO membership_location_scopes (business_id, membership_id, location_id)
@@ -108,7 +108,8 @@ export async function configureLaLocations(options: {
             FROM pg_constraint fk JOIN pg_class c ON c.oid = fk.conrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
             JOIN pg_attribute a ON a.attrelid = fk.conrelid AND a.attnum = ANY(fk.conkey)
-            WHERE fk.contype = 'f' AND fk.confrelid = 'public.locations'::regclass`;
+            WHERE fk.contype = 'f' AND fk.confrelid = 'public.locations'::regclass
+            ORDER BY n.nspname, c.relname, a.attname`;
           for (const ref of refs) {
             const [count] = await tx<{ count: number }[]>`
               SELECT count(*)::int AS count FROM ${tx(`${ref.schema_name}.${ref.table_name}`)}
