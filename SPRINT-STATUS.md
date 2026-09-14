@@ -5824,3 +5824,7 @@ Owner amendment: show extended Cost beside Merch Amount and remove Customer Disc
 ## 2026-09-14 — Compact Written Sales print layout
 
 Owner amendment: use a report-specific US Letter landscape page with 0.3-inch margins, compact 8-point tables, repeated column headings and row/totals break controls. Print omits parameters, navigation, actions and duplicate summary tiles; keeps the loaded report dates/type, transaction details, Cost and all totals. Screen layout remains unchanged. Local layout verification uses the real report with print styles at the landscape content width, including long descriptions and large amounts.
+
+## 2026-09-14 — Compact Cash Drawer Balancing print and PDF
+
+Owner sample requires the AR.317 header/business/as-of date/generated clock/page number, customer and tender/reference fields, drawer/operator/Mgr/Batch columns, pay-class/payment-type/store subtotals, grand total and cash/check/deposit reconciliation. Browser Print now receives the same paginated snapshot as the PDF. Both use Letter landscape, 8pt Courier, 9.2pt leading, 0.3-inch margins and 60 lines per page. Compact output removes blank spacer rows and keeps the parameter echo together at the end, sharing the final register page when space allows. Legacy TXT byte layout remains available. Mgr/Batch values remain blank because no source fields exist. Ten layout/PDF unit tests passed; API build, web typecheck and scoped lint passed. One-page and 123-payment/three-page synthetic PDFs were rendered and visually inspected. Full database integration assertions run in CI.

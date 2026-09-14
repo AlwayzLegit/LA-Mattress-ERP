@@ -11,6 +11,7 @@ import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import {
+  CASH_DRAWER_PRINT_OPTIONS,
   renderCashDrawerBalancingPages,
   renderCashDrawerBalancingText,
 } from './cash-drawer-balancing.text';
@@ -139,6 +140,8 @@ export interface BalanceGroup {
 
 export interface CashDrawerBalancingReport {
   generatedAt: string;
+  /** Compact, paginated AR.317 output for browser printing, from this same report snapshot. */
+  printPages?: string[][];
   range: { start: string; end: string; startTime: string; endTime: string };
   balanceBy: BalanceBy;
   filters: {
@@ -706,18 +709,23 @@ export class CashDrawerBalancingController {
       res!.send(toCsv(headers, data));
       return;
     }
+    // Browser print, PDF and TXT share the business/store clock and the report snapshot.
+    const timezone =
+      filteredStore?.timezone ??
+      rows[0]?.timezone ??
+      (await this.firstTimezone(businessId)) ??
+      'UTC';
+    const ctx = {
+      businessName: business.name,
+      generatedAt: new Date(report.generatedAt),
+      timezone,
+    };
+    const printPages = renderCashDrawerBalancingPages(report, ctx, { compact: true });
     if (format === 'pdf' || format === 'txt') {
-      // The header clock runs on the store's time: the filtered store's,
-      // else the first store on the register, else the first store.
-      const timezone =
-        filteredStore?.timezone ??
-        rows[0]?.timezone ??
-        (await this.firstTimezone(businessId)) ??
-        'UTC';
-      const ctx = { businessName: business.name, generatedAt: new Date(), timezone };
       const stem = `cash-drawer-balancing-${range.start}-to-${range.end}`;
       if (format === 'pdf') {
-        const pdf = textPagesToPdf(renderCashDrawerBalancingPages(report, ctx), {
+        const pdf = textPagesToPdf(printPages, {
+          ...CASH_DRAWER_PRINT_OPTIONS,
           title: 'Report Cash Drawer Balancing Totals',
         });
         res!.setHeader('Content-Type', 'application/pdf');
@@ -730,7 +738,7 @@ export class CashDrawerBalancingController {
       res!.send(renderCashDrawerBalancingText(report, ctx));
       return;
     }
-    return report;
+    return { ...report, printPages };
   }
 
   private async business(businessId: string): Promise<{ name: string; toleranceCents: number }> {

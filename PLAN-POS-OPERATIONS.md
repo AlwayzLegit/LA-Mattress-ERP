@@ -554,6 +554,14 @@ itemization beyond the $0 Removal line · signature capture at POS · dark mode.
 
 ### 12.8 Report Cash Drawer Balancing Totals (amendment A12, owner 2026-09-02)
 
+**Print amendment — 2026-09-14:** Browser Print and PDF use the same compact
+AR.317 register, in Letter landscape, Courier 8pt with 9.2pt line spacing
+and 0.3-inch margins. Preserve every sample header/column, group and tender
+subtotal, grand total and cash/check/deposit reconciliation. Repeat headers
+and page numbers; place the filter echo after the register when space allows.
+Manager and Batch stay blank because ERP does not capture those values.
+The legacy TXT spool keeps its existing byte layout for parallel-run comparisons.
+
 Owner ask (STORIS AR.317 parameter screen + sample output): "create this too".
 
 - **Endpoint** `GET /v1/reports/cash-drawer-balancing` (`reports.sales.view`,
