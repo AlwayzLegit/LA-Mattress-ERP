@@ -5863,3 +5863,5 @@ back, all policies remain required, and exhausted retries still fail startup.
 
 Validated DB build/typecheck/lint, four retry tests, and a real local PostgreSQL
 lock-timeout test proving rollback before retry and RLS enabled after success.
+
+- 2026-09-14: RLS startup compares canonical policy definitions and row-security flags before DDL, avoiding redundant locks during rolling deploys. Regression checks cover unchanged policy OIDs with all live tables read-locked, missing/changed policies, and disabled security flags. Existing transactional retry remains in place.
