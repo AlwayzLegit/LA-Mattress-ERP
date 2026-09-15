@@ -18,6 +18,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
+import { sellingStoreCorrectionSchema, type SellingStoreCorrection } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { qualifiesForRecyclingFee } from './recycling-fee';
@@ -2121,7 +2122,7 @@ export class OrdersController {
   async correctSellingStore(
     @CurrentTenant() tenant: RequestTenantContext,
     @Param('id') id: string,
-    @Body() body: { locationId?: string; expectedLocationId?: string; reason?: string },
+    @Body() input: SellingStoreCorrection,
   ): Promise<OrderDetail> {
     if (
       !tenant.userId ||
@@ -2132,20 +2133,13 @@ export class OrdersController {
     ) {
       throw new ForbiddenException('Only the owner can correct an order’s selling store');
     }
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (
-      typeof body?.locationId !== 'string' ||
-      !uuid.test(body.locationId) ||
-      typeof body.expectedLocationId !== 'string' ||
-      !uuid.test(body.expectedLocationId) ||
-      typeof body.reason !== 'string' ||
-      !body.reason.trim() ||
-      body.reason.trim().length > 1000
-    ) {
+    const parsed = sellingStoreCorrectionSchema.safeParse(input);
+    if (!parsed.success) {
       throw new BadRequestException(
         'Choose a selling store and enter a reason (up to 1,000 characters)',
       );
     }
+    const body = parsed.data;
     // Serialize corrections and existing order mutations inside the request transaction.
     const [order] = await this.db
       .select()

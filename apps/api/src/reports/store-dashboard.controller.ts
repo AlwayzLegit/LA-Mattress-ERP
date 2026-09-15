@@ -16,6 +16,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, sql, type SQL } from 'drizzle-o
 import { alias, type PgColumn } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { writtenOrdersQuerySchema } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { tzDayEndExclusive, tzDayStart, type DayRange } from '../common/date-range';
@@ -508,18 +509,17 @@ export class StoreDashboardController {
     @Query('salespersonMembershipId') salespersonId?: string,
     @Query('offset') offsetQ?: string,
   ) {
-    if (
-      (locationId && !isUuid(locationId)) ||
-      (salespersonId && !isUuid(salespersonId)) ||
-      (periodQ && !['today', 'mtd'].includes(periodQ))
-    ) {
+    const parsed = writtenOrdersQuerySchema.safeParse({
+      period: periodQ,
+      locationId,
+      salespersonMembershipId: salespersonId,
+      offset: offsetQ,
+    });
+    if (!parsed.success) {
       throw new BadRequestException('Invalid written sales filter');
     }
-    const offset = offsetQ === undefined ? 0 : Number(offsetQ);
-    if (!Number.isSafeInteger(offset) || offset < 0)
-      throw new BadRequestException('Invalid offset');
+    const { offset, period } = parsed.data;
     const { today } = await this.clock(tenant.businessId!);
-    const period = this.periodOf(periodQ ?? 'today');
     const range = this.rangeFor(period, today);
     const stores = await this.storesFor(
       tenant,
