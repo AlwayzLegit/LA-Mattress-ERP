@@ -93,7 +93,27 @@ Receive: PO select, Into, Packing slip #, Blind count toggle; lines with Ordered
 ### 3.4 Deliveries (Phase 7 canvas, static artboards)
 Header controls: Week | Month segmented, ‹ Today ›, Confirm calls, Dispatch, Print day sheet. Week: 7 columns, header `n / 15` + 4px bar (green <13, amber 13–15, red >15 with red border), cards = links with grab handle ⋮⋮, order, window, customer · city, status chip, `$due` in amber; empty day = dashed "No stops · Schedule here"; Pickup (return) cards use the Waiting tint. Drag: lifted card shadow + −1° tilt, origin ghost dashed 45%, target column navy dashed with preview "8 → 9 / 15"; drop 120ms; audit row written; keyboard: focus card, M, pick day. Over cap: allowed, day red, one-line note required and printed on the day sheet, banner at top. Month: same grid, 35 days, fraction + status roll-up + due-at-door, no cards. Day sheet print: letter, black on white, 14pt, stop number 26px, customer/phone/address, tick box per piece, window + due + signature line, COD total in header, failed-stop instruction every page.
 
-### 3.5 Dashboards (`Proto Dashboard.dc.html`, Phase 8) — every shipped card kept
+### 3.5 Dashboards (`Proto Dashboard.dc.html`, Phase 8)
+
+**Owner amendment (2026-09-14):** replace Written business and Morning brief on the
+owner home with a compact Today · all stores card listing each written order, its
+salesperson, store, customer, status and amount, with links into the order. Exclude
+drafts, quotes, cancelled and imported documents, matching store Written totals;
+include Warehouse sales in the all-location view. A salesperson row opens the same
+order detail list for that store and the selected Today / Month-to-date period.
+Compact the headline tiles and website statistics; website source tables start
+collapsed. Allow owners to choose displayed website cards and metrics, remembering
+choices per business and owner in this browser. Drag handles reorder dashboard
+sections, with keyboard move controls and saved per-owner/browser preferences.
+Staff schedule has a Show / Hide detail control that preserves editing state.
+
+Owners may correct an order's selling store to an active location, with a required
+reason and before/after audit history. Keep its existing number, prices, tax,
+payments, delivery and effective inventory sources; this corrects attribution.
+An order lock / open delivery run must be cleared before correction. Completed
+ERP orders can be corrected; imported history cannot. Enforce owner identity
+on the API and reject stale source-store values to prevent concurrent overwrites.
+
 Common: header Today | Month to date; "Acting for" scope; time-clock strip (Manager, Ops, Warehouse) with clock in/out.
 Owner: headline **Company written today** 56px with **vs same day last week** and **vs same day last month**; side tiles Month to date / Open exceptions; six small figures (Collected, Balance due, Refunds, Cancellations, Avg ticket, Deliveries today) with deltas; **Cash pickups** queue; **Stores** (one card per store: Written/Delivered/Received/Refunds, Salespeople table, Money received by method → payment list dialog, Cash on hand panel); Written business (30d bars), Morning brief, Changes (severity filter), Staff schedule (editable + Publish).
 Cash pickups (rebuilt): per store, cash on hand since last pickup with chip Collected / Holding / **Pickup due** (> $1,500 or any cash payment > 3 days old); tick payments (none = all), **Record pickup** → Counted, Slip #, variance shown → **Post pickup** stamps every payment with who/when, issues `PU-nnnn`, flags variance to 10pm exceptions. Owner and Ops get a cross-store queue at the top (due first, "Record pickup" jumps into the form). Manager may record their own store.

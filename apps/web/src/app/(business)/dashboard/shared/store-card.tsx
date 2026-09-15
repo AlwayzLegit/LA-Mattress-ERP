@@ -1,5 +1,7 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
 import { usdWhole } from '../owner/owner-kit';
 import { CashOnHandPanel, type CashPickupsApi } from './cash-pickups';
 import { clockTime, dayAndTime, plural, tenderMeta } from './kit';
@@ -19,16 +21,20 @@ export function StoreCard({
   open,
   onToggle,
   onOpenPayments,
+  onOpenSalesperson,
   cp,
   actorName,
+  dragHandle,
 }: {
   card: StoreCardData;
   period: StorePeriod;
   open: boolean;
   onToggle: () => void;
   onOpenPayments: (method: string) => void;
+  onOpenSalesperson: (membershipId: string, name: string) => void;
   cp: CashPickupsApi;
   actorName?: string | null;
+  dragHandle?: ReactNode;
 }) {
   const tz = card.timezone;
   const reps = card.salespeople;
@@ -41,6 +47,7 @@ export function StoreCard({
       id={`store-${card.locationId}`}
     >
       <div className="sc-head">
+        {dragHandle}
         <h3 className="sc-name">{card.name}</h3>
         <span className="sc-sub">
           {card.manager ? `${card.manager.name} · ` : ''}
@@ -93,9 +100,24 @@ export function StoreCard({
                 </thead>
                 <tbody>
                   {reps.map((s) => (
-                    <tr key={s.membershipId} data-testid="store-salesperson">
+                    <tr
+                      key={s.membershipId}
+                      data-testid="store-salesperson"
+                      className="clickable-salesperson"
+                      onClick={() => onOpenSalesperson(s.membershipId, s.name)}
+                    >
                       <td style={{ fontWeight: s.isManager ? 600 : 400 }}>
-                        {s.name}
+                        <button
+                          type="button"
+                          className="salesperson-link"
+                          aria-label={`View ${s.name}'s written orders`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenSalesperson(s.membershipId, s.name);
+                          }}
+                        >
+                          {s.name}
+                        </button>
                         {s.isManager && <span className="manager-badge">Manager</span>}
                       </td>
                       <td className="num">{usdWhole(s.writtenCents)}</td>

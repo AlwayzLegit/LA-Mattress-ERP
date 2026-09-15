@@ -1,15 +1,40 @@
 .website {
-  margin: 24px 0;
+  margin: 0;
   border-top: 2px solid var(--accent);
   color: var(--text);
   min-width: 0;
+}
+.picker {
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  padding: 8px;
+  margin-bottom: 4px;
+}
+.picker legend {
+  padding: 0 4px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.pickerMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+.picker label {
+  cursor: pointer;
+}
+.updated {
+  margin: 3px 2px;
+  color: var(--muted);
+  font-size: 10px;
 }
 .header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 0 16px;
+  gap: 8px;
+  padding: 8px 0;
   flex-wrap: wrap;
 }
 .eyebrow {
@@ -20,9 +45,9 @@
   font-weight: 600;
 }
 .header h2 {
-  font-size: 26px;
+  font-size: 16px;
   font-weight: 600;
-  margin: 3px 0 6px;
+  margin: 0 0 2px;
 }
 .header p {
   margin: 0;
@@ -63,8 +88,8 @@
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-2);
-  min-height: 36px;
-  padding: 7px 11px;
+  min-height: 30px;
+  padding: 4px 8px;
   border-radius: 3px;
   font-size: 12px;
   font-weight: 600;
@@ -100,8 +125,8 @@
 }
 .cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 8px;
   align-items: start;
 }
 .card {
@@ -116,7 +141,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
 .cardHead h4 {
@@ -131,10 +156,10 @@
 }
 .metrics {
   margin: 0;
-  padding: 16px;
+  padding: 10px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 18px 14px;
+  gap: 8px 10px;
 }
 .metrics dt {
   color: var(--muted);
@@ -143,7 +168,7 @@
 }
 .metrics dd {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1.2;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

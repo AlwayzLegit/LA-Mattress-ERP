@@ -70,6 +70,7 @@ export interface ChangesResponse {
 }
 
 const ORDER_ACTIONS = [
+  'order.selling_store.correct',
   'order.update',
   'order.line.add',
   'order.line.remove',
@@ -187,6 +188,15 @@ export function describeChange(action: string, changes: Changes, ctx: DescribeCt
   };
 
   switch (action) {
+    case 'order.selling_store.correct':
+      return {
+        ...base,
+        type: 'selling_store_corrected',
+        label: 'Selling store corrected',
+        was: String(before.locationName ?? before.locationId ?? ''),
+        now: String(after.locationName ?? after.locationId ?? ''),
+        reason: String(after.reason ?? ''),
+      };
     case 'order.update': {
       if (has('orderDiscountCents')) {
         const b = num(before.orderDiscountCents);

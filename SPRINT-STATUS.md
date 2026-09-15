@@ -1,5 +1,24 @@
 # Sprint Status — STORIS Cutover
 
+## Owner dashboard controls — 2026-09-14
+
+- Click a salesperson row for written-order detail using the same store-local
+  Today/Month-to-date window and exclusions as the Stores card. Orders link to
+  the existing detail/editor. A separate Today card lists each sale across all
+  active locations, including Warehouse, with paging and exact totals.
+- Owner-only selling-store correction records before/after and reason in order
+  history and the Changes card. Preserves number, prices, tax, payments and
+  effective inventory sources; rejects stale edits, inactive/foreign locations,
+  imported history and locked orders/open runs. Completed ERP orders are supported.
+- Drag or keyboard-reorder dashboard cards and individual stores. Layouts and
+  website card/metric selections are saved per business and owner in this browser.
+  Compact headline tiles and website statistics; remove owner Written Business
+  and Morning Brief; add persistent Staff schedule Show/Hide detail.
+- Validation: 22 dashboard integration tests passed on isolated PostgreSQL;
+  API/web typechecks and changed-source lint passed. Browser verified drag/reload,
+  salesperson drill-down, multi-section website selections and schedule collapse.
+  Release CI and production verification pending.
+
 ## Owner location cutover — 2026-09-14
 
 - New-sale prefixes: KO Koreatown, WE West LA, LB La Brea, ST Studio City, WA Warehouse.
@@ -14,7 +33,9 @@
 - Validation: API/web typechecks and changed-source lint passed; the isolated
   PostgreSQL cutover test passed, including
   rollback, idempotency, existing counters/orders, mixed member scopes, historical
-  shifts, cross-tenant isolation and safe deletion. CI and production cutover pending.
+  shifts, cross-tenant isolation and safe deletion. PR #189 merged and deployed
+  (`ed5bb10`); production cutover verified. Glendale retained inactive for history;
+  no members or future shifts required reassignment.
 
 > **Living tracker for `PLAN-STORIS-CUTOVER.md`.** Protocol: pick the first unchecked
 > **Build** item, ship it as a vertical slice, check it off with a dated note, commit the
