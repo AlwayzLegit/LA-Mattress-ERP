@@ -163,8 +163,13 @@ export default function DashboardClient() {
   return (
     <>
       {view !== 'cashier' && <DashboardControls />}
-      {/* Redesign Phase 11: the competition strip sits above every role home. */}
-      <CompetitionStrip showLeads={view === 'cashier' || view === 'manager'} actorName={userName} />
+      {/* Owners arrange competition with their other dashboard cards. */}
+      {view !== 'owner' && (
+        <CompetitionStrip
+          showLeads={view === 'cashier' || view === 'manager'}
+          actorName={userName}
+        />
+      )}
       {home}
     </>
   );

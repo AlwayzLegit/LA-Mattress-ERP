@@ -22,7 +22,9 @@
   caught a pre-existing Stores request race when restoring Today: a slow MTD
   response could replace today's rows. Follow-up aborts superseded requests,
   binds rendered rows to their period/scope, and keeps detail dialogs on the
-  period of the clicked row. Regression verification and follow-up release pending.
+  period of the clicked row. The competition panel also participates in owner
+  drag/keyboard layout and hide controls. Regression verification and follow-up
+  release pending.
 
 ## Owner location cutover — 2026-09-14
 
