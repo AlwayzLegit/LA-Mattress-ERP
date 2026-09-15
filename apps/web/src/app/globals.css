@@ -6552,6 +6552,134 @@ select.picker-from {
   font-weight: 600;
 }
 
+/* Owner-selected compact dashboard. */
+.owner-layout {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+}
+.owner-layout > * {
+  grid-column: 1 / -1;
+}
+.owner-layout > .dh-headline,
+.owner-layout > .dh-side {
+  grid-column: span 2;
+}
+.dh-compact .dh-headline,
+.dh-compact .dh-side {
+  padding: 10px 12px;
+}
+.dh-compact .dh-headline,
+.dh-compact .dh-side {
+  position: relative;
+}
+.dh-compact .dh-headline > .dashboard-card-controls,
+.dh-compact .dh-side > .dashboard-card-controls {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+.dh-compact .dh-label {
+  padding-right: 30px;
+}
+.dh-compact .dh-value,
+.dh-compact .dh-side-value {
+  font-size: 30px;
+  margin-top: 4px;
+}
+.dh-compact .dh-baselines {
+  margin-top: 6px;
+  font-size: 11px;
+  gap: 1px;
+}
+.dh-compact .dh-sub,
+.dh-compact .dh-side-delta {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.dh-compact .dh-side-link {
+  padding-top: 6px;
+}
+.dashboard-card-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  float: right;
+}
+.dashboard-drag {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 20px;
+  min-width: 28px;
+}
+.dashboard-drag:active {
+  cursor: grabbing;
+}
+.clickable-salesperson {
+  cursor: pointer;
+}
+.clickable-salesperson:hover,
+.clickable-salesperson:focus-within {
+  background: var(--accent-soft);
+}
+.salesperson-link {
+  font: inherit;
+  color: var(--accent-ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.written-orders-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.written-orders-summary > strong {
+  margin-left: auto;
+}
+.written-orders-scroll {
+  overflow: auto;
+  max-height: 360px;
+  padding: 0 12px;
+}
+.written-orders-table {
+  min-width: 850px;
+  width: 100%;
+}
+.written-orders-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.written-orders-table td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.written-orders-dialog {
+  width: min(1100px, 96vw) !important;
+  max-width: 96vw !important;
+}
+@media (max-width: 800px) {
+  .owner-layout > .dh-headline,
+  .owner-layout > .dh-side {
+    grid-column: 1 / -1;
+  }
+}
+@media print {
+  .dashboard-card-controls {
+    display: none;
+  }
+  .written-orders-scroll {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 /* Headline row: the one number, then two side tiles. */
 .dh-head {
   display: grid;

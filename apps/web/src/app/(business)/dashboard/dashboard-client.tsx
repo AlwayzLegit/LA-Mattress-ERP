@@ -154,6 +154,8 @@ export default function DashboardClient() {
     ) : (
       <OwnerHome
         userName={userName}
+        businessId={checklist.businessId}
+        membershipId={session.data.user.id}
         email={session.data.user.email}
         websiteBusinessId={me.roleName === 'Owner' ? checklist.businessId : undefined}
       />

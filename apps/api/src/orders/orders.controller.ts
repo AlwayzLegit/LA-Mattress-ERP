@@ -18,6 +18,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
+import { sellingStoreCorrectionSchema, type SellingStoreCorrection } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { qualifiesForRecyclingFee } from './recycling-fee';
@@ -2113,6 +2114,95 @@ export class OrdersController {
       siblings.push({ ...sibling, requestedDate: date });
     }
     return siblings;
+  }
+
+  /** Attribution correction only: never move stock or rewrite the invoice. */
+  @Patch('orders/:id/selling-store')
+  @RequirePermission('orders.update')
+  async correctSellingStore(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() input: SellingStoreCorrection,
+  ): Promise<OrderDetail> {
+    if (
+      !tenant.userId ||
+      tenant.apiKeyId ||
+      !tenant.businessId ||
+      tenant.dataScope !== 'all' ||
+      (!tenant.isSuperAdmin && tenant.roleName !== 'Owner')
+    ) {
+      throw new ForbiddenException('Only the owner can correct an order’s selling store');
+    }
+    const parsed = sellingStoreCorrectionSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Choose a selling store and enter a reason (up to 1,000 characters)',
+      );
+    }
+    const body = parsed.data;
+    // Serialize corrections and existing order mutations inside the request transaction.
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, id), eq(schema.orders.businessId, tenant.businessId)))
+      .for('update');
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.importedAt)
+      throw new BadRequestException('Imported order history cannot be reassigned');
+    if (order.locationId !== body.expectedLocationId) {
+      throw new ConflictException(
+        'The selling store changed. Reload the order before correcting it',
+      );
+    }
+    this.assertUnlocked(order);
+    await this.assertNotOnOpenRun(id);
+    const [location] = await this.db
+      .select()
+      .from(schema.locations)
+      .where(
+        and(
+          eq(schema.locations.id, body.locationId),
+          eq(schema.locations.businessId, tenant.businessId),
+          eq(schema.locations.isActive, true),
+        ),
+      );
+    if (!location) throw new BadRequestException('Choose an active selling store in this business');
+    if (order.locationId === location.id) return this.loadDetail(id);
+    const [previous] = await this.db
+      .select({ name: schema.locations.name })
+      .from(schema.locations)
+      .where(eq(schema.locations.id, order.locationId));
+    // A null source means "the selling store". Freeze its old effective value
+    // so reservations and fulfilment still use the original stock.
+    await this.db
+      .update(schema.orders)
+      .set({
+        locationId: location.id,
+        stockLocationId: order.stockLocationId ?? order.locationId,
+        // Keep the agreed pickup point; pickup queues otherwise follow locationId.
+        pickupLocationId: order.pickupLocationId ?? order.locationId,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.orders.id, id));
+    await this.audit.log({
+      action: 'order.selling_store.correct',
+      targetType: 'order',
+      targetId: id,
+      before: { locationId: order.locationId, locationName: previous?.name ?? order.locationId },
+      after: { locationId: location.id, locationName: location.name, reason: body.reason.trim() },
+    });
+    void this.webhooks.fire({
+      businessId: tenant.businessId,
+      eventType: 'order.selling_store_corrected',
+      payload: {
+        orderId: id,
+        number: order.number,
+        previousLocationId: order.locationId,
+        locationId: location.id,
+        reason: body.reason.trim(),
+      },
+    });
+    return this.loadDetail(id);
   }
 
   @Patch('orders/:id')

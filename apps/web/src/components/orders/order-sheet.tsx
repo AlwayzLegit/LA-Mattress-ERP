@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { formatMoney } from '@jetnine/shared';
 import { ApiError, api } from '@/lib/api';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import {
   Alert,
   Button,
+  Dialog,
   ErrorState,
   Field,
   Input,
@@ -87,6 +89,7 @@ interface OrderDetail {
   onOpenRun: { runId: string; runDate: string } | null;
   createdAt: string;
   completedAt: string | null;
+  importedAt?: string | null;
   cancelledAt: string | null;
   lines: OrderLine[];
   payments: OrderPayment[];
@@ -132,6 +135,12 @@ function describe(row: AuditRow): { what: string; tone: string; detail: string }
   const b = row.changesJson?.before ?? {};
   const money = (v: unknown) => (typeof v === 'number' ? formatMoney(v) : String(v ?? ''));
   switch (row.action) {
+    case 'order.selling_store.correct':
+      return {
+        what: 'Selling store corrected',
+        tone: 'accent',
+        detail: `${String(b.locationName ?? '')} → ${String(a.locationName ?? '')} · ${String(a.reason ?? '')}`,
+      };
     case 'order.create':
       return { what: 'Order written', tone: 'accent', detail: '' };
     case 'order.payment.take':
@@ -209,6 +218,11 @@ function describe(row: AuditRow): { what: string; tone: string; detail: string }
 
 export function OrderSheet({ id }: { id: string }) {
   const router = useRouter();
+  const acting = useOptionalActingStore();
+  const [correctingStore, setCorrectingStore] = useState(false);
+  const [correctedStore, setCorrectedStore] = useState('');
+  const [storeReason, setStoreReason] = useState('');
+  const [storeError, setStoreError] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [customer, setCustomer] = useState<CustomerRow | null>(null);
   const [locations, setLocations] = useState<LocationRow[]>([]);
@@ -255,6 +269,7 @@ export function OrderSheet({ id }: { id: string }) {
 
   useEffect(() => {
     setOrder(null);
+    setCorrectingStore(false);
     setHistory(null);
     setPaying(false);
     setScheduling(false);
@@ -518,6 +533,28 @@ export function OrderSheet({ id }: { id: string }) {
         >
           Print
         </Button>
+        {acting?.me?.roleName === 'Owner' && (
+          <Button
+            size="sm"
+            disabled={locked || !!order.importedAt}
+            title={
+              order.importedAt
+                ? 'Imported order history cannot be reassigned'
+                : locked
+                  ? 'Unlock the order and remove it from an open delivery run first'
+                  : undefined
+            }
+            onClick={() => {
+              setCorrectedStore(order.locationId);
+              setStoreReason('');
+              setStoreError(null);
+              setCorrectingStore(true);
+            }}
+            data-testid="correct-selling-store"
+          >
+            Change selling store
+          </Button>
+        )}
         <div className="osh-more" ref={moreRef}>
           <Button
             size="sm"
@@ -598,6 +635,80 @@ export function OrderSheet({ id }: { id: string }) {
         </Button>
       </div>
 
+      {correctingStore && (
+        <Dialog
+          title={`Change selling store · ${order.number}`}
+          onClose={() => {
+            if (!busy) setCorrectingStore(false);
+          }}
+          description="Correct which store gets this sale. The order number, prices, tax, payments and inventory sources stay the same. The correction and your reason appear in history."
+          testId="selling-store-dialog"
+        >
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setStoreError(null);
+              try {
+                const next = await api<OrderDetail>(`/v1/orders/${id}/selling-store`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({
+                    locationId: correctedStore,
+                    expectedLocationId: order.locationId,
+                    reason: storeReason,
+                  }),
+                });
+                setOrder(next);
+                setCorrectingStore(false);
+                changed();
+                void load();
+                toast.success('Selling store corrected');
+              } catch (err) {
+                setStoreError(
+                  err instanceof Error ? err.message : 'Could not correct selling store',
+                );
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <Field label="Selling store">
+              <Select
+                value={correctedStore}
+                onChange={(e) => setCorrectedStore(e.target.value)}
+                required
+              >
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Reason for correction">
+              <Input
+                value={storeReason}
+                onChange={(e) => setStoreReason(e.target.value)}
+                required
+                maxLength={1000}
+              />
+            </Field>
+            {storeError && <Alert tone="error">{storeError}</Alert>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <Button disabled={busy} onClick={() => setCorrectingStore(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={busy || correctedStore === order.locationId || !storeReason.trim()}
+              >
+                {busy ? 'Saving…' : 'Save selling store'}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      )}
       {actionError && (
         <div className="osh-alert">
           <Alert tone="error">{actionError}</Alert>

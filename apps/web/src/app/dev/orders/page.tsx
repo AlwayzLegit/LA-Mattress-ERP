@@ -394,6 +394,7 @@ function installStub() {
   w.__ordStub = true;
   const real = window.fetch.bind(window);
   const local = new Map<string, Fx>(FX.map((f) => [f.id, { ...f }]));
+  const storeCorrections = new Map<string, { from: string; to: string; reason: string }>();
   window.fetch = async (input, init) => {
     const url = new URL(
       typeof input === 'string' ? input : (input as Request).url,
@@ -405,7 +406,8 @@ function installStub() {
     if (p === '/v1/business/members/me') {
       return json({
         membershipId: 'm1',
-        roleName: 'Manager',
+        roleName:
+          new URLSearchParams(window.location.search).get('role') === 'owner' ? 'Owner' : 'Manager',
         hiddenNav: [],
         sellingScope: 'all',
         scopeLocations: LOCS,
@@ -478,10 +480,18 @@ function installStub() {
         },
       });
     }
-    const om = p.match(/^\/v1\/orders\/([^/]+)(\/(payments|cancel|unlock|share|deliveries))?$/);
+    const om = p.match(
+      /^\/v1\/orders\/([^/]+)(\/(payments|cancel|unlock|share|deliveries|selling-store))?$/,
+    );
     if (om) {
       const f = local.get(om[1]!);
       if (!f) return json({ message: 'Order not found' }, 404);
+      if (om[3] === 'selling-store' && method === 'PATCH') {
+        const b = JSON.parse(String(init?.body ?? '{}')) as { locationId: string; reason: string };
+        storeCorrections.set(f.id, { from: f.loc, to: b.locationId, reason: b.reason });
+        f.loc = b.locationId;
+        return json(detail(f));
+      }
       if (om[3] === 'payments' && method === 'POST') {
         const b = JSON.parse(String(init?.body ?? '{}')) as { amountCents: number };
         f.paidCents = Math.min(f.totalCents, f.paidCents + b.amountCents);
@@ -526,6 +536,26 @@ function installStub() {
     }
     if (p === '/v1/audit-logs') {
       const f = local.get(q.get('targetId') ?? '');
+      const correction = f ? storeCorrections.get(f.id) : null;
+      if (f && correction)
+        return json({
+          data: [
+            {
+              id: 'store-correction',
+              action: 'order.selling_store.correct',
+              actorEmail: 'owner@example.test',
+              createdAt: new Date().toISOString(),
+              changesJson: {
+                before: { locationName: LOCS.find((l) => l.id === correction.from)?.name },
+                after: {
+                  locationName: LOCS.find((l) => l.id === correction.to)?.name,
+                  reason: correction.reason,
+                },
+              },
+            },
+          ],
+          nextCursor: null,
+        });
       return json(f ? audit(f) : { data: [], nextCursor: null });
     }
     if (p.startsWith('/v1/')) return json({ message: `stub: ${p}` }, 404);

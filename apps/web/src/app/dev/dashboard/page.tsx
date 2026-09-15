@@ -24,7 +24,13 @@ export default function OwnerDashboardPreview() {
           <div className="t-mono-sm" style={{ color: 'var(--muted)', marginBottom: 12 }}>
             PREVIEW · FIXTURES FROM THE CANVAS · NOTHING IS SAVED
           </div>
-          <OwnerHome userName="Alex Rivera" email="alex@lamattress.com" />
+          <OwnerHome
+            userName="Alex Rivera"
+            email="alex@lamattress.com"
+            businessId="dev"
+            membershipId="dev-owner"
+            websiteBusinessId="dev"
+          />
         </div>
       </DashboardFiltersProvider>
     </BusinessSettingsProvider>

@@ -437,6 +437,69 @@ export function installDashboardStub(opts: { role: PreviewRole } = { role: 'owne
     const p = url.pathname;
     const q = url.searchParams;
     const method = init?.method ?? 'GET';
+    if (p === '/v1/dashboard/website') {
+      const section = q.get('section') ?? 'overview';
+      return json({
+        version: 1,
+        businessId: 'dev',
+        section,
+        days: Number(q.get('days') ?? 30),
+        generatedAt: new Date().toISOString(),
+        timezone: 'America/Los_Angeles',
+        cards: [
+          {
+            id: section + '-sample',
+            title: section === 'overview' ? 'Website overview' : section + ' performance',
+            source: 'Preview',
+            status: 'ready',
+            note: '',
+            metrics: [
+              { label: 'Visitors', value: 3250, format: 'number' },
+              { label: 'Revenue', value: 1284000, format: 'money' },
+            ],
+            tables: [
+              {
+                title: 'Daily results',
+                columns: [
+                  { key: 'day', label: 'Day', format: 'text' },
+                  { key: 'visitors', label: 'Visitors', format: 'number' },
+                ],
+                rows: [{ day: 'Today', visitors: 155 }],
+              },
+            ],
+          },
+        ],
+      });
+    }
+    if (p === '/v1/dashboard/written-orders') {
+      const period = q.get('period') ?? 'today';
+      const list = orders.filter(
+        (o) =>
+          (period !== 'today' || o.day === today) &&
+          (!q.get('locationId') || o.storeId === q.get('locationId')) &&
+          (!q.get('salespersonMembershipId') ||
+            memberId(o.rep) === q.get('salespersonMembershipId')),
+      );
+      const rows = list.map((o) => ({
+        id: o.id,
+        number: o.number,
+        status: 'open',
+        createdAt: atHour(o.day, 12),
+        totalCents: o.amountCents,
+        balanceDueCents: Math.round(o.amountCents / 2),
+        locationName: STORES.find((s) => s.id === o.storeId)?.name,
+        timezone: 'America/Los_Angeles',
+        salespersonName: o.rep,
+        customerName: o.customer,
+      }));
+      return json({
+        range: { start: period === 'today' ? today : today.slice(0, 7) + '-01', end: today },
+        rows,
+        count: rows.length,
+        totalCents: rows.reduce((n, o) => n + o.totalCents, 0),
+        nextOffset: null,
+      });
+    }
     const ids =
       q.get('locationIds')?.split(',').filter(Boolean) ??
       (q.get('locationId') ? [q.get('locationId')!] : null);

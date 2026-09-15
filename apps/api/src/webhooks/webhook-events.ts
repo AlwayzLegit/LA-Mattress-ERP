@@ -19,6 +19,7 @@ export const WEBHOOK_EVENT_TYPES = [
   // lines: [{ lineId, variantId, description, quantity }] } — the
   // backorder split that moves lines onto a new order.
   'order.split',
+  'order.selling_store_corrected',
   'delivery.scheduled',
   'delivery.delivered',
   'customer.created',

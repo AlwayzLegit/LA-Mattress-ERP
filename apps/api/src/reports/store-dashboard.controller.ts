@@ -16,6 +16,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, sql, type SQL } from 'drizzle-o
 import { alias, type PgColumn } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { writtenOrdersQuerySchema } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { tzDayEndExclusive, tzDayStart, type DayRange } from '../common/date-range';
@@ -260,6 +261,7 @@ export class StoreDashboardController {
     tenant: RequestTenantContext,
     businessId: string,
     requested: string[] | null,
+    includeWarehouse = false,
   ): Promise<{ id: string; name: string; timezone: string }[]> {
     const scoped = tenant.dataScope === 'store' ? (tenant.scopeLocationIds ?? []) : null;
     if (scoped && scoped.length === 0) return [];
@@ -274,7 +276,7 @@ export class StoreDashboardController {
         and(
           eq(schema.locations.businessId, businessId),
           eq(schema.locations.isActive, true),
-          sql`${schema.locations.locationType} <> 'warehouse'`,
+          includeWarehouse ? undefined : sql`${schema.locations.locationType} <> 'warehouse'`,
           scoped ? inArray(schema.locations.id, scoped) : undefined,
           requested ? inArray(schema.locations.id, requested) : undefined,
         ),
@@ -495,6 +497,89 @@ export class StoreDashboardController {
         receipt,
       };
     });
+  }
+
+  /** Same written definition and store-local boundaries as the store cards. */
+  @Get('written-orders')
+  @RequirePermission('orders.view')
+  async writtenOrders(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query('period') periodQ?: string,
+    @Query('locationId') locationId?: string,
+    @Query('salespersonMembershipId') salespersonId?: string,
+    @Query('offset') offsetQ?: string,
+  ) {
+    const parsed = writtenOrdersQuerySchema.safeParse({
+      period: periodQ,
+      locationId,
+      salespersonMembershipId: salespersonId,
+      offset: offsetQ,
+    });
+    if (!parsed.success) {
+      throw new BadRequestException('Invalid written sales filter');
+    }
+    const { offset, period } = parsed.data;
+    const { today } = await this.clock(tenant.businessId!);
+    const range = this.rangeFor(period, today);
+    const stores = await this.storesFor(
+      tenant,
+      tenant.businessId!,
+      locationId ? [locationId] : null,
+      true,
+    );
+    const cond = and(
+      eq(schema.orders.businessId, tenant.businessId!),
+      sql`${schema.orders.status} NOT IN ('draft', 'quote', 'cancelled')`,
+      isNull(schema.orders.importedAt),
+      salesScopeCond(tenant, schema.orders.locationId),
+      storeWindow(stores, range, schema.orders.createdAt, schema.orders.locationId),
+      salespersonId ? eq(schema.orders.salespersonMembershipId, salespersonId) : undefined,
+    );
+    const [summary] = await this.db
+      .select({
+        count: sql<number>`count(*)::int`,
+        totalCents: sql<number>`coalesce(sum(${schema.orders.totalCents}), 0)::bigint`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.orders)
+      .where(cond);
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        number: schema.orders.number,
+        status: schema.orders.status,
+        createdAt: schema.orders.createdAt,
+        totalCents: schema.orders.totalCents,
+        locationId: schema.orders.locationId,
+        locationName: schema.locations.name,
+        timezone: schema.locations.timezone,
+        salespersonMembershipId: schema.orders.salespersonMembershipId,
+        salespersonName: schema.users.name,
+        customerName: sql<string>`concat_ws(' ', ${schema.customers.firstName}, ${schema.customers.lastName})`,
+        balanceDueCents: sql<number>`greatest(0, ${schema.orders.totalCents} - coalesce((select sum(p.amount_cents) from payments p where p.order_id = ${schema.orders.id} and p.status = 'succeeded'), 0))::int`,
+      })
+      .from(schema.orders)
+      .innerJoin(schema.locations, eq(schema.locations.id, schema.orders.locationId))
+      .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
+      .leftJoin(
+        schema.memberships,
+        eq(schema.memberships.id, schema.orders.salespersonMembershipId),
+      )
+      .leftJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+      .where(cond)
+      .orderBy(desc(schema.orders.createdAt), desc(schema.orders.id))
+      .limit(100)
+      .offset(offset);
+    const count = summary?.count ?? 0;
+    return {
+      range,
+      period,
+      rows,
+      count,
+      totalCents: summary?.totalCents ?? 0,
+      nextOffset: offset + rows.length < count ? offset + rows.length : null,
+    };
   }
 
   @Get('stores')

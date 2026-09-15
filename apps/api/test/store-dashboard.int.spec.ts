@@ -427,6 +427,37 @@ afterAll(async () => {
   if (app) await app.close();
 });
 
+describe('written-order drill-down', () => {
+  it('reconciles the salesperson list to store Written totals and excludes drafts/history', async () => {
+    const stores = await as('owner').get('/v1/dashboard/stores?period=today').expect(200);
+    const a = stores.body.stores.find((s: { locationId: string }) => s.locationId === aStoreId);
+    const rep = a.salespeople.find(
+      (r: { membershipId: string }) => r.membershipId === members.rep.membershipId,
+    );
+    const list = await as('owner')
+      .get(
+        `/v1/dashboard/written-orders?period=today&locationId=${aStoreId}&salespersonMembershipId=${members.rep.membershipId}`,
+      )
+      .expect(200);
+    expect(list.body.count).toBe(rep.orders);
+    expect(list.body.totalCents).toBe(rep.writtenCents);
+    expect(list.body.rows.map((o: { id: string }) => o.id)).toContain(fx.o1);
+    expect(
+      list.body.rows.every(
+        (o: { salespersonMembershipId: string; locationId: string }) =>
+          o.salespersonMembershipId === members.rep.membershipId && o.locationId === aStoreId,
+      ),
+    ).toBe(true);
+    // The fixture includes a $100 refund; net succeeded payments leave $100 due.
+    expect(list.body.rows.find((o: { id: string }) => o.id === fx.o1)).toMatchObject({
+      balanceDueCents: 10000,
+      customerName: 'Noah Feldman',
+    });
+    await as('owner').get('/v1/dashboard/written-orders?locationId=bad').expect(400);
+    await as('owner').get('/v1/dashboard/written-orders?offset=-1').expect(400);
+  });
+});
+
 describe('the pickup permission', () => {
   it('sits with Owner and Operations, not the Manager or Cashier', () => {
     const has = (name: string) =>
@@ -817,6 +848,186 @@ describe('GET /v1/dashboard/changes', () => {
 
   it('refuses a role without audit access', async () => {
     await as('rep').get('/v1/dashboard/changes').expect(403);
+  });
+});
+
+describe('owner selling-store corrections', () => {
+  it('preserves stock, money and number, rejects non-owners and stale edits, and audits the correction', async () => {
+    const created = await as('owner')
+      .post('/v1/orders')
+      .send({
+        locationId: aStoreId,
+        customerId,
+        salespersonMembershipId: members.rep.membershipId,
+        confirm: true,
+        lines: [{ variantId, quantity: 1 }],
+      })
+      .expect(201);
+    const id = created.body.id as string;
+    const paid = await as('owner')
+      .post(`/v1/orders/${id}/payments`)
+      .send({ method: 'external_card', amountCents: 25000 })
+      .expect(201);
+    const inventory = () =>
+      withDb((db) =>
+        db
+          .select()
+          .from(schema.inventoryLevels)
+          .where(eq(schema.inventoryLevels.variantId, variantId)),
+      );
+    const beforeStock = await inventory();
+    const correction = {
+      locationId: bStoreId,
+      expectedLocationId: aStoreId,
+      reason: 'Signed into the wrong selling store',
+    };
+    const invalidLocations = await withDb(async (db) => {
+      const [other] = await db
+        .insert(schema.businesses)
+        .values({ slug: 'foreign-store-correction', name: 'Another business', status: 'active' })
+        .returning();
+      return db
+        .insert(schema.locations)
+        .values([
+          { businessId, name: 'Closed test store', timezone: TZ, isActive: false },
+          { businessId: other!.id, name: 'Foreign store', timezone: TZ },
+        ])
+        .returning();
+    });
+    for (const location of invalidLocations) {
+      await as('owner')
+        .patch(`/v1/orders/${id}/selling-store`)
+        .send({ ...correction, locationId: location.id })
+        .expect(400);
+    }
+    await as('manager').patch(`/v1/orders/${id}/selling-store`).send(correction).expect(403);
+    await as('rep').patch(`/v1/orders/${id}/selling-store`).send(correction).expect(403);
+    await as('owner')
+      .patch(`/v1/orders/${id}/selling-store`)
+      .send({ ...correction, reason: ' ' })
+      .expect(400);
+    const moved = await as('owner')
+      .patch(`/v1/orders/${id}/selling-store`)
+      .send(correction)
+      .expect(200);
+    expect(moved.body).toMatchObject({
+      number: created.body.number,
+      locationId: bStoreId,
+      stockLocationId: aStoreId,
+      pickupLocationId: aStoreId,
+      totalCents: paid.body.totalCents,
+      taxCents: paid.body.taxCents,
+      paidCents: 25000,
+      balanceDueCents: paid.body.balanceDueCents,
+    });
+    expect(moved.body.lines).toEqual(paid.body.lines);
+    expect(moved.body.payments).toEqual(paid.body.payments);
+    expect(await inventory()).toEqual(beforeStock);
+    await as('owner').patch(`/v1/orders/${id}/selling-store`).send(correction).expect(409);
+    const history = await as('owner')
+      .get(`/v1/audit-logs?targetType=order&targetId=${id}`)
+      .expect(200);
+    expect(
+      history.body.data.find((r: { action: string }) => r.action === 'order.selling_store.correct'),
+    ).toMatchObject({
+      changesJson: {
+        before: { locationId: aStoreId, locationName: 'A Store' },
+        after: { locationId: bStoreId, locationName: 'B Store', reason: correction.reason },
+      },
+    });
+    // Moving back must keep the original effective stock source as well.
+    await as('owner')
+      .patch(`/v1/orders/${id}/selling-store`)
+      .send({
+        locationId: aStoreId,
+        expectedLocationId: bStoreId,
+        reason: 'Restore test attribution',
+      })
+      .expect(200);
+    await as('owner').post(`/v1/orders/${id}/release`).send({}).expect(201);
+    const afterRelease = await inventory();
+    expect(afterRelease.find((r) => r.locationId === aStoreId)!.reserved).toBe(
+      beforeStock.find((r) => r.locationId === aStoreId)!.reserved - 1,
+    );
+    // Owner correction cannot touch imported history or a locked ticket.
+    await withDb((db) =>
+      db.update(schema.orders).set({ lockedAt: new Date() }).where(eq(schema.orders.id, id)),
+    );
+    await as('owner').patch(`/v1/orders/${id}/selling-store`).send(correction).expect(409);
+    await withDb((db) =>
+      db
+        .update(schema.orders)
+        .set({ lockedAt: null, importedAt: new Date() })
+        .where(eq(schema.orders.id, id)),
+    );
+    await as('owner').patch(`/v1/orders/${id}/selling-store`).send(correction).expect(400);
+  });
+
+  it('includes Warehouse sales, paginates without losing totals, and enforces location visibility', async () => {
+    const warehouseId = await withDb(async (db) => {
+      const locs = await db
+        .select()
+        .from(schema.locations)
+        .where(eq(schema.locations.businessId, businessId));
+      const warehouse = locs.find((l) => l.locationType === 'warehouse')!;
+      await db.insert(schema.orders).values(
+        Array.from({ length: 102 }, (_, n) => ({
+          businessId,
+          customerId,
+          locationId: warehouse.id,
+          number: `WA-QA-${n}`,
+          status: 'completed',
+          salespersonMembershipId: members.rep.membershipId,
+          totalCents: 100,
+          completedAt: new Date(),
+        })),
+      );
+      return warehouse.id;
+    });
+    const first = await as('owner')
+      .get(`/v1/dashboard/written-orders?locationId=${warehouseId}`)
+      .expect(200);
+    expect(first.body).toMatchObject({ count: 102, totalCents: 10200, nextOffset: 100 });
+    expect(first.body.rows).toHaveLength(100);
+    const last = await as('owner')
+      .get(`/v1/dashboard/written-orders?locationId=${warehouseId}&offset=100`)
+      .expect(200);
+    expect(last.body.rows).toHaveLength(2);
+    expect(
+      new Set([...first.body.rows, ...last.body.rows].map((r: { id: string }) => r.id)).size,
+    ).toBe(102);
+    expect(last.body.nextOffset).toBeNull();
+    const completedId = first.body.rows[0].id as string;
+    const corrected = await as('owner')
+      .patch(`/v1/orders/${completedId}/selling-store`)
+      .send({
+        expectedLocationId: warehouseId,
+        locationId: bStoreId,
+        reason: 'Correct completed ERP sale attribution',
+      })
+      .expect(200);
+    expect(corrected.body).toMatchObject({
+      status: 'completed',
+      locationId: bStoreId,
+      stockLocationId: warehouseId,
+      totalCents: 100,
+    });
+    await withDb((db) =>
+      db
+        .update(schema.memberships)
+        .set({ dataScope: 'store' })
+        .where(eq(schema.memberships.id, members.manager.membershipId)),
+    );
+    const restricted = await as('manager')
+      .get(`/v1/dashboard/written-orders?locationId=${warehouseId}`)
+      .expect(200);
+    expect(restricted.body).toMatchObject({ count: 0, rows: [], totalCents: 0 });
+    await withDb((db) =>
+      db
+        .update(schema.memberships)
+        .set({ dataScope: 'all' })
+        .where(eq(schema.memberships.id, members.manager.membershipId)),
+    );
   });
 });
 

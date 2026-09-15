@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import { ShimmerRows, usdWhole } from '../owner/owner-kit';
@@ -8,6 +8,7 @@ import { CashPickupsQueue, useCashPickups } from './cash-pickups';
 import { periodWord, plural, rangeLabel, readLocal, writeLocal } from './kit';
 import { PaymentListDialog } from './payment-list-dialog';
 import { StoreCard } from './store-card';
+import { SalespersonOrdersDialog } from './written-orders';
 import type { StoreCardData, StorePeriod, StoresResponse } from './types';
 
 /**
@@ -30,6 +31,7 @@ export function StoresSection({
   queueHandle,
   style,
   queueStyle,
+  preferenceKey,
 }: {
   /** null = every store the member may see. */
   locationIds: string[] | null;
@@ -44,13 +46,25 @@ export function StoresSection({
   queueHandle?: ReactNode;
   style?: React.CSSProperties;
   queueStyle?: React.CSSProperties;
+  preferenceKey?: string;
 }) {
   const [period, setPeriodState] = useState<StorePeriod>('mtd');
+  const [storeOrder, setStoreOrder] = useState<string[]>([]);
+  const storeDrag = useRef<string | null>(null);
+  const [storeMove, setStoreMove] = useState('');
+  useEffect(() => {
+    if (preferenceKey) setStoreOrder(readLocal<string[]>(preferenceKey + '.order', []));
+  }, [preferenceKey]);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [data, setData] = useState<StoresResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [payModal, setPayModal] = useState<{ store: StoreCardData; method: string } | null>(null);
+  const [salesperson, setSalesperson] = useState<{
+    store: StoreCardData;
+    id: string;
+    name: string;
+  } | null>(null);
   const cp = useCashPickups(locationIds);
 
   useEffect(() => {
@@ -97,7 +111,24 @@ export function StoresSection({
     }, 30);
   };
 
-  const stores = data?.stores ?? [];
+  const stores = [...(data?.stores ?? [])].sort((a, b) => {
+    const ids = Array.isArray(storeOrder) ? storeOrder : [];
+    const index = (id: string) => (ids.includes(id) ? ids.indexOf(id) : ids.length);
+    return index(a.locationId) - index(b.locationId);
+  });
+  const moveStore = (from: string, to: string) => {
+    if (!preferenceKey || from === to) return;
+    const ids = stores.map((s) => s.locationId);
+    const next = ids.filter((id) => id !== from);
+    next.splice(ids.indexOf(to), 0, from);
+    setStoreOrder(next);
+    writeLocal(preferenceKey + '.order', next);
+    setStoreMove(
+      (stores.find((s) => s.locationId === from)?.name ?? 'Store') +
+        ' moved to position ' +
+        (next.indexOf(from) + 1),
+    );
+  };
   const totals = data?.totals;
   const storeWord = useMemo(
     () =>
@@ -171,17 +202,67 @@ export function StoresSection({
           </section>
         )}
 
-        {stores.map((s) => (
-          <StoreCard
+        <span className="sr-only" role="status">
+          {storeMove}
+        </span>
+        {stores.map((s, index) => (
+          <div
             key={s.locationId}
-            card={s}
-            period={period}
-            open={!closed[s.locationId]}
-            onToggle={() => toggle(s.locationId)}
-            onOpenPayments={(method) => setPayModal({ store: s, method })}
-            cp={cp}
-            actorName={actorName}
-          />
+            onDragOver={(e) => {
+              if (storeDrag.current) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+            onDrop={(e) => {
+              if (storeDrag.current) {
+                e.preventDefault();
+                e.stopPropagation();
+                moveStore(storeDrag.current, s.locationId);
+                storeDrag.current = null;
+              }
+            }}
+          >
+            <StoreCard
+              dragHandle={
+                preferenceKey ? (
+                  <button
+                    type="button"
+                    draggable
+                    className="icon-btn dashboard-drag"
+                    aria-label={`Drag ${s.name} store card to rearrange`}
+                    title="Drag to rearrange stores · arrow keys to move"
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      storeDrag.current = s.locationId;
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', s.locationId);
+                    }}
+                    onDragEnd={() => {
+                      storeDrag.current = null;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const target = stores[index + (e.key === 'ArrowUp' ? -1 : 1)];
+                        if (target) moveStore(s.locationId, target.locationId);
+                      }
+                    }}
+                  >
+                    ⠿
+                  </button>
+                ) : undefined
+              }
+              card={s}
+              period={period}
+              open={!closed[s.locationId]}
+              onToggle={() => toggle(s.locationId)}
+              onOpenPayments={(method) => setPayModal({ store: s, method })}
+              onOpenSalesperson={(id, name) => setSalesperson({ store: s, id, name })}
+              cp={cp}
+              actorName={actorName}
+            />
+          </div>
         ))}
 
         {totals && stores.length > 0 && (
@@ -206,6 +287,16 @@ export function StoresSection({
           </div>
         )}
 
+        {salesperson && (
+          <SalespersonOrdersDialog
+            locationId={salesperson.store.locationId}
+            locationName={salesperson.store.name}
+            salespersonId={salesperson.id}
+            name={salesperson.name}
+            period={period}
+            onClose={() => setSalesperson(null)}
+          />
+        )}
         {payModal && (
           <PaymentListDialog
             locationId={payModal.store.locationId}
