@@ -1,15 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button } from '@/components/ui';
-import { api } from '@/lib/api';
 import { ShimmerRows, usdWhole } from '../owner/owner-kit';
 import { CashPickupsQueue, useCashPickups } from './cash-pickups';
 import { periodWord, plural, rangeLabel, readLocal, writeLocal } from './kit';
 import { PaymentListDialog } from './payment-list-dialog';
 import { StoreCard } from './store-card';
 import { SalespersonOrdersDialog } from './written-orders';
-import type { StoreCardData, StorePeriod, StoresResponse } from './types';
+import type { StoreCardData, StorePeriod } from './types';
+import { useStores } from './use-stores';
 
 /**
  * The "Stores" block (redesign Phase 9): the cross-store cash pickups
@@ -56,14 +56,16 @@ export function StoresSection({
     if (preferenceKey) setStoreOrder(readLocal<string[]>(preferenceKey + '.order', []));
   }, [preferenceKey]);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
-  const [data, setData] = useState<StoresResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [payModal, setPayModal] = useState<{ store: StoreCardData; method: string } | null>(null);
+  const [payModal, setPayModal] = useState<{
+    store: StoreCardData;
+    method: string;
+    period: StorePeriod;
+  } | null>(null);
   const [salesperson, setSalesperson] = useState<{
     store: StoreCardData;
     id: string;
     name: string;
+    period: StorePeriod;
   } | null>(null);
   const cp = useCashPickups(locationIds);
 
@@ -83,22 +85,7 @@ export function StoresSection({
   };
 
   const scopeKey = locationIds ? locationIds.join(',') : '';
-  const load = useCallback(
-    (quiet = false) => {
-      if (!quiet) setLoading(true);
-      setError(false);
-      const qs = new URLSearchParams({ period });
-      if (scopeKey) qs.set('locationIds', scopeKey);
-      return api<StoresResponse>(`/v1/dashboard/stores?${qs.toString()}`)
-        .then(setData)
-        .catch(() => setError(true))
-        .finally(() => setLoading(false));
-    },
-    [period, scopeKey],
-  );
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, loading, error, load } = useStores(period, scopeKey);
 
   /** From the queue: open the card, start recording, scroll to it. */
   const recordFor = (locationId: string) => {
@@ -257,8 +244,8 @@ export function StoresSection({
               period={period}
               open={!closed[s.locationId]}
               onToggle={() => toggle(s.locationId)}
-              onOpenPayments={(method) => setPayModal({ store: s, method })}
-              onOpenSalesperson={(id, name) => setSalesperson({ store: s, id, name })}
+              onOpenPayments={(method) => setPayModal({ store: s, method, period })}
+              onOpenSalesperson={(id, name) => setSalesperson({ store: s, id, name, period })}
               cp={cp}
               actorName={actorName}
             />
@@ -293,7 +280,7 @@ export function StoresSection({
             locationName={salesperson.store.name}
             salespersonId={salesperson.id}
             name={salesperson.name}
-            period={period}
+            period={salesperson.period}
             onClose={() => setSalesperson(null)}
           />
         )}
@@ -303,7 +290,7 @@ export function StoresSection({
             locationName={payModal.store.name}
             timezone={payModal.store.timezone}
             method={payModal.method}
-            period={period}
+            period={payModal.period}
             onClose={() => setPayModal(null)}
           />
         )}

@@ -104,7 +104,9 @@ order detail list for that store and the selected Today / Month-to-date period.
 Compact the headline tiles and website statistics; website source tables start
 collapsed. Allow owners to choose displayed website cards and metrics, remembering
 choices per business and owner in this browser. Drag handles reorder dashboard
-sections, with keyboard move controls and saved per-owner/browser preferences.
+sections, including the sales competition panel, with keyboard move controls and
+saved per-owner/browser preferences. Restored filters and overlapping requests
+must keep store totals and their detail dialogs on the same period and scope.
 Staff schedule has a Show / Hide detail control that preserves editing state.
 
 Owners may correct an order's selling store to an active location, with a required

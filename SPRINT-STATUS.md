@@ -17,7 +17,14 @@
 - Validation: 22 dashboard integration tests passed on isolated PostgreSQL;
   API/web typechecks and changed-source lint passed. Browser verified drag/reload,
   salesperson drill-down, multi-section website selections and schedule collapse.
-  Release CI and production verification pending.
+  PR #190 merged at `0313ed5`; full CI passed (22 dashboard integration tests,
+  17 browser E2E). Vercel and Render are live on that commit. Live verification
+  caught a pre-existing Stores request race when restoring Today: a slow MTD
+  response could replace today's rows. Follow-up aborts superseded requests,
+  binds rendered rows to their period/scope, and keeps detail dialogs on the
+  period of the clicked row. The competition panel also participates in owner
+  drag/keyboard layout and hide controls. Regression verification and follow-up
+  release pending.
 
 ## Owner location cutover — 2026-09-14
 

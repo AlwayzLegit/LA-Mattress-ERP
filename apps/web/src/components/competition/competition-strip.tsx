@@ -1,7 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Button } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { readLocal, writeLocal } from '@/app/(business)/dashboard/shared/kit';
@@ -61,10 +69,12 @@ export function useCompetition() {
 export function CompetitionStrip({
   showLeads = false,
   actorName,
+  layout,
 }: {
   /** Render the "My leads" panel under the strip (salesperson / manager homes). */
   showLeads?: boolean;
   actorName?: string | null;
+  layout?: { style: CSSProperties; handle: ReactNode };
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<{ card: RaceCard; tab: 'month' | 'history' } | null>(null);
@@ -139,7 +149,12 @@ export function CompetitionStrip({
   if (board === null) return null;
   if (board === undefined) {
     return error ? null : (
-      <div className="cs cs-loading" data-testid="competition-strip" aria-busy />
+      <div
+        className="cs cs-loading"
+        data-testid="competition-strip"
+        aria-busy
+        style={layout?.style}
+      />
     );
   }
 
@@ -157,7 +172,7 @@ export function CompetitionStrip({
           : 'days left';
   const showBanner = board.banner && bannerHidden !== board.banner.month;
 
-  return (
+  const content = (
     <>
       {showBanner && board.banner && (
         <div className="cs-banner" data-testid="cs-banner">
@@ -235,6 +250,7 @@ export function CompetitionStrip({
           <Button size="sm" onClick={toggleCollapsed} data-testid="cs-collapse">
             {collapsed ? 'Expand' : 'Collapse'}
           </Button>
+          {layout?.handle}
         </div>
 
         <div
@@ -303,6 +319,7 @@ export function CompetitionStrip({
       )}
     </>
   );
+  return layout ? <div style={layout.style}>{content}</div> : content;
 }
 
 function RaceCardView({

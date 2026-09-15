@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
+import { CompetitionStrip } from '@/components/competition/competition-strip';
 import { ChangesCard } from '../shared/changes-card';
 import { StaffSchedule } from '../shared/staff-schedule';
 import { StoresSection } from '../shared/stores-section';
@@ -62,6 +63,7 @@ interface OwnerData {
 }
 
 type CardId =
+  | 'competition'
   | 'headline'
   | 'mtd'
   | 'exceptions'
@@ -73,6 +75,7 @@ type CardId =
   | 'changes'
   | 'schedule';
 const CARD_IDS: CardId[] = [
+  'competition',
   'headline',
   'mtd',
   'exceptions',
@@ -85,6 +88,7 @@ const CARD_IDS: CardId[] = [
   'schedule',
 ];
 const TITLES: Record<CardId, string> = {
+  competition: 'Sales competition',
   headline: 'Company written today',
   mtd: 'Month to date',
   exceptions: 'Open exceptions',
@@ -424,6 +428,7 @@ export default function OwnerHome({
           setDragTarget(null);
         }}
       >
+        <CompetitionStrip actorName={userName} layout={card('competition')} />
         {!denied && (
           <>
             <section
