@@ -914,6 +914,7 @@ describe('owner selling-store corrections', () => {
       number: created.body.number,
       locationId: bStoreId,
       stockLocationId: aStoreId,
+      pickupLocationId: aStoreId,
       totalCents: paid.body.totalCents,
       taxCents: paid.body.taxCents,
       paidCents: 25000,

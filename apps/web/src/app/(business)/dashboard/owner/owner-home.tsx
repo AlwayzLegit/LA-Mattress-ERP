@@ -145,6 +145,7 @@ export default function OwnerHome({
   const [layout, setLayout] = useState<Layout>({ order: CARD_IDS, hidden: {} });
 
   useEffect(() => {
+    setLayout({ order: CARD_IDS, hidden: {} });
     try {
       const raw = localStorage.getItem(layoutKey);
       if (raw) {

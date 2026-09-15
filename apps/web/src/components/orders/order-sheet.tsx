@@ -89,6 +89,7 @@ interface OrderDetail {
   onOpenRun: { runId: string; runDate: string } | null;
   createdAt: string;
   completedAt: string | null;
+  importedAt?: string | null;
   cancelledAt: string | null;
   lines: OrderLine[];
   payments: OrderPayment[];
@@ -268,6 +269,7 @@ export function OrderSheet({ id }: { id: string }) {
 
   useEffect(() => {
     setOrder(null);
+    setCorrectingStore(false);
     setHistory(null);
     setPaying(false);
     setScheduling(false);
@@ -534,9 +536,13 @@ export function OrderSheet({ id }: { id: string }) {
         {acting?.me?.roleName === 'Owner' && (
           <Button
             size="sm"
-            disabled={locked}
+            disabled={locked || !!order.importedAt}
             title={
-              locked ? 'Unlock the order and remove it from an open delivery run first' : undefined
+              order.importedAt
+                ? 'Imported order history cannot be reassigned'
+                : locked
+                  ? 'Unlock the order and remove it from an open delivery run first'
+                  : undefined
             }
             onClick={() => {
               setCorrectedStore(order.locationId);

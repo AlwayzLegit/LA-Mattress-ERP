@@ -2185,6 +2185,8 @@ export class OrdersController {
       .set({
         locationId: location.id,
         stockLocationId: order.stockLocationId ?? order.locationId,
+        // Keep the agreed pickup point; pickup queues otherwise follow locationId.
+        pickupLocationId: order.pickupLocationId ?? order.locationId,
         updatedAt: new Date(),
       })
       .where(eq(schema.orders.id, id));
