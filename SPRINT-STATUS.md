@@ -5909,3 +5909,39 @@ Validated DB build/typecheck/lint, four retry tests, and a real local PostgreSQL
 lock-timeout test proving rollback before retry and RLS enabled after success.
 
 - 2026-09-14: RLS startup compares canonical policy definitions and row-security flags before DDL, avoiding redundant locks during rolling deploys. Regression checks cover unchanged policy OIDs with all live tables read-locked, missing/changed policies, and disabled security flags. Existing transactional retry remains in place.
+
+### Checkpoint — 2026-09-16 (owner: add-on fees follow the product; $18 recycling; no chat dock)
+
+KO-10002 showed the gap: a take-with sale split the foundation off to
+KO-10002-A (completed) and stranded its $18 Recycling Fee on the base
+order, which then sat "Open" with nothing to deliver. Fee lines had no
+link to the product they were toggled on. PLAN-POS-OPERATIONS §4
+amended first.
+
+- Schema 0107_order_line_parent: `order_lines.parent_line_id` (self FK,
+  cascade) — an add-on fee line belongs to its product line.
+- Create order: fee lines carry `addonOf` (index of their product line
+  in the payload) and inherit that line's fulfillment and promised
+  date. POST /lines takes `parentLineId` (fee → product line only).
+- executeSplit moves a parent's children with it (whole, or per moved
+  unit) — covers the take-with hand-over, split-by-date and manual
+  split; the "would empty the order" checks count children too.
+- Complete: a child is take-with iff its parent is, so a sale where
+  every product line goes with the customer completes IN PLACE (no -A
+  piece); an order left holding only fee lines (goods all delivered or
+  split away) completes instead of demanding a delivery.
+- Editing a product line's quantity re-syncs its per-unit fees;
+  removing the line removes them.
+- Order page: the order-level "+ Recycling / + Declined" buttons are
+  replaced by the same per-line Removal / Recycling / Declined-
+  foundation chips as New Sale (attached lines show ↳). New Sale
+  resumes drafts with the chips lit instead of loose fee rows.
+- Default recycling fee $18.00 (Settings → POS still overrides).
+- The floating "Chat inbox / Team workspace / Sound on" dock is gone;
+  the topbar inbox and /chat remain.
+- Tests: 4 new int tests (in-place take-with completion with fee,
+  split carries fee, order-page attach + qty sync + cascade, fee-only
+  completion); pos-addons unit tests unchanged.
+  Ops: KO-10002 itself — press Complete on it (fee paid, nothing to
+  deliver → completes with this build); the fee stays recorded against
+  the sale via the family.

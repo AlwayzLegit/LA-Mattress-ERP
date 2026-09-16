@@ -11,6 +11,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { businesses, users } from './platform';
@@ -266,6 +267,16 @@ export const orderLines = pgTable(
     fulfillmentMethod: text('fulfillment_method'),
     // Per-line promised date when parts of an order arrive separately.
     deliveryDate: date('delivery_date'),
+    /**
+     * Owner 2026-09-16 (KO-10002): an add-on fee line (Recycling Fee,
+     * Mattress Removal, Client Declined New Foundation) belongs to the
+     * product line it was toggled on. It follows that line through every
+     * split — take-with hand-over, split-by-date, manual split — and is
+     * removed with it. NULL = a free-standing custom line.
+     */
+    parentLineId: uuid('parent_line_id').references((): AnyPgColumn => orderLines.id, {
+      onDelete: 'cascade',
+    }),
     // A20 (STORIS Step 2 line details). All optional; none affects money.
     /** "Line Comments": prints under the line on the invoice and delivery ticket. */
     comment: text('comment'),
@@ -290,6 +301,7 @@ export const orderLines = pgTable(
     // Drives the Day 4 "to-order queue": special-order lines not yet
     // fully allocated to a PO.
     lineTypeIdx: index('order_lines_business_line_type_idx').on(t.businessId, t.lineType),
+    parentLineIdx: index('order_lines_parent_line_id_idx').on(t.parentLineId),
     quantityPositive: check('order_lines_quantity_positive', sql`${t.quantity} > 0`),
     reservedRange: check(
       'order_lines_reserved_range',

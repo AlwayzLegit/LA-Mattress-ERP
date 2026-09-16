@@ -440,7 +440,7 @@ function OpsCard({ settings, onSaved }: { settings: Settings; onSaved: (s: Setti
       <form onSubmit={submit}>
         <FormGrid cols={2}>
           <SectionHeading as="h3" title="Fees & invoices" />
-          <Field label="Recycling fee per unit ($; blank = default 10.50)">
+          <Field label="Recycling fee per unit ($; blank = default 18.00)">
             <Input
               name="recyclingFee"
               type="number"

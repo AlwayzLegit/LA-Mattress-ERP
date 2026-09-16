@@ -108,10 +108,20 @@ Single-screen order entry — customer, products, payment all on one screen (no 
 - **Discounts**: per line item AND on the order subtotal.
 - **Fee lines** _(amended 2026-08-30: the Recycling Fee no longer auto-adds per
   qualifying unit — the owner wants it added by hand)_: a "+ Recycling" button next
-  to "+ Removal" adds one untaxed Recycling Fee line (rate = admin setting, e.g.
-  $10.50/unit); each further click counts one more unit on that line; removable by
-  the salesperson. Installation = order-level fee (default $0). Mattress Removal =
-  selectable $0 line item. Delivery fee entered manually per order.
+  to "+ Removal" adds one untaxed Recycling Fee line (rate = admin setting, default
+  **$18.00/unit** — owner 2026-09-16); each further click counts one more unit on
+  that line; removable by the salesperson. Installation = order-level fee (default
+  $0). Mattress Removal = selectable $0 line item. Delivery fee entered manually per
+  order.
+  _Amendment 2026-09-16 (KO-10002):_ Removal, Recycling and Declined-foundation are
+  **per-line toggles on the product line** (New Sale and the order page alike) and
+  the fee lines they create are **attached to that product line**
+  (`order_lines.parent_line_id`). An attached fee inherits the line's fulfillment
+  and promised date, moves with it through every split (take-with hand-over,
+  split-by-date, manual split), and is removed with it; per-unit fees track the
+  line's quantity. A take-with sale whose every product line goes with the customer
+  completes in place — no -A piece is carved off just to strand the fee. An order
+  left holding only fee lines (nothing to deliver) can be completed.
 - **Take-with hand-over** _(amendment 2026-08-31)_: completing a sale (New Sale, or
   Complete on the order page — the per-line hand-over button is gone) splits any
   take-with lines to a `-A` sibling order; money already collected covers that piece

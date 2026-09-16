@@ -13,6 +13,7 @@ import {
 } from '@jetnine/shared';
 import { orderNextSteps } from '@/lib/order-next-steps';
 import { api, ApiError } from '@/lib/api';
+import { lineHasAddons } from '@/lib/pos-addons';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -83,6 +84,10 @@ interface OrderLine {
     expectedDate?: string | null;
   } | null;
   needsInstall?: boolean;
+  /** Add-on fee attached to a product line (owner 2026-09-16); null = free-standing. */
+  parentLineId?: string | null;
+  /** Catalog category path; its root decides the add-on chips. */
+  categoryPath?: string | null;
   /** The PO this line rides on, when sourced through purchasing (owner 2026-09-02). */
   po: {
     poId: string;
@@ -598,9 +603,10 @@ export default function OrderDetailPage() {
     }
   }
 
-  // "+ Recycling" (owner 2026-08-31): same button as New Sale — one
-  // untaxed fee line; each click counts one more unit on it.
-  const [recyclingFeeCents, setRecyclingFeeCents] = useState(1050);
+  // Add-on chips per product line (owner 2026-09-16): Removal, Recycling
+  // and Declined foundation toggle a fee line ATTACHED to that product
+  // line, exactly like New Sale — it follows the line through splits.
+  const [recyclingFeeCents, setRecyclingFeeCents] = useState(1800);
   useEffect(() => {
     api<{ ops: { recyclingFeeCents?: number | null } | null }>('/v1/business/settings/pos')
       .then((s2) => {
@@ -608,26 +614,32 @@ export default function OrderDetailPage() {
       })
       .catch(() => undefined);
   }, []);
-  async function addRecyclingFee() {
-    if (!order) return;
-    const fee = order.lines.find(
-      (l) => l.lineType === 'custom' && l.description === 'Recycling Fee',
+  const ADDON_DESC = {
+    removal: 'Mattress Removal',
+    recycling: 'Recycling Fee',
+    declined: 'Client Declined New Foundation',
+  } as const;
+  function addonLine(parent: OrderLine, which: keyof typeof ADDON_DESC) {
+    return order?.lines.find(
+      (c) => c.parentLineId === parent.id && c.description === ADDON_DESC[which],
     );
+  }
+  async function toggleAddon(parent: OrderLine, which: keyof typeof ADDON_DESC) {
+    if (!order) return;
+    const existing = addonLine(parent, which);
     setBusy(true);
     try {
-      if (fee) {
-        await api(`/v1/orders/${id}/lines/${fee.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ quantity: fee.quantity + 1 }),
-        });
+      if (existing) {
+        await api(`/v1/orders/${id}/lines/${existing.id}`, { method: 'DELETE' });
       } else {
         await api(`/v1/orders/${id}/lines`, {
           method: 'POST',
           body: JSON.stringify({
-            description: 'Recycling Fee',
+            description: ADDON_DESC[which],
             lineType: 'custom',
-            quantity: 1,
-            unitPriceCents: recyclingFeeCents,
+            quantity: which === 'declined' ? 1 : parent.quantity,
+            unitPriceCents: which === 'recycling' ? recyclingFeeCents : 0,
+            parentLineId: parent.id,
           }),
         });
       }
@@ -1095,44 +1107,6 @@ export default function OrderDetailPage() {
                   )}
                   <Button
                     size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => void addRecyclingFee()}
-                    data-testid="order-add-recycling"
-                  >
-                    + Recycling (${(recyclingFeeCents / 100).toFixed(2)})
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    data-testid="order-add-declined-foundation"
-                    onClick={async () => {
-                      // Owner 2026-08-31: no-charge documentation line,
-                      // same as New Sale's button.
-                      setBusy(true);
-                      try {
-                        await api(`/v1/orders/${id}/lines`, {
-                          method: 'POST',
-                          body: JSON.stringify({
-                            description: 'Client Declined New Foundation',
-                            lineType: 'custom',
-                            quantity: 1,
-                            unitPriceCents: 0,
-                          }),
-                        });
-                        await load();
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : String(err));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    + Declined foundation ($0)
-                  </Button>
-                  <Button
-                    size="sm"
                     variant="secondary"
                     disabled={busy}
                     onClick={() => {
@@ -1219,7 +1193,50 @@ export default function OrderDetailPage() {
                               }}
                             />
                           )}
+                          {l.parentLineId && (
+                            <span className="muted" aria-hidden>
+                              ↳{' '}
+                            </span>
+                          )}
                           {l.description}
+                          {editable && lineHasAddons(l) && (
+                            <div className="reg-addons">
+                              {(
+                                [
+                                  ['removal', 'Removal', 0],
+                                  ['recycling', 'Recycling', recyclingFeeCents],
+                                  ['declined', 'Declined foundation', 0],
+                                ] as const
+                              ).map(([k, label, cents]) => {
+                                const on = Boolean(addonLine(l, k));
+                                return (
+                                  <button
+                                    key={k}
+                                    type="button"
+                                    className={`reg-addon${on ? ' is-on' : ''}`}
+                                    aria-pressed={on}
+                                    disabled={busy}
+                                    onClick={() => void toggleAddon(l, k)}
+                                    data-testid={
+                                      k === 'recycling'
+                                        ? 'order-add-recycling'
+                                        : k === 'declined'
+                                          ? 'order-add-declined-foundation'
+                                          : 'order-add-removal'
+                                    }
+                                  >
+                                    <span aria-hidden className="mono">
+                                      {on ? '✓' : '+'}
+                                    </span>{' '}
+                                    {label}{' '}
+                                    <span className="reg-addon-price">
+                                      ({cents ? `$${(cents / 100).toFixed(2)}` : '$0'})
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </td>
                         <td>
                           {l.lineType === 'custom' ? (
