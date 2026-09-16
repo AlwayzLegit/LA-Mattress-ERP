@@ -4355,3 +4355,197 @@ describe('Orders list date window (owner 2026-09-02, Shopify-style picker)', () 
     expect(view.body.data).toEqual([]);
   });
 });
+
+/**
+ * Owner 2026-09-16 (KO-10002): the add-on fee lines toggled on a product
+ * line — Recycling Fee, Mattress Removal, Client Declined New Foundation —
+ * belong to that line. They follow it through the take-with hand-over
+ * and every split, track its quantity, and leave with it.
+ */
+describe('Add-on fee lines follow their product line', () => {
+  let bedVariantId = '';
+  let pillowVariantId = '';
+
+  function req(method: 'post' | 'get' | 'patch' | 'delete', url: string) {
+    return request(app.getHttpServer())
+      [method](url)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+  }
+
+  beforeAll(async () => {
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql2);
+    try {
+      const mk = async (sku: string, onHand: number) => {
+        const [pr] = await db
+          .insert(schema.products)
+          .values({ businessId, sku, name: `ADDON ${sku}` })
+          .returning();
+        const [v] = await db
+          .insert(schema.productVariants)
+          .values({ businessId, productId: pr!.id, sku: `${sku}-1`, priceCents: 60_000 })
+          .returning();
+        await db
+          .insert(schema.inventoryLevels)
+          .values({ businessId, variantId: v!.id, locationId, onHand, reserved: 0 });
+        return v!.id;
+      };
+      bedVariantId = await mk('ADDON-BED', 10);
+      pillowVariantId = await mk('ADDON-PILLOW', 10);
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+  });
+
+  it('an all-take-with sale with an attached recycling fee completes in place, fee included', async () => {
+    const created = await req('post', '/v1/orders').send({
+      locationId,
+      customerId,
+      fulfillmentType: 'take_with',
+      confirm: true,
+      lines: [
+        { variantId: bedVariantId, quantity: 1 },
+        {
+          description: 'Recycling Fee',
+          lineType: 'custom',
+          quantity: 1,
+          unitPriceCents: 1800,
+          addonOf: 0,
+        },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const bed = created.body.lines.find((l: { variantId: string | null }) => l.variantId);
+    const fee = created.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fee.parentLineId).toBe(bed.id);
+
+    const paid = await req('post', `/v1/orders/${created.body.id}/payments`).send({
+      method: 'cash',
+      amountCents: created.body.totalCents,
+    });
+    expect(paid.status).toBe(201);
+
+    const done = await req('post', `/v1/orders/${created.body.id}/complete`).send({});
+    expect(done.status).toBe(201);
+    // No -A piece: everything went with the customer, so the sale itself completes.
+    expect(done.body.takeWith.completed).toBe(true);
+    expect(done.body.takeWith.orderId).toBe(created.body.id);
+    expect(done.body.status).toBe('completed');
+    expect(done.body.lines).toHaveLength(2);
+    expect(done.body.lines.every((l: { qtyFulfilled: number }) => l.qtyFulfilled === 1)).toBe(true);
+    expect(done.body.balanceDueCents).toBe(0);
+  });
+
+  it('the take-with split carries the fee with its mattress; the truck piece keeps only the pillow', async () => {
+    const created = await req('post', '/v1/orders').send({
+      locationId,
+      customerId,
+      fulfillmentType: 'delivery',
+      confirm: true,
+      lines: [
+        { variantId: bedVariantId, quantity: 1, fulfillmentMethod: 'take_with' },
+        {
+          description: 'Recycling Fee',
+          lineType: 'custom',
+          quantity: 1,
+          unitPriceCents: 1800,
+          addonOf: 0,
+        },
+        { variantId: pillowVariantId, quantity: 1 },
+      ],
+    });
+    expect(created.status).toBe(201);
+    // The fee inherits its parent's fulfillment.
+    const fee0 = created.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fee0.fulfillmentMethod).toBe('take_with');
+
+    await req('post', `/v1/orders/${created.body.id}/payments`).send({
+      method: 'cash',
+      amountCents: created.body.totalCents,
+    });
+    const done = await req('post', `/v1/orders/${created.body.id}/complete`).send({});
+    expect(done.status).toBe(201);
+    expect(done.body.takeWith.number).toMatch(/-A$/);
+    expect(done.body.takeWith.completed).toBe(true);
+    // Parent: pillow only — the fee did NOT stay behind.
+    expect(done.body.lines).toHaveLength(1);
+    expect(done.body.lines[0].variantId).toBe(pillowVariantId);
+
+    const piece = await req('get', `/v1/orders/${done.body.takeWith.orderId}`);
+    expect(piece.body.status).toBe('completed');
+    expect(piece.body.lines).toHaveLength(2);
+    const pieceBed = piece.body.lines.find((l: { variantId: string | null }) => l.variantId);
+    const pieceFee = piece.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(pieceFee.parentLineId).toBe(pieceBed.id);
+    expect(pieceFee.description).toBe('Recycling Fee');
+  });
+
+  it('an attached fee added on the order page tracks quantity and leaves with its line', async () => {
+    const created = await req('post', '/v1/orders').send({
+      locationId,
+      customerId,
+      fulfillmentType: 'delivery',
+      confirm: true,
+      lines: [{ variantId: bedVariantId, quantity: 1 }],
+    });
+    expect(created.status).toBe(201);
+    const bedId = created.body.lines[0].id as string;
+
+    const added = await req('post', `/v1/orders/${created.body.id}/lines`).send({
+      description: 'Recycling Fee',
+      lineType: 'custom',
+      quantity: 1,
+      unitPriceCents: 1800,
+      parentLineId: bedId,
+    });
+    expect(added.status).toBe(201);
+    const fee = added.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fee.parentLineId).toBe(bedId);
+
+    // A fee cannot hang off another fee, and a product line cannot be a child.
+    const bad = await req('post', `/v1/orders/${created.body.id}/lines`).send({
+      description: 'Mattress Removal',
+      lineType: 'custom',
+      quantity: 1,
+      unitPriceCents: 0,
+      parentLineId: fee.id,
+    });
+    expect(bad.status).toBe(400);
+
+    // Per-unit fee follows the product quantity.
+    const bumped = await req('patch', `/v1/orders/${created.body.id}/lines/${bedId}`).send({
+      quantity: 2,
+    });
+    expect(bumped.status).toBe(200);
+    const fee2 = bumped.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fee2.quantity).toBe(2);
+    expect(bumped.body.totalCents).toBe(created.body.totalCents * 2 - 0 + 1800 * 2);
+
+    // Removing the mattress takes its fee along.
+    const removed = await req('delete', `/v1/orders/${created.body.id}/lines/${bedId}`);
+    expect(removed.status).toBe(200);
+    expect(removed.body.lines).toHaveLength(0);
+  });
+
+  it('an order left holding only a fee line can be completed', async () => {
+    const created = await req('post', '/v1/orders').send({
+      locationId,
+      customerId,
+      fulfillmentType: 'delivery',
+      confirm: true,
+      lines: [
+        { description: 'Recycling Fee', lineType: 'custom', quantity: 1, unitPriceCents: 1800 },
+      ],
+    });
+    expect(created.status).toBe(201);
+    await req('post', `/v1/orders/${created.body.id}/payments`).send({
+      method: 'cash',
+      amountCents: created.body.totalCents,
+    });
+    const done = await req('post', `/v1/orders/${created.body.id}/complete`).send({});
+    expect(done.status).toBe(201);
+    expect(done.body.status).toBe('completed');
+    expect(done.body.lines[0].qtyFulfilled).toBe(1);
+  });
+});

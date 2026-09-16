@@ -107,6 +107,14 @@ interface OrderLineInput {
   sourceLocationId?: string | null;
   /** Per-line promised date (YYYY-MM-DD) when items arrive separately. */
   deliveryDate?: string | null;
+  /**
+   * Owner 2026-09-16: an add-on fee line (recycling / removal / declined
+   * foundation) names the product line it belongs to — on create, the
+   * index of that line in the same `lines` array; on POST /lines, the
+   * existing line's id. It then follows that line through every split.
+   */
+  addonOf?: number | null;
+  parentLineId?: string | null;
 }
 
 interface AddressInput {
@@ -370,6 +378,8 @@ interface OrderLineRow {
   fulfillmentMethod: string | null;
   sourceLocationId: string | null;
   deliveryDate: string | null;
+  /** The product line this add-on fee belongs to (null = free-standing). */
+  parentLineId: string | null;
   /** A20 line details (STORIS Step 2 actions). */
   comment: string | null;
   room: string | null;
@@ -1944,30 +1954,65 @@ export class OrdersController {
         l.sourceLocationId &&
         l.sourceLocationId !== order.locationId,
     ).length;
-    await this.db.insert(schema.orderLines).values(
-      priced.map((l, i) => ({
-        businessId: tenant.businessId!,
-        orderId: order.id,
-        variantId: l.variantId,
-        description: l.description,
-        quantity: l.quantity,
-        lineType: l.lineType,
-        unitPriceCents: l.unitPriceCents,
-        discountCents: l.lineDiscountCents,
-        taxRateBps: l.taxRateBps,
-        taxClassId: l.taxClassId,
-        fulfillmentMethod: lineFulfillment(body.lines![i]),
-        // Stored only when it actually differs from the order's default,
-        // so changing the default later re-inherits cleanly.
-        sourceLocationId: lineSourceFor(body.lines![i]),
-        deliveryDate: body.lines![i]?.deliveryDate ?? null,
-        // Placeholders — recomputeTotals prices every line against the
-        // whole cart (the order discount is allocated pro-rata) and
-        // writes the real numbers back.
-        taxCents: 0,
-        totalCents: 0,
-      })),
-    );
+    // Add-on fee lines (owner 2026-09-16): `addonOf` points at the
+    // product line in this same payload; the fee inherits that line's
+    // fulfillment so a take-with mattress takes its recycling fee along.
+    const addonParent = (i: number): number | null => {
+      const raw = body.lines![i]?.addonOf;
+      if (raw == null) return null;
+      const parent = body.lines![raw as number];
+      if (
+        !Number.isInteger(raw) ||
+        !parent ||
+        raw === i ||
+        priced[i]!.lineType !== 'custom' ||
+        priced[raw as number]!.lineType === 'custom'
+      ) {
+        throw new BadRequestException('lines[].addonOf must index a product line in this order');
+      }
+      return raw as number;
+    };
+    const parentIndex = priced.map((_, i) => addonParent(i));
+    const inserted = await this.db
+      .insert(schema.orderLines)
+      .values(
+        priced.map((l, i) => ({
+          businessId: tenant.businessId!,
+          orderId: order.id,
+          variantId: l.variantId,
+          description: l.description,
+          quantity: l.quantity,
+          lineType: l.lineType,
+          unitPriceCents: l.unitPriceCents,
+          discountCents: l.lineDiscountCents,
+          taxRateBps: l.taxRateBps,
+          taxClassId: l.taxClassId,
+          fulfillmentMethod: lineFulfillment(
+            parentIndex[i] != null ? body.lines![parentIndex[i]!] : body.lines![i],
+          ),
+          // Stored only when it actually differs from the order's default,
+          // so changing the default later re-inherits cleanly.
+          sourceLocationId: lineSourceFor(body.lines![i]),
+          deliveryDate:
+            parentIndex[i] != null
+              ? (body.lines![parentIndex[i]!]?.deliveryDate ?? null)
+              : (body.lines![i]?.deliveryDate ?? null),
+          // Placeholders — recomputeTotals prices every line against the
+          // whole cart (the order discount is allocated pro-rata) and
+          // writes the real numbers back.
+          taxCents: 0,
+          totalCents: 0,
+        })),
+      )
+      .returning({ id: schema.orderLines.id });
+    for (let i = 0; i < inserted.length; i++) {
+      const pi = parentIndex[i];
+      if (pi == null) continue;
+      await this.db
+        .update(schema.orderLines)
+        .set({ parentLineId: inserted[pi]!.id })
+        .where(eq(schema.orderLines.id, inserted[i]!.id));
+    }
 
     const totals = await this.orders.recomputeTotals(this.db, order.id);
 
@@ -2102,8 +2147,16 @@ export class OrdersController {
       ].sort();
       const date = splitDates[0];
       if (!date) break;
-      const moving = lines.filter((l) => l.deliveryDate === date);
-      if (moving.length === lines.length) break; // would empty the order
+      const moving = lines.filter(
+        (l) =>
+          l.deliveryDate === date &&
+          !(l.parentLineId && lines.some((p) => p.id === l.parentLineId)),
+      );
+      const movingIds = new Set(moving.map((l) => l.id));
+      const leaving = lines.filter(
+        (l) => movingIds.has(l.id) || (l.parentLineId && movingIds.has(l.parentLineId)),
+      );
+      if (leaving.length === lines.length) break; // would empty the order
       const sibling = await this.executeSplit(
         tenant,
         actor,
@@ -2456,6 +2509,22 @@ export class OrdersController {
         .limit(1);
       if (!src) throw new NotFoundException('Line source location not found');
     }
+    // Add-on fee attached to a product line on this order (owner
+    // 2026-09-16): it inherits that line's fulfillment and date, and
+    // follows it through splits.
+    let parent: typeof schema.orderLines.$inferSelect | null = null;
+    if (body.parentLineId) {
+      const [row] = await this.db
+        .select()
+        .from(schema.orderLines)
+        .where(and(eq(schema.orderLines.id, body.parentLineId), eq(schema.orderLines.orderId, id)))
+        .limit(1);
+      if (!row) throw new NotFoundException('Parent line not found on this order');
+      if (row.lineType === 'custom' || priced!.lineType !== 'custom') {
+        throw new BadRequestException('Only a custom fee line can attach to a product line');
+      }
+      parent = row;
+    }
     const [line] = await this.db
       .insert(schema.orderLines)
       .values({
@@ -2474,6 +2543,9 @@ export class OrdersController {
           body.sourceLocationId !== (order.stockLocationId ?? order.locationId)
             ? body.sourceLocationId
             : null,
+        parentLineId: parent?.id ?? null,
+        fulfillmentMethod: parent ? parent.fulfillmentMethod : null,
+        deliveryDate: parent ? parent.deliveryDate : null,
         taxCents: 0,
         totalCents: 0,
       })
@@ -2603,8 +2675,10 @@ export class OrdersController {
       moves.push({ line, quantity: qty });
     }
     const movesEverything = allLines.every((l) => {
-      const m = moves.find((x) => x.line.id === l.id);
-      return m ? m.quantity === l.quantity : false;
+      const m =
+        moves.find((x) => x.line.id === l.id) ??
+        (l.parentLineId ? moves.find((x) => x.line.id === l.parentLineId) : undefined);
+      return m ? m.quantity === m.line.quantity : false;
     });
     if (movesEverything) {
       throw new BadRequestException(
@@ -2838,7 +2912,68 @@ export class OrdersController {
       .returning();
     if (!target) throw new BadRequestException('failed to create the split order');
 
-    for (const m of moves) {
+    // Add-on fee lines ride with the product line they belong to (owner
+    // 2026-09-16, KO-10002): a moved parent pulls its children along —
+    // whole when the parent moves whole, else up to the moved units
+    // (per-unit fees) — and a child named on its own but whose parent
+    // also moves is handled here, not as a free-standing move.
+    const movedIds = new Set(moves.map((m) => m.line.id));
+    const allLines = await this.db
+      .select()
+      .from(schema.orderLines)
+      .where(eq(schema.orderLines.orderId, id));
+    const childrenOf = new Map<string, (typeof allLines)[number][]>();
+    for (const l of allLines) {
+      if (l.parentLineId && movedIds.has(l.parentLineId)) {
+        childrenOf.set(l.parentLineId, [...(childrenOf.get(l.parentLineId) ?? []), l]);
+      }
+    }
+    const explicitMoves = moves.filter(
+      (m) => !(m.line.parentLineId && movedIds.has(m.line.parentLineId)),
+    );
+
+    const moveLine = async (
+      line: (typeof allLines)[number],
+      quantity: number,
+      parentLineId: string | null,
+    ): Promise<string> => {
+      const discountShare = Math.round((line.discountCents * quantity) / line.quantity);
+      const [created] = await this.db
+        .insert(schema.orderLines)
+        .values({
+          businessId: tenant.businessId!,
+          orderId: target.id,
+          variantId: line.variantId,
+          description: line.description,
+          quantity,
+          lineType: line.lineType,
+          unitPriceCents: line.unitPriceCents,
+          discountCents: discountShare,
+          taxRateBps: line.taxRateBps,
+          taxClassId: line.taxClassId,
+          sourceLocationId: line.sourceLocationId,
+          fulfillmentMethod: line.fulfillmentMethod,
+          parentLineId,
+          serialUnitIds: null,
+          taxCents: 0,
+          totalCents: 0,
+        })
+        .returning({ id: schema.orderLines.id });
+      if (quantity === line.quantity) {
+        await this.db.delete(schema.orderLines).where(eq(schema.orderLines.id, line.id));
+      } else {
+        await this.db
+          .update(schema.orderLines)
+          .set({
+            quantity: line.quantity - quantity,
+            discountCents: line.discountCents - discountShare,
+          })
+          .where(eq(schema.orderLines.id, line.id));
+      }
+      return created!.id;
+    };
+
+    for (const m of explicitMoves) {
       // Free the moved units' commitment at the line's effective source…
       const releaseQty = Math.min(m.line.qtyReserved, m.quantity);
       if (m.line.variantId && releaseQty > 0) {
@@ -2852,36 +2987,14 @@ export class OrdersController {
         });
       }
       // …write the moved units onto the new order (discount travels
-      // proportionally)…
-      const discountShare = Math.round((m.line.discountCents * m.quantity) / m.line.quantity);
-      await this.db.insert(schema.orderLines).values({
-        businessId: tenant.businessId!,
-        orderId: target.id,
-        variantId: m.line.variantId,
-        description: m.line.description,
-        quantity: m.quantity,
-        lineType: m.line.lineType,
-        unitPriceCents: m.line.unitPriceCents,
-        discountCents: discountShare,
-        taxRateBps: m.line.taxRateBps,
-        taxClassId: m.line.taxClassId,
-        sourceLocationId: m.line.sourceLocationId,
-        fulfillmentMethod: m.line.fulfillmentMethod,
-        serialUnitIds: null,
-        taxCents: 0,
-        totalCents: 0,
-      });
-      // …and shrink or drop the source line.
-      if (m.quantity === m.line.quantity) {
-        await this.db.delete(schema.orderLines).where(eq(schema.orderLines.id, m.line.id));
-      } else {
-        await this.db
-          .update(schema.orderLines)
-          .set({
-            quantity: m.line.quantity - m.quantity,
-            discountCents: m.line.discountCents - discountShare,
-          })
-          .where(eq(schema.orderLines.id, m.line.id));
+      // proportionally) and shrink or drop the source line…
+      const wholeMove = m.quantity === m.line.quantity;
+      const newParentId = await moveLine(m.line, m.quantity, null);
+      // …then the add-on fees that belong to it.
+      for (const child of childrenOf.get(m.line.id) ?? []) {
+        const qty = wholeMove ? child.quantity : Math.min(child.quantity, m.quantity);
+        if (qty <= 0) continue;
+        await moveLine(child, qty, newParentId);
       }
     }
 
@@ -3355,7 +3468,25 @@ export class OrdersController {
     }
 
     await this.db.update(schema.orderLines).set(patch).where(eq(schema.orderLines.id, line.id));
-    if (repriced) await this.orders.recomputeTotals(this.db, order.id);
+    // Per-unit add-on fees (recycling, removal) follow the product line's
+    // quantity; the $0 declined-foundation marker stays at one.
+    let childrenRepriced = false;
+    if (patch.quantity !== undefined) {
+      const kids = await this.db
+        .select()
+        .from(schema.orderLines)
+        .where(eq(schema.orderLines.parentLineId, line.id));
+      for (const k of kids) {
+        if (k.unitPriceCents === 0 && k.quantity === 1) continue;
+        if (k.quantity === patch.quantity) continue;
+        await this.db
+          .update(schema.orderLines)
+          .set({ quantity: Math.max(patch.quantity, k.qtyFulfilled) })
+          .where(eq(schema.orderLines.id, k.id));
+        childrenRepriced = true;
+      }
+    }
+    if (repriced || childrenRepriced) await this.orders.recomputeTotals(this.db, order.id);
     if (
       line.variantId &&
       line.lineType === 'stock' &&
@@ -3820,9 +3951,15 @@ export class OrdersController {
         .select()
         .from(schema.orderLines)
         .where(eq(schema.orderLines.orderId, id));
-      const isTakeWith = (l: (typeof lines)[number]) =>
-        l.lineType !== 'direct_ship' &&
-        (l.fulfillmentMethod ?? order.fulfillmentType) === 'take_with';
+      // An add-on fee goes wherever its product line goes (owner
+      // 2026-09-16): it is take-with exactly when its parent is.
+      const byId = new Map(lines.map((l) => [l.id, l]));
+      const isTakeWith = (l: (typeof lines)[number]): boolean => {
+        if (l.lineType === 'direct_ship') return false;
+        const parent = l.parentLineId ? byId.get(l.parentLineId) : undefined;
+        if (parent) return isTakeWith(parent);
+        return (l.fulfillmentMethod ?? order.fulfillmentType) === 'take_with';
+      };
       const twLines = lines.filter(isTakeWith);
       const rest = lines.filter((l) => !isTakeWith(l));
       if (twLines.length > 0) {
@@ -3830,7 +3967,9 @@ export class OrdersController {
         await this.assertNotOnOpenRun(id);
         let piece = order;
         if (rest.length > 0) {
+          // Children ride along inside executeSplit — only name the parents.
           const moves = twLines
+            .filter((line) => !(line.parentLineId && byId.has(line.parentLineId)))
             .map((line) => ({
               line,
               quantity: line.quantity - line.qtyFulfilled - line.qtyReturned,
@@ -3864,7 +4003,34 @@ export class OrdersController {
       }
     }
 
-    if (order.status !== 'fulfilled') {
+    // Nothing left to deliver — every product unit is fulfilled (or there
+    // never was one; e.g. an order left holding only a fee after its
+    // goods split off, owner 2026-09-16 KO-10002). The fee lines count as
+    // done and the order can complete.
+    let status = order.status;
+    if (['open', 'partially_fulfilled'].includes(status)) {
+      const lines = await this.db
+        .select()
+        .from(schema.orderLines)
+        .where(eq(schema.orderLines.orderId, id));
+      const goods = lines.filter((l) => l.lineType !== 'custom');
+      const goodsDone = goods.every((l) => l.qtyFulfilled + l.qtyReturned >= l.quantity);
+      const feesOpen = lines.filter((l) => l.lineType === 'custom' && l.qtyFulfilled < l.quantity);
+      if (goodsDone && lines.length > 0) {
+        for (const f of feesOpen) {
+          await this.db
+            .update(schema.orderLines)
+            .set({ qtyFulfilled: f.quantity })
+            .where(eq(schema.orderLines.id, f.id));
+        }
+        status = 'fulfilled';
+        await this.db
+          .update(schema.orders)
+          .set({ status, updatedAt: new Date() })
+          .where(eq(schema.orders.id, id));
+      }
+    }
+    if (status !== 'fulfilled') {
       throw new BadRequestException('Deliver or hand over every unit before completing the order');
     }
 
@@ -5589,6 +5755,7 @@ export class OrdersController {
         fulfillmentMethod: l.fulfillmentMethod,
         sourceLocationId: l.sourceLocationId,
         deliveryDate: l.deliveryDate,
+        parentLineId: l.parentLineId ?? null,
         categoryPath: l.variantId ? (categoryByVariant.get(l.variantId) ?? null) : null,
         comment: l.comment,
         room: l.room,

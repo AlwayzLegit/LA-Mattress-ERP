@@ -180,7 +180,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [locationId, setLocationId] = useState('');
   const [taxRateBps, setTaxRateBps] = useState(0);
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [recyclingFeeCents, setRecyclingFeeCents] = useState(1050);
+  // Owner 2026-09-16: $18.00 per unit unless Settings → POS says otherwise.
+  const [recyclingFeeCents, setRecyclingFeeCents] = useState(1800);
   const [defaultSourceLocationId, setDefaultSourceLocationId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [draftsOpen, setDraftsOpen] = useState(false);
@@ -715,10 +716,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       fulfillmentMethod?: Fulfillment;
       sourceLocationId?: string;
       deliveryDate?: string;
+      /** Add-on fee: index of the product line it belongs to (follows it through splits). */
+      addonOf?: number;
     }[] = [];
-    const fee = (description: string, quantity: number, unitPriceCents: number) =>
-      out.push({ description, quantity, unitPriceCents, lineType: 'custom' });
+    const fee = (description: string, quantity: number, unitPriceCents: number, addonOf: number) =>
+      out.push({ description, quantity, unitPriceCents, lineType: 'custom', addonOf });
     for (const l of lines) {
+      const parentIndex = out.length;
       out.push({
         variantId: l.variantId ?? undefined,
         description: l.lineType === 'custom' ? l.description : undefined,
@@ -735,9 +739,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             : undefined,
         deliveryDate: l.deliveryDate || undefined,
       });
-      if (l.addons.removal) fee(REMOVAL_DESC, l.quantity, 0);
-      if (l.addons.recycling) fee(RECYCLING_DESC, l.quantity, recyclingFeeCents);
-      if (l.addons.declined) fee(DECLINED_DESC, 1, 0);
+      if (l.addons.removal) fee(REMOVAL_DESC, l.quantity, 0, parentIndex);
+      if (l.addons.recycling) fee(RECYCLING_DESC, l.quantity, recyclingFeeCents, parentIndex);
+      if (l.addons.declined) fee(DECLINED_DESC, 1, 0, parentIndex);
     }
     return out;
   }
@@ -797,6 +801,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         installFeeCents: number;
         deliveryFeeCents: number;
         lines: {
+          id: string;
           variantId: string | null;
           description: string;
           quantity: number;
@@ -808,6 +813,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           sourceLocationId: string | null;
           deliveryDate: string | null;
           categoryPath?: string | null;
+          parentLineId?: string | null;
         }[];
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
@@ -827,32 +833,55 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setOrderDiscount(o.orderDiscountCents ? (o.orderDiscountCents / 100).toFixed(2) : '');
       setInstallFee(o.installFeeCents ? (o.installFeeCents / 100).toFixed(2) : '');
       setDeliveryFee(o.deliveryFeeCents ? (o.deliveryFeeCents / 100).toFixed(2) : '');
+      // Add-on fees attached to a product line come back as that line's
+      // chips (owner 2026-09-16), not as loose rows that would double up.
+      const ADDON_DESCS: Record<string, keyof Addons> = {
+        [REMOVAL_DESC]: 'removal',
+        [RECYCLING_DESC]: 'recycling',
+        [DECLINED_DESC]: 'declined',
+      };
+      const lineIds = new Set(o.lines.map((l) => l.id));
+      const attached = o.lines.filter(
+        (l) =>
+          l.lineType === 'custom' &&
+          l.parentLineId &&
+          lineIds.has(l.parentLineId) &&
+          ADDON_DESCS[l.description] !== undefined,
+      );
+      const addonsFor = (lineId: string): Addons => {
+        const a = { ...NO_ADDONS };
+        for (const c of attached)
+          if (c.parentLineId === lineId) a[ADDON_DESCS[c.description]!] = true;
+        return a;
+      };
       setLines(
-        o.lines.map((l) => {
-          const fm = (l.fulfillmentMethod as Line['fulfillmentMethod']) ?? '';
-          const eff = effectiveFulfillment({ fulfillmentMethod: fm }, f);
-          const autoSource = defaultSourceFor(eff, nextCtx);
-          const source = l.sourceLocationId ?? o.locationId;
-          return {
-            key: nextKey(),
-            variantId: l.variantId,
-            description: l.description,
-            sku: null,
-            size: null,
-            categoryPath: l.categoryPath ?? null,
-            quantity: l.quantity,
-            unitPriceCents: l.unitPriceCents,
-            lineDiscountCents: l.discountCents,
-            lineType: (l.lineType as Line['lineType']) ?? 'stock',
-            fulfillmentMethod: fm,
-            sourceLocationId: source,
-            // A stored source that differs from the rule was a choice.
-            sourceTouched: source !== autoSource,
-            deliveryDate: l.deliveryDate ?? '',
-            addons: { ...NO_ADDONS },
-            taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
-          };
-        }),
+        o.lines
+          .filter((l) => !attached.includes(l))
+          .map((l) => {
+            const fm = (l.fulfillmentMethod as Line['fulfillmentMethod']) ?? '';
+            const eff = effectiveFulfillment({ fulfillmentMethod: fm }, f);
+            const autoSource = defaultSourceFor(eff, nextCtx);
+            const source = l.sourceLocationId ?? o.locationId;
+            return {
+              key: nextKey(),
+              variantId: l.variantId,
+              description: l.description,
+              sku: null,
+              size: null,
+              categoryPath: l.categoryPath ?? null,
+              quantity: l.quantity,
+              unitPriceCents: l.unitPriceCents,
+              lineDiscountCents: l.discountCents,
+              lineType: (l.lineType as Line['lineType']) ?? 'stock',
+              fulfillmentMethod: fm,
+              sourceLocationId: source,
+              // A stored source that differs from the rule was a choice.
+              sourceTouched: source !== autoSource,
+              deliveryDate: l.deliveryDate ?? '',
+              addons: addonsFor(l.id),
+              taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
+            };
+          }),
       );
       setResumedDraft({ id, number: o.number });
       toast.success(`${o.number} resumed — completing it replaces the draft`);
