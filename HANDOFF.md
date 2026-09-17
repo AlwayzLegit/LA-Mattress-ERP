@@ -4,6 +4,15 @@
 verified against the live systems on the date above; re-check anything you are about to
 depend on rather than trusting this file's freshness.
 
+> **Update 2026-09-17.** Re-verified: `main` = `60959c4` (PR #192), no open PRs;
+> Render `jetnine-api` live on that commit, boot line `108/108 applied,
+head=0107_order_line_parent`; Vercel production READY on the same commit. The API
+> now deploys from `main` by `.github/workflows/deploy-api.yml` (the deploy-branch
+> row in §2 is history). Production data work goes through the `ops-*` workflows
+> (§2 "One-off commands"); the 2026-09-03 catalog is loaded (§5). Add-on fee lines
+> (recycling / removal / declined foundation) now attach to their product line and
+> follow it through splits (`order_lines.parent_line_id`, PR #192).
+>
 > **Update 2026-09-12.** Re-verified against the live accounts. Since this brief was
 > written: the **email thread in §4a is closed** (root `a-prompt.ai` verified in Resend,
 > `RESEND_API_KEY` + `RESEND_FROM_EMAIL` on Render, invite delivered 2026-08-27 — see
