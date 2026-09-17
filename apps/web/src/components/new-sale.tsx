@@ -1710,11 +1710,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   disabled={locked}
                   data-testid="order-store"
                 >
+                  {/* Owner 2026-09-17: the Warehouse sells like any store. */}
                   {locs
-                    .filter((l) => l.canSellHere !== false && l.locationType !== 'warehouse')
+                    .filter((l) => l.canSellHere !== false)
                     .map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name}
+                        {l.locationType === 'warehouse' ? ' (warehouse)' : ''}
                       </option>
                     ))}
                 </Select>
