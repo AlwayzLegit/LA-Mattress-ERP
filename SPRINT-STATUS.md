@@ -5945,3 +5945,16 @@ amended first.
   Ops: KO-10002 itself — press Complete on it (fee paid, nothing to
   deliver → completes with this build); the fee stays recorded against
   the sale via the family.
+
+### Checkpoint — 2026-09-17 (owner: vendor filter atop Purchases; Warehouse sells like a store)
+
+- Purchase orders page: the vendor filter is now a dropdown ("All vendors"
+  - every vendor) in a toolbar at the TOP of the page, above Reorder
+    suggestions, with Show deleted beside it; picking a vendor filters the
+    list and keeps the `?vendorId=&vendor=` door URL in sync (the vendors
+    page's "on PO" link still lands filtered).
+- New Sale: the Store picker now lists warehouse-typed locations (marked
+  "(warehouse)"), so "Acting for Warehouse" actually rings at the
+  warehouse instead of silently falling back to the first store. No API
+  change — the register's location endpoint already returned every
+  location and write-time checks are member-scope only. PLAN §4 amended.

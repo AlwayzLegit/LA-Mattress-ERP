@@ -21,6 +21,7 @@ import {
   PageHeader,
   ResetColumns,
   SectionHeading,
+  Select,
   Stack,
   StatusBadge,
   TableEmpty,
@@ -137,6 +138,28 @@ export default function PurchaseOrdersPage() {
   // Vendor door (owner 2026-09-02): /purchase-orders?vendorId=…&vendor=Name
   // from the vendors page's "on PO" count.
   const [vendor, setVendor] = useState<{ id: string; name: string } | null>(null);
+  // Owner 2026-09-17: the vendor filter is a real dropdown at the top of
+  // the page, not a label buried under the suggestions.
+  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    void api<{ data: { id: string; name: string }[] } | { id: string; name: string }[]>(
+      '/v1/vendors?limit=200',
+    )
+      .then((r) => setVendors(Array.isArray(r) ? r : r.data))
+      .catch(() => setVendors([]));
+  }, []);
+  function pickVendor(id: string) {
+    const v = id ? (vendors.find((x) => x.id === id) ?? null) : null;
+    setVendor(v);
+    window.history.replaceState(
+      null,
+      '',
+      v
+        ? `/purchase-orders?vendorId=${v.id}&vendor=${encodeURIComponent(v.name)}`
+        : '/purchase-orders',
+    );
+    void reload(showDeleted, v);
+  }
   const reload = (deleted = showDeleted, v = vendor) =>
     list.load({
       ...(deleted ? { includeDeleted: '1' } : {}),
@@ -199,6 +222,40 @@ export default function PurchaseOrdersPage() {
       />
       <Stack>
         {(error ?? list.error) && <Alert tone="error">{error ?? list.error}</Alert>}
+
+        <Toolbar
+          end={
+            <label className="muted flex items-center gap-2" data-testid="show-deleted-toggle">
+              <input
+                type="checkbox"
+                checked={showDeleted}
+                onChange={(e) => {
+                  setShowDeleted(e.target.checked);
+                  void reload(e.target.checked);
+                }}
+              />
+              Show deleted
+            </label>
+          }
+        >
+          <Select
+            value={vendor?.id ?? ''}
+            onChange={(e) => pickVendor(e.target.value)}
+            aria-label="Vendor"
+            data-testid="po-vendor-filter"
+            style={{ maxWidth: 280 }}
+          >
+            <option value="">All vendors</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+            {vendor && !vendors.some((v) => v.id === vendor.id) && (
+              <option value={vendor.id}>{vendor.name}</option>
+            )}
+          </Select>
+        </Toolbar>
 
         {suggestions != null && suggestions.length > 0 && (
           <Card
@@ -302,41 +359,6 @@ export default function PurchaseOrdersPage() {
         )}
 
         <div>
-          <Toolbar
-            end={
-              <label className="muted flex items-center gap-2" data-testid="show-deleted-toggle">
-                <input
-                  type="checkbox"
-                  checked={showDeleted}
-                  onChange={(e) => {
-                    setShowDeleted(e.target.checked);
-                    void reload(e.target.checked);
-                  }}
-                />
-                Show deleted
-              </label>
-            }
-          >
-            {vendor ? (
-              <span className="pill" data-testid="po-vendor-chip">
-                Vendor: <strong>{vendor.name}</strong>
-                <button
-                  type="button"
-                  className="btn-link"
-                  onClick={() => {
-                    setVendor(null);
-                    window.history.replaceState(null, '', '/purchase-orders');
-                    void reload(showDeleted, null);
-                  }}
-                >
-                  clear
-                </button>
-              </span>
-            ) : (
-              <span className="muted">All vendors</span>
-            )}
-          </Toolbar>
-
           {rows == null ? (
             <LoadingRows />
           ) : rows.length === 0 && !filtered ? (

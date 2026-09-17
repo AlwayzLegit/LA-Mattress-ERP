@@ -122,6 +122,10 @@ Single-screen order entry — customer, products, payment all on one screen (no 
   line's quantity. A take-with sale whose every product line goes with the customer
   completes in place — no -A piece is carved off just to strand the fee. An order
   left holding only fee lines (nothing to deliver) can be completed.
+  _Amendment 2026-09-17:_ the **Warehouse is a selling location** like any store —
+  it appears in New Sale's Store picker (and the "Acting for" chip) and a sale
+  rung there books its drawer, tax and inventory at the warehouse. The default
+  store when nothing is acting still prefers a retail store.
 - **Take-with hand-over** _(amendment 2026-08-31)_: completing a sale (New Sale, or
   Complete on the order page — the per-line hand-over button is gone) splits any
   take-with lines to a `-A` sibling order; money already collected covers that piece
