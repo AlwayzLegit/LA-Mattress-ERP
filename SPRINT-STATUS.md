@@ -5980,6 +5980,10 @@ first saved version, annotated tag **`v2026.09.18`** on `main`.
 
 ### 2026-09-18 — Enter an Exchange = the register in exchange mode (owner ask)
 
+- **Ops (owner):** cut the `v2026.09.18` tag on `aa8a4ad7cc00b46798d13b6b88d1b0fa04068204`
+  (main after PR #195) — the sandbox cannot push tags (HTTP 403 on `refs/tags/*`);
+  command in `HANDOFF.md` top update.
+
 Owner: "make the exchange screen look and behave more like new sale but for
 exchanges features. like delivery charge we do not have here. Etc add all
 missing fields." `/exchanges/new` now finds the original invoice and renders
