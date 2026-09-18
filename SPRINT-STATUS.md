@@ -5958,3 +5958,22 @@ amended first.
   warehouse instead of silently falling back to the first store. No API
   change — the register's location endpoint already returned every
   location and write-time checks are member-scope only. PLAN §4 amended.
+
+### Checkpoint — 2026-09-18 (owner: "review the newest version and save it" → v2026.09.18)
+
+Code review (medium) over the week's range `b08d0e2~1..main` (PRs #185–#194)
+surfaced three real defects; all fixed here, then the build is pinned as the
+first saved version, annotated tag **`v2026.09.18`** on `main`.
+
+- Attached add-on fees now copy the parent line's **fulfillment method and
+  promised date** when either is edited (they only tracked quantity), so a
+  child row never disagrees with what `complete()` resolves through the
+  parent.
+- A **partial split** moves per-unit fees for the moved units but leaves the
+  qty-1 $0 declined-foundation marker on the source — the same rule the
+  quantity path already used (the marker documents the line, not its units).
+- Owner dashboard **Written sales "Load more"**: a page that resolves after
+  the period / store / salesperson changed (or Refresh fired) is dropped
+  instead of being appended to the new dataset with stale totals.
+- Tests: +1 int test (partial split with fee + marker) and the attach test
+  now covers the fulfillment/date follow-through.

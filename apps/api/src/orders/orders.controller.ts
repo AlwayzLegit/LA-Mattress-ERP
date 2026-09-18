@@ -2992,7 +2992,10 @@ export class OrdersController {
       const newParentId = await moveLine(m.line, m.quantity, null);
       // …then the add-on fees that belong to it.
       for (const child of childrenOf.get(m.line.id) ?? []) {
-        const qty = wholeMove ? child.quantity : Math.min(child.quantity, m.quantity);
+        // A $0 one-off marker (declined foundation) documents the line, not
+        // its units: it stays put unless the whole line goes.
+        const marker = child.unitPriceCents === 0 && child.quantity === 1;
+        const qty = wholeMove ? child.quantity : marker ? 0 : Math.min(child.quantity, m.quantity);
         if (qty <= 0) continue;
         await moveLine(child, qty, newParentId);
       }
@@ -3468,22 +3471,36 @@ export class OrdersController {
     }
 
     await this.db.update(schema.orderLines).set(patch).where(eq(schema.orderLines.id, line.id));
-    // Per-unit add-on fees (recycling, removal) follow the product line's
-    // quantity; the $0 declined-foundation marker stays at one.
+    // Attached add-on fees follow the product line: per-unit fees
+    // (recycling, removal) track its quantity — the $0 declined-foundation
+    // marker stays at one — and every child copies the line's fulfillment
+    // and promised date so the row a report or split reads never drifts
+    // from what complete() resolves through the parent.
     let childrenRepriced = false;
-    if (patch.quantity !== undefined) {
+    if (
+      patch.quantity !== undefined ||
+      patch.fulfillmentMethod !== undefined ||
+      patch.deliveryDate !== undefined
+    ) {
       const kids = await this.db
         .select()
         .from(schema.orderLines)
         .where(eq(schema.orderLines.parentLineId, line.id));
       for (const k of kids) {
-        if (k.unitPriceCents === 0 && k.quantity === 1) continue;
-        if (k.quantity === patch.quantity) continue;
-        await this.db
-          .update(schema.orderLines)
-          .set({ quantity: Math.max(patch.quantity, k.qtyFulfilled) })
-          .where(eq(schema.orderLines.id, k.id));
-        childrenRepriced = true;
+        const kidPatch: Partial<typeof schema.orderLines.$inferInsert> = {};
+        if (patch.fulfillmentMethod !== undefined)
+          kidPatch.fulfillmentMethod = patch.fulfillmentMethod;
+        if (patch.deliveryDate !== undefined) kidPatch.deliveryDate = patch.deliveryDate;
+        if (
+          patch.quantity !== undefined &&
+          !(k.unitPriceCents === 0 && k.quantity === 1) &&
+          k.quantity !== patch.quantity
+        ) {
+          kidPatch.quantity = Math.max(patch.quantity, k.qtyFulfilled);
+          childrenRepriced = true;
+        }
+        if (Object.keys(kidPatch).length === 0) continue;
+        await this.db.update(schema.orderLines).set(kidPatch).where(eq(schema.orderLines.id, k.id));
       }
     }
     if (repriced || childrenRepriced) await this.orders.recomputeTotals(this.db, order.id);
