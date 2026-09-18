@@ -5977,3 +5977,24 @@ first saved version, annotated tag **`v2026.09.18`** on `main`.
   instead of being appended to the new dataset with stale totals.
 - Tests: +1 int test (partial split with fee + marker) and the attach test
   now covers the fulfillment/date follow-through.
+
+### 2026-09-18 — Enter an Exchange = the register in exchange mode (owner ask)
+
+Owner: "make the exchange screen look and behave more like new sale but for
+exchanges features. like delivery charge we do not have here. Etc add all
+missing fields." `/exchanges/new` now finds the original invoice and renders
+`<NewSale exchangeOf>`; the register carries the return leg and the settlement
+(PLAN-POS-OPERATIONS §10 amendment 2026-09-18).
+
+- Missing fields now on the exchange: Store, Fulfillment, Promised date,
+  Salesperson + 2nd, instructions, order notes, **Delivery charge**, Installation,
+  Order discount, per-line fulfillment / source / discount, add-on chips.
+- Return section (delivered lines, return qty, unit credit, reason, return-to) +
+  **Same items** (like for like at the price paid); totals show the credit and the
+  estimated net; Settlement block (return salesperson, restocking fee, leftover
+  credit tender, even exchange, goods in hand, collect now with New Sale tender
+  fields). The balance is collected for the server-computed amount after settle.
+- `lib/exchange-math.ts` holds the estimate (+7 unit tests); e2e delivery
+  lifecycle now continues into an exchange (return 1 → Same items → $5 delivery
+  charge → cash → lands on the exchange).
+- `/orders/new?exchangeOf=` is the same register, so it gained the return leg too.

@@ -4323,6 +4323,20 @@ kbd.key {
   flex-direction: column;
   gap: 8px;
 }
+.reg-main {
+  /* Exchange mode: the Return section stacks above Items in the left column. */
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.reg-return-fields {
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border);
+}
+.reg-return-fields .field-label,
+.reg-return-fields label > span:first-child {
+  font-size: 12px;
+}
 .reg-two {
   display: grid;
   /* minmax(0, …): a bare 1fr floors at the input's intrinsic width, so two
