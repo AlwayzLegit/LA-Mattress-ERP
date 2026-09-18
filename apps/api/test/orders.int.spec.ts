@@ -4522,10 +4522,82 @@ describe('Add-on fee lines follow their product line', () => {
     expect(fee2.quantity).toBe(2);
     expect(bumped.body.totalCents).toBe(created.body.totalCents * 2 - 0 + 1800 * 2);
 
+    // Re-dating or switching the mattress to take-with carries its fee's copy
+    // along, so the child row never disagrees with what complete() resolves.
+    const redated = await req('patch', `/v1/orders/${created.body.id}/lines/${bedId}`).send({
+      fulfillmentMethod: 'take_with',
+      deliveryDate: '2026-12-24',
+    });
+    expect(redated.status).toBe(200);
+    const fee3 = redated.body.lines.find((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fee3.fulfillmentMethod).toBe('take_with');
+    expect(fee3.deliveryDate).toBe('2026-12-24');
+
     // Removing the mattress takes its fee along.
     const removed = await req('delete', `/v1/orders/${created.body.id}/lines/${bedId}`);
     expect(removed.status).toBe(200);
     expect(removed.body.lines).toHaveLength(0);
+  });
+
+  it('a partial split moves per-unit fees for the moved units but leaves the $0 marker behind', async () => {
+    const created = await req('post', '/v1/orders').send({
+      locationId,
+      customerId,
+      fulfillmentType: 'delivery',
+      confirm: true,
+      lines: [
+        { variantId: bedVariantId, quantity: 2 },
+        {
+          description: 'Recycling Fee',
+          lineType: 'custom',
+          quantity: 2,
+          unitPriceCents: 1800,
+          addonOf: 0,
+        },
+        {
+          description: 'Client Declined New Foundation',
+          lineType: 'custom',
+          quantity: 1,
+          unitPriceCents: 0,
+          addonOf: 0,
+        },
+        { variantId: pillowVariantId, quantity: 1 },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const bedId = created.body.lines.find(
+      (l: { variantId: string | null }) => l.variantId === bedVariantId,
+    ).id as string;
+
+    const split = await req('post', `/v1/orders/${created.body.id}/split`).send({
+      lines: [{ lineId: bedId, quantity: 1 }],
+      requestedDate: '2026-12-01',
+    });
+    expect(split.status).toBe(201);
+    const src = split.body.order;
+    const srcFee = src.lines.find(
+      (l: { description: string }) => l.description === 'Recycling Fee',
+    );
+    const srcMarker = src.lines.find(
+      (l: { description: string }) => l.description === 'Client Declined New Foundation',
+    );
+    expect(srcFee.quantity).toBe(1);
+    expect(srcMarker).toBeTruthy(); // the marker documents the line; it stays with the source
+
+    const piece = await req('get', `/v1/orders/${split.body.newOrder.id}`);
+    expect(piece.status).toBe(200);
+    const pieceBed = piece.body.lines.find((l: { variantId: string | null }) => l.variantId);
+    const pieceFee = piece.body.lines.find(
+      (l: { description: string }) => l.description === 'Recycling Fee',
+    );
+    expect(pieceBed.quantity).toBe(1);
+    expect(pieceFee.quantity).toBe(1);
+    expect(pieceFee.parentLineId).toBe(pieceBed.id);
+    expect(
+      piece.body.lines.some(
+        (l: { description: string }) => l.description === 'Client Declined New Foundation',
+      ),
+    ).toBe(false);
   });
 
   it('an order left holding only a fee line can be completed', async () => {

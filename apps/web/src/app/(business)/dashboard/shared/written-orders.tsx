@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { formatMoney } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Alert, Button, SlideOver } from '@/components/ui';
@@ -42,8 +42,13 @@ export function WrittenOrders({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  // Every query (filters + refresh) gets a sequence number; a "Load more"
+  // page that resolves after the query changed is dropped instead of
+  // being appended to the new dataset.
+  const querySeq = useRef(0);
   const load = useCallback(
     async (offset: number, signal?: AbortSignal) => {
+      const seq = querySeq.current;
       setBusy(true);
       setError(null);
       const q = new URLSearchParams({ period, offset: String(offset) });
@@ -53,22 +58,23 @@ export function WrittenOrders({
         const next = await api<WrittenOrdersResponse>(`/v1/dashboard/written-orders?${q}`, {
           signal,
         });
-        if (!signal?.aborted)
-          setData((old) => ({
-            ...next,
-            rows: offset && old ? [...old.rows, ...next.rows] : next.rows,
-          }));
+        if (signal?.aborted || seq !== querySeq.current) return;
+        setData((old) => ({
+          ...next,
+          rows: offset && old ? [...old.rows, ...next.rows] : next.rows,
+        }));
       } catch (e) {
-        if (!signal?.aborted)
+        if (!signal?.aborted && seq === querySeq.current)
           setError(e instanceof Error ? e.message : 'Could not load written orders');
       } finally {
-        if (!signal?.aborted) setBusy(false);
+        if (!signal?.aborted && seq === querySeq.current) setBusy(false);
       }
     },
     [period, locationId, salespersonId],
   );
   useEffect(() => {
     const c = new AbortController();
+    querySeq.current += 1;
     setData(null);
     void load(0, c.signal);
     return () => c.abort();
