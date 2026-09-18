@@ -4,6 +4,18 @@
 verified against the live systems on the date above; re-check anything you are about to
 depend on rather than trusting this file's freshness.
 
+> **Update 2026-09-18.** First saved version = `main` at `aa8a4ad` (PR #195). Tag it
+> as **`v2026.09.18`** from a machine with push rights — the sandbox credential can
+> push only its feature branch (a tag push answers HTTP 403):
+> `git fetch origin main && git tag -a v2026.09.18 aa8a4ad -m "first saved version" && git push origin v2026.09.18`.
+> PR #195 = three review fixes — child add-on fee lines follow their
+> parent's fulfillment and promised date, a partial split keeps the $0 marker line,
+> the written-orders load-more race). Roll back with `git checkout v2026.09.18` or
+> `git revert` on `main`; a push to `main` deploys both apps. The Enter an Exchange
+> screen is now the New Sale register in exchange mode (return section + settlement
+> block, every order-details field incl. delivery charge/installation/discount) — see
+> `PLAN-POS-OPERATIONS.md` §10 amendment 2026-09-18.
+>
 > **Update 2026-09-17.** Re-verified: `main` = `60959c4` (PR #192), no open PRs;
 > Render `jetnine-api` live on that commit, boot line `108/108 applied,
 head=0107_order_line_parent`; Vercel production READY on the same commit. The API

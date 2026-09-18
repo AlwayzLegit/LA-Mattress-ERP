@@ -14,6 +14,12 @@ import {
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { lineHasAddons } from '@/lib/pos-addons';
+import {
+  exchangeSettlement,
+  perUnitCreditCents,
+  returnCreditCents,
+  returnableQty,
+} from '@/lib/exchange-math';
 import { setDraftSummary } from '@/lib/api-status';
 import { SELLING_STORE_KEY } from '@/lib/acting-store';
 import {
@@ -156,6 +162,31 @@ interface Avail {
   atpDate: string | null;
   taxRateBps: number | null;
 }
+/** §10 exchange mode: a line on the original invoice that can come back. */
+interface ReturnLine {
+  id: string;
+  variantId: string | null;
+  description: string;
+  quantity: number;
+  qtyFulfilled: number;
+  qtyReturned: number;
+  unitPriceCents: number;
+  totalCents: number;
+  taxCents: number;
+}
+interface ExchangeOriginal {
+  id: string;
+  number: string;
+  locationId: string;
+  lines: ReturnLine[];
+}
+const REFUND_TENDERS = [
+  { value: 'store_credit', label: 'Store credit (stays on account)' },
+  { value: 'original', label: 'Original tenders' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'check', label: 'Check' },
+] as const;
+type RefundTender = (typeof REFUND_TENDERS)[number]['value'];
 
 let lineKeySeq = 0;
 const nextKey = () => `l${++lineKeySeq}`;
@@ -194,9 +225,25 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [openOrders, setOpenOrders] = useState<
     { id: string; number: string; requestedDate: string | null; deliveryDate: string | null }[]
   >([]);
-  const [exchangeOriginal, setExchangeOriginal] = useState<{ id: string; number: string } | null>(
-    null,
-  );
+  const [exchangeOriginal, setExchangeOriginal] = useState<ExchangeOriginal | null>(null);
+  // §10 Enter an Exchange (owner 2026-09-18): the register in exchange
+  // mode carries the return leg and the settlement choices too.
+  const isExchange = Boolean(exchangeOf);
+  const [returnQty, setReturnQty] = useState<Record<string, number>>({});
+  const [returnReason, setReturnReason] = useState('');
+  const [returnToId, setReturnToId] = useState(''); // '' = the order's Store
+  const [evenExchange, setEvenExchange] = useState(false);
+  const [feeOverride, setFeeOverride] = useState('');
+  const [goodsInHand, setGoodsInHand] = useState(true);
+  const [collectNow, setCollectNow] = useState(true);
+  const [returnSalespersonId, setReturnSalespersonId] = useState('');
+  const [refundTender, setRefundTender] = useState<RefundTender>('store_credit');
+  // Steps 1–2 of the exchange create real documents; a failed later step
+  // remembers them so a retry binds the SAME documents, never duplicates.
+  const [createdLegs, setCreatedLegs] = useState<{
+    saleOrderId: string | null;
+    returnId: string | null;
+  }>({ saleOrderId: null, returnId: null });
   const [custQuery, setCustQuery] = useState('');
   const [leadOpen, setLeadOpen] = useState(false);
   const [custHits, setCustHits] = useState<CustomerHit[]>([]);
@@ -373,14 +420,31 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   useEffect(() => {
     if (!exchangeOf) return;
     let stale = false;
-    api<{ id: string; number: string; customerId: string }>(`/v1/orders/${exchangeOf}`)
+    api<{
+      id: string;
+      number: string;
+      customerId: string;
+      locationId: string;
+      lines: ReturnLine[];
+    }>(`/v1/orders/${exchangeOf}`)
       .then(async (o) => {
         if (stale) return;
-        setExchangeOriginal({ id: o.id, number: o.number });
+        setExchangeOriginal({
+          id: o.id,
+          number: o.number,
+          locationId: o.locationId,
+          lines: o.lines ?? [],
+        });
+        setReturnQty({});
         const c = await api<CustomerHit>(`/v1/customers/${o.customerId}`).catch(() => null);
         if (!stale && c) setCustomer(c);
       })
-      .catch(() => setExchangeOriginal(null));
+      .catch((err) => {
+        setExchangeOriginal(null);
+        setError(
+          `Could not load the original order: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     return () => {
       stale = true;
     };
@@ -610,6 +674,21 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   });
   const hasZero = lines.some((l) => l.lineType !== 'custom' && l.unitPriceCents === 0);
   const zeroBlock = hasZero && !zeroOk;
+  // §10 exchange mode: what comes back, and how it nets against the replacement.
+  const returnableLines = exchangeOriginal
+    ? exchangeOriginal.lines.filter((l) => returnableQty(l) > 0)
+    : [];
+  const pickedReturns = returnableLines
+    .filter((l) => (returnQty[l.id] ?? 0) > 0)
+    .map((l) => ({ line: l, quantity: Math.min(returnQty[l.id]!, returnableQty(l)) }));
+  const returnCredit = returnCreditCents(returnableLines, returnQty);
+  const restockingFeeCents = parseDollars(feeOverride);
+  const settlement = exchangeSettlement({
+    replacementTotalCents: totals.totalCents,
+    returnCreditCents: returnCredit,
+    restockingFeeCents,
+  });
+
   // No money, no completion: until a payment is recorded the order can
   // only be parked as a draft (quotes and exchanges are exempt — quotes
   // hold no money by design, exchanges may be covered by the original
@@ -637,8 +716,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   // ---------------------------------------------------------------- lines
 
-  function addProduct(row: SearchRow, fromId: string) {
-    const auto = defaultSourceFor(fulfillment, ctx);
+  /** Remember what the search saw at that source so the row can warn about shortfalls. */
+  function noteAvail(row: SearchRow, fromId: string) {
     setAvail((prev) => ({
       ...prev,
       [`${fromId}:${row.variantId}`]: {
@@ -647,32 +726,38 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         taxRateBps: row.taxRateBps ?? null,
       },
     }));
-    setLines((prev) => [
-      ...prev,
-      // Adding the same product again always makes a NEW line — a second
-      // unit often sells at a different price.
-      {
-        key: nextKey(),
-        variantId: row.variantId,
-        description: [row.productName, row.variantName].filter(Boolean).join(' — '),
-        sku: row.sku,
-        size: row.size,
-        categoryPath: row.categoryPath ?? null,
-        quantity: 1,
-        unitPriceCents: row.priceCents,
-        lineDiscountCents: 0,
-        lineType: 'stock',
-        fulfillmentMethod: '',
-        sourceLocationId: fromId,
-        // A "From" the salesperson picked in the dialog is their choice;
-        // the rules only move lines they have not touched.
-        sourceTouched: fromId !== auto,
-        deliveryDate: '',
-        addons: { ...NO_ADDONS },
-        atpDate: row.atpDate,
-        taxRateBps: row.taxRateBps ?? null,
-      },
-    ]);
+  }
+
+  function lineFromRow(row: SearchRow, fromId: string): Line {
+    const auto = defaultSourceFor(fulfillment, ctx);
+    return {
+      key: nextKey(),
+      variantId: row.variantId,
+      description: [row.productName, row.variantName].filter(Boolean).join(' — '),
+      sku: row.sku,
+      size: row.size,
+      categoryPath: row.categoryPath ?? null,
+      quantity: 1,
+      unitPriceCents: row.priceCents,
+      lineDiscountCents: 0,
+      lineType: 'stock',
+      fulfillmentMethod: '',
+      sourceLocationId: fromId,
+      // A "From" the salesperson picked in the dialog is their choice;
+      // the rules only move lines they have not touched.
+      sourceTouched: fromId !== auto,
+      deliveryDate: '',
+      addons: { ...NO_ADDONS },
+      atpDate: row.atpDate,
+      taxRateBps: row.taxRateBps ?? null,
+    };
+  }
+
+  function addProduct(row: SearchRow, fromId: string) {
+    noteAvail(row, fromId);
+    // Adding the same product again always makes a NEW line — a second
+    // unit often sells at a different price.
+    setLines((prev) => [...prev, lineFromRow(row, fromId)]);
     setShowProductSearch(false);
     toast.success(
       `${row.productName}${row.size ? `, ${row.size}` : ''} added · from ${nameOf(fromId)}`,
@@ -702,6 +787,57 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         l.key === key ? { ...l, addons: { ...l.addons, [which]: !l.addons[which] } } : l,
       ),
     );
+  }
+
+  /**
+   * Even exchange: the returned items come back onto the ticket like for
+   * like — same quantity, at the price the customer paid.
+   */
+  async function sameItems() {
+    if (!exchangeOriginal || pickedReturns.length === 0) return;
+    const withVariant = pickedReturns.filter((p) => p.line.variantId);
+    if (withVariant.length === 0) {
+      toast.error(
+        'The returned items are not catalog products — add the replacement with Add product.',
+      );
+      return;
+    }
+    const from = defaultSourceFor(fulfillment, ctx);
+    try {
+      const params = new URLSearchParams({
+        variantIds: [...new Set(withVariant.map((p) => p.line.variantId!))].join(','),
+        locationId: from,
+        limit: '100',
+      });
+      const rows = await api<SearchRow[]>(`/v1/pos/product-search?${params.toString()}`);
+      const missing: string[] = [];
+      const added: Line[] = [];
+      for (const p of withVariant) {
+        const row = rows.find((r) => r.variantId === p.line.variantId);
+        if (!row) {
+          missing.push(p.line.description);
+          continue;
+        }
+        noteAvail(row, from);
+        added.push({
+          ...lineFromRow(row, from),
+          quantity: p.quantity,
+          unitPriceCents: p.line.unitPriceCents,
+        });
+      }
+      if (added.length > 0) setLines((prev) => [...prev, ...added]);
+      if (missing.length > 0) {
+        toast.error(
+          `Not in the catalog any more: ${missing.join(', ')} — add the replacement with Add product.`,
+        );
+      } else {
+        toast.success(
+          `${added.length} item${added.length === 1 ? '' : 's'} copied to the replacement`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   /** Lines as the API wants them: add-ons become the custom fee lines the invoice prints. */
@@ -899,7 +1035,22 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       return;
     }
     if (lines.length === 0) {
-      setError('Add at least one line.');
+      setError(isExchange ? 'Add at least one replacement item.' : 'Add at least one line.');
+      return;
+    }
+    if (exchangeOriginal && pickedReturns.length === 0) {
+      setError('Pick at least one item to return.');
+      return;
+    }
+    if (
+      exchangeOriginal &&
+      goodsInHand &&
+      collectNow &&
+      settlement.customerOwesCents > 0 &&
+      isCardMethod(payMethod) &&
+      !payCardBrand
+    ) {
+      setError('Pick the card brand (Visa, Mastercard, …) for the balance.');
       return;
     }
     if (mode === 'complete' && zeroBlock) {
@@ -954,6 +1105,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   async function doSubmit(mode: 'complete' | 'draft') {
     if (!customer) throw new Error('Attach a customer first.');
+    if (exchangeOriginal) {
+      await submitExchange();
+      return;
+    }
     const linePayload = expandLines();
     const sources = [
       ...new Set(
@@ -1010,15 +1165,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
 
     const sp = salespeople.filter(Boolean);
-    const createPath = exchangeOriginal
-      ? `/v1/orders/${exchangeOriginal.id}/exchange`
-      : '/v1/orders';
     const order = await api<{
       id: string;
       number: string;
       totalCents: number;
       splitOrders?: { id: string; number: string; requestedDate: string | null }[];
-    }>(createPath, {
+    }>('/v1/orders', {
       method: 'POST',
       body: JSON.stringify({
         locationId,
@@ -1138,6 +1290,157 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
   }
 
+  /**
+   * §10 Enter an Exchange: the replacement order (written against the
+   * original with everything the register captured), the return
+   * authorization, the exchange container, then — goods in hand — receive
+   * the return, settle, and collect the exact balance the server computed.
+   * Steps 1–2 create real documents; a failed later step remembers them so
+   * Write exchange again binds the SAME documents instead of duplicating.
+   */
+  async function submitExchange() {
+    if (!exchangeOriginal || !customer) return;
+    const sp = salespeople.filter(Boolean);
+    let saleOrderId = createdLegs.saleOrderId;
+    let returnId = createdLegs.returnId;
+    try {
+      if (!saleOrderId) {
+        const order = await api<{ id: string }>(`/v1/orders/${exchangeOriginal.id}/exchange`, {
+          method: 'POST',
+          body: JSON.stringify({
+            locationId,
+            fulfillmentType: fulfillment,
+            requestedDate: requestedDate || null,
+            deliveryInstructions: deliveryInstructions || null,
+            notes: notes || null,
+            address: shipDiffers
+              ? {
+                  line1: ship.line1 || null,
+                  line2: ship.line2 || null,
+                  city: ship.city || null,
+                  region: ship.region || null,
+                  postalCode: ship.postalCode || null,
+                  phone: ship.phone || null,
+                }
+              : addressFromCustomer(customer),
+            salespersonMembershipId: sp[0] || undefined,
+            secondSalespersonMembershipId: sp[1] || undefined,
+            splitBps: sp.length === 2 ? 5000 : undefined,
+            lines: expandLines(),
+            orderDiscountCents: parseDollars(orderDiscount) || undefined,
+            installFeeCents: parseDollars(installFee) || undefined,
+            deliveryFeeCents: parseDollars(deliveryFee) || undefined,
+            confirm: true,
+          }),
+        });
+        saleOrderId = order.id;
+        setCreatedLegs((prev) => ({ ...prev, saleOrderId }));
+      }
+      if (!returnId) {
+        // store_credit: the exchange settlement diverts the money anyway,
+        // this skips the cash-refund cap on partially-paid originals, and
+        // if the exchange is later split the fallback is credit — never
+        // cash out the door.
+        await api(`/v1/orders/${exchangeOriginal.id}/return`, {
+          method: 'POST',
+          body: JSON.stringify({
+            fulfillment: 'pickup',
+            refundMethod: 'store_credit',
+            ...(returnReason.trim() ? { reason: returnReason.trim() } : {}),
+            lines: pickedReturns.map((p) => ({ lineId: p.line.id, quantity: p.quantity })),
+          }),
+        });
+        const returns = await api<{ data: { id: string }[] }>(
+          `/v1/order-returns?orderId=${exchangeOriginal.id}&status=authorized`,
+        );
+        if (!returns.data[0]) throw new Error('Return authorization not found');
+        returnId = returns.data[0].id;
+        setCreatedLegs((prev) => ({ ...prev, returnId }));
+      }
+      const exchange = await api<{ id: string; status: string }>('/v1/exchanges', {
+        method: 'POST',
+        body: JSON.stringify({
+          saleOrderId,
+          returnId,
+          evenExchange,
+          fulfillment: goodsInHand ? 'drop_off' : 'pickup',
+          refundTender,
+          ...(returnSalespersonId ? { returnSalespersonMembershipId: returnSalespersonId } : {}),
+          ...(feeOverride.trim() !== '' ? { restockingFeeCents } : {}),
+        }),
+      });
+      // Goods in hand → settle now. A held (E1) exchange settles after
+      // approval instead, and a receive or payment hiccup must not strand
+      // the cashier — the exchange exists; its page has the buttons.
+      if (goodsInHand && exchange.status !== 'on_hold') {
+        try {
+          await api(`/v1/order-returns/${returnId}/receive`, {
+            method: 'POST',
+            body: JSON.stringify({ locationId: returnToId || locationId }),
+          });
+          if (collectNow) {
+            const settled = await api<{ settlement: { saleBalanceDueCents: number } }>(
+              `/v1/exchanges/${exchange.id}`,
+            );
+            const due = settled.settlement.saleBalanceDueCents;
+            if (due > 0) {
+              await api(`/v1/orders/${saleOrderId}/payments`, {
+                method: 'POST',
+                body: JSON.stringify({
+                  method: payMethod,
+                  amountCents: due,
+                  kind: 'balance',
+                  processorRef: payRef || undefined,
+                  cardBrand: isCardMethod(payMethod) ? payCardBrand || undefined : undefined,
+                  financingMonths:
+                    isFinancingMethod(payMethod) && payMonths ? Number(payMonths) : undefined,
+                }),
+              });
+            }
+          }
+        } catch {
+          // Settle (and collect) from the exchange page once whatever blocked it clears.
+        }
+      }
+      // Same hand-over rules as a sale: take-with lines go out now, a
+      // delivery date books the truck for the replacement.
+      if (
+        lines.some(
+          (l) => effectiveFulfillment(l, fulfillment) === 'take_with' && l.lineType !== 'custom',
+        )
+      ) {
+        await api(`/v1/orders/${saleOrderId}/complete`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        }).catch(() => undefined);
+      }
+      if (
+        fulfillment === 'delivery' &&
+        requestedDate &&
+        lines.some(
+          (l) =>
+            l.lineType !== 'custom' &&
+            !['take_with', 'pickup'].includes(effectiveFulfillment(l, fulfillment)),
+        )
+      ) {
+        await api(`/v1/orders/${saleOrderId}/deliveries`, {
+          method: 'POST',
+          body: JSON.stringify({ scheduledDate: requestedDate, confirmOverCapacity: true }),
+        }).catch(() =>
+          toast.error('Could not book the delivery — schedule it from the order page.'),
+        );
+      }
+      router.push(`/exchanges/${exchange.id}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        saleOrderId || returnId
+          ? `${msg} — the replacement order and return are saved; fix the issue and press Write exchange again to bind them (no duplicates will be created).`
+          : msg,
+      );
+    }
+  }
+
   async function cancelDraft(id: string) {
     await api(`/v1/orders/${id}/cancel`, {
       method: 'POST',
@@ -1210,7 +1513,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       if (e.key === 'F2' && !locked) {
         e.preventDefault();
         setShowProductSearch(true);
-      } else if (e.key === 'F8' && !locked) {
+      } else if (e.key === 'F8' && !locked && !isExchange) {
         e.preventDefault();
         setPaying(true);
         payAmountInput.current?.focus();
@@ -1255,8 +1558,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             : '';
   const payDisabled = zeroBlock || lines.length === 0 || totals.balanceCents === 0;
   const payAmountCents = payAmount.trim() ? parseDollars(payAmount) : 0;
-  const dueLabel =
-    totals.balanceCents === 0 && lines.length > 0
+  const dueLabel = isExchange
+    ? settlement.creditBackCents > 0
+      ? 'Credit back to customer (est.)'
+      : 'Customer owes (est.)'
+    : totals.balanceCents === 0 && lines.length > 0
       ? 'Paid in full'
       : totals.paidCents > 0
         ? 'Balance due'
@@ -1267,39 +1573,132 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       : totals.balanceCents === 0 && lines.length > 0
         ? 'Complete sale'
         : 'Complete with balance';
-  const completeHint = !customer
-    ? 'Add a customer to complete'
-    : lines.length === 0
-      ? ' '
-      : needsMoney
-        ? 'Record a payment to complete — Save draft keeps it without money down'
-        : totals.balanceCents > 0
-          ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
-          : "Reserves stock at each line's source";
+  const completeHint = isExchange
+    ? !exchangeOriginal
+      ? 'Loading the original order…'
+      : pickedReturns.length === 0
+        ? 'Pick what comes back under Return'
+        : lines.length === 0
+          ? 'Add the replacement — Same items copies the return like for like'
+          : goodsInHand
+            ? collectNow
+              ? 'Receives the return, settles the credit, and collects the exact balance'
+              : 'Receives the return and settles the credit — collect from the exchange page'
+            : 'Writes the exchange now; settle when the truck brings the goods back'
+    : !customer
+      ? 'Add a customer to complete'
+      : lines.length === 0
+        ? ' '
+        : needsMoney
+          ? 'Record a payment to complete — Save draft keeps it without money down'
+          : totals.balanceCents > 0
+            ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
+            : "Reserves stock at each line's source";
   const draftNumber = done?.number ?? resumedDraft?.number ?? null;
+
+  /** Brand + last 4 for cards, months for financing, a reference for the rest. */
+  const tenderDetails = (disabled: boolean) => (
+    <>
+      {payMethod === 'card' ? (
+        <div className="reg-pay-grid">
+          <Field label="Card brand">
+            <Select
+              value={payCardBrand}
+              onChange={(e) => setPayCardBrand(e.target.value)}
+              data-testid="pay-card-brand"
+              disabled={disabled}
+            >
+              <option value="">Pick brand…</option>
+              {CARD_BRANDS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Card last 4">
+            <Input
+              value={payRef}
+              onChange={(e) => setPayRef(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              inputMode="numeric"
+              placeholder="4412"
+              className="input-mono"
+              data-testid="pay-ref"
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+      ) : isFinancingMethod(payMethod) ? (
+        <div className="reg-pay-grid">
+          <Field label="Months financed">
+            <Select
+              value={payMonths}
+              onChange={(e) => setPayMonths(e.target.value)}
+              data-testid="pay-months"
+              disabled={disabled}
+            >
+              <option value="">Pick term…</option>
+              {FINANCING_TERM_MONTHS.map((m) => (
+                <option key={m} value={m}>
+                  {m} months
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Reference (optional)">
+            <Input
+              value={payRef}
+              onChange={(e) => setPayRef(e.target.value)}
+              className="input-mono"
+              data-testid="pay-ref"
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+      ) : payMethod !== 'cash' ? (
+        <Field label="Reference (optional)">
+          <Input
+            value={payRef}
+            onChange={(e) => setPayRef(e.target.value)}
+            className="input-mono"
+            data-testid="pay-ref"
+            disabled={disabled}
+          />
+        </Field>
+      ) : null}
+    </>
+  );
 
   return (
     <div className="register" data-density="register" data-testid="new-sale">
       <header className="reg-head">
         <div>
-          <div className="t-label">Sell · {store?.name ?? '…'}</div>
+          <div className="t-label">
+            {isExchange ? 'Exchange' : 'Sell'} · {store?.name ?? '…'}
+          </div>
           <div className="reg-title-row">
-            <h1 className="reg-title">{locked ? 'Sale' : 'New sale'}</h1>
+            <h1 className="reg-title">
+              {isExchange ? 'New exchange' : locked ? 'Sale' : 'New sale'}
+            </h1>
             {draftNumber && <span className="reg-number">{draftNumber}</span>}
             <StatusChip status={status} data-testid="register-status" />
           </div>
         </div>
         <div className="reg-head-end">
           <span className="reg-save-note">
-            {locked
-              ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-              : resumedDraft
-                ? 'Draft resumed · completing it replaces the draft'
-                : lines.length > 0
-                  ? 'Save draft keeps this for the store'
-                  : ' '}
+            {isExchange
+              ? exchangeOriginal
+                ? `Against original invoice ${exchangeOriginal.number}`
+                : ' '
+              : locked
+                ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                : resumedDraft
+                  ? 'Draft resumed · completing it replaces the draft'
+                  : lines.length > 0
+                    ? 'Save draft keeps this for the store'
+                    : ' '}
           </span>
-          {!locked && drafts.length > 0 && (
+          {!locked && !isExchange && drafts.length > 0 && (
             <Button size="sm" onClick={() => setDraftsOpen((v) => !v)} aria-expanded={draftsOpen}>
               Resume a draft <span className="mono">{drafts.length}</span>
             </Button>
@@ -1307,7 +1706,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         </div>
       </header>
 
-      {draftsOpen && drafts.length > 0 && (
+      {draftsOpen && !isExchange && drafts.length > 0 && (
         <div className="reg-drafts" data-testid="draft-chips">
           {drafts.map((d) => (
             <div key={d.id} className="reg-draft-row">
@@ -1347,9 +1746,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
       {exchangeOriginal && (
         <Alert tone="warning" data-testid="exchange-banner">
-          Writing an <strong>Exchange Order</strong> against original invoice{' '}
-          <strong>{exchangeOriginal.number}</strong> — the document prints with the original number,
-          and the customer is fixed to the original order&apos;s.
+          <strong>Exchange Order</strong> against original invoice{' '}
+          <strong>{exchangeOriginal.number}</strong> — pick what comes back under Return, add the
+          replacement below; the return credit nets against the replacement when you write the
+          exchange. The document prints with the original number and the customer is fixed to the
+          original order&apos;s.
         </Alert>
       )}
       {!exchangeOriginal && openOrders.length > 0 && (
@@ -1379,94 +1780,228 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       )}
 
       <div className="reg-grid">
-        {/* ---------------------------------------------------------- items */}
-        <section className="reg-items" aria-labelledby="reg-items-title">
-          <div className="reg-section-head">
-            <h2 id="reg-items-title" className="t-title">
-              Items
-            </h2>
-            <span className="reg-count mono">
-              {lines.length} line{lines.length === 1 ? '' : 's'}
-            </span>
-            <span className="reg-section-note">Stock is reserved when the sale completes</span>
-            <Button
-              variant="primary"
-              kbd="F2"
-              onClick={() => setShowProductSearch(true)}
-              disabled={locked || !locationId}
-              data-testid="add-product"
+        <div className="reg-main">
+          {/* --------------------------------------------------------- return */}
+          {isExchange && (
+            <section
+              className="reg-items"
+              aria-labelledby="reg-return-title"
+              data-testid="exchange-return"
             >
-              Add product
-            </Button>
-          </div>
-          {locations == null ? (
-            <LoadingRows rows={4} height={44} what="The register" />
-          ) : lines.length === 0 ? (
-            <EmptyState
-              title="No items yet"
-              action={
-                <>
-                  <Button
-                    variant="primary"
-                    onClick={() => setShowProductSearch(true)}
-                    disabled={locked}
-                  >
-                    Add product
-                  </Button>
-                  {drafts.length > 0 && (
-                    <Button onClick={() => setDraftsOpen(true)}>Resume a draft</Button>
-                  )}
-                </>
-              }
-            >
-              Press <Kbd keys="F2" /> or Add product. Lines source from the{' '}
-              {nameOf(defaultSourceFor('delivery', ctx))} unless the customer is taking them today.
-            </EmptyState>
-          ) : (
-            <div className="reg-table-wrap">
-              <table className="table reg-table">
-                <colgroup>
-                  <col />
-                  <col style={{ width: 62 }} />
-                  <col style={{ width: 100 }} />
-                  <col style={{ width: 80 }} />
-                  <col style={{ width: 148 }} />
-                  <col style={{ width: 172 }} />
-                  <col style={{ width: 104 }} />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Price</th>
-                    <th className="num">Disc</th>
-                    <th>Fulfillment</th>
-                    <th>Inventory from</th>
-                    <th className="num">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l) => (
-                    <LineRow
-                      key={l.key}
-                      line={l}
-                      locked={locked}
-                      ctx={ctx}
-                      storeName={store?.name ?? 'the store'}
-                      avail={availFor(l)}
-                      recyclingFeeCents={recyclingFeeCents}
-                      onPatch={patchLine}
-                      onFulfillment={setLineFulfillment}
-                      onSource={setLineSource}
-                      onAddon={toggleAddon}
-                      onRemove={(k) => setLines((p) => p.filter((x) => x.key !== k))}
+              <div className="reg-section-head">
+                <h2 id="reg-return-title" className="t-title">
+                  Return
+                </h2>
+                <span className="reg-count mono">
+                  {pickedReturns.length} of {returnableLines.length} line
+                  {returnableLines.length === 1 ? '' : 's'}
+                </span>
+                <span className="reg-section-note">
+                  {exchangeOriginal
+                    ? `From ${exchangeOriginal.number} — only delivered units can come back`
+                    : 'Loading the original order…'}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => void sameItems()}
+                  disabled={locked || busy || pickedReturns.length === 0}
+                  title="Even exchange: replace like for like at the price paid"
+                  data-testid="exchange-same-items"
+                >
+                  Same items
+                </Button>
+              </div>
+              {!exchangeOriginal ? (
+                <LoadingRows rows={2} height={44} what="The original order" />
+              ) : returnableLines.length === 0 ? (
+                <EmptyState title="Nothing returnable">
+                  Nothing on {exchangeOriginal.number} has been delivered yet — only delivered units
+                  can come back.
+                </EmptyState>
+              ) : (
+                <div className="reg-table-wrap">
+                  <table className="table reg-table">
+                    <colgroup>
+                      <col />
+                      <col style={{ width: 90 }} />
+                      <col style={{ width: 96 }} />
+                      <col style={{ width: 110 }} />
+                      <col style={{ width: 110 }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th className="num">Delivered</th>
+                        <th className="num">Return qty</th>
+                        <th className="num">Unit credit</th>
+                        <th className="num">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {returnableLines.map((l) => {
+                        const q = Math.min(returnQty[l.id] ?? 0, returnableQty(l));
+                        return (
+                          <tr key={l.id}>
+                            <td>{l.description}</td>
+                            <td className="num mono">{returnableQty(l)}</td>
+                            <td className="num">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={returnableQty(l)}
+                                value={q}
+                                onChange={(e) =>
+                                  setReturnQty((prev) => ({
+                                    ...prev,
+                                    [l.id]: Math.max(
+                                      0,
+                                      Math.min(returnableQty(l), Number(e.target.value) || 0),
+                                    ),
+                                  }))
+                                }
+                                disabled={locked}
+                                className="input-num reg-cell-input"
+                                aria-label={`Return quantity for ${l.description}`}
+                                data-testid="return-qty"
+                              />
+                            </td>
+                            <td className="num mono">
+                              <Money cents={perUnitCreditCents(l)} />
+                            </td>
+                            <td className="num mono">
+                              {q > 0 ? <Money cents={perUnitCreditCents(l) * q} /> : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {exchangeOriginal && returnableLines.length > 0 && (
+                <div className="reg-return-fields reg-two">
+                  <Field label="Return reason">
+                    <Input
+                      value={returnReason}
+                      onChange={(e) => setReturnReason(e.target.value)}
+                      placeholder="Why is it coming back?"
+                      disabled={locked}
+                      data-testid="return-reason-text"
                     />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </Field>
+                  <Field label="Return goods to">
+                    <Select
+                      value={returnToId}
+                      onChange={(e) => setReturnToId(e.target.value)}
+                      disabled={locked}
+                      data-testid="return-to-location"
+                    >
+                      <option value="">{store?.name ?? 'This store'} — this store</option>
+                      {locs
+                        .filter((l) => l.id !== locationId)
+                        .map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                            {l.locationType === 'warehouse' ? ' (warehouse)' : ''}
+                          </option>
+                        ))}
+                    </Select>
+                  </Field>
+                </div>
+              )}
+            </section>
           )}
-        </section>
+
+          {/* ---------------------------------------------------------- items */}
+          <section className="reg-items" aria-labelledby="reg-items-title">
+            <div className="reg-section-head">
+              <h2 id="reg-items-title" className="t-title">
+                Items
+              </h2>
+              <span className="reg-count mono">
+                {lines.length} line{lines.length === 1 ? '' : 's'}
+              </span>
+              <span className="reg-section-note">Stock is reserved when the sale completes</span>
+              <Button
+                variant="primary"
+                kbd="F2"
+                onClick={() => setShowProductSearch(true)}
+                disabled={locked || !locationId}
+                data-testid="add-product"
+              >
+                Add product
+              </Button>
+            </div>
+            {locations == null ? (
+              <LoadingRows rows={4} height={44} what="The register" />
+            ) : lines.length === 0 ? (
+              <EmptyState
+                title="No items yet"
+                action={
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={() => setShowProductSearch(true)}
+                      disabled={locked}
+                    >
+                      Add product
+                    </Button>
+                    {drafts.length > 0 && (
+                      <Button onClick={() => setDraftsOpen(true)}>Resume a draft</Button>
+                    )}
+                  </>
+                }
+              >
+                Press <Kbd keys="F2" /> or Add product. Lines source from the{' '}
+                {nameOf(defaultSourceFor('delivery', ctx))} unless the customer is taking them
+                today.
+              </EmptyState>
+            ) : (
+              <div className="reg-table-wrap">
+                <table className="table reg-table">
+                  <colgroup>
+                    <col />
+                    <col style={{ width: 62 }} />
+                    <col style={{ width: 100 }} />
+                    <col style={{ width: 80 }} />
+                    <col style={{ width: 148 }} />
+                    <col style={{ width: 172 }} />
+                    <col style={{ width: 104 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th className="num">Qty</th>
+                      <th className="num">Price</th>
+                      <th className="num">Disc</th>
+                      <th>Fulfillment</th>
+                      <th>Inventory from</th>
+                      <th className="num">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((l) => (
+                      <LineRow
+                        key={l.key}
+                        line={l}
+                        locked={locked}
+                        ctx={ctx}
+                        storeName={store?.name ?? 'the store'}
+                        avail={availFor(l)}
+                        recyclingFeeCents={recyclingFeeCents}
+                        onPatch={patchLine}
+                        onFulfillment={setLineFulfillment}
+                        onSource={setLineSource}
+                        onAddon={toggleAddon}
+                        onRemove={(k) => setLines((p) => p.filter((x) => x.key !== k))}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
 
         {/* ----------------------------------------------------------- rail */}
         <aside className="reg-rail">
@@ -1502,7 +2037,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   size="sm"
                   variant="ghost"
                   onClick={() => setCustomer(null)}
-                  disabled={locked}
+                  disabled={locked || isExchange}
+                  title={
+                    isExchange ? 'An exchange keeps the original invoice’s customer' : undefined
+                  }
                 >
                   Change
                 </Button>
@@ -1797,18 +2335,20 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             </button>
             {moreOpen && (
               <div className="reg-stack">
-                <Field label="Order type">
-                  <Select
-                    value={orderType}
-                    onChange={(e) => setOrderType(e.target.value as typeof orderType)}
-                    disabled={locked}
-                    data-testid="order-type"
-                  >
-                    <option value="sales_order">Sales order</option>
-                    <option value="layaway">Layaway ($100 min deposit)</option>
-                    <option value="quote">Sales quote</option>
-                  </Select>
-                </Field>
+                {!isExchange && (
+                  <Field label="Order type">
+                    <Select
+                      value={orderType}
+                      onChange={(e) => setOrderType(e.target.value as typeof orderType)}
+                      disabled={locked}
+                      data-testid="order-type"
+                    >
+                      <option value="sales_order">Sales order</option>
+                      <option value="layaway">Layaway ($100 min deposit)</option>
+                      <option value="quote">Sales quote</option>
+                    </Select>
+                  </Field>
+                )}
                 <Field label="2nd salesperson (equal split)">
                   <Select
                     value={salespeople[1] ?? ''}
@@ -1833,6 +2373,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       onChange={(e) => setDeliveryFee(e.target.value)}
                       disabled={locked}
                       className="input-num"
+                      data-testid="delivery-fee"
                     />
                   </Field>
                   <Field label="Installation">
@@ -1844,6 +2385,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       onChange={(e) => setInstallFee(e.target.value)}
                       disabled={locked}
                       className="input-num"
+                      data-testid="install-fee"
                     />
                   </Field>
                 </div>
@@ -1907,6 +2449,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 <Money cents={totals.totalCents} />
               </span>
             </div>
+            {isExchange && (
+              <TotalRow
+                label={
+                  restockingFeeCents > 0
+                    ? `Return credit (after ${formatMoney(restockingFeeCents)} fee)`
+                    : 'Return credit'
+                }
+                cents={-settlement.creditAppliedCents}
+              />
+            )}
             {payments.map((p) => (
               <div key={p.key} className="reg-total-row reg-payment">
                 <span>
@@ -1928,11 +2480,24 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               </div>
             ))}
             <div
-              className={`reg-due${totals.balanceCents === 0 && lines.length > 0 ? ' is-paid' : ''}`}
+              className={`reg-due${
+                (isExchange ? settlement.customerOwesCents === 0 : totals.balanceCents === 0) &&
+                lines.length > 0
+                  ? ' is-paid'
+                  : ''
+              }`}
             >
               <span>{dueLabel}</span>
               <span className="mono" data-testid="balance-due">
-                <Money cents={totals.balanceCents} />
+                <Money
+                  cents={
+                    isExchange
+                      ? settlement.creditBackCents > 0
+                        ? settlement.creditBackCents
+                        : settlement.customerOwesCents
+                      : totals.balanceCents
+                  }
+                />
               </span>
             </div>
           </section>
@@ -1954,7 +2519,106 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   </label>
                 </div>
               )}
-              {paying ? (
+              {isExchange ? (
+                <div
+                  className="reg-pay-panel"
+                  role="group"
+                  aria-labelledby="reg-settle-title"
+                  data-testid="exchange-settlement"
+                >
+                  <h2 id="reg-settle-title" className="reg-pay-title">
+                    Settlement
+                  </h2>
+                  <div className="reg-pay-grid">
+                    <Field label="Return salesperson">
+                      <Select
+                        value={returnSalespersonId}
+                        onChange={(e) => setReturnSalespersonId(e.target.value)}
+                        data-testid="exchange-return-salesperson"
+                      >
+                        <option value="">—</option>
+                        {members.map((m) => (
+                          <option key={m.membershipId} value={m.membershipId}>
+                            {m.name?.trim() || m.email}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Restocking fee">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={feeOverride}
+                        onChange={(e) => setFeeOverride(e.target.value)}
+                        placeholder="From settings"
+                        className="input-num reg-cell-input"
+                        data-testid="exchange-fee-override"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Credit left over goes to">
+                    <Select
+                      value={refundTender}
+                      onChange={(e) => setRefundTender(e.target.value as RefundTender)}
+                      data-testid="exchange-refund-tender"
+                    >
+                      {REFUND_TENDERS.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <label className="reg-check">
+                    <input
+                      type="checkbox"
+                      checked={evenExchange}
+                      onChange={(e) => setEvenExchange(e.target.checked)}
+                      data-testid="exchange-even"
+                    />
+                    Even exchange (required when the original was financed)
+                  </label>
+                  <label className="reg-check">
+                    <input
+                      type="checkbox"
+                      checked={goodsInHand}
+                      onChange={(e) => setGoodsInHand(e.target.checked)}
+                      data-testid="exchange-goods-in-hand"
+                    />
+                    Goods are in hand — settle now (uncheck for a truck pickup)
+                  </label>
+                  {goodsInHand && (
+                    <label className="reg-check">
+                      <input
+                        type="checkbox"
+                        checked={collectNow}
+                        onChange={(e) => setCollectNow(e.target.checked)}
+                        data-testid="collect-balance-now"
+                      />
+                      Collect the balance now — the exact amount due after the credit applies
+                    </label>
+                  )}
+                  {goodsInHand && collectNow && (
+                    <>
+                      <Field label="Method">
+                        <Select
+                          value={payMethod}
+                          onChange={(e) => setPayMethod(e.target.value as Tender)}
+                          data-testid="exchange-pay-method"
+                        >
+                          {TENDERS.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      {tenderDetails(false)}
+                    </>
+                  )}
+                </div>
+              ) : paying ? (
                 <div
                   className="reg-pay-panel"
                   role="group"
@@ -1999,73 +2663,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       />
                     </Field>
                   </div>
-                  {payMethod === 'card' ? (
-                    <div className="reg-pay-grid">
-                      <Field label="Card brand">
-                        <Select
-                          value={payCardBrand}
-                          onChange={(e) => setPayCardBrand(e.target.value)}
-                          data-testid="pay-card-brand"
-                          disabled={zeroBlock}
-                        >
-                          <option value="">Pick brand…</option>
-                          {CARD_BRANDS.map((b) => (
-                            <option key={b.value} value={b.value}>
-                              {b.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
-                      <Field label="Card last 4">
-                        <Input
-                          value={payRef}
-                          onChange={(e) => setPayRef(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                          inputMode="numeric"
-                          placeholder="4412"
-                          className="input-mono"
-                          data-testid="pay-ref"
-                          disabled={zeroBlock}
-                        />
-                      </Field>
-                    </div>
-                  ) : isFinancingMethod(payMethod) ? (
-                    <div className="reg-pay-grid">
-                      <Field label="Months financed">
-                        <Select
-                          value={payMonths}
-                          onChange={(e) => setPayMonths(e.target.value)}
-                          data-testid="pay-months"
-                          disabled={zeroBlock}
-                        >
-                          <option value="">Pick term…</option>
-                          {FINANCING_TERM_MONTHS.map((m) => (
-                            <option key={m} value={m}>
-                              {m} months
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
-                      <Field label="Reference (optional)">
-                        <Input
-                          value={payRef}
-                          onChange={(e) => setPayRef(e.target.value)}
-                          className="input-mono"
-                          data-testid="pay-ref"
-                          disabled={zeroBlock}
-                        />
-                      </Field>
-                    </div>
-                  ) : payMethod !== 'cash' ? (
-                    <Field label="Reference (optional)">
-                      <Input
-                        value={payRef}
-                        onChange={(e) => setPayRef(e.target.value)}
-                        className="input-mono"
-                        data-testid="pay-ref"
-                        disabled={zeroBlock}
-                      />
-                    </Field>
-                  ) : null}
+                  {tenderDetails(zeroBlock)}
                   <div className="reg-pay-quick">
                     <Button
                       size="sm"
@@ -2113,23 +2711,41 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   Take payment
                 </Button>
               )}
-              <div className="reg-two">
+              {isExchange ? (
                 <Button
                   className="reg-complete"
-                  disabled={busy || zeroBlock || !customer || lines.length === 0 || needsMoney}
+                  disabled={
+                    busy ||
+                    zeroBlock ||
+                    !customer ||
+                    !exchangeOriginal ||
+                    lines.length === 0 ||
+                    pickedReturns.length === 0
+                  }
                   onClick={() => void submit('complete')}
-                  data-testid="complete-sale"
+                  data-testid="create-exchange"
                 >
-                  {busy ? 'Working…' : completeLabel}
+                  {busy ? 'Writing…' : 'Write exchange'}
                 </Button>
-                <Button
-                  onClick={() => void submit('draft')}
-                  disabled={busy}
-                  data-testid="save-draft"
-                >
-                  Save draft
-                </Button>
-              </div>
+              ) : (
+                <div className="reg-two">
+                  <Button
+                    className="reg-complete"
+                    disabled={busy || zeroBlock || !customer || lines.length === 0 || needsMoney}
+                    onClick={() => void submit('complete')}
+                    data-testid="complete-sale"
+                  >
+                    {busy ? 'Working…' : completeLabel}
+                  </Button>
+                  <Button
+                    onClick={() => void submit('draft')}
+                    disabled={busy}
+                    data-testid="save-draft"
+                  >
+                    Save draft
+                  </Button>
+                </div>
+              )}
               <div className="reg-hint">{completeHint}</div>
             </section>
           ) : (

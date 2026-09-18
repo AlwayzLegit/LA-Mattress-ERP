@@ -292,6 +292,24 @@ test.describe('Day 2 — order writer', () => {
     await expect(page.getByTestId('balance-due')).toContainText('$0.00');
     await page.getByTestId('complete-order').click();
     await expect(page.getByTestId('order-status')).toHaveText(/delivered/i);
+
+    // Enter an Exchange from the delivered order (owner 2026-09-18: the
+    // register in exchange mode): return the unit, take the same item
+    // back at the price paid, add a delivery charge, collect the exact
+    // difference in cash, land on the exchange.
+    const orderId = /\/orders\/([0-9a-f-]{36})/.exec(page.url())![1];
+    await page.goto(`/exchanges/new?originalOrderId=${orderId}`);
+    await expect(page.getByTestId('exchange-banner')).toBeVisible();
+    await expect(page.getByTestId('order-customer')).toContainText('Del Ivery');
+    await page.getByTestId('return-qty').first().fill('1');
+    await page.getByTestId('exchange-same-items').click();
+    await expect(page.getByTestId('balance-due')).toContainText('$0.00');
+    await page.getByRole('button', { name: /More — type/ }).click();
+    await page.getByTestId('delivery-fee').fill('5');
+    await expect(page.getByTestId('balance-due')).toContainText('$5.00');
+    await page.getByTestId('exchange-pay-method').selectOption('cash');
+    await page.getByTestId('create-exchange').click();
+    await page.waitForURL(/\/exchanges\/[0-9a-f-]{36}$/);
   });
 
   test('New Sale saves a confirmed order with deposit', async ({ page }) => {

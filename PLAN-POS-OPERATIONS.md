@@ -313,6 +313,35 @@ is organised around "what happens next":
   issued from returns/refunds.
 - No comfort-exchange policy enforcement in v1.
 
+**Amendment (2026-09-18, owner — Enter an Exchange is the register):** the
+exchange screen (`/exchanges/new`) is the New Sale register in exchange mode, not a
+separate form. Same order details (Store, Fulfillment, Promised date, Salesperson +
+2nd, delivery / pickup instructions, order notes, Delivery charge, Installation,
+Order discount), the same line rows (qty, price, line discount, per-line
+fulfillment, inventory source, Removal / Recycling / Declined-foundation chips) and
+the same customer card (pinned to the original invoice's customer). Added on top:
+
+- **Return** section above Items — the original invoice's delivered lines with
+  Return qty and the per-unit credit (line total after discounts + tax share),
+  Return reason (free text) and Return goods to (defaults to the order's Store).
+  **Same items** copies the picked returns onto the ticket like for like, same
+  quantity, at the price paid (even exchange).
+- **Totals** show the return credit (after any restocking fee) and the estimated
+  net: _Customer owes_ or _Credit back to customer_. The exact figures come from
+  the written documents.
+- **Settlement** block replaces the payments list: return salesperson, restocking
+  fee override, where leftover credit goes (store credit / original tenders / cash
+  / check), even-exchange flag, goods-in-hand (settle now vs. truck pickup), and
+  collect-now with the New Sale tender fields (method, card brand + last 4,
+  financing months, reference). The balance is collected **after** the credit
+  applies, for the server-computed amount — never a typed amount.
+- **Write exchange** writes the replacement order (against the original, with
+  every field above), the return authorization, the exchange container, then —
+  goods in hand — receives the return, settles, and collects. Take-with
+  replacement lines complete on the spot; a delivery date books the truck. A
+  failed later step keeps the documents already written and re-binds them on retry.
+- No draft mode and no order type (layaway / quote) in exchange mode.
+
 ## 11. Printed / PDF Documents
 
 Replicate the two LA Mattress sample invoices. All documents: neutral template +
