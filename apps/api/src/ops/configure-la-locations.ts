@@ -134,7 +134,7 @@ export async function configureLaLocations(options: {
           const next = hasStreet
             ? { ...existing, phone: existing.phone || contact.phone }
             : { ...existing, ...contact };
-          await tx`UPDATE locations SET address_json = ${JSON.stringify(next)}::jsonb
+          await tx`UPDATE locations SET address_json = ${tx.json(next as unknown as postgres.JSONValue)}
             WHERE id = ${location.id} AND business_id = ${business.id}`;
           summary.contacts.push(name);
         }
