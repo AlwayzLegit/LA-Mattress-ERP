@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Printer } from 'lucide-react';
-import { formatMoney } from '@jetnine/shared';
+import { formatMoney, formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { useBusinessName } from '@/lib/business-settings';
 import { Alert, Button, LinkButton, LoadingRows } from '@/components/ui';
@@ -307,7 +307,9 @@ export default function DaySheetPage() {
                           {pickup ? (s.rmaNumber ?? s.orderNumber) : s.orderNumber}
                         </span>
                         <span className="ds-stop-cust">{s.customerName ?? '—'}</span>
-                        {s.addressPhone && <span className="ds-stop-phone">{s.addressPhone}</span>}
+                        {s.addressPhone && (
+                          <span className="ds-stop-phone">{formatPhone(s.addressPhone)}</span>
+                        )}
                         {pickup && <span>PICKUP — bring the goods back</span>}
                       </div>
                       <div className="ds-stop-addr">

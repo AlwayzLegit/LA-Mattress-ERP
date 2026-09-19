@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { formatPhone } from '@jetnine/shared';
 import { Alert, LinkButton, Select, rowKeys, Button } from '@/components/ui';
 import { api } from '@/lib/api';
 import {
@@ -805,7 +806,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
                       </Link>
                       {c.phone && (
                         <span className="sub" style={{ marginLeft: 6 }}>
-                          {c.phone}
+                          {formatPhone(c.phone)}
                         </span>
                       )}
                     </td>
@@ -852,7 +853,7 @@ export default function ManagerDashboardView({ userName }: { userName: string })
 }
 
 function customerLine(r: { customerName: string | null; customerPhone: string | null }): string {
-  return [r.customerName ?? '—', r.customerPhone].filter(Boolean).join(' · ');
+  return [r.customerName ?? '—', formatPhone(r.customerPhone)].filter(Boolean).join(' · ');
 }
 
 function incomingTone(status: string): Tone {
@@ -1157,7 +1158,7 @@ function QueueTable({
                       (r.customerName ?? '—')
                     )}
                   </div>
-                  {r.customerPhone && <div className="sub">{r.customerPhone}</div>}
+                  {r.customerPhone && <div className="sub">{formatPhone(r.customerPhone)}</div>}
                 </td>
                 <td>
                   <StatusPill tone={meta.tone}>{meta.label}</StatusPill>

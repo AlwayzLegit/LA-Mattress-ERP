@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -128,7 +129,12 @@ function confirmColumns(setContact: (row: Row, contactStatus: string) => void): 
       sortValue: (r) => r.customerName,
       render: (r) => r.customerName ?? '—',
     },
-    { id: 'phone', label: 'Phone', sortValue: (r) => r.phone, render: (r) => r.phone ?? '—' },
+    {
+      id: 'phone',
+      label: 'Phone',
+      sortValue: (r) => r.phone,
+      render: (r) => (r.phone ? formatPhone(r.phone) : '—'),
+    },
     { id: 'city', label: 'City', sortValue: (r) => r.city, render: (r) => r.city ?? '—' },
     {
       id: 'zip',

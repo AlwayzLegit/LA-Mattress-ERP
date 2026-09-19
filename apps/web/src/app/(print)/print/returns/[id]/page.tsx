@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { PrintToolbar } from '../../print-toolbar';
 
 /**
@@ -147,7 +148,7 @@ export default function ReturnTicketPrintPage() {
                       .join(', ')}
                   </div>
                 )}
-                {r.customerPhone && <div>Ph. {r.customerPhone}</div>}
+                {r.customerPhone && <div>Ph. {formatPhone(r.customerPhone)}</div>}
                 {r.customerEmail && <div>{r.customerEmail}</div>}
               </div>
             </div>

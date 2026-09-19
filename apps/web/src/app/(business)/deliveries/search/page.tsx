@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -139,7 +140,12 @@ function searchColumns(kind: Result['kind']): ColumnDef<Row>[] {
       sortValue: (r) => r.postalCode,
       render: (r) => r.postalCode ?? '—',
     },
-    { id: 'phone', label: 'Phone', sortValue: (r) => r.phone, render: (r) => r.phone ?? '—' },
+    {
+      id: 'phone',
+      label: 'Phone',
+      sortValue: (r) => r.phone,
+      render: (r) => (r.phone ? formatPhone(r.phone) : '—'),
+    },
     { id: 'units', label: 'Units', num: true, sortValue: (r) => r.units, render: (r) => r.units },
     {
       id: 'dollars',

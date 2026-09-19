@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { formatPhone } from '@jetnine/shared';
 import { Button, Dialog, Field, Input, StatusChip } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { ShimmerRows } from '@/app/(business)/dashboard/owner/owner-kit';
@@ -111,7 +112,7 @@ export function LeadsPanel({
                 >
                   <td className="first">
                     <span style={{ fontWeight: 500 }}>{l.name}</span>
-                    <div className="sub mono">{l.phone}</div>
+                    <div className="sub mono">{formatPhone(l.phone)}</div>
                   </td>
                   <td>{l.wanted}</td>
                   <td>

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatMoney } from '@jetnine/shared';
+import { formatMoney, formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Kbd, useFocusTrap } from '@/components/ui';
 import { GO_KEYS, HOME, MORE_PAGES, NAV } from './nav';
@@ -105,7 +105,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         out.push({
           key: `c-${c.id}`,
           group: 'Customers',
-          id: c.phone ?? '—',
+          id: c.phone ? formatPhone(c.phone) : '—',
           title: c.name || c.email || 'customer',
           sub: c.email ?? '',
           meta: 'open',

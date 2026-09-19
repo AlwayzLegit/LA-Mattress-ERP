@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, useRef } from 'react';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   Button,
@@ -10,6 +11,7 @@ import {
   FormActions,
   FormGrid,
   Input,
+  PhoneInput,
   TableEmpty,
   TableWrap,
   Toolbar,
@@ -130,7 +132,7 @@ export function CustomerPicker({
                   <Input name="email" type="email" />
                 </Field>
                 <Field label="Phone">
-                  <Input name="phone" type="tel" />
+                  <PhoneInput name="phone" />
                 </Field>
               </FormGrid>
               {error && <Alert tone="error">{error}</Alert>}
@@ -186,7 +188,9 @@ export function CustomerPicker({
                         <td>
                           <strong>{customerDisplayName(c)}</strong>
                         </td>
-                        <td className="muted">{c.email ?? c.phone ?? '—'}</td>
+                        <td className="muted">
+                          {c.email ?? (c.phone ? formatPhone(c.phone) : '—')}
+                        </td>
                         <td className="actions">
                           <Button size="sm" variant="secondary" onClick={() => onPick(c)}>
                             Attach

@@ -213,6 +213,36 @@ describe('Epic 1.9 — Customer records', () => {
     expect(names).toContain('Charlie');
   });
 
+  it('Phone search matches digits to digits however either side was typed', async () => {
+    const made = await request(app.getHttpServer())
+      .post('/v1/customers')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ firstName: 'Dash', lastName: 'Dialer', phone: '818-800-5678' });
+    expect(made.status).toBe(201);
+    expect(made.body.phone).toBe('818-800-5678');
+    for (const typed of [
+      '8188005678',
+      '818-800-5678',
+      '(818) 800-5678',
+      '800-5678',
+      '+1 818 800 5678',
+    ]) {
+      const res = await request(app.getHttpServer())
+        .get(`/v1/customers?q=${encodeURIComponent(typed)}`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId);
+      expect(res.status).toBe(200);
+      const ids = (res.body.data as { id: string }[]).map((c) => c.id);
+      expect(ids, typed).toContain(made.body.id);
+    }
+    const miss = await request(app.getHttpServer())
+      .get('/v1/customers?q=818-800-9999')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect((miss.body.data as { id: string }[]).map((c) => c.id)).not.toContain(made.body.id);
+  });
+
   it('Customer detail includes empty recentSales (Epic 1.10 will fill it)', async () => {
     const res = await request(app.getHttpServer())
       .get(`/v1/customers/${aliceId}`)

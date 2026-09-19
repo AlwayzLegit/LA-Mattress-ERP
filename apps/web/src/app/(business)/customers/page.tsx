@@ -2,6 +2,7 @@
 
 import { Search, UserPlus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   Button,
@@ -41,7 +42,12 @@ const CUSTOMER_COLUMNS: ColumnDef<CustomerRow>[] = [
     render: (c) => <strong>{displayName(c) || <span className="muted">—</span>}</strong>,
   },
   { id: 'email', label: 'Email', sortValue: (c) => c.email, render: (c) => c.email ?? '—' },
-  { id: 'phone', label: 'Phone', sortValue: (c) => c.phone, render: (c) => c.phone ?? '—' },
+  {
+    id: 'phone',
+    label: 'Phone',
+    sortValue: (c) => c.phone,
+    render: (c) => (c.phone ? formatPhone(c.phone) : '—'),
+  },
   {
     id: 'actions',
     label: '',

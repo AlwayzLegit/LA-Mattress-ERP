@@ -8,6 +8,7 @@
  * into paper.
  */
 
+import { formatPhone } from '@jetnine/shared';
 import { TableWrap } from './ui';
 
 export interface OrderDocumentPayload {
@@ -65,6 +66,8 @@ export interface OrderDocumentPayload {
     addressPostalCode: string | null;
     addressPhone: string | null;
     deliveryInstructions: string | null;
+    /** The promised date when nothing is scheduled yet (the delivery card falls back to it). */
+    requestedDate?: string | null;
     notes: string | null;
     lockedAt: string | null;
     createdAt: string;
@@ -76,6 +79,9 @@ export interface OrderDocumentPayload {
       createdAt: string;
       /** The register's "Reference / last 4 / approval #" entry (owner 2026-09-11: prints). */
       processorRef?: string | null;
+      /** Card brand picked at the register (owner 2026-09-19: prints — "Visa •••• 8212"). */
+      cardBrand?: string | null;
+      financingMonths?: number | null;
     }[];
   };
   lines: {
@@ -134,6 +140,7 @@ export function usd(cents: number): string {
 const FULFILLMENT_CODES: Record<string, string> = {
   delivery: 'D',
   pickup: 'P',
+  will_call: 'W',
   take_with: 'T',
   direct_ship: 'S',
 };
@@ -151,11 +158,87 @@ const TENDER_LABELS: Record<string, string> = {
   zelle: 'Zelle',
   synchrony: 'Synchrony',
   acima: 'Acima',
+  financing: 'Financing',
   store_credit: 'Store credit',
 };
 
 export function tenderLabel(method: string): string {
   return TENDER_LABELS[method] ?? method.replace(/_/g, ' ');
+}
+
+/** Owner 2026-09-19: the delivery block must be easy to see — its own tinted card. */
+function deliveryHeading(fulfillmentType: string): string {
+  switch (fulfillmentType) {
+    case 'pickup':
+      return 'Customer pickup';
+    case 'will_call':
+      return 'Customer will call';
+    case 'take_with':
+      return 'Taken with';
+    case 'direct_ship':
+      return 'Direct ship';
+    default:
+      return 'Delivery';
+  }
+}
+
+function deliveryDateLine(fulfillmentType: string, date: string | null | undefined): string {
+  const pretty = date ? formatDocDate(date) : null;
+  switch (fulfillmentType) {
+    case 'pickup':
+      return pretty ? `Pickup ${pretty}` : 'Pickup date to be arranged';
+    case 'will_call':
+      return 'Held for the customer — call when ready';
+    case 'take_with':
+      return pretty ? `Taken ${pretty}` : 'Taken with the customer';
+    case 'direct_ship':
+      return pretty ? `Ships ${pretty}` : 'Ships from the vendor';
+    default:
+      return pretty ? `Delivering ${pretty}` : 'Delivery date to be scheduled';
+  }
+}
+
+/** "2026-09-22" → "Tue, Sep 22, 2026" (a date-only string, never shifted by timezone). */
+function formatDocDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+const CARD_BRANDS: Record<string, string> = {
+  visa: 'Visa',
+  mastercard: 'Mastercard',
+  amex: 'American Express',
+  discover: 'Discover',
+  jcb: 'JCB',
+  diners: 'Diners Club',
+  other: 'Card',
+};
+
+/**
+ * How a payment reads on paper: the card brand chosen at the sale
+ * ("Visa", "Mastercard") in place of the bare "Credit card", financing
+ * with its term ("Financing · 12 mo"), everything else by tender.
+ */
+export function paymentLabel(p: {
+  method: string;
+  cardBrand?: string | null;
+  financingMonths?: number | null;
+}): string {
+  if (p.method === 'card' && p.cardBrand) {
+    const brand = CARD_BRANDS[p.cardBrand] ?? p.cardBrand;
+    return brand === 'Card' ? 'Credit card' : brand;
+  }
+  if (p.method === 'financing' && p.financingMonths) {
+    return `${tenderLabel(p.method)} · ${p.financingMonths} mo`;
+  }
+  return tenderLabel(p.method);
 }
 
 /**
@@ -277,7 +360,7 @@ function StoreAddress({ addressJson }: { addressJson: unknown }) {
       {s('line1') && <div>{s('line1')}</div>}
       {s('line2') && <div>{s('line2')}</div>}
       {cityLine && <div>{cityLine}</div>}
-      {s('phone') && <div>Ph. {s('phone')}</div>}
+      {s('phone') && <div>Ph. {formatPhone(s('phone'))}</div>}
     </>
   );
 }
@@ -334,7 +417,7 @@ function ShipTo({ doc }: { doc: OrderDocumentPayload }) {
         <div style={{ color: '#333' }}>Same as billing</div>
       )}
       {(o.addressPhone ?? doc.customer?.phone) && (
-        <div>Ph. {o.addressPhone ?? doc.customer?.phone}</div>
+        <div>Ph. {formatPhone(o.addressPhone ?? doc.customer?.phone)}</div>
       )}
     </>
   );
@@ -538,8 +621,12 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
               {doc.business.name}
             </div>
           )}
-          {/* Owner 2026-09-11: the selling store's full address, no store name. */}
-          <div style={{ fontSize: 11, color: '#374151' }}>
+          {/* Owner 2026-09-19: the selling store — name, address and phone
+              (supersedes 2026-09-11 "address only"). */}
+          <div style={{ fontSize: 11, color: '#374151' }} data-testid="invoice-store">
+            {doc.location?.name && (
+              <div style={{ fontWeight: 700, color: '#111' }}>{doc.location.name}</div>
+            )}
             <StoreAddress addressJson={doc.location?.addressJson} />
           </div>
         </div>
@@ -630,12 +717,26 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
           <div style={cardLabel}>Sold to</div>
           <div style={{ fontWeight: 700 }}>{doc.customer?.name ?? '—'}</div>
           <BillingAddress doc={doc} />
-          {doc.customer?.phone && <div>Ph. {doc.customer.phone}</div>}
+          {doc.customer?.phone && <div>Ph. {formatPhone(doc.customer.phone)}</div>}
           {doc.customer?.email && <div style={{ color: '#374151' }}>{doc.customer.email}</div>}
         </div>
-        <div className="inv-card" style={cardStyle}>
-          <div style={cardLabel}>Ship to</div>
-          <ShipTo doc={doc} />
+        <div
+          className="inv-card"
+          style={{ ...cardStyle, borderTop: `3px solid ${accent}`, background: tint(accent, 0.94) }}
+          data-testid="invoice-delivery"
+        >
+          <div style={cardLabel}>{deliveryHeading(o.fulfillmentType)}</div>
+          <div className="inv-num" style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>
+            {deliveryDateLine(o.fulfillmentType, doc.scheduledDate ?? o.requestedDate)}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <ShipTo doc={doc} />
+          </div>
+          {o.deliveryInstructions && (
+            <div style={{ marginTop: 4, fontStyle: 'italic', color: '#374151' }}>
+              {o.deliveryInstructions}
+            </div>
+          )}
         </div>
         <div className="inv-card" style={cardStyle}>
           <div style={cardLabel}>Order details</div>
@@ -759,8 +860,11 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
                 <tbody>
                   {payments.map((p) => (
                     <tr key={p.id}>
-                      <td style={{ padding: '3px 0', fontSize: 11 }}>
-                        {tenderLabel(p.method)}
+                      <td
+                        style={{ padding: '3px 0', fontSize: 11 }}
+                        data-testid="invoice-payment-tender"
+                      >
+                        {paymentLabel(p)}
                         {p.processorRef && (
                           <span
                             style={{ color: MUTED, marginLeft: 6 }}

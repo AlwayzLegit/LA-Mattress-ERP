@@ -385,7 +385,8 @@ export class DeliveriesController {
     // scheduling — booking a delivery on a pickup-typed order is a
     // deliberate change of plan, not a mistake to refuse. An explicit
     // body.lines still schedules exactly what it names.
-    const counterMarked = (m: string | null) => m === 'take_with' || m === 'pickup';
+    const counterMarked = (m: string | null) =>
+      m === 'take_with' || m === 'pickup' || m === 'will_call';
     const truckBound = schedulable.filter((l) => !counterMarked(l.fulfillmentMethod));
     const requests: FulfillmentRequest[] =
       body.lines && body.lines.length > 0
@@ -400,7 +401,7 @@ export class DeliveriesController {
       );
       throw new BadRequestException(
         counterRemaining
-          ? 'Nothing to schedule — the remaining units are marked take-with/pickup. Hand them over from the order page instead.'
+          ? 'Nothing to schedule — the remaining units are marked take-with/pickup/will-call. Hand them over from the order page instead.'
           : 'Nothing left to schedule on this order',
       );
     }

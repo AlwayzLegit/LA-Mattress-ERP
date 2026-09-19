@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PenLine } from 'lucide-react';
-import { formatMoney } from '@jetnine/shared';
+import { formatMoney, formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { useOptionalActingStore } from '@/lib/acting-store';
 import { rangeFor } from '@/lib/date-range';
@@ -392,7 +392,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
       render: (r) => (
         <>
           <span className="ob-customer">{r.customerName}</span>
-          {r.customerPhone && <span className="ob-phone">{r.customerPhone}</span>}
+          {r.customerPhone && <span className="ob-phone">{formatPhone(r.customerPhone)}</span>}
         </>
       ),
     },

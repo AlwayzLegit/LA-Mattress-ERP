@@ -68,6 +68,7 @@ export const STATUS_OPTIONS: { value: string; label: string }[] = [
 export const FULFILLMENT_LABEL: Record<string, string> = {
   delivery: 'Delivery',
   pickup: 'Pickup',
+  will_call: 'Will call',
   take_with: 'Take with',
   direct_ship: 'Direct ship',
 };

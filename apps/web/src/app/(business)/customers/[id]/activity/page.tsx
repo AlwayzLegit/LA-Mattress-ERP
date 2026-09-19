@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -613,8 +614,8 @@ export default function CustomerActivityPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <KeyValue
               rows={[
-                { label: 'Cell phone', value: c.phone ?? '—' },
-                { label: 'Home / other phone', value: c.phone2 ?? '—' },
+                { label: 'Cell phone', value: c.phone ? formatPhone(c.phone) : '—' },
+                { label: 'Home / other phone', value: c.phone2 ? formatPhone(c.phone2) : '—' },
               ]}
             />
             <KeyValue

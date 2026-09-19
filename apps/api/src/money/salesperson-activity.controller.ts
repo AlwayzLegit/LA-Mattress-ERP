@@ -85,12 +85,18 @@ function orderTypeLabel(kind: string, fulfillmentType: string, status: string): 
   if (kind === 'layaway') return 'Layaway';
   if (kind === 'exchange') return 'Exchange';
   if (kind === 'sale') return 'Sale';
-  if (fulfillmentType === 'pickup' || fulfillmentType === 'take_with') return 'Take-With Order';
+  if (
+    fulfillmentType === 'pickup' ||
+    fulfillmentType === 'will_call' ||
+    fulfillmentType === 'take_with'
+  )
+    return 'Take-With Order';
   return 'Sales Order';
 }
 
 function fulfillmentLabel(t: string): string {
   if (t === 'pickup' || t === 'take_with') return 'Take With';
+  if (t === 'will_call') return 'Will Call';
   if (t === 'split') return 'Split Ticket';
   return t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ');
 }

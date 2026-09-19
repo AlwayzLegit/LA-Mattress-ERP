@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PackageCheck } from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -146,7 +147,7 @@ export default function DeliveryDetailPage() {
               rows={[
                 { label: 'Customer', value: <strong>{d.customerName ?? '—'}</strong> },
                 { label: 'Address', value: address },
-                { label: 'Phone', value: d.addressPhone ?? '—' },
+                { label: 'Phone', value: d.addressPhone ? formatPhone(d.addressPhone) : '—' },
               ]}
             />
             {d.balanceDueCents > 0 && (

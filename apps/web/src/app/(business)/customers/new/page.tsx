@@ -13,6 +13,7 @@ import {
   FormGrid,
   Input,
   PageHeader,
+  PhoneInput,
 } from '@/components/ui';
 import { api } from '@/lib/api';
 
@@ -73,7 +74,7 @@ export default function NewCustomerPage() {
               <Input name="email" type="email" autoComplete="off" />
             </Field>
             <Field label="Phone">
-              <Input name="phone" type="tel" autoComplete="off" />
+              <PhoneInput name="phone" autoComplete="off" />
             </Field>
             <Field label="Business name" hint="Trade accounts">
               <Input name="businessName" autoComplete="off" />

@@ -12,6 +12,7 @@ import {
   FormGrid,
   Input,
   LoadingRows,
+  PhoneInput,
   Select,
   TableWrap,
 } from '@/components/ui';
@@ -511,7 +512,7 @@ export function TradeDesignerDialog({
             <Input name="company" defaultValue={td.company ?? ''} />
           </Field>
           <Field label="Phone">
-            <Input name="phone" defaultValue={td.phone ?? ''} />
+            <PhoneInput name="phone" defaultValue={td.phone ?? ''} />
           </Field>
           <Field label="Email">
             <Input name="email" type="email" defaultValue={td.email ?? ''} />

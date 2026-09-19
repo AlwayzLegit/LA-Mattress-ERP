@@ -5,6 +5,7 @@ import { Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   BackLink,
@@ -21,6 +22,7 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  PhoneInput,
   ResetColumns,
   SectionHeading,
   Stack,
@@ -150,6 +152,7 @@ function lineStateLabel(l: HistoryLine): string {
   if (l.qtyReturned > 0) parts.push(`returned ${l.qtyReturned}`);
   if (l.fulfillmentMethod === 'take_with' || l.fulfillmentMethod === 'pickup')
     parts.push('take-with');
+  if (l.fulfillmentMethod === 'will_call') parts.push('will call');
   return parts.join(' · ');
 }
 
@@ -328,7 +331,7 @@ export default function CustomerDetailPage() {
       label: 'Contact',
       sortValue: (d) => [d.phone, d.email].filter(Boolean).join(' · '),
       render: (d) =>
-        [d.phone, d.email].filter(Boolean).join(' · ') || (
+        [formatPhone(d.phone), d.email].filter(Boolean).join(' · ') || (
           <span className="muted">no contact info</span>
         ),
     },
@@ -580,10 +583,10 @@ export default function CustomerDetailPage() {
                 <Input name="email" type="email" defaultValue={c.email ?? ''} />
               </Field>
               <Field label="Phone">
-                <Input name="phone" type="tel" defaultValue={c.phone ?? ''} />
+                <PhoneInput name="phone" defaultValue={c.phone ?? ''} />
               </Field>
               <Field label="2nd phone (optional)">
-                <Input name="phone2" type="tel" defaultValue={c.phone2 ?? ''} />
+                <PhoneInput name="phone2" defaultValue={c.phone2 ?? ''} />
               </Field>
               <Field label="How did they hear about us?">
                 <Input name="referralSource" defaultValue={c.referralSource ?? ''} />

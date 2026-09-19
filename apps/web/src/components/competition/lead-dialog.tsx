@@ -2,8 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { formatPhone, phoneDigits } from '@jetnine/shared';
-import { Button, Dialog, Field, Input } from '@/components/ui';
+import { phoneDigits } from '@jetnine/shared';
+import { Button, Dialog, Field, Input, PhoneInput } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { LEAD_CATEGORIES, LEAD_SIZES, pingCompetition, type LeadRow } from './types';
 
@@ -105,13 +105,11 @@ export function LeadDialog({
           />
         </Field>
         <Field label="Phone" required hint="This is what matches the sale.">
-          <Input
+          <PhoneInput
             className="input-mono"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            onBlur={() => setPhone((p) => (phoneDigits(p).length === 10 ? formatPhone(p) : p))}
-            placeholder="(818) 555-"
-            inputMode="tel"
+            placeholder="818-555-"
             data-testid="lead-phone"
             onKeyDown={(e) => e.key === 'Enter' && void save()}
           />

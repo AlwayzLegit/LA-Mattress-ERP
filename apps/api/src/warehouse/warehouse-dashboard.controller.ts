@@ -523,7 +523,7 @@ export class WarehouseDashboardController {
       .where(
         and(
           eq(schema.orders.businessId, businessId),
-          eq(schema.orders.fulfillmentType, 'pickup'),
+          inArray(schema.orders.fulfillmentType, ['pickup', 'will_call']),
           inArray(schema.orders.status, ['open', 'partially_fulfilled']),
           isNull(schema.orders.importedAt),
           sql`${pickupLoc} IN (${sql.join(

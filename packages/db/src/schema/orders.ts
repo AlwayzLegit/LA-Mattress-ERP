@@ -107,8 +107,8 @@ export const orders = pgTable(
      */
     originalOrderId: uuid('original_order_id'),
     /**
-     * 'delivery' | 'pickup' | 'take_with' | 'direct_ship' — the order
-     * default; STORIS split tickets are per-line overrides on
+     * 'delivery' | 'pickup' | 'will_call' | 'take_with' | 'direct_ship' —
+     * the order default ('will_call': held for the customer, no promised date); STORIS split tickets are per-line overrides on
      * `order_lines.fulfillment_method`.
      */
     fulfillmentType: text('fulfillment_type').notNull().default('delivery'),
@@ -261,7 +261,7 @@ export const orderLines = pgTable(
     serialUnitIds: uuid('serial_unit_ids').array(),
     /**
      * Per-line override of the order's fulfillment method (split ticket):
-     * 'delivery' | 'pickup' | 'take_with' | 'direct_ship'. NULL inherits
+     * 'delivery' | 'pickup' | 'will_call' | 'take_with' | 'direct_ship'. NULL inherits
      * the order default.
      */
     fulfillmentMethod: text('fulfillment_method'),

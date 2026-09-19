@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../print-toolbar';
 
@@ -63,7 +64,7 @@ function AddressBlock({ addressJson }: { addressJson: unknown }) {
     <div style={{ fontSize: 11, color: '#111' }}>
       {s('line1') && <div>{s('line1')}</div>}
       {cityLine && <div>{cityLine}</div>}
-      {s('phone') && <div>Ph. {s('phone')}</div>}
+      {s('phone') && <div>Ph. {formatPhone(s('phone'))}</div>}
     </div>
   );
 }

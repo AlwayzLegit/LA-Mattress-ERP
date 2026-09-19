@@ -158,7 +158,12 @@ function orderTypeLabel(kind: string, fulfillmentType: string): string {
   if (kind === 'layaway') return 'Layaway';
   if (kind === 'exchange') return 'Exchange';
   if (kind === 'sale') return 'Sale';
-  if (fulfillmentType === 'pickup' || fulfillmentType === 'take_with') return 'Take-With Order';
+  if (
+    fulfillmentType === 'pickup' ||
+    fulfillmentType === 'will_call' ||
+    fulfillmentType === 'take_with'
+  )
+    return 'Take-With Order';
   return 'Sales Order';
 }
 
@@ -560,7 +565,9 @@ export class CustomerActivityController {
           poDeliveryDate: isoDate(po?.expectedAt),
           poQuantity: po ? po.ordered + po.received : 0,
           fulfillmentMethod:
-            l.fulfillmentMethod === 'take_with' || l.fulfillmentMethod === 'pickup'
+            l.fulfillmentMethod === 'take_with' ||
+            l.fulfillmentMethod === 'pickup' ||
+            l.fulfillmentMethod === 'will_call'
               ? 'Take-With'
               : 'Delivery',
           fulfillmentStatus,

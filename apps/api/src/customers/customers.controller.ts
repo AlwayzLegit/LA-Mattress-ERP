@@ -128,10 +128,26 @@ export class CustomersController {
       // with `nextCursor: null`. Clients refine with the next query.
       const normalized = q.replace(/[^a-zA-Z0-9]+/g, ' ').trim();
       const tsq = sql`websearch_to_tsquery('simple', ${normalized})`;
+      // A phone typed any way ("8188005678", "818-800-5678", "(818) 800-5678")
+      // matches a phone stored any way: the tsvector splits on dashes, so
+      // compare digits to digits as well (phones are stored as entered —
+      // dashed since 2026-09-19 — and legacy rows are digits-only).
+      const rawDigits = q.replace(/\D/g, '');
+      // Drop a leading US country code so "+1 818…" matches an 818… row.
+      const digits =
+        rawDigits.length === 11 && rawDigits.startsWith('1') ? rawDigits.slice(1) : rawDigits;
+      const phoneLike = /^[\d\s().+-]+$/.test(q.trim()) && digits.length >= 4;
+      const match = phoneLike
+        ? or(
+            sql`${schema.customers.searchTsv} @@ ${tsq}`,
+            sql`regexp_replace(COALESCE(${schema.customers.phone}, ''), '\\D', '', 'g') LIKE ${`%${digits}%`}`,
+            sql`regexp_replace(COALESCE(${schema.customers.phone2}, ''), '\\D', '', 'g') LIKE ${`%${digits}%`}`,
+          )
+        : sql`${schema.customers.searchTsv} @@ ${tsq}`;
       const data = await this.db
         .select(SELECT_COLS)
         .from(schema.customers)
-        .where(sql`${schema.customers.searchTsv} @@ ${tsq}`)
+        .where(match)
         .orderBy(desc(sql`ts_rank(${schema.customers.searchTsv}, ${tsq})`))
         .limit(limit);
       return { data, nextCursor: null };

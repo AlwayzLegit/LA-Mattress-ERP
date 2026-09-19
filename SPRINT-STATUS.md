@@ -6002,3 +6002,27 @@ missing fields." `/exchanges/new` now finds the original invoice and renders
   lifecycle now continues into an exchange (return 1 → Same items → $5 delivery
   charge → cash → lands on the exchange).
 - `/orders/new?exchangeOf=` is the same register, so it gained the return leg too.
+
+### 2026-09-19 — five register asks (owner, same morning)
+
+Merged as one slice (PR pending):
+
+- [x] `so-1234` finds SO-1234 — `GET /v1/orders?number=` lower-cases both sides; int test.
+- [x] Phones as 818-800-5678 everywhere — `formatPhone` → dashes; `formatPhoneAsTyped` + `PhoneInput` (components/ui) format as you type; every render site wrapped, every
+      `type="tel"` input swapped.
+- [x] "Customer will call" fulfillment (`will_call`) — order level and per line; no
+      promised date; counter hand-over; pickup queues include it; int test.
+- [x] Installation never taxed — migration `0108_nontaxable_services` (0% class
+      "Non-taxable services" on the NONINV service products, per tenant, idempotent);
+      verify on Render boot `109/109 applied, head=0108_nontaxable_services`.
+- [x] Per-line **Deliver on** date at New Sale — surfaces the existing split-at-sale
+      (`splitByDeliveryDate`): a line dated differently becomes its own A/B sibling with
+      its own truck.
+- [x] Invoice: card brand on payments ("Visa •••• 8212"), tinted **Delivery** card with a
+      large date + address + instructions, selling store name + address + phone in the
+      header. Locations settings got an inline **Address & phone** editor; the four LA
+      store contacts ride the `Ops — configure LA locations` script (`STORE_CONTACT`).
+- **Ops (owner or me after merge):** run `Ops — configure LA locations` → validate, then
+  commit, to seed the store addresses/phones (idempotent; typed addresses are kept).
+- Doc: `PLAN-POS-OPERATIONS.md` amendment 2026-09-19.
+- **Ops (owner):** still to cut tag `v2026.09.18` (see 2026-09-18 entry).
