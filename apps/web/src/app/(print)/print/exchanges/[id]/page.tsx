@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { PrintToolbar } from '../../print-toolbar';
 
 /**
@@ -165,7 +166,7 @@ export default function ExchangeTicketPrintPage() {
                       .join(', ')}
                   </div>
                 )}
-                {ret?.customerPhone && <div>Ph. {ret.customerPhone}</div>}
+                {ret?.customerPhone && <div>Ph. {formatPhone(ret.customerPhone)}</div>}
               </div>
             </div>
             <div style={{ ...box, flex: 1, minHeight: 70 }}>

@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { forwardRef, useId, type ReactNode } from 'react';
 
+import { formatPhoneAsTyped } from '@jetnine/shared';
+
 import { cx } from './cx';
 
 /**
@@ -18,6 +20,38 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
     return <input {...props} ref={ref} className={cx('input', props.className)} />;
   },
 );
+
+/**
+ * A phone field that formats as you type — "8188005678" becomes
+ * "818-800-5678" (owner 2026-09-19: dashes everywhere a phone is entered
+ * or shown). Works controlled (value/onChange) or uncontrolled
+ * (defaultValue) — the formatted text is what the form submits.
+ */
+export const PhoneInput = forwardRef<
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'defaultValue' | 'value'> & {
+    value?: string;
+    defaultValue?: string | null;
+  }
+>(function PhoneInput({ onChange, defaultValue, value, ...props }, ref) {
+  return (
+    <input
+      {...props}
+      ref={ref}
+      type="tel"
+      inputMode="tel"
+      autoComplete={props.autoComplete ?? 'tel'}
+      value={value === undefined ? undefined : formatPhoneAsTyped(value)}
+      defaultValue={defaultValue == null ? undefined : formatPhoneAsTyped(defaultValue)}
+      onChange={(e) => {
+        const next = formatPhoneAsTyped(e.target.value);
+        if (next !== e.target.value) e.target.value = next;
+        onChange?.(e);
+      }}
+      className={cx('input', props.className)}
+    />
+  );
+});
 
 export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   function Select(props, ref) {

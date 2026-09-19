@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { lookupZip } from '@/lib/zip-lookup';
-import { Alert, Button, Field, FormGrid, Input } from '@/components/ui';
+import { Alert, Button, Field, FormGrid, Input, PhoneInput } from '@/components/ui';
 import { ActionDialog, errorText } from './dialog';
 import type { ActionOrder } from './types';
 
@@ -126,14 +126,14 @@ export function CustomerDialog({
             <Input name="email" type="email" defaultValue={customer.email ?? ''} />
           </Field>
           <Field label="Home phone">
-            <Input name="phone" defaultValue={customer.phone ?? ''} />
+            <PhoneInput name="phone" defaultValue={customer.phone ?? ''} />
           </Field>
           <Field label="Cell phone">
-            <Input name="phone2" defaultValue={customer.phone2 ?? ''} />
+            <PhoneInput name="phone2" defaultValue={customer.phone2 ?? ''} />
           </Field>
           <Field label="Work phone · extension">
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 6 }}>
-              <Input
+              <PhoneInput
                 name="workPhone"
                 defaultValue={customer.workPhone ?? ''}
                 data-testid="cust-work-phone"
@@ -195,7 +195,7 @@ export function CustomerDialog({
                 <Input name="sLine2" defaultValue={order.addressLine2 ?? ''} />
               </Field>
               <Field label="Phone at address">
-                <Input name="sPhone" defaultValue={order.addressPhone ?? ''} />
+                <PhoneInput name="sPhone" defaultValue={order.addressPhone ?? ''} />
               </Field>
               <Field label="City">
                 <Input name="sCity" defaultValue={order.addressCity ?? ''} />

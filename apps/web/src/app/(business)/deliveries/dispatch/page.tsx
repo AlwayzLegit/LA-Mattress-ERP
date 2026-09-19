@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Printer } from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { Money } from '@/components/money';
 import { toast } from 'sonner';
@@ -522,7 +523,7 @@ function DispatchInner() {
       render: (r) => (
         <>
           {[r.addressLine1, r.addressCity, r.addressPostalCode].filter(Boolean).join(', ') || '—'}
-          {r.addressPhone && <div className="muted">{r.addressPhone}</div>}
+          {r.addressPhone && <div className="muted">{formatPhone(r.addressPhone)}</div>}
         </>
       ),
     },

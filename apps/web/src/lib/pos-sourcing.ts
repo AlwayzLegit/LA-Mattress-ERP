@@ -11,7 +11,8 @@
  * A touched line is never moved; it gets an inline note instead.
  */
 
-export type Fulfillment = 'delivery' | 'pickup' | 'take_with' | 'direct_ship';
+/** 'will_call' (owner 2026-09-19): held for the customer, who calls when ready. */
+export type Fulfillment = 'delivery' | 'pickup' | 'will_call' | 'take_with' | 'direct_ship';
 
 export interface SourceLocation {
   id: string;

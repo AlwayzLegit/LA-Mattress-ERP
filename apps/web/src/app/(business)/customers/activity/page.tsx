@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   BackLink,
@@ -53,7 +54,7 @@ const HIT_COLUMNS: ColumnDef<Hit>[] = [
     id: 'phone',
     label: 'Phone',
     sortValue: (h) => h.phone ?? h.phone2,
-    render: (h) => h.phone ?? h.phone2 ?? '—',
+    render: (h) => formatPhone(h.phone ?? h.phone2) || '—',
   },
   {
     id: 'email',

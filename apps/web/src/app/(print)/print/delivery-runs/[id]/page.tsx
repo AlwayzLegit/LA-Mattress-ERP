@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { LoadingRows, TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../print-toolbar';
 
@@ -113,7 +114,7 @@ export default function RunManifestPage() {
                       .filter(Boolean)
                       .join(', ')}
                   </div>
-                  {s.addressPhone && <div>☎ {s.addressPhone}</div>}
+                  {s.addressPhone && <div>☎ {formatPhone(s.addressPhone)}</div>}
                   {s.windowStart && s.windowEnd && (
                     <div>
                       Window {s.windowStart.slice(0, 5)}–{s.windowEnd.slice(0, 5)}

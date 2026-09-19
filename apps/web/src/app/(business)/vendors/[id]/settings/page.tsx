@@ -14,6 +14,7 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  PhoneInput,
   Select,
 } from '@/components/ui';
 
@@ -318,7 +319,14 @@ function GeneralTab({
           </Field>
           {text('contactName', 'Contact name')}
           {text('email', 'Email', 'email')}
-          {text('phone', 'Phone')}
+          <Field label="Phone">
+            <PhoneInput
+              value={form.phone ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value || null }))}
+              style={{ width: '100%' }}
+              data-testid="vendor-phone"
+            />
+          </Field>
           {text('remitTo', 'Remit-to (payments go here)')}
           <Field label="Status">
             <Select

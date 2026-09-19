@@ -23,6 +23,7 @@ export {
 } from './columns';
 export {
   Input,
+  PhoneInput,
   Select,
   Field,
   Card,

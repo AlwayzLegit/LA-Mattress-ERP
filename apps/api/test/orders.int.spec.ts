@@ -362,6 +362,93 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
     expect(confirmed.body.lines[0].qtyReserved).toBe(1);
   });
 
+  it('Order lookup by number ignores case (so-1234 finds SO-1234)', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        customerId,
+        draft: true,
+        lines: [{ variantId: nsVariantId, quantity: 1 }],
+      });
+    expect(created.status).toBe(201);
+    const number: string = created.body.number;
+    expect(number).not.toBe(number.toLowerCase());
+
+    for (const typed of [number.toLowerCase(), number.toUpperCase(), ` ${number} `]) {
+      const found = await request(app.getHttpServer())
+        .get(`/v1/orders?number=${encodeURIComponent(typed)}`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId);
+      expect(found.status).toBe(200);
+      expect(found.body.data.map((o: { id: string }) => o.id)).toEqual([created.body.id]);
+    }
+
+    const miss = await request(app.getHttpServer())
+      .get('/v1/orders?number=SO-NOPE')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId);
+    expect(miss.status).toBe(200);
+    expect(miss.body.data).toEqual([]);
+  });
+
+  it('Customer will call: held for the customer, no truck, hand-over completes it', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'will_call',
+        confirm: true,
+        lines: [{ variantId: nsVariantId, quantity: 1, fulfillmentMethod: 'will_call' }],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.fulfillmentType).toBe('will_call');
+    expect(created.body.lines[0].fulfillmentMethod).toBe('will_call');
+    expect(created.body.requestedDate).toBeNull();
+    expect(created.body.lines[0].qtyReserved).toBe(1);
+
+    // A will-call line is a counter line: the scheduler has nothing to load.
+    const sched = await request(app.getHttpServer())
+      .post(`/v1/orders/${created.body.id}/deliveries`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ scheduledDate: '2030-01-15' });
+    expect(sched.status).toBe(400);
+    expect(sched.body.message).toMatch(/will-call/);
+
+    const pay = await request(app.getHttpServer())
+      .post(`/v1/orders/${created.body.id}/payments`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ method: 'cash', amountCents: created.body.totalCents });
+    expect(pay.status).toBe(201);
+    const ful = await request(app.getHttpServer())
+      .post(`/v1/orders/${created.body.id}/fulfill`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({});
+    expect(ful.status).toBe(201);
+    expect(ful.body.status).toBe('fulfilled');
+    expect(ful.body.lines[0].qtyFulfilled).toBe(1);
+
+    const bad = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'will_cal',
+        lines: [{ variantId: nsVariantId, quantity: 1 }],
+      });
+    expect(bad.status).toBe(400);
+  });
+
   it('Product search: stock filters and ATP date from open POs', async () => {
     const out = await request(app.getHttpServer())
       .get(`/v1/pos/product-search?q=ATP&inStock=0&locationId=${locationId}`)

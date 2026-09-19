@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { formatPhone } from '@jetnine/shared';
 import { localToday, type DateRange } from '@/lib/date-range';
 import { Money } from '@/components/money';
 import {
@@ -585,7 +586,12 @@ const LEAD_COLUMNS: ColumnDef<LeadRow>[] = [
     sortValue: (l) => l.name,
     render: (l) => <Link href={`/customers/${l.customerId}`}>{l.name}</Link>,
   },
-  { id: 'phone', label: 'Phone', sortValue: (l) => l.phone, render: (l) => l.phone ?? '—' },
+  {
+    id: 'phone',
+    label: 'Phone',
+    sortValue: (l) => l.phone,
+    render: (l) => (l.phone ? formatPhone(l.phone) : '—'),
+  },
   { id: 'email', label: 'Email', sortValue: (l) => l.email, render: (l) => l.email ?? '—' },
   { id: 'source', label: 'Source', sortValue: (l) => l.source, render: (l) => l.source },
   {

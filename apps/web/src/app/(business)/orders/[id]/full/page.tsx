@@ -9,6 +9,7 @@ import {
   CARD_BRANDS,
   FINANCING_TERM_MONTHS,
   formatMoney,
+  formatPhone,
   isFinancingMethod,
 } from '@jetnine/shared';
 import { orderNextSteps } from '@/lib/order-next-steps';
@@ -1372,6 +1373,7 @@ export default function OrderDetailPage() {
                               <option value="">Same as order</option>
                               <option value="delivery">Delivery</option>
                               <option value="pickup">Customer pickup</option>
+                              <option value="will_call">Customer will call</option>
                               <option value="take_with">Take-with</option>
                               <option value="direct_ship">Direct ship</option>
                             </Select>
@@ -1664,7 +1666,9 @@ export default function OrderDetailPage() {
               (l) =>
                 l.lineType !== 'custom' &&
                 l.lineType !== 'direct_ship' &&
-                (effective(l) === 'take_with' || effective(l) === 'pickup') &&
+                (effective(l) === 'take_with' ||
+                  effective(l) === 'pickup' ||
+                  effective(l) === 'will_call') &&
                 l.quantity - l.qtyFulfilled > 0,
             );
             const counterUnits = counterLines.reduce(
@@ -1693,7 +1697,9 @@ export default function OrderDetailPage() {
                   <p className="muted">
                     {order.fulfillmentType === 'pickup'
                       ? 'Pickup order — hand over the goods below when the customer arrives.'
-                      : 'Nothing scheduled yet.'}
+                      : order.fulfillmentType === 'will_call'
+                        ? 'Will-call order — goods are held; hand them over below when the customer comes in.'
+                        : 'Nothing scheduled yet.'}
                   </p>
                 ) : (
                   <ul className="grid gap-1">
@@ -1977,7 +1983,10 @@ export default function OrderDetailPage() {
                       </Link>
                     ),
                   },
-                  { label: 'Contact', value: customer.email ?? customer.phone ?? '—' },
+                  {
+                    label: 'Contact',
+                    value: customer.email ?? (customer.phone ? formatPhone(customer.phone) : '—'),
+                  },
                   ...(customer.customerNumber
                     ? [{ label: 'Customer #', value: <code>{customer.customerNumber}</code> }]
                     : []),
@@ -2017,7 +2026,7 @@ export default function OrderDetailPage() {
                               {order.addressPhone ? (
                                 <>
                                   <br />
-                                  {order.addressPhone}
+                                  {formatPhone(order.addressPhone)}
                                 </>
                               ) : null}
                             </>

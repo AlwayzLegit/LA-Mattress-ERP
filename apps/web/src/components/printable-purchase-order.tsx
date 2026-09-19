@@ -1,6 +1,6 @@
 'use client';
 
-import { formatMoney } from '@jetnine/shared';
+import { formatMoney, formatPhone } from '@jetnine/shared';
 import { useBusinessName } from '@/lib/business-settings';
 
 export interface PrintablePoLine {
@@ -90,7 +90,7 @@ export function PrintablePurchaseOrder({ po }: { po: PrintablePo }) {
             {po.vendorPhone && (
               <>
                 <br />
-                {po.vendorPhone}
+                {formatPhone(po.vendorPhone)}
               </>
             )}
           </p>
@@ -119,7 +119,7 @@ export function PrintablePurchaseOrder({ po }: { po: PrintablePo }) {
                     {shipTo.phone && (
                       <>
                         <br />
-                        {shipTo.phone}
+                        {formatPhone(shipTo.phone)}
                       </>
                     )}
                     {shipTo.orderNumber && (

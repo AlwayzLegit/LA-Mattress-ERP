@@ -2,7 +2,8 @@
 
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   Button,
@@ -16,6 +17,7 @@ import {
   Input,
   LoadingRows,
   PageHeader,
+  PhoneInput,
   ResetColumns,
   Select,
   Stack,
@@ -37,6 +39,17 @@ interface Location {
   replenishmentDays: number[] | null;
   isActive: boolean;
   orderPrefix: string | null;
+  /** Street address + phone; prints on every invoice from this store (owner 2026-09-19). */
+  addressJson: StoreContact | null;
+}
+
+interface StoreContact {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  phone?: string;
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -184,6 +197,19 @@ export default function LocationsPage() {
       render: (l) => <OrderPrefix key={`${l.id}:${l.orderPrefix}`} location={l} onSaved={load} />,
     },
     {
+      id: 'contact',
+      label: 'Address & phone',
+      title: 'Prints on every invoice written at this store',
+      sortValue: (l) => l.addressJson?.line1 ?? '',
+      render: (l) => (
+        <StoreContactEditor
+          key={`${l.id}:${JSON.stringify(l.addressJson ?? {})}`}
+          location={l}
+          onSaved={load}
+        />
+      ),
+    },
+    {
       id: 'tax',
       label: 'Tax',
       num: true,
@@ -324,6 +350,119 @@ export default function LocationsPage() {
         )}
       </Stack>
     </div>
+  );
+}
+
+/**
+ * Owner 2026-09-19: the invoice header carries the selling store's
+ * address and phone. Edited inline, saved as locations.address_json in
+ * the same shape the documents read (line1/line2/city/region/postalCode/
+ * phone).
+ */
+function StoreContactEditor({
+  location,
+  onSaved,
+}: {
+  location: Location;
+  onSaved: () => Promise<void>;
+}) {
+  const initial = location.addressJson ?? {};
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<StoreContact>({
+    line1: initial.line1 ?? '',
+    line2: initial.line2 ?? '',
+    city: initial.city ?? '',
+    region: initial.region ?? '',
+    postalCode: initial.postalCode ?? '',
+    phone: initial.phone ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const summary = [initial.line1, initial.city].filter(Boolean).join(', ');
+  const set = (k: keyof StoreContact) => (e: ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  async function save(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const trimmed = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, (v ?? '').trim()]),
+      ) as StoreContact;
+      const hasAny = Object.values(trimmed).some(Boolean);
+      await api(`/v1/business/locations/${location.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ addressJson: hasAny ? { ...initial, ...trimmed } : null }),
+      });
+      await onSaved();
+      setOpen(false);
+      toast.success(`Address and phone saved for ${location.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="link text-left"
+        onClick={() => setOpen(true)}
+        data-testid="location-contact"
+      >
+        {summary ? (
+          <>
+            <div>{summary}</div>
+            {initial.phone && <div className="muted mono">{formatPhone(initial.phone)}</div>}
+          </>
+        ) : (
+          <span className="muted">Add address & phone</span>
+        )}
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={save} className="flex flex-col gap-1" style={{ minWidth: 260 }}>
+      <Input placeholder="Street" value={form.line1} onChange={set('line1')} aria-label="Street" />
+      <Input
+        placeholder="Suite / unit"
+        value={form.line2}
+        onChange={set('line2')}
+        aria-label="Suite"
+      />
+      <div className="flex gap-1">
+        <Input placeholder="City" value={form.city} onChange={set('city')} aria-label="City" />
+        <Input
+          placeholder="ST"
+          value={form.region}
+          onChange={set('region')}
+          aria-label="State"
+          style={{ width: 56 }}
+        />
+        <Input
+          placeholder="ZIP"
+          value={form.postalCode}
+          onChange={set('postalCode')}
+          aria-label="ZIP"
+          style={{ width: 84 }}
+        />
+      </div>
+      <PhoneInput
+        placeholder="Phone"
+        value={form.phone ?? ''}
+        onChange={set('phone')}
+        aria-label="Phone"
+      />
+      <div className="flex gap-1">
+        <Button type="submit" size="sm" variant="primary" disabled={saving}>
+          Save
+        </Button>
+        <Button type="button" size="sm" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

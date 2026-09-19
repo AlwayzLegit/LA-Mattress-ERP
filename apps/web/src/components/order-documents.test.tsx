@@ -4,6 +4,7 @@ import {
   InvoiceDoc,
   invoiceAccent,
   onAccent,
+  paymentLabel,
   paymentRef,
   type OrderDocumentPayload,
 } from './order-documents';
@@ -129,9 +130,9 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toContain('WE CALL 6-8PM NIGHT BEFORE DEL');
     expect(html).toContain('All sales final on clearance items.');
     expect(html).toContain('Ronnie Ortiz');
-    // Owner 2026-09-11: the selling store's address prints, never its name.
+    // Owner 2026-09-19: the selling store prints with its name, address and phone.
     expect(html).toContain('11911 Santa Monica Blvd');
-    expect(html).not.toContain('West LA');
+    expect(html).toContain('West LA');
   });
 
   it('keeps Merchandise goods-only with the recycling fee broken out (BA-0015)', () => {
@@ -143,6 +144,24 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toContain('Credit card');
     // The register's last-4 / reference prints with the tender.
     expect(html).toContain('•••• 4242');
+  });
+
+  it('prints the card brand chosen at the sale and a visible delivery block', () => {
+    const base = payload();
+    const doc: OrderDocumentPayload = {
+      ...base,
+      order: {
+        ...base.order,
+        payments: base.order.payments.map((p) => ({ ...p, cardBrand: 'visa' })),
+      },
+    };
+    const html = render(doc);
+    expect(html).toContain('Visa');
+    expect(html).not.toContain('Credit card');
+    expect(html).toMatch(/invoice-delivery[\s\S]*Delivering/);
+    expect(paymentLabel({ method: 'card', cardBrand: 'mastercard' })).toBe('Mastercard');
+    expect(paymentLabel({ method: 'card', cardBrand: null })).toBe('Credit card');
+    expect(paymentLabel({ method: 'financing', financingMonths: 12 })).toBe('Financing · 12 mo');
   });
 
   it('prints the payment reference as entered unless it is a bare last 4', () => {

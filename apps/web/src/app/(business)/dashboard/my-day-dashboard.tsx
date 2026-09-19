@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatPhone } from '@jetnine/shared';
 import {
   Alert,
   Card,
@@ -175,7 +176,7 @@ function Phone({ phone }: { phone: string | null }) {
   return (
     <div>
       <a href={`tel:${phone}`} className="muted">
-        {phone}
+        {formatPhone(phone)}
       </a>
     </div>
   );
@@ -416,7 +417,7 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
                       <Link href={`/orders/${d.orderId}`}>{d.orderNumber}</Link>
                       <div className="muted">
                         {d.customerName ?? '—'}
-                        {d.phone ? ` · ${d.phone}` : ''}
+                        {d.phone ? ` · ${formatPhone(d.phone)}` : ''}
                       </div>
                     </td>
                     <td className="muted">{d.driverName ?? 'no driver'}</td>
@@ -505,7 +506,7 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
                     </td>
                     <td>
                       {p.customerName ?? '—'}
-                      {p.phone ? <span className="muted"> · {p.phone}</span> : null}
+                      {p.phone ? <span className="muted"> · {formatPhone(p.phone)}</span> : null}
                     </td>
                     <td className="num nowrap">
                       <span style={{ color: p.ready ? 'var(--success)' : 'var(--text-muted)' }}>

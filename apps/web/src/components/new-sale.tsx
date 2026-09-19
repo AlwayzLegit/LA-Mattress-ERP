@@ -9,6 +9,7 @@ import {
   FINANCING_TERM_MONTHS,
   cardBrandLabel,
   formatMoney,
+  formatPhone,
   isCardMethod,
   isFinancingMethod,
 } from '@jetnine/shared';
@@ -42,6 +43,7 @@ import {
   EmptyState,
   Field,
   Input,
+  PhoneInput,
   Kbd,
   LoadingRows,
   Select,
@@ -69,6 +71,7 @@ import {
 const FULFILLMENTS: { value: Fulfillment; label: string }[] = [
   { value: 'delivery', label: 'Delivery' },
   { value: 'pickup', label: 'Customer pickup' },
+  { value: 'will_call', label: 'Customer will call' },
   { value: 'take_with', label: 'Take-with' },
   { value: 'direct_ship', label: 'Direct ship' },
 ];
@@ -1246,7 +1249,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       const truckBound = lines.some(
         (l) =>
           l.lineType !== 'custom' &&
-          !['take_with', 'pickup'].includes(effectiveFulfillment(l, fulfillment)),
+          !['take_with', 'pickup', 'will_call'].includes(effectiveFulfillment(l, fulfillment)),
       );
       const targets = [
         ...(requestedDate && truckBound
@@ -1420,7 +1423,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         lines.some(
           (l) =>
             l.lineType !== 'custom' &&
-            !['take_with', 'pickup'].includes(effectiveFulfillment(l, fulfillment)),
+            !['take_with', 'pickup', 'will_call'].includes(effectiveFulfillment(l, fulfillment)),
         )
       ) {
         await api(`/v1/orders/${saleOrderId}/deliveries`, {
@@ -1965,6 +1968,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     <col style={{ width: 100 }} />
                     <col style={{ width: 80 }} />
                     <col style={{ width: 148 }} />
+                    <col style={{ width: 132 }} />
                     <col style={{ width: 172 }} />
                     <col style={{ width: 104 }} />
                   </colgroup>
@@ -1975,6 +1979,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       <th className="num">Price</th>
                       <th className="num">Disc</th>
                       <th>Fulfillment</th>
+                      <th>Deliver on</th>
                       <th>Inventory from</th>
                       <th className="num">Amount</th>
                     </tr>
@@ -2022,7 +2027,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   <div className="reg-customer-name" data-testid="order-customer">
                     {customerName(customer)}
                   </div>
-                  <div className="reg-customer-sub mono">{customer.phone ?? '—'}</div>
+                  <div className="reg-customer-sub mono">{formatPhone(customer.phone) || '—'}</div>
                   <div className="reg-customer-sub">
                     {[customer.email, addressPreview(customer)].filter(Boolean).join(' · ')}
                     {storeCredit != null && storeCredit > 0 && (
@@ -2106,7 +2111,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     ref={customerInput}
                     value={custQuery}
                     onChange={(e) => setCustQuery(e.target.value)}
-                    placeholder="(818) 555-…"
+                    placeholder="818-555-…"
                     data-testid="customer-search"
                     autoFocus
                     autoComplete="off"
@@ -2130,7 +2135,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       >
                         <span className="reg-cust-hit-name">{customerName(c)}</span>
                         <span className="reg-cust-hit-sub">{addressPreview(c)}</span>
-                        <span className="mono reg-cust-hit-phone">{c.phone ?? ''}</span>
+                        <span className="mono reg-cust-hit-phone">{formatPhone(c.phone)}</span>
                       </button>
                     ))}
                     {custMore && <div className="reg-cust-more">More matches — keep typing.</div>}
@@ -2220,7 +2225,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     }
                     disabled={locked}
                   />
-                  <Input
+                  <PhoneInput
                     placeholder="Phone at address"
                     aria-label="Phone at address"
                     value={ship.phone}
@@ -2277,7 +2282,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 </Select>
               </Field>
               <Field
-                label={fulfillment === 'take_with' ? 'Taken' : 'Promised'}
+                label={
+                  fulfillment === 'take_with'
+                    ? 'Taken'
+                    : fulfillment === 'will_call'
+                      ? 'Promised (customer will call)'
+                      : 'Promised'
+                }
                 hint={
                   fulfillment === 'delivery' &&
                   dayCapacity &&
@@ -2302,11 +2313,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   value={
                     fulfillment === 'take_with'
                       ? new Date().toISOString().slice(0, 10)
-                      : requestedDate
+                      : fulfillment === 'will_call'
+                        ? ''
+                        : requestedDate
                   }
                   min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setRequestedDate(e.target.value)}
-                  disabled={locked || fulfillment === 'take_with'}
+                  disabled={locked || fulfillment === 'take_with' || fulfillment === 'will_call'}
                   className="input-mono"
                 />
               </Field>
@@ -2760,7 +2773,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   : 'Paid in full.'}
                 {requestedDate
                   ? ` ${fulfillment === 'pickup' ? 'Pickup' : 'Delivery'} ${requestedDate}.`
-                  : ''}
+                  : fulfillment === 'will_call'
+                    ? ' Held for the customer — they will call when ready.'
+                    : ''}
               </p>
               {done!.splitOrders && done!.splitOrders.length > 0 && (
                 <Alert tone="info" data-testid="split-siblings">
@@ -3033,6 +3048,23 @@ function LineRow({
         )}
       </td>
       <td>
+        {isFee || (eff !== 'delivery' && eff !== 'pickup') ? (
+          <span className="muted">—</span>
+        ) : (
+          <Input
+            type="date"
+            value={l.deliveryDate}
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => onPatch(l.key, { deliveryDate: e.target.value })}
+            aria-label={`Delivery date for ${l.description}`}
+            title="Blank = the order's promised date. A different date writes this line to its own dated order (A/B) with its own truck."
+            disabled={locked}
+            className="input-mono reg-cell-input"
+            data-testid="line-date"
+          />
+        )}
+      </td>
+      <td>
         {isFee ? (
           <span className="muted">—</span>
         ) : (
@@ -3125,14 +3157,14 @@ function NewCustomerForm({
         />
       </div>
       <div className="reg-two">
-        <Input
+        <PhoneInput
           placeholder="Phone"
           aria-label="Phone"
           value={value.phone}
           onChange={(e) => onChange({ ...value, phone: e.target.value })}
           className="input-mono"
         />
-        <Input
+        <PhoneInput
           placeholder="2nd phone (optional)"
           aria-label="2nd phone (optional)"
           value={value.phone2}
@@ -3162,7 +3194,8 @@ function NewCustomerForm({
           }
         >
           Looks like <strong>{dupeWarn.name}</strong>
-          {dupeWarn.phone ? ` (${dupeWarn.phone})` : ''} already exists — use them instead?
+          {dupeWarn.phone ? ` (${formatPhone(dupeWarn.phone)})` : ''} already exists — use them
+          instead?
         </Alert>
       )}
       <div className="t-label">Delivery address</div>

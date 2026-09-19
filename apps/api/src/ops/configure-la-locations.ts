@@ -10,8 +10,51 @@ export const STORE_PREFIXES = {
   Warehouse: 'WA',
 } as const;
 
+/**
+ * Owner 2026-09-19: the invoice prints the selling store's address and
+ * phone, taken from mattressstoreslosangeles.com (store pages, Sep 2026).
+ * Written into locations.address_json only where no street line is on
+ * file yet — an address someone typed in Locations settings is kept.
+ * The Warehouse has no public listing; set it in Locations settings.
+ */
+export const STORE_CONTACT: Record<
+  string,
+  { line1: string; city: string; region: string; postalCode: string; phone: string }
+> = {
+  Koreatown: {
+    line1: '201 S Western Ave',
+    city: 'Los Angeles',
+    region: 'CA',
+    postalCode: '90004',
+    phone: '213-984-4654',
+  },
+  'West LA': {
+    line1: '10861 W Pico Blvd',
+    city: 'Los Angeles',
+    region: 'CA',
+    postalCode: '90064',
+    phone: '310-507-8024',
+  },
+  'La Brea': {
+    line1: '300 S La Brea Ave',
+    city: 'Los Angeles',
+    region: 'CA',
+    postalCode: '90036',
+    phone: '323-275-4715',
+  },
+  'Studio City': {
+    line1: '12306 Ventura Blvd',
+    city: 'Studio City',
+    region: 'CA',
+    postalCode: '91604',
+    phone: '818-766-3500',
+  },
+};
+
 interface Summary {
   prefixes: { name: string; before: string | null; after: string }[];
+  /** Stores whose address/phone were filled from STORE_CONTACT this run. */
+  contacts: string[];
   reassignedMembers: string[];
   reassignedShifts: number;
   glendale: 'absent' | 'deleted' | 'archived';
@@ -43,11 +86,13 @@ export async function configureLaLocations(options: {
             name: string;
             order_prefix: string | null;
             is_active: boolean;
+            address_json: Record<string, unknown> | null;
           }[]
-        >`SELECT id, name, order_prefix, is_active FROM locations
+        >`SELECT id, name, order_prefix, is_active, address_json FROM locations
           WHERE business_id = ${business.id} ORDER BY id FOR UPDATE`;
         const summary: Summary = {
           prefixes: [],
+          contacts: [],
           reassignedMembers: [],
           reassignedShifts: 0,
           glendale: 'absent',
@@ -77,6 +122,21 @@ export async function configureLaLocations(options: {
             VALUES (${business.id}, ${location.id}, ${used!.next})
             ON CONFLICT (location_id) DO UPDATE
             SET next_value = greatest(order_sequences.next_value, excluded.next_value)`;
+        }
+        // Store address + phone for the invoice header (owner 2026-09-19).
+        for (const [name, contact] of Object.entries(STORE_CONTACT)) {
+          const location = locations.find((l) => l.name === name && l.is_active);
+          if (!location) continue;
+          const existing = location.address_json ?? {};
+          const hasStreet = typeof existing.line1 === 'string' && existing.line1.trim() !== '';
+          if (hasStreet && typeof existing.phone === 'string' && existing.phone.trim() !== '')
+            continue;
+          const next = hasStreet
+            ? { ...existing, phone: existing.phone || contact.phone }
+            : { ...existing, ...contact };
+          await tx`UPDATE locations SET address_json = ${JSON.stringify(next)}::jsonb
+            WHERE id = ${location.id} AND business_id = ${business.id}`;
+          summary.contacts.push(name);
         }
         const retired = locations.filter((l) => l.name === 'Glendale Store');
         if (retired.length > 1)
@@ -128,13 +188,14 @@ export async function configureLaLocations(options: {
         }
         if (
           summary.prefixes.length ||
+          summary.contacts.length ||
           summary.reassignedMembers.length ||
           summary.reassignedShifts ||
           (glendale && (glendale.is_active || summary.glendale === 'deleted'))
         ) {
           await tx`INSERT INTO audit_logs (business_id, actor_type, action, target_type, target_id, changes_json)
             VALUES (${business.id}, 'system', 'locations.owner_cutover', 'business', ${business.id},
-              ${tx.json({ ...summary, reason: 'Owner request 2026-09-14' })})`;
+              ${tx.json({ ...summary, reason: 'Owner requests 2026-09-14 (prefixes) / 2026-09-19 (store contact)' })})`;
         }
         if (options.mode === 'validate') throw new Preview(summary);
         return summary;

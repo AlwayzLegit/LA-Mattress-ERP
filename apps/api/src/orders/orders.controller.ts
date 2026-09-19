@@ -87,7 +87,9 @@ const PAYMENT_METHODS = [
 ] as const;
 type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-const FULFILLMENT_TYPES = ['delivery', 'pickup', 'take_with', 'direct_ship'] as const;
+// 'will_call' (owner 2026-09-19): goods held for the customer, who calls
+// when ready — a counter hand-over like pickup, but with no promised date.
+const FULFILLMENT_TYPES = ['delivery', 'pickup', 'will_call', 'take_with', 'direct_ship'] as const;
 const DELIVERY_STATUSES = ['scheduled', 'estimated', 'asap', 'will_call'] as const;
 const ORDER_KINDS = ['sales_order', 'layaway', 'exchange'] as const;
 const LINE_TYPES = ['stock', 'special_order', 'custom', 'direct_ship'] as const;
@@ -714,9 +716,11 @@ export class OrdersController {
     }
     if (status) filters.push(eq(schema.orders.status, status));
     if (customerId) filters.push(eq(schema.orders.customerId, customerId));
-    // Exact document-number recall (the exchange writer's original-order
-    // field types the number off the paper invoice).
-    if (number) filters.push(eq(schema.orders.number, number.trim()));
+    // Document-number recall (the exchange writer's original-order field
+    // types the number off the paper invoice). Case-insensitive: "so-1234"
+    // finds SO-1234 (owner 2026-09-19).
+    if (number && number.trim())
+      filters.push(sql`lower(${schema.orders.number}) = ${number.trim().toLowerCase()}`);
     if (salespersonMembershipId)
       filters.push(eq(schema.orders.salespersonMembershipId, salespersonMembershipId));
     if (locationIdFilter) filters.push(eq(schema.orders.locationId, locationIdFilter));

@@ -17,6 +17,7 @@ interface MemberRow {
 const FULFILLMENT = [
   ['delivery', 'Delivery'],
   ['pickup', 'Customer pickup'],
+  ['will_call', 'Customer will call'],
   ['take_with', 'Take-with'],
   ['direct_ship', 'Direct ship'],
 ] as const;

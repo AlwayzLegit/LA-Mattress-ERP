@@ -342,6 +342,44 @@ the same customer card (pinned to the original invoice's customer). Added on top
   failed later step keeps the documents already written and re-binds them on retry.
 - No draft mode and no order type (layaway / quote) in exchange mode.
 
+**Amendment (2026-09-19, owner — five register asks):**
+
+- **Order-number recall is case-insensitive.** `GET /v1/orders?number=` compares
+  `lower(number)`; "so-1234" finds SO-1234 (the exchange writer's Find box and any
+  other document-number lookup).
+- **Phones read 818-800-5678 everywhere.** `formatPhone` (shared) emits the dashed
+  shape; `formatPhoneAsTyped` + the `PhoneInput` primitive format as the digits are
+  typed. Storage is unchanged (digits-to-digits matching still drives search and
+  duplicate detection); only presentation and entry are normalised.
+- **Fulfillment `will_call` — "Customer will call".** Goods are reserved and held
+  for the customer, who calls when ready: no promised date, no truck. It is a counter
+  fulfillment like pickup (hand-over from the order page completes it; explicitly
+  will-call lines are never scheduled; will-call orders sit in the pickup queues on
+  the cashier and warehouse dashboards). Available at order level and per line.
+- **Installation is never taxed.** Installation (and the other STORIS CATG NONINV
+  services) are catalog products, so they were taxed at the store rate. Migration
+  0108 gives every tenant that carries them a 0% tax class "Non-taxable services"
+  and assigns it to the products under "Delivery & Installation" / "Services & Fees"
+  and to any product named _install…_. The header Installation charge was already
+  untaxed (§ "Step-3 charges"). New service products: set the class on the product
+  page (Tax class) or the register taxes them.
+- **Invoice header, payments and delivery block (§11).** The selling store prints
+  with its **name, address and phone** (supersedes 2026-09-11 "address only"); the
+  address/phone live in `locations.address_json` (Locations settings → Address &
+  phone; the LA stores are seeded by the `Ops — configure LA locations` script from
+  mattressstoreslosangeles.com: Koreatown 201 S Western Ave · 213-984-4654, West LA
+  10861 W Pico Blvd · 310-507-8024, La Brea 300 S La Brea Ave · 323-275-4715, Studio
+  City 12306 Ventura Blvd · 818-766-3500; the Warehouse has no public listing). A card
+  payment prints its **brand** as chosen at the sale ("Visa •••• 8212"), financing its
+  term. The **Delivery** block is its own tinted card with the date in large type
+  ("Delivering Tue, Sep 22, 2026"), the ship-to address and phone, and the delivery
+  instructions; pickup / will-call / take-with / direct-ship read accordingly.
+- **Two mattresses, two days, one sale.** Each register line has a **Deliver on**
+  date (blank = the order's promised date). A different date writes that line to its
+  own dated sibling order (A/B numbering, split-at-sale, one truck per date) — the
+  existing `splitByDeliveryDate` rule, now reachable from the row instead of only
+  after the fact from the order page.
+
 ## 11. Printed / PDF Documents
 
 Replicate the two LA Mattress sample invoices. All documents: neutral template +

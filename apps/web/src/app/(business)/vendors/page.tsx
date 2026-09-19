@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import {
   Alert,
@@ -20,6 +21,7 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  PhoneInput,
   ResetColumns,
   Stack,
   StatusBadge,
@@ -152,7 +154,12 @@ export default function VendorsPage() {
       render: (v) => v.contactName ?? '—',
     },
     { id: 'email', label: 'Email', sortValue: (v) => v.email, render: (v) => v.email ?? '—' },
-    { id: 'phone', label: 'Phone', sortValue: (v) => v.phone, render: (v) => v.phone ?? '—' },
+    {
+      id: 'phone',
+      label: 'Phone',
+      sortValue: (v) => v.phone,
+      render: (v) => (v.phone ? formatPhone(v.phone) : '—'),
+    },
     {
       id: 'products',
       label: 'Products',
@@ -256,7 +263,7 @@ export default function VendorsPage() {
                   <Input name="email" type="email" />
                 </Field>
                 <Field label="Phone">
-                  <Input name="phone" type="tel" />
+                  <PhoneInput name="phone" />
                 </Field>
                 <Field label="Notes" className="form-span">
                   <textarea className="textarea" name="notes" rows={2} />

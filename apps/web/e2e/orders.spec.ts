@@ -117,6 +117,14 @@ test.describe('Day 2 — order writer', () => {
     await expect(result).toBeVisible();
     await result.click();
 
+    // Owner 2026-09-19: each line carries its own Deliver-on date (two
+    // mattresses, two days) and "Customer will call" is a fulfillment.
+    const firstLine = page.locator('.reg-table tbody tr').first();
+    await expect(firstLine.getByTestId('line-date')).toBeVisible();
+    await expect(
+      firstLine.getByRole('combobox', { name: /^Fulfillment for/ }).locator('option'),
+    ).toContainText(['Customer will call']);
+
     // ...take the deposit at the register (no money = draft only, owner
     // 2026-09-12: Complete stays disabled until a payment is recorded)...
     await page.getByTestId('take-payment').click();

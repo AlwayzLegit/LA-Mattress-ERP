@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { formatMoney } from '@jetnine/shared';
+import { formatMoney, formatPhone } from '@jetnine/shared';
 import { ApiError, api } from '@/lib/api';
 import { useOptionalActingStore } from '@/lib/acting-store';
 import {
@@ -825,7 +825,9 @@ export function OrderSheet({ id }: { id: string }) {
         <div>
           <div className="t-label">Customer</div>
           <div className="osh-strong">{customerName}</div>
-          {customer?.phone && <div className="osh-mono osh-muted">{customer.phone}</div>}
+          {customer?.phone && (
+            <div className="osh-mono osh-muted">{formatPhone(customer.phone)}</div>
+          )}
           <div className="osh-muted">{address || 'No delivery address'}</div>
         </div>
         <div>
