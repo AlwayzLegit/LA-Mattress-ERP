@@ -217,6 +217,63 @@ describe('Epic 1.7 — Product catalog', () => {
     expect(res.body.variants[0].costCents).toBe(800);
   });
 
+  it('A duplicate SKU answers 409 with a readable message, not a 500', async () => {
+    // Owner 2026-09-21: this returned "Internal server error" because the
+    // guard matched on err.message, which drizzle replaces with
+    // "Failed query: …" — the constraint name lives in err.cause.
+    const res = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ sku: 'WIDGET-001', name: 'Another product, same SKU' });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('WIDGET-001');
+    expect(res.body.message).toMatch(/already belongs/i);
+
+    // The rejected attempt leaves nothing behind.
+    const list = await request(app.getHttpServer())
+      .get('/v1/products?q=Another product, same SKU')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(0);
+  });
+
+  it('Renaming a SKU onto one already in use answers 409', async () => {
+    const other = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ sku: 'WIDGET-RENAME', name: 'Rename target' });
+    expect(other.status).toBe(201);
+
+    const clash = await request(app.getHttpServer())
+      .patch(`/v1/products/${other.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ sku: 'WIDGET-001' });
+    expect(clash.status).toBe(409);
+    expect(clash.body.message).toContain('WIDGET-001');
+
+    // The product keeps its own SKU after the refusal.
+    const after = await request(app.getHttpServer())
+      .get(`/v1/products/${other.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(after.body.sku).toBe('WIDGET-RENAME');
+  });
+
+  it('A product with no SKU is allowed alongside another with no SKU', async () => {
+    for (const name of ['No SKU one', 'No SKU two']) {
+      const res = await request(app.getHttpServer())
+        .post('/v1/products')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ name });
+      expect(res.status).toBe(201);
+    }
+  });
+
   it('Find by partial SKU returns the product', async () => {
     const res = await request(app.getHttpServer())
       .get('/v1/products?q=WIDGET-001-MD')

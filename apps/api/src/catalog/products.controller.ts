@@ -35,6 +35,7 @@ import {
   decodeCursor,
   type PageResponse,
 } from '../common/pagination';
+import { isUniqueViolation } from '../common/db-errors';
 import { vendorMatchFor } from '../common/vendor-match';
 import { DRIZZLE } from '../database/database.module';
 import { mergeShipping, parseShipping, type ProductShipping } from './product-shipping';
@@ -1033,8 +1034,12 @@ export class CatalogProductsController {
       })
       .returning()
       .catch((err) => {
-        if (err instanceof Error && err.message.includes('products_business_sku_uniq')) {
-          throw new ConflictException(`SKU "${body.sku}" already exists in this business`);
+        // Drizzle wraps the driver error, so classify through the cause
+        // chain — matching on err.message answered 500 (owner 2026-09-21).
+        if (isUniqueViolation(err, 'products_business_sku_uniq')) {
+          throw new ConflictException(
+            `SKU "${body.sku}" already belongs to another product. Search Products for it (turn on "Include inactive"), or give this one a different SKU.`,
+          );
         }
         throw err;
       });
@@ -1197,7 +1202,19 @@ export class CatalogProductsController {
     }
 
     if (Object.keys(after).length > 0) {
-      await this.db.update(schema.products).set(update).where(eq(schema.products.id, id));
+      await this.db
+        .update(schema.products)
+        .set(update)
+        .where(eq(schema.products.id, id))
+        .catch((err) => {
+          // Renaming a SKU onto one already in use (owner 2026-09-21).
+          if (isUniqueViolation(err, 'products_business_sku_uniq')) {
+            throw new ConflictException(
+              `SKU "${update.sku}" already belongs to another product. Search Products for it (turn on "Include inactive"), or pick a different SKU.`,
+            );
+          }
+          throw err;
+        });
       await this.audit.log({
         action: 'product.update',
         targetType: 'product',

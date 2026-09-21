@@ -6026,3 +6026,24 @@ Merged as one slice (PR pending):
   commit, to seed the store addresses/phones (idempotent; typed addresses are kept).
 - Doc: `PLAN-POS-OPERATIONS.md` amendment 2026-09-19.
 - **Ops (owner):** still to cut tag `v2026.09.18` (see 2026-09-18 entry).
+
+### 2026-09-21 — "Internal server error" on a duplicate SKU (owner)
+
+Creating a product whose SKU already exists answered a bare 500. Root cause: drizzle
+wraps every failed statement in `DrizzleQueryError` ("Failed query: …"); the postgres.js
+error carrying SQLSTATE 23505 and `constraint_name` is one level down in `.cause`. Four
+guards written as `err.message.includes('<index>_uniq')` could never match, so the raw
+error reached the exception filter.
+
+- [x] `apps/api/src/common/db-errors.ts` — `isUniqueViolation(err, constraint?)` /
+      `uniqueViolationConstraint(err)` walk the cause chain (unit-tested against the real
+      error shape, including a self-referencing cause).
+- [x] Products create **and** update (the edit path had no guard at all) → 409 naming the
+      SKU and pointing at "Include inactive" on the Products list.
+- [x] Gift-card mint retried on a code collision again (it was throwing instead of
+      re-rolling), admin business-slug conflict, vendor-invoice duplicate (one
+      implementation instead of its own inline chain walk).
+- [x] Int tests: duplicate SKU → 409, blank SKUs still allowed side by side, SKU rename
+      onto a taken SKU → 409 and the row keeps its old SKU.
+- **Ops (owner):** SKU 4760005 already exists in the catalog — find it on Products with
+  "Include inactive" on.

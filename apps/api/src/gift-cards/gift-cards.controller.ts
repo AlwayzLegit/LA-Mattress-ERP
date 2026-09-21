@@ -24,6 +24,7 @@ import {
   timestampCursorWhere,
   type PageResponse,
 } from '../common/pagination';
+import { isUniqueViolation } from '../common/db-errors';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
@@ -200,7 +201,7 @@ export class GiftCardsController {
         });
         return { ...card, code };
       } catch (err) {
-        if (err instanceof Error && err.message.includes('gift_cards_business_code_uniq')) {
+        if (isUniqueViolation(err, 'gift_cards_business_code_uniq')) {
           continue;
         }
         throw err;
