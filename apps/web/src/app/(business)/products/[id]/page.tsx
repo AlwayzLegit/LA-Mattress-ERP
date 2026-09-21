@@ -354,6 +354,25 @@ export default function ProductDetailPage() {
     }
   }
 
+  /**
+   * Owner 2026-09-21: a deactivated size could only be read, never
+   * switched back on, so a product reactivated from the header still had
+   * nothing sellable under it. Deactivating is a DELETE; turning it back
+   * on is the ordinary variant PATCH.
+   */
+  async function reactivateVariant(variantId: string) {
+    try {
+      await api(`/v1/products/variants/${variantId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: true }),
+      });
+      toast.success('Variant reactivated');
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function registerImage() {
     const contentType = prompt('Content type', 'image/png');
     if (!contentType) return;
@@ -1262,7 +1281,16 @@ export default function ProductDetailPage() {
                                 Deactivate
                               </Button>
                             ) : (
-                              <StatusBadge status="inactive" />
+                              <div className="flex items-center gap-2">
+                                <StatusBadge status="inactive" />
+                                <Button
+                                  size="sm"
+                                  onClick={() => void reactivateVariant(v.id)}
+                                  data-testid="variant-reactivate"
+                                >
+                                  Reactivate
+                                </Button>
+                              </div>
                             )}
                           </td>
                         </tr>

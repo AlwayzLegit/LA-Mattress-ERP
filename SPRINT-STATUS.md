@@ -6045,5 +6045,9 @@ error reached the exception filter.
       implementation instead of its own inline chain walk).
 - [x] Int tests: duplicate SKU → 409, blank SKUs still allowed side by side, SKU rename
       onto a taken SKU → 409 and the row keeps its old SKU.
+- [x] Product page: a deactivated **variant** could only be read — no way back on, so a
+      product reactivated from the header still had nothing sellable under it. The row now
+      carries a **Reactivate** button beside the Inactive badge (variant PATCH
+      `isActive: true`, which the API already accepted); int test covers off → on.
 - **Ops (owner):** SKU 4760005 already exists in the catalog — find it on Products with
   "Include inactive" on.

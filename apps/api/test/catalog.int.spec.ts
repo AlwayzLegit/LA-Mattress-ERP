@@ -239,6 +239,51 @@ describe('Epic 1.7 — Product catalog', () => {
     expect(list.body.data).toHaveLength(0);
   });
 
+  it('A deactivated variant can be switched back on', async () => {
+    // Owner 2026-09-21: reactivating a product left its sizes off with no
+    // way back; the product page now PATCHes isActive on the variant.
+    const created = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        sku: 'WIDGET-REVIVE',
+        name: 'Revivable widget',
+        variants: [{ sku: 'WIDGET-REVIVE-QN', name: 'Queen', priceCents: 4999 }],
+      });
+    expect(created.status).toBe(201);
+    const variantId = created.body.variants[0].id as string;
+
+    const off = await request(app.getHttpServer())
+      .delete(`/v1/products/variants/${variantId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(off.status).toBe(200);
+
+    const whileOff = await request(app.getHttpServer())
+      .get(`/v1/products/${created.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(whileOff.body.variants.find((v: { id: string }) => v.id === variantId).isActive).toBe(
+      false,
+    );
+
+    const on = await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${variantId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ isActive: true });
+    expect(on.status).toBe(200);
+
+    const after = await request(app.getHttpServer())
+      .get(`/v1/products/${created.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    const revived = after.body.variants.find((v: { id: string }) => v.id === variantId);
+    expect(revived.isActive).toBe(true);
+    expect(revived.priceCents).toBe(4999);
+  });
+
   it('Renaming a SKU onto one already in use answers 409', async () => {
     const other = await request(app.getHttpServer())
       .post('/v1/products')
