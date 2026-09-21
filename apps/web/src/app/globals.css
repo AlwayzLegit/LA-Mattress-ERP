@@ -588,6 +588,64 @@ pre {
   border-color: var(--border-strong);
 }
 
+/*
+ * A read-only box must not look typeable (owner 2026-09-21: "I'm not able
+ * to type anything" — the field was a mirror of a value owned by another
+ * card). Muted fill, no caret, no accent border on focus or hover. The
+ * :focus-visible ring stays: a keyboard user still has to be able to land
+ * on it and read the value.
+ */
+.input[readonly],
+.textarea[readonly] {
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: default;
+}
+.input[readonly]:focus,
+.textarea[readonly]:focus,
+.input[readonly]:hover,
+.textarea[readonly]:hover {
+  border-color: var(--border);
+}
+
+/*
+ * A value this card only displays — the editor lives elsewhere. Reads as
+ * text rather than a control, so it is never mistaken for an input and
+ * never takes a tab stop.
+ */
+.field-mirror {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h);
+  padding: 0 9px 0 0;
+  font-family: var(--font-text);
+  font-size: var(--text-size);
+  color: var(--text);
+}
+.field-mirror.is-empty {
+  color: var(--muted);
+}
+
+/* The card a Descriptive hint just jumped to, so the move is visible. */
+.is-jump-target {
+  animation: jump-flash 1.5s ease-out;
+}
+@keyframes jump-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-jump-target {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+}
+
 /* Compact controls for table-row editors and totals rails. */
 .input-sm,
 .select-sm {

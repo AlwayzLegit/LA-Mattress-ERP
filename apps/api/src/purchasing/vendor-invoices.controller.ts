@@ -20,6 +20,7 @@ import {
 } from '../controls/security-override.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
+import { isUniqueViolation } from '../common/db-errors';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
@@ -171,21 +172,10 @@ export class VendorInvoicesController {
         })
         .returning();
     } catch (err) {
-      // The unique-violation may be wrapped (drizzle → postgres.js), so
-      // walk the cause chain for the constraint name or SQLSTATE 23505.
-      let cursor: unknown = err;
-      for (let depth = 0; cursor && depth < 5; depth++) {
-        const e = cursor as { message?: string; code?: string; cause?: unknown };
-        if (
-          e.code === '23505' ||
-          (typeof e.message === 'string' &&
-            e.message.includes('vendor_invoices_vendor_number_unique'))
-        ) {
-          throw new ConflictException(
-            `Invoice ${body.number.trim()} is already recorded for this vendor`,
-          );
-        }
-        cursor = e.cause;
+      if (isUniqueViolation(err)) {
+        throw new ConflictException(
+          `Invoice ${body.number.trim()} is already recorded for this vendor`,
+        );
       }
       throw err;
     }

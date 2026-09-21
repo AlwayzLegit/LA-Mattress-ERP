@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -43,6 +43,7 @@ import {
   Input,
   KeyValue,
   LoadingRows,
+  MirrorValue,
   PageHeader,
   Select,
   Stack,
@@ -354,6 +355,25 @@ export default function ProductDetailPage() {
     }
   }
 
+  /**
+   * Owner 2026-09-21: a deactivated size could only be read, never
+   * switched back on, so a product reactivated from the header still had
+   * nothing sellable under it. Deactivating is a DELETE; turning it back
+   * on is the ordinary variant PATCH.
+   */
+  async function reactivateVariant(variantId: string) {
+    try {
+      await api(`/v1/products/variants/${variantId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: true }),
+      });
+      toast.success('Variant reactivated');
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function registerImage() {
     const contentType = prompt('Content type', 'image/png');
     if (!contentType) return;
@@ -413,6 +433,33 @@ export default function ProductDetailPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /**
+   * Sends the reader to the card that actually owns a value the Descriptive
+   * card only mirrors (owner 2026-09-21). Scrolls it into view and flashes
+   * its outline, so the jump is visible rather than a silent reposition.
+   */
+  function JumpTo({ to, children }: { to: string; children: ReactNode }) {
+    return (
+      <button
+        type="button"
+        className="btn-link"
+        data-testid={`jump-${to}`}
+        onClick={() => {
+          const el = document.getElementById(to);
+          if (!el) return;
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.remove('is-jump-target');
+          // Restart the animation even when the same card is jumped to twice.
+          void el.offsetWidth;
+          el.classList.add('is-jump-target');
+          window.setTimeout(() => el.classList.remove('is-jump-target'), 1600);
+        }}
+      >
+        {children}
+      </button>
+    );
   }
 
   function primaryVariant(product: Product): Variant | undefined {
@@ -960,30 +1007,67 @@ export default function ProductDetailPage() {
                       }}
                     />
                   </Field>
-                  <Field label="Brand" hint="Change it in Brand & collection below.">
-                    <Input value={p.brandName ?? ''} readOnly aria-label="Brand" />
+                  {/*
+                    Owner 2026-09-21: these seven were read-only boxes that
+                    looked exactly like the two above them — you could click in,
+                    type, and nothing happened. They are values this card only
+                    shows, so they read as text now and each hint jumps to the
+                    card that does own them.
+                  */}
+                  <Field
+                    as="div"
+                    label="Brand"
+                    hint={
+                      <JumpTo to="card-brand-collection">Change it in Brand & collection</JumpTo>
+                    }
+                  >
+                    <MirrorValue value={p.brandName ?? ''} data-testid="mirror-brand" />
                   </Field>
-                  <Field label="Vendor model" hint="Edit on the Reorder automation card.">
-                    <Input value={p.vendorModel ?? ''} readOnly aria-label="Vendor model" />
+                  <Field
+                    as="div"
+                    label="Vendor model"
+                    hint={<JumpTo to="card-reorder">Edit on the Reorder automation card</JumpTo>}
+                  >
+                    <MirrorValue value={p.vendorModel ?? ''} />
                   </Field>
-                  <Field label="Vendor" hint="The preferred vendor on the Reorder automation card.">
-                    <Input value={p.vendorName ?? ''} readOnly aria-label="Vendor" />
+                  <Field
+                    as="div"
+                    label="Vendor"
+                    hint={
+                      <JumpTo to="card-reorder">
+                        The preferred vendor on the Reorder automation card
+                      </JumpTo>
+                    }
+                  >
+                    <MirrorValue value={p.vendorName ?? ''} data-testid="mirror-vendor" />
                   </Field>
-                  <Field label="Group" hint="STORIS size / product group from the import.">
-                    <Input value={p.group ?? ''} readOnly aria-label="Group" />
+                  <Field
+                    as="div"
+                    label="Group"
+                    hint="STORIS size / product group, set by the import."
+                  >
+                    <MirrorValue value={p.group ?? ''} />
                   </Field>
-                  <Field label="Size" hint="Set per variant in the Variants card below.">
-                    <Input value={p.size ?? ''} readOnly aria-label="Size" />
+                  <Field
+                    as="div"
+                    label="Size"
+                    hint={<JumpTo to="card-variants">Set per variant in the Variants card</JumpTo>}
+                  >
+                    <MirrorValue value={p.size ?? ''} empty="Mixed — see Variants" />
                   </Field>
-                  <Field label="Firmness" hint="Set per variant in the Variants card below.">
-                    <Input value={p.firmness ?? ''} readOnly aria-label="Firmness" />
+                  <Field
+                    as="div"
+                    label="Firmness"
+                    hint={<JumpTo to="card-variants">Set per variant in the Variants card</JumpTo>}
+                  >
+                    <MirrorValue value={p.firmness ?? ''} empty="Mixed — see Variants" />
                   </Field>
-                  <Field label="Category">
-                    <Input
-                      value={p.categoryPath ?? p.categoryName ?? ''}
-                      readOnly
-                      aria-label="Category"
-                    />
+                  <Field
+                    as="div"
+                    label="Category"
+                    hint="Set by the catalog import; there is no editor for it yet."
+                  >
+                    <MirrorValue value={p.categoryPath ?? p.categoryName ?? ''} />
                   </Field>
                 </FormGrid>
               </Card>
@@ -1094,6 +1178,7 @@ export default function ProductDetailPage() {
               )}
 
               <Card
+                id="card-brand-collection"
                 title="Brand & collection"
                 description="The invoice's Brand column prints this brand; without one it falls back to the variant's preferred vendor."
               >
@@ -1173,7 +1258,7 @@ export default function ProductDetailPage() {
                 </FormGrid>
               </Card>
 
-              <Card title="Variants" flush>
+              <Card id="card-variants" title="Variants" flush>
                 <TableWrap>
                   <table className="table">
                     <thead>
@@ -1262,7 +1347,16 @@ export default function ProductDetailPage() {
                                 Deactivate
                               </Button>
                             ) : (
-                              <StatusBadge status="inactive" />
+                              <div className="flex items-center gap-2">
+                                <StatusBadge status="inactive" />
+                                <Button
+                                  size="sm"
+                                  onClick={() => void reactivateVariant(v.id)}
+                                  data-testid="variant-reactivate"
+                                >
+                                  Reactivate
+                                </Button>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -1272,7 +1366,9 @@ export default function ProductDetailPage() {
                 </TableWrap>
               </Card>
 
-              <ReorderSettingsCard variants={p.variants} onSaved={load} />
+              <div id="card-reorder">
+                <ReorderSettingsCard variants={p.variants} onSaved={load} />
+              </div>
 
               <Card
                 title="Images"

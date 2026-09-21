@@ -6026,3 +6026,39 @@ Merged as one slice (PR pending):
   commit, to seed the store addresses/phones (idempotent; typed addresses are kept).
 - Doc: `PLAN-POS-OPERATIONS.md` amendment 2026-09-19.
 - **Ops (owner):** still to cut tag `v2026.09.18` (see 2026-09-18 entry).
+
+### 2026-09-21 — "Internal server error" on a duplicate SKU (owner)
+
+Creating a product whose SKU already exists answered a bare 500. Root cause: drizzle
+wraps every failed statement in `DrizzleQueryError` ("Failed query: …"); the postgres.js
+error carrying SQLSTATE 23505 and `constraint_name` is one level down in `.cause`. Four
+guards written as `err.message.includes('<index>_uniq')` could never match, so the raw
+error reached the exception filter.
+
+- [x] `apps/api/src/common/db-errors.ts` — `isUniqueViolation(err, constraint?)` /
+      `uniqueViolationConstraint(err)` walk the cause chain (unit-tested against the real
+      error shape, including a self-referencing cause).
+- [x] Products create **and** update (the edit path had no guard at all) → 409 naming the
+      SKU and pointing at "Include inactive" on the Products list.
+- [x] Gift-card mint retried on a code collision again (it was throwing instead of
+      re-rolling), admin business-slug conflict, vendor-invoice duplicate (one
+      implementation instead of its own inline chain walk).
+- [x] Int tests: duplicate SKU → 409, blank SKUs still allowed side by side, SKU rename
+      onto a taken SKU → 409 and the row keeps its old SKU.
+- [x] Product page: a deactivated **variant** could only be read — no way back on, so a
+      product reactivated from the header still had nothing sellable under it. The row now
+      carries a **Reactivate** button beside the Inactive badge (variant PATCH
+      `isActive: true`, which the API already accepted); int test covers off → on.
+- [x] Product page, Descriptive card: seven read-only boxes (Brand, Vendor model, Vendor,
+      Group, Size, Firmness, Category) looked exactly like the two editable ones — click
+      in, type, nothing happens (owner: "im not able to type anything"). They render as
+      text now (`MirrorValue`, no caret, no tab stop) and each hint is a **JumpTo** button
+      that scrolls to the card that owns the value and flashes it. Read-only `<input>`s
+      app-wide (37 of them) also pick up a muted fill and no accent border, keeping the
+      focus-visible ring for keyboard users.
+- **Gap, not fixed:** **Category** has no editor anywhere in the web app — `categoryId`
+  is never sent from any screen, so the value only arrives via the catalog import. Its
+  hint says so. A picker needs `/v1/categories` loaded on the product page plus a tree
+  select; flagged to the owner.
+- **Ops (owner):** SKU 4760005 already exists in the catalog — find it on Products with
+  "Include inactive" on.

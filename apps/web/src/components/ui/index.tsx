@@ -23,6 +23,7 @@ export {
 } from './columns';
 export {
   Input,
+  MirrorValue,
   PhoneInput,
   Select,
   Field,

@@ -20,6 +20,7 @@ import { DRIZZLE } from '../database/database.module';
 import { CurrentUser, type CurrentUserPayload } from '../auth/current-user.decorator';
 import { PLANS, type PlanId } from '../billing/pricing';
 import { isReadOnly, type SubscriptionStatus } from '../billing/subscription-state';
+import { isUniqueViolation } from '../common/db-errors';
 import { SuperAdminOnly, TenantScoped } from '../tenancy/decorators';
 import { InvitationService } from '../business/invitation.service';
 import { TemplatesService, type TemplateSnapshot } from './templates.service';
@@ -172,8 +173,7 @@ export class AdminBusinessesController {
       })
       .returning()
       .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('businesses_slug_uniq')) {
+        if (isUniqueViolation(err, 'businesses_slug_uniq')) {
           throw new ConflictException(`A business with slug "${slug}" already exists`);
         }
         throw err;
