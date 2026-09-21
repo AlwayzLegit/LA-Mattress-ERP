@@ -6049,5 +6049,16 @@ error reached the exception filter.
       product reactivated from the header still had nothing sellable under it. The row now
       carries a **Reactivate** button beside the Inactive badge (variant PATCH
       `isActive: true`, which the API already accepted); int test covers off → on.
+- [x] Product page, Descriptive card: seven read-only boxes (Brand, Vendor model, Vendor,
+      Group, Size, Firmness, Category) looked exactly like the two editable ones — click
+      in, type, nothing happens (owner: "im not able to type anything"). They render as
+      text now (`MirrorValue`, no caret, no tab stop) and each hint is a **JumpTo** button
+      that scrolls to the card that owns the value and flashes it. Read-only `<input>`s
+      app-wide (37 of them) also pick up a muted fill and no accent border, keeping the
+      focus-visible ring for keyboard users.
+- **Gap, not fixed:** **Category** has no editor anywhere in the web app — `categoryId`
+  is never sent from any screen, so the value only arrives via the catalog import. Its
+  hint says so. A picker needs `/v1/categories` loaded on the product page plus a tree
+  select; flagged to the owner.
 - **Ops (owner):** SKU 4760005 already exists in the catalog — find it on Products with
   "Include inactive" on.

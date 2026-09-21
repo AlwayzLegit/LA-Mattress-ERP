@@ -113,6 +113,31 @@ export function Field({
   );
 }
 
+/**
+ * A value the surrounding card only shows — the control that owns it is
+ * somewhere else (owner 2026-09-21: read-only boxes looked typeable, so
+ * people clicked in and nothing happened). Rendered as text, so there is
+ * no caret, no focus ring and no tab stop; pair it with a `Field` hint
+ * that says, or links to, where the value is edited.
+ */
+export function MirrorValue({
+  value,
+  empty = '—',
+  className,
+  ...rest
+}: {
+  value: ReactNode;
+  /** Shown when there is no value yet. */
+  empty?: ReactNode;
+} & React.HTMLAttributes<HTMLDivElement>) {
+  const blank = value === null || value === undefined || value === '';
+  return (
+    <div {...rest} className={cx('field-mirror', blank && 'is-empty', className)}>
+      {blank ? empty : value}
+    </div>
+  );
+}
+
 export function Card({
   title,
   description,
