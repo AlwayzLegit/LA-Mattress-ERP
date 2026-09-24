@@ -725,7 +725,7 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
     Record<string, { quantity: string; cost: string; remove: boolean }>
   >({});
   const [added, setAdded] = useState<
-    { variantId: string; description: string; quantity: string; cost: string }[]
+    { variantId: string; description: string; sku: string | null; quantity: string; cost: string }[]
   >([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<
@@ -832,6 +832,7 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
             <thead>
               <tr>
                 <th>Item</th>
+                <th>SKU</th>
                 <th className="num">Qty</th>
                 <th className="num">Unit cost ($)</th>
                 <th className="actions" />
@@ -847,6 +848,7 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
                       {l.productName}
                       {l.variantName && <span className="muted"> — {l.variantName}</span>}
                     </td>
+                    <td>{l.sku ? <code>{l.sku}</code> : <span className="muted">—</span>}</td>
                     <td className="num">
                       <Input
                         type="number"
@@ -893,6 +895,7 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
                   <td>
                     {a.description} <span className="badge badge-info">new</span>
                   </td>
+                  <td>{a.sku ? <code>{a.sku}</code> : <span className="muted">—</span>}</td>
                   <td className="num">
                     <Input
                       type="number"
@@ -973,6 +976,7 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
                       {
                         variantId: r.variantId,
                         description: [r.productName, r.variantName].filter(Boolean).join(' — '),
+                        sku: r.sku,
                         quantity: '1',
                         cost: '0.00',
                       },

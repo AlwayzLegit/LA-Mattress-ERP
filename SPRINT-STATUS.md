@@ -6086,3 +6086,14 @@ Deliveries, so it had to be found and scheduled from the order page.
   completion summary naming the order, with a link to schedule it from the order page.
   Tests: `business-today.spec.ts` (2); deliveries (19), scheduling (6), schedule (10) int specs
   and web unit tests green.
+
+### Checkpoint — 2026-09-24 (Purchase orders: SKU column on the lines being written)
+
+Owner (screenshots of New purchase order → Lines, and the receiving table): "We need a SKU
+column in the Lines section where added pieces are, not just the description." The receiving
+table already showed the SKU after each item; the lines being written did not. New purchase
+order → **Lines** now has a **SKU** column between Item and Qty, filled from whichever source
+added the line (search, reorder suggestion, sold-not-in-stock queue); the subtotal row moves
+with it. The PO page's **Edit order** table gets the same column, for existing lines and ones
+added while editing. Checked in Chromium on a local stack: two items added, both SKUs shown in
+the new-PO Lines and again in Edit order after placing the order.
