@@ -337,6 +337,72 @@ describe('GET /v1/products — STORIS columns (A19)', () => {
     );
   });
 
+  it('lists a variant whose only pieces at a store are As-Is (no stock level)', async () => {
+    // A first receipt rejected whole: As-Is pieces, no inventory level.
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    let onlyVariantId = '';
+    try {
+      const db = drizzle(sql);
+      const [p] = await db
+        .insert(schema.products)
+        .values({ businessId, sku: 'ASIS-ONLY', name: 'AS-IS ONLY PIECE' })
+        .returning({ id: schema.products.id });
+      const [v] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: p!.id, sku: 'ASIS-ONLY-Q', priceCents: 0 })
+        .returning({ id: schema.productVariants.id });
+      onlyVariantId = v!.id;
+      await db.insert(schema.asIsItems).values([
+        {
+          businessId,
+          variantId: onlyVariantId,
+          locationId: storeId,
+          quantity: 2,
+          condition: 'damaged',
+        },
+        {
+          businessId,
+          variantId: onlyVariantId,
+          locationId: storeId,
+          quantity: 1,
+          condition: 'light_wear',
+        },
+      ]);
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+    type Row = {
+      variantId: string;
+      onHand: number;
+      asIsOnHand: number;
+      asIsAvailable: number;
+      asIsNonSellable: number;
+      hasLevel: boolean;
+    };
+    const rows = (
+      await as(ownerCookie).get(`/v1/inventory/levels?locationId=${storeId}`).expect(200)
+    ).body as Row[];
+    expect(rows.find((r) => r.variantId === onlyVariantId)).toMatchObject({
+      onHand: 0,
+      asIsOnHand: 3,
+      asIsAvailable: 1,
+      asIsNonSellable: 2,
+      hasLevel: false,
+    });
+    // The search box narrows As-Is-only rows like any other.
+    const hit = (
+      await as(ownerCookie)
+        .get(`/v1/inventory/levels?locationId=${storeId}&q=ASIS-ONLY-Q`)
+        .expect(200)
+    ).body as Row[];
+    expect(hit.map((r) => r.variantId)).toEqual([onlyVariantId]);
+    // Not at the warehouse.
+    const wh = (
+      await as(ownerCookie).get(`/v1/inventory/levels?locationId=${warehouseId}`).expect(200)
+    ).body as Row[];
+    expect(wh.some((r) => r.variantId === onlyVariantId)).toBe(false);
+  });
+
   it('hides deactivated products unless includeInactive is set (browse and search)', async () => {
     await as(ownerCookie)
       .patch(`/v1/products/${bareProductId}`)

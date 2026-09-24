@@ -67,6 +67,8 @@ interface LevelRow {
   storageBinId: string | null;
   storageBinCode: string | null;
   updatedAt: Date;
+  /** False for a row that exists only because of As-Is pieces (no stock level to bin). */
+  hasLevel: boolean;
 }
 
 interface MovementRow {
@@ -167,8 +169,9 @@ export class InventoryController {
     @Query('q') q?: string,
     @Query('vendorId') vendorId?: string,
   ): Promise<LevelRow[]> {
+    // Product filters shared by the stock rows and the As-Is rows below;
+    // the location filter is applied to each table on its own.
     const filters = [];
-    if (locationId) filters.push(eq(schema.inventoryLevels.locationId, locationId));
     // Vendor (owner 2026-09-02): the vendors page's "in inventory" count
     // opens here, across every location. Same rule as the Add Product popup.
     if (vendorId) filters.push(await vendorMatchFor(this.db, _tenant.businessId!, vendorId));
@@ -182,7 +185,10 @@ export class InventoryController {
              OR ${schema.products.searchTsv} @@ ${tsq})`,
       );
     }
-    const where = filters.length ? and(...filters) : undefined;
+    const where = and(
+      locationId ? eq(schema.inventoryLevels.locationId, locationId) : undefined,
+      ...filters,
+    );
     const rows = await this.db
       .select({
         variantId: schema.inventoryLevels.variantId,
@@ -211,37 +217,44 @@ export class InventoryController {
       .orderBy(asc(schema.products.name), asc(schema.productVariants.sku));
     // As-Is pieces still in review, per variant and location (owner
     // 2026-09-24: Stock by location shows the three As-Is columns the
-    // Products list has, per store).
-    const asIsKey = (variantId: string, locationId: string) => `${variantId}:${locationId}`;
-    const asIsBy = new Map<string, { onHand: number; nonSellable: number }>();
-    const variantIds = [...new Set(rows.map((r) => r.variantId))];
-    for (let i = 0; i < variantIds.length; i += 1000) {
-      const chunk = variantIds.slice(i, i + 1000);
-      const asIs = await this.db
-        .select({
-          variantId: schema.asIsItems.variantId,
-          locationId: schema.asIsItems.locationId,
-          onHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
-          nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])}), 0)::int`,
-        })
-        .from(schema.asIsItems)
-        .where(
-          and(
-            eq(schema.asIsItems.status, 'pending_review'),
-            inArray(schema.asIsItems.variantId, chunk),
-            locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
-          ),
-        )
-        .groupBy(schema.asIsItems.variantId, schema.asIsItems.locationId);
-      for (const a of asIs) {
-        asIsBy.set(asIsKey(a.variantId, a.locationId), {
-          onHand: a.onHand,
-          nonSellable: a.nonSellable,
-        });
-      }
-    }
-    return rows.map((r) => {
-      const a = asIsBy.get(asIsKey(r.variantId, r.locationId));
+    // Products list has, per store). Read from as_is_items on its own, so a
+    // variant whose only pieces here are As-Is (a first receipt rejected
+    // whole never creates a stock level) still gets a row.
+    const asIs = await this.db
+      .select({
+        variantId: schema.asIsItems.variantId,
+        locationId: schema.asIsItems.locationId,
+        productId: schema.products.id,
+        productName: schema.products.name,
+        variantSku: schema.productVariants.sku,
+        variantName: schema.productVariants.name,
+        variantBarcode: schema.productVariants.barcode,
+        onHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
+        nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])}), 0)::int`,
+        updatedAt: sql<Date>`max(${schema.asIsItems.createdAt})`,
+      })
+      .from(schema.asIsItems)
+      .innerJoin(schema.productVariants, eq(schema.productVariants.id, schema.asIsItems.variantId))
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .where(
+        and(
+          eq(schema.asIsItems.status, 'pending_review'),
+          locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
+          ...filters,
+        ),
+      )
+      .groupBy(
+        schema.asIsItems.variantId,
+        schema.asIsItems.locationId,
+        schema.products.id,
+        schema.productVariants.id,
+      );
+    const key = (variantId: string, locId: string) => `${variantId}:${locId}`;
+    const asIsBy = new Map(asIs.map((a) => [key(a.variantId, a.locationId), a]));
+    const out: LevelRow[] = rows.map((r) => {
+      const a = asIsBy.get(key(r.variantId, r.locationId));
+      asIsBy.delete(key(r.variantId, r.locationId));
       const asIsOnHand = a?.onHand ?? 0;
       const asIsNonSellable = a?.nonSellable ?? 0;
       return {
@@ -250,8 +263,36 @@ export class InventoryController {
         asIsOnHand,
         asIsAvailable: Math.max(0, asIsOnHand - asIsNonSellable),
         asIsNonSellable,
+        hasLevel: true,
       };
     });
+    for (const a of asIsBy.values()) {
+      out.push({
+        variantId: a.variantId,
+        locationId: a.locationId,
+        productId: a.productId,
+        productName: a.productName,
+        variantSku: a.variantSku,
+        variantName: a.variantName,
+        variantBarcode: a.variantBarcode,
+        onHand: 0,
+        reserved: 0,
+        floorSample: 0,
+        available: 0,
+        asIsOnHand: a.onHand,
+        asIsAvailable: Math.max(0, a.onHand - a.nonSellable),
+        asIsNonSellable: a.nonSellable,
+        storageBinId: null,
+        storageBinCode: null,
+        updatedAt: a.updatedAt,
+        hasLevel: false,
+      });
+    }
+    return out.sort(
+      (x, y) =>
+        x.productName.localeCompare(y.productName) ||
+        (x.variantSku ?? '').localeCompare(y.variantSku ?? ''),
+    );
   }
 
   /**

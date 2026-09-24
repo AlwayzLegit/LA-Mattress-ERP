@@ -218,19 +218,35 @@ export default function PurchaseOrderDetailPage() {
     }
   }
 
-  /** One-click "everything arrived fine": receive + inspect + accept the rest. */
+  /**
+   * One click, "everything arrived fine": receive, inspect and accept the
+   * rest of every line — including units an older receipt left received
+   * but not yet inspected or accepted (the pre-2026-09-24 staged screen),
+   * which would otherwise have no way into stock.
+   */
   async function acceptAllRemaining() {
     if (!po) return;
     const lines = po.lines
-      .filter((l) => l.quantityOrdered - l.quantityReceived > 0)
-      .map((l) => ({ lineId: l.id, quantity: l.quantityOrdered - l.quantityReceived }));
+      .map((l) => {
+        const received = l.quantityOrdered - l.quantityReceived;
+        const toInspect = l.quantityReceived - l.quantityInspected;
+        const undecided = l.quantityInspected - l.quantityAccepted - l.quantityRejected;
+        return {
+          lineId: l.id,
+          received,
+          inspected: received + toInspect,
+          accepted: received + toInspect + undecided,
+          rejected: 0,
+        };
+      })
+      .filter((l) => l.accepted > 0);
     if (lines.length === 0) {
       toast.error('Nothing left to receive.');
       return;
     }
     setBusy(true);
     try {
-      await api(`/v1/purchase-orders/${id}/receive`, {
+      await api(`/v1/purchase-orders/${id}/receiving`, {
         method: 'POST',
         body: JSON.stringify({ notes: recvNotes || null, lines }),
       });
@@ -527,6 +543,14 @@ export default function PurchaseOrderDetailPage() {
                                   {o.orderNumber} ×{o.quantity}
                                 </Link>
                               ))}
+                            </div>
+                          )}
+                          {l.quantityReceived - l.quantityAccepted - l.quantityRejected > 0 && (
+                            <div className="text-warning text-xs" data-testid="backlog-note">
+                              {l.quantityReceived - l.quantityAccepted - l.quantityRejected}{' '}
+                              received earlier, not yet accepted — Receive &amp; accept all
+                              remaining puts them in stock, or enter the damaged ones under
+                              +Rejected
                             </div>
                           )}
                           {!po.blindReceiving && remaining > 0 && l.quantityReceived > 0 && (

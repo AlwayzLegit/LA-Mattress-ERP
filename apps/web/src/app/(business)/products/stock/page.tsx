@@ -48,6 +48,8 @@ interface Level {
   asIsOnHand: number;
   asIsAvailable: number;
   asIsNonSellable: number;
+  /** False when the row exists only for its As-Is pieces (no stock record to bin). */
+  hasLevel?: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
 }
@@ -281,22 +283,25 @@ export default function InventoryPage() {
       id: 'bin',
       label: 'Bin',
       sortValue: (l) => l.storageBinCode,
-      render: (l) => (
-        <Select
-          value={l.storageBinId ?? ''}
-          onChange={(e) => void assignBin(l, e.target.value || null)}
-          aria-label={`Bin for ${l.variantSku ?? l.productName}`}
-        >
-          <option value="">—</option>
-          {bins
-            .filter((b) => b.isActive || b.id === l.storageBinId)
-            .map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.code}
-              </option>
-            ))}
-        </Select>
-      ),
+      render: (l) =>
+        l.hasLevel === false ? (
+          <span className="muted">—</span>
+        ) : (
+          <Select
+            value={l.storageBinId ?? ''}
+            onChange={(e) => void assignBin(l, e.target.value || null)}
+            aria-label={`Bin for ${l.variantSku ?? l.productName}`}
+          >
+            <option value="">—</option>
+            {bins
+              .filter((b) => b.isActive || b.id === l.storageBinId)
+              .map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code}
+                </option>
+              ))}
+          </Select>
+        ),
     },
     {
       id: 'actions',
