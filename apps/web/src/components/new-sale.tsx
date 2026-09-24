@@ -49,6 +49,7 @@ import {
   Select,
   StatusChip,
 } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 /**
  * New Sale — the register (redesign Phase 4, README §3.1, canvas 4a–4f).
@@ -324,6 +325,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     splitOrders?: { id: string; number: string; requestedDate: string | null }[];
     takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
     bookedDeliveries?: string[];
+    /** Delivery lines were written with no date: not on the Deliveries calendar yet. */
+    needsDeliveryDate?: boolean;
     sources: string[];
     dueCents: number;
     at: Date;
@@ -1279,6 +1282,18 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       resetAll();
       loadDrafts();
     } else {
+      // A delivery line with no date of its own and no promised date on the
+      // order books no truck: say so, or the sale silently never reaches
+      // the Deliveries calendar (owner 2026-09-23).
+      const needsDeliveryDate =
+        orderType !== 'quote' &&
+        !requestedDate &&
+        lines.some(
+          (l) =>
+            l.lineType !== 'custom' &&
+            !l.deliveryDate &&
+            effectiveFulfillment(l, fulfillment) === 'delivery',
+        );
       setDone({
         id: order.id,
         number: order.number,
@@ -1286,6 +1301,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         splitOrders: order.splitOrders,
         takeWith,
         bookedDeliveries,
+        needsDeliveryDate,
         sources,
         dueCents: Math.max(0, order.totalCents - totals.paidCents),
         at: new Date(),
@@ -2296,6 +2312,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     <span data-testid="newsale-capacity">
                       {dayCapacity.cap - dayCapacity.booked} of {dayCapacity.cap} stops left
                     </span>
+                  ) : fulfillment === 'delivery' && !requestedDate && !locked ? (
+                    <span data-testid="newsale-no-date">
+                      Blank = not on the Deliveries calendar until it is scheduled
+                    </span>
                   ) : undefined
                 }
                 error={
@@ -2312,12 +2332,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   type="date"
                   value={
                     fulfillment === 'take_with'
-                      ? new Date().toISOString().slice(0, 10)
+                      ? localToday()
                       : fulfillment === 'will_call'
                         ? ''
                         : requestedDate
                   }
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={localToday()}
                   onChange={(e) => setRequestedDate(e.target.value)}
                   disabled={locked || fulfillment === 'take_with' || fulfillment === 'will_call'}
                   className="input-mono"
@@ -2796,6 +2816,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   calendar.
                 </Alert>
               )}
+              {done!.needsDeliveryDate && (
+                <Alert tone="warning" data-testid="needs-delivery-date">
+                  No delivery date — {done!.number} is not on the Deliveries calendar yet.{' '}
+                  <a href={`/orders/${done!.id}`}>Open the order</a> and use Schedule delivery once
+                  the customer picks a day.
+                </Alert>
+              )}
               {done!.takeWith && (
                 <Alert
                   tone={done!.takeWith.completed ? 'success' : 'warning'}
@@ -3054,7 +3081,7 @@ function LineRow({
           <Input
             type="date"
             value={l.deliveryDate}
-            min={new Date().toISOString().slice(0, 10)}
+            min={localToday()}
             onChange={(e) => onPatch(l.key, { deliveryDate: e.target.value })}
             aria-label={`Delivery date for ${l.description}`}
             title="Blank = the order's promised date. A different date writes this line to its own dated order (A/B) with its own truck."

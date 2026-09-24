@@ -21,13 +21,14 @@ import {
 } from '@/components/ui';
 import { fmtDate, LocationPicker, SectionError, useSection } from './kit';
 import type { Ledger, LedgerRow } from './types';
+import { localToday } from '@/lib/date-range';
 
 function monthStartYmd(): string {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
 }
 function todayYmd(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 const LEDGER_COLUMNS: ColumnDef<LedgerRow>[] = [

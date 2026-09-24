@@ -32,6 +32,7 @@ import {
   TableWrap,
   useListColumns,
 } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 /**
  * Dispatcher view (PLAN-POS-OPERATIONS §7): one day's stops as a simple
@@ -410,9 +411,7 @@ function RunCard({
 
 function DispatchInner() {
   const search = useSearchParams();
-  const [date, setDate] = useState(
-    () => search?.get('date') ?? new Date().toISOString().slice(0, 10),
-  );
+  const [date, setDate] = useState(() => search?.get('date') ?? localToday());
   const [rows, setRows] = useState<DeliveryDetail[] | null>(null);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);

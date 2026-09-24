@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { LoadingRows } from '@/components/ui';
 import CloseOutSheet from '../close-out-sheet';
+import { localToday } from '@/lib/date-range';
 
 /** `/shifts/close/:date` — the close-out sheet (Z-report), redesign Phase 10. */
 export default function CloseOutPage() {
@@ -21,7 +22,7 @@ function CloseOutRoute() {
   const search = useSearchParams();
   const router = useRouter();
   const raw = Array.isArray(params.date) ? params.date[0] : params.date;
-  const date = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : new Date().toISOString().slice(0, 10);
+  const date = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : localToday();
   return (
     <CloseOutSheet
       date={date}

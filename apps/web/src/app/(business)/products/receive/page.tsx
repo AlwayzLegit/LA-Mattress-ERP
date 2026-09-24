@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { ProductsNav } from '@/components/products-nav';
 import { Alert, Button, Field, Input, Select } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 /**
  * Receive (redesign Phase 7, README §3.3, canvas 6d). Against a PO when
@@ -83,7 +84,7 @@ function fmtDay(v: string | null): string {
 }
 function dueWord(v: string | null): string {
   if (!v) return '';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const day = v.slice(0, 10);
   if (day === today) return 'due today';
   return day < today ? `overdue ${fmtDay(v)}` : `due ${fmtDay(v)}`;

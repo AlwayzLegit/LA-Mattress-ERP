@@ -29,6 +29,7 @@ import {
   TableWrap,
   useListColumns,
 } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 /**
  * Q1 (owner 2026-08-28): manifests without scanning. Build groups draft
@@ -113,7 +114,7 @@ export default function ManifestsPage() {
   // Build form
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
-  const [manifestDate, setManifestDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manifestDate, setManifestDate] = useState(() => localToday());
   const [routeName, setRouteName] = useState('');
   const [drafts, setDrafts] = useState<DraftTransfer[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());

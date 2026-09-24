@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { DeliveryTicketDoc, type OrderDocumentPayload } from '@/components/order-documents';
 import { PrintToolbar } from '../print-toolbar';
+import { localToday } from '@/lib/date-range';
 
 /**
  * Batch "Print all for date" (§7): one delivery ticket per trip
@@ -39,7 +40,7 @@ function flagFor(delivery: DeliveryRow, doc: OrderDocumentPayload): string | nul
 
 function BatchPrintInner() {
   const search = useSearchParams();
-  const date = search?.get('date') ?? new Date().toISOString().slice(0, 10);
+  const date = search?.get('date') ?? localToday();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
