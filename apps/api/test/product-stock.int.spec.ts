@@ -307,6 +307,36 @@ describe('GET /v1/products — STORIS columns (A19)', () => {
     });
   });
 
+  it('Stock by location carries the As-Is columns per store', async () => {
+    const levels = async (loc: string) =>
+      (await as(ownerCookie).get(`/v1/inventory/levels?locationId=${loc}`).expect(200)).body as {
+        variantId: string;
+        asIsOnHand: number;
+        asIsAvailable: number;
+        asIsNonSellable: number;
+      }[];
+    // Store: 3 pieces in review, 1 of them parts-only; the scrapped 4 are gone.
+    expect((await levels(storeId)).find((r) => r.variantId === variantId)).toMatchObject({
+      asIsOnHand: 3,
+      asIsAvailable: 2,
+      asIsNonSellable: 1,
+    });
+    expect((await levels(warehouseId)).find((r) => r.variantId === variantId)).toMatchObject({
+      asIsOnHand: 0,
+      asIsAvailable: 0,
+      asIsNonSellable: 0,
+    });
+    // Every location at once keeps each store's own figures.
+    const all = (await as(ownerCookie).get('/v1/inventory/levels').expect(200)).body as {
+      variantId: string;
+      locationId: string;
+      asIsOnHand: number;
+    }[];
+    expect(all.find((r) => r.variantId === variantId && r.locationId === storeId)?.asIsOnHand).toBe(
+      3,
+    );
+  });
+
   it('hides deactivated products unless includeInactive is set (browse and search)', async () => {
     await as(ownerCookie)
       .patch(`/v1/products/${bareProductId}`)

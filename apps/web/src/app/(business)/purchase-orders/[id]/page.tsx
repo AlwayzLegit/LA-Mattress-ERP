@@ -156,20 +156,49 @@ export default function PurchaseOrderDetailPage() {
     }));
   }
 
-  /** Staged submit: only lines with at least one positive increment go up. */
+  /**
+   * Record receiving (owner 2026-09-24, PLAN-POS-OPERATIONS §6 amendment):
+   * the screen asks for +Received and +Rejected only. Receiving a unit
+   * includes inspecting and accepting it, so the API's three stages are
+   * filled here: everything received (plus anything an older receipt left
+   * uninspected or undecided) is inspected, and accepted except the units
+   * entered as rejected, which go to As-Is review.
+   */
   async function submitStages() {
     if (!po) return;
-    const lines = Object.entries(draft)
-      .map(([lineId, s]) => ({
+    const byId = new Map(po.lines.map((l) => [l.id, l]));
+    const lines: {
+      lineId: string;
+      received: number;
+      inspected: number;
+      accepted: number;
+      rejected: number;
+    }[] = [];
+    for (const [lineId, s] of Object.entries(draft)) {
+      const l = byId.get(lineId);
+      if (!l) continue;
+      const received = Number(s.received) || 0;
+      const rejected = Number(s.rejected) || 0;
+      if (received === 0 && rejected === 0) continue;
+      const toInspect = l.quantityReceived - l.quantityInspected;
+      const undecided = l.quantityInspected - l.quantityAccepted - l.quantityRejected;
+      const pool = received + toInspect + undecided;
+      if (rejected > pool) {
+        toast.error(
+          `${l.productName}: ${rejected} rejected is more than the ${pool} being received.`,
+        );
+        return;
+      }
+      lines.push({
         lineId,
-        received: Number(s.received) || 0,
-        inspected: Number(s.inspected) || 0,
-        accepted: Number(s.accepted) || 0,
-        rejected: Number(s.rejected) || 0,
-      }))
-      .filter((l) => l.received + l.inspected + l.accepted + l.rejected > 0);
+        received,
+        inspected: received + toInspect,
+        accepted: pool - rejected,
+        rejected,
+      });
+    }
     if (lines.length === 0) {
-      toast.error('Enter a quantity in at least one stage.');
+      toast.error('Enter a received quantity on at least one line.');
       return;
     }
     setBusy(true);
@@ -450,10 +479,10 @@ export default function PurchaseOrderDetailPage() {
           description={
             receivable ? (
               <>
-                Per line: <strong>Received</strong> at the dock → <strong>Inspected</strong> →{' '}
-                <strong>Accepted</strong> into sellable stock, or <strong>Rejected</strong> into the
-                As-Is review queue (damage never silently becomes sellable). Stock moves at Accept.
-                Enter increments and record below.
+                Enter what arrived under <strong>+Received</strong>: it goes into sellable stock.
+                Units too damaged to keep also go under <strong>+Rejected</strong> — they move to
+                the As-Is review queue instead. Kept a damaged unit to settle with the vendor?
+                Receive it and add a note.
               </>
             ) : undefined
           }
@@ -466,13 +495,10 @@ export default function PurchaseOrderDetailPage() {
                     <th>Item</th>
                     {!po.blindReceiving && <th className="num">Ordered</th>}
                     <th className="num">Rcvd</th>
-                    <th className="num">Insp</th>
                     <th className="num">Acc</th>
                     <th className="num">Rej</th>
                     {!po.blindReceiving && <th className="num">Unit cost</th>}
                     {receivable && <th>+Received</th>}
-                    {receivable && <th>+Inspected</th>}
-                    {receivable && <th>+Accepted</th>}
                     {receivable && <th>+Rejected</th>}
                   </tr>
                 </thead>
@@ -512,7 +538,6 @@ export default function PurchaseOrderDetailPage() {
                         </td>
                         {!po.blindReceiving && <td className="num">{l.quantityOrdered}</td>}
                         <td className="num">{l.quantityReceived}</td>
-                        <td className="num">{l.quantityInspected}</td>
                         <td className="num">
                           {l.quantityAccepted >= l.quantityOrdered ? (
                             <span className="badge badge-success">{l.quantityAccepted}</span>
@@ -527,22 +552,20 @@ export default function PurchaseOrderDetailPage() {
                           </td>
                         )}
                         {receivable &&
-                          (['received', 'inspected', 'accepted', 'rejected'] as const).map(
-                            (stage) => (
-                              <td key={stage}>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  placeholder="0"
-                                  aria-label={`+${stage}`}
-                                  value={stageValue(l.id, stage)}
-                                  onChange={(e) => setStage(l.id, stage, e.target.value)}
-                                  data-testid={`stage-${stage}`}
-                                  className="w-16"
-                                />
-                              </td>
-                            ),
-                          )}
+                          (['received', 'rejected'] as const).map((stage) => (
+                            <td key={stage}>
+                              <Input
+                                type="number"
+                                min={0}
+                                placeholder="0"
+                                aria-label={`+${stage}`}
+                                value={stageValue(l.id, stage)}
+                                onChange={(e) => setStage(l.id, stage, e.target.value)}
+                                data-testid={`stage-${stage}`}
+                                className="w-16"
+                              />
+                            </td>
+                          ))}
                       </tr>
                     );
                   })}
@@ -983,6 +1006,22 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
                     ]);
                     setResults([]);
                     setSearch('');
+                    // Pre-fill the catalog cost; the buyer can still edit it.
+                    void api<{ variantId: string; unitCostCents: number | null }[]>(
+                      `/v1/purchase-orders/unit-costs?variantIds=${encodeURIComponent(r.variantId)}`,
+                    )
+                      .then((rows) => {
+                        const cents = rows[0]?.unitCostCents;
+                        if (cents == null) return;
+                        setAdded((prev) =>
+                          prev.map((x) =>
+                            x.variantId === r.variantId && x.cost === '0.00'
+                              ? { ...x, cost: (cents / 100).toFixed(2) }
+                              : x,
+                          ),
+                        );
+                      })
+                      .catch(() => undefined);
                   }}
                 >
                   + {[r.productName, r.variantName].filter(Boolean).join(' — ')}

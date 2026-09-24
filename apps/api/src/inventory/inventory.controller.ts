@@ -15,7 +15,11 @@ import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
-import { loadProductStockByLocation, type StockTotals } from '../catalog/product-stock';
+import {
+  AS_IS_NON_SELLABLE_CONDITIONS,
+  loadProductStockByLocation,
+  type StockTotals,
+} from '../catalog/product-stock';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -52,6 +56,14 @@ interface LevelRow {
   reserved: number;
   floorSample: number;
   available: number;
+  /**
+   * As-Is pieces of this variant at this location still in review
+   * (product-stock.ts definitions): on hand, the damaged / parts ones that
+   * cannot be sold, and the rest that can.
+   */
+  asIsOnHand: number;
+  asIsAvailable: number;
+  asIsNonSellable: number;
   storageBinId: string | null;
   storageBinCode: string | null;
   updatedAt: Date;
@@ -197,10 +209,49 @@ export class InventoryController {
       .leftJoin(schema.storageBins, eq(schema.storageBins.id, schema.inventoryLevels.storageBinId))
       .where(where)
       .orderBy(asc(schema.products.name), asc(schema.productVariants.sku));
-    return rows.map((r) => ({
-      ...r,
-      available: Math.max(0, r.onHand - r.reserved - r.floorSample),
-    }));
+    // As-Is pieces still in review, per variant and location (owner
+    // 2026-09-24: Stock by location shows the three As-Is columns the
+    // Products list has, per store).
+    const asIsKey = (variantId: string, locationId: string) => `${variantId}:${locationId}`;
+    const asIsBy = new Map<string, { onHand: number; nonSellable: number }>();
+    const variantIds = [...new Set(rows.map((r) => r.variantId))];
+    for (let i = 0; i < variantIds.length; i += 1000) {
+      const chunk = variantIds.slice(i, i + 1000);
+      const asIs = await this.db
+        .select({
+          variantId: schema.asIsItems.variantId,
+          locationId: schema.asIsItems.locationId,
+          onHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
+          nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])}), 0)::int`,
+        })
+        .from(schema.asIsItems)
+        .where(
+          and(
+            eq(schema.asIsItems.status, 'pending_review'),
+            inArray(schema.asIsItems.variantId, chunk),
+            locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
+          ),
+        )
+        .groupBy(schema.asIsItems.variantId, schema.asIsItems.locationId);
+      for (const a of asIs) {
+        asIsBy.set(asIsKey(a.variantId, a.locationId), {
+          onHand: a.onHand,
+          nonSellable: a.nonSellable,
+        });
+      }
+    }
+    return rows.map((r) => {
+      const a = asIsBy.get(asIsKey(r.variantId, r.locationId));
+      const asIsOnHand = a?.onHand ?? 0;
+      const asIsNonSellable = a?.nonSellable ?? 0;
+      return {
+        ...r,
+        available: Math.max(0, r.onHand - r.reserved - r.floorSample),
+        asIsOnHand,
+        asIsAvailable: Math.max(0, asIsOnHand - asIsNonSellable),
+        asIsNonSellable,
+      };
+    });
   }
 
   /**

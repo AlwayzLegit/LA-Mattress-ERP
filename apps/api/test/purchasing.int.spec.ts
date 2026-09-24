@@ -416,6 +416,26 @@ describe('Reorder automation', () => {
     expect(line.unitCostCents).toBe(1500);
   });
 
+  it('A new PO line starts at the catalog cost (unit-costs lookup)', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/v1/purchase-orders/unit-costs?variantIds=${lowVariantId},${lowVariantId}`)
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(res.body).toEqual([{ variantId: lowVariantId, unitCostCents: 1500 }]);
+    await request(app.getHttpServer())
+      .get('/v1/purchase-orders/unit-costs?variantIds=not-a-uuid')
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId)
+      .expect(400);
+    // Cost is purchasing data: a cashier without purchase_orders.create is refused.
+    await request(app.getHttpServer())
+      .get(`/v1/purchase-orders/unit-costs?variantIds=${lowVariantId}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .expect(403);
+  });
+
   it('Without an explicit qty, suggestion tops up to 2× the point', async () => {
     const patch = await request(app.getHttpServer())
       .patch(`/v1/products/variants/${lowVariantId}/reorder`)

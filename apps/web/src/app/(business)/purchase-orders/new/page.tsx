@@ -218,6 +218,17 @@ function NewPurchaseOrderInner() {
     ]);
     setSearch('');
     setResults([]);
+    // Pre-fill the catalog cost (owner 2026-09-24); the buyer can still edit it.
+    void fetchUnitCost(v.variantId).then((cents) => {
+      if (cents == null) return;
+      setLines((prev) =>
+        prev.map((l) =>
+          l.variantId === v.variantId && !l.orderLineId && l.unitCostStr === ''
+            ? { ...l, unitCostStr: (cents / 100).toFixed(2) }
+            : l,
+        ),
+      );
+    });
   }
 
   function setLine(index: number, patch: Partial<Line>) {
@@ -624,6 +635,18 @@ function NewPurchaseOrderInner() {
       </form>
     </div>
   );
+}
+
+/** The catalog cost a new PO line starts at, or null when none is on file. */
+async function fetchUnitCost(variantId: string): Promise<number | null> {
+  try {
+    const rows = await api<{ variantId: string; unitCostCents: number | null }[]>(
+      `/v1/purchase-orders/unit-costs?variantIds=${encodeURIComponent(variantId)}`,
+    );
+    return rows[0]?.unitCostCents ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export default function NewPurchaseOrderPage() {

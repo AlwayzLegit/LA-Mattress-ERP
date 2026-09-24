@@ -45,6 +45,9 @@ interface Level {
   reserved: number;
   floorSample: number;
   available: number;
+  asIsOnHand: number;
+  asIsAvailable: number;
+  asIsNonSellable: number;
   storageBinId: string | null;
   storageBinCode: string | null;
 }
@@ -249,6 +252,30 @@ export default function InventoryPage() {
       num: true,
       sortValue: (l) => l.available,
       render: (l) => l.available,
+    },
+    {
+      id: 'asIsOnHand',
+      label: 'As-Is on hand',
+      num: true,
+      title: 'As-Is pieces here still in review',
+      sortValue: (l) => l.asIsOnHand,
+      render: (l) => (l.asIsOnHand > 0 ? l.asIsOnHand : '—'),
+    },
+    {
+      id: 'asIsAvailable',
+      label: 'As-Is available',
+      num: true,
+      title: 'As-Is pieces here that can be sold',
+      sortValue: (l) => l.asIsAvailable,
+      render: (l) => (l.asIsAvailable > 0 ? l.asIsAvailable : '—'),
+    },
+    {
+      id: 'asIsNonSellable',
+      label: 'As-Is non-sellable',
+      num: true,
+      title: 'As-Is pieces here marked damaged or parts',
+      sortValue: (l) => l.asIsNonSellable,
+      render: (l) => (l.asIsNonSellable > 0 ? l.asIsNonSellable : '—'),
     },
     {
       id: 'bin',

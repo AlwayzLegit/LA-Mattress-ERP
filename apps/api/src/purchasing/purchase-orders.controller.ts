@@ -194,6 +194,8 @@ interface PoReceiveResult extends PoDetail {
   unblockedOrders: { orderId: string; number: string; units: number }[];
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @TenantScoped()
 @Controller('v1/purchase-orders')
 export class PurchaseOrdersController {
@@ -308,6 +310,39 @@ export class PurchaseOrdersController {
       ReturnType<PurchaseOrdersController['reorderSuggestions']>
     >['vendors'];
     return { vendors };
+  }
+
+  /**
+   * The cost a new PO line starts at, per variant: the catalog cost
+   * (`product_variants.cost_cents`, the STORIS replacement cost the
+   * catalog import loads). The PO writer pre-fills Unit cost with it
+   * and the buyer can still change it (owner 2026-09-24). Up to 200 ids
+   * per call; a variant with no cost on file comes back as null.
+   */
+  @Get('unit-costs')
+  @RequirePermission('purchase_orders.create')
+  async unitCosts(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Query('variantIds') variantIdsRaw?: string,
+  ): Promise<{ variantId: string; unitCostCents: number | null }[]> {
+    const ids = [
+      ...new Set(
+        (variantIdsRaw ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (ids.length === 0) return [];
+    if (ids.length > 200) throw new BadRequestException('At most 200 variantIds per call');
+    if (!ids.every((id) => UUID_RE.test(id))) {
+      throw new BadRequestException('variantIds must be UUIDs');
+    }
+    const rows = await this.db
+      .select({ variantId: schema.productVariants.id, costCents: schema.productVariants.costCents })
+      .from(schema.productVariants)
+      .where(inArray(schema.productVariants.id, ids));
+    return rows.map((r) => ({ variantId: r.variantId, unitCostCents: r.costCents ?? null }));
   }
 
   /**

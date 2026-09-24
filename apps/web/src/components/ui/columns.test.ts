@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { applySavedOrder, compareSortValues, moveId, sortRows, type ColumnDef } from './columns';
 
 describe('column order', () => {
-  it('keeps saved order, drops ids that no longer exist, appends new ones', () => {
-    expect(applySavedOrder(['c', 'a', 'zzz'], ['a', 'b', 'c', 'd'])).toEqual(['c', 'a', 'b', 'd']);
+  it('keeps saved order, drops ids that no longer exist, slots new ones beside their neighbour', () => {
+    expect(applySavedOrder(['c', 'a', 'zzz'], ['a', 'b', 'c', 'd'])).toEqual(['c', 'd', 'a', 'b']);
+    // A column added after a saved layout lands next to its default
+    // neighbour, never after the trailing actions column.
+    expect(
+      applySavedOrder(
+        ['sku', 'product', 'available', 'actions'],
+        ['product', 'sku', 'available', 'asIsOnHand', 'asIsAvailable', 'actions'],
+      ),
+    ).toEqual(['sku', 'product', 'available', 'asIsOnHand', 'asIsAvailable', 'actions']);
+    expect(applySavedOrder(['b'], ['a', 'b'])).toEqual(['a', 'b']);
     expect(applySavedOrder(null, ['a', 'b'])).toEqual(['a', 'b']);
     expect(applySavedOrder('junk', ['a', 'b'])).toEqual(['a', 'b']);
     expect(applySavedOrder([], ['a', 'b'])).toEqual(['a', 'b']);
