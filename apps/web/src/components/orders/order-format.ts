@@ -1,4 +1,5 @@
 import type { StatusKey } from '@/lib/design-tokens';
+import { localToday } from '@/lib/date-range';
 
 /**
  * Orders (redesign Phase 6, README §3.2): the server's owner-facing
@@ -9,7 +10,7 @@ export function chipFor(
   displayStatus: string,
   opts: { deliveryDate?: string | null; today?: string } = {},
 ): { status: StatusKey; label: string } {
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
+  const today = opts.today ?? localToday();
   const open = ['Pending', 'On PO', 'Reserved', 'Scheduled'].includes(displayStatus);
   if (open && opts.deliveryDate && opts.deliveryDate < today) {
     return { status: 'risk', label: 'Past due' };

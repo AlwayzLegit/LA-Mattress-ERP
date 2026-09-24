@@ -29,7 +29,7 @@ import {
 } from '@/components/ui';
 import { DateRangePicker, useUrlDateRange } from '@/components/date-range-picker';
 import { api } from '@/lib/api';
-import { formatRange } from '@/lib/date-range';
+import { formatRange, localToday } from '@/lib/date-range';
 import { downloadFile } from '@/lib/download';
 import { Money } from '@/components/money';
 
@@ -658,7 +658,7 @@ const VALUATION_COLUMNS: ColumnDef<ValuationRow>[] = [
 ];
 
 export default function ReportsPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   // Page-level window (Shopify-style picker, carried in the URL as
   // ?range= / ?start=&end=); every range-scoped report below follows it.
   const [range, setRange, rangeReady] = useUrlDateRange('last7');

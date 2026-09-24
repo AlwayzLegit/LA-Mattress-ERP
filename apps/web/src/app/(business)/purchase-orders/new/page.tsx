@@ -42,6 +42,8 @@ interface VariantRow {
 interface Line {
   variantId: string;
   description: string;
+  /** The item's SKU, shown in its own column so the buyer checks it against the vendor. */
+  sku: string | null;
   quantity: number;
   unitCostStr: string;
   /** Set when the line buys for a specific customer order (queue pre-load). */
@@ -169,6 +171,7 @@ function NewPurchaseOrderInner() {
           .map((s) => ({
             variantId: s.variantId,
             description: [s.productName, s.variantName].filter(Boolean).join(' — '),
+            sku: s.sku,
             quantity: s.suggestedQty,
             unitCostStr: s.unitCostCents != null ? (s.unitCostCents / 100).toFixed(2) : '',
           })),
@@ -208,6 +211,7 @@ function NewPurchaseOrderInner() {
       {
         variantId: v.variantId,
         description: [v.productName, v.variantName].filter(Boolean).join(' — '),
+        sku: v.sku,
         quantity: 1,
         unitCostStr: '',
       },
@@ -376,6 +380,7 @@ function NewPurchaseOrderInner() {
                                 description: [s.productName, s.variantName]
                                   .filter(Boolean)
                                   .join(' — '),
+                                sku: s.sku,
                                 quantity: s.suggestedQty,
                                 unitCostStr:
                                   s.unitCostCents != null ? (s.unitCostCents / 100).toFixed(2) : '',
@@ -418,6 +423,7 @@ function NewPurchaseOrderInner() {
                               {
                                 variantId: q.variantId!,
                                 description: q.description,
+                                sku: q.sku,
                                 quantity: q.toOrder,
                                 unitCostStr:
                                   q.unitCostCents != null ? (q.unitCostCents / 100).toFixed(2) : '',
@@ -509,6 +515,7 @@ function NewPurchaseOrderInner() {
                   <thead>
                     <tr>
                       <th>Item</th>
+                      <th>SKU</th>
                       <th>Qty</th>
                       <th>Unit cost ($)</th>
                       <th className="num">Line total</th>
@@ -529,6 +536,9 @@ function NewPurchaseOrderInner() {
                                 <span className="badge badge-info">for {l.orderNumber}</span>
                               </>
                             )}
+                          </td>
+                          <td data-testid="po-line-sku">
+                            {l.sku ? <code>{l.sku}</code> : <span className="muted">—</span>}
                           </td>
                           <td>
                             <Input
@@ -570,7 +580,7 @@ function NewPurchaseOrderInner() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={3} className="num">
+                      <td colSpan={4} className="num">
                         <strong>Subtotal</strong>
                       </td>
                       <td className="num">

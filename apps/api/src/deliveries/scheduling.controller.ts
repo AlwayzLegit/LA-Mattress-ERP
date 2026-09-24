@@ -27,6 +27,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
+import { businessToday } from '../common/business-today';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
@@ -134,9 +135,6 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 function csv(v: string | undefined): string[] {
   return (v ?? '')
     .split(',')
@@ -162,7 +160,7 @@ export class SchedulingController {
   @Get('scheduling/search')
   @RequirePermission('deliveries.view')
   async search(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
     @Query('kind') kindRaw?: string,
     @Query('locationId') locationId?: string,
     @Query('toLocationId') toLocationId?: string,
@@ -184,7 +182,7 @@ export class SchedulingController {
       throw new BadRequestException(`kind must be one of ${KINDS.join(', ')}`);
     }
     const past = includePast === '1' || includePast === 'true';
-    const today = isoToday();
+    const today = await businessToday(this.db, tenant.businessId!);
     const start = past ? null : (ymd(startRaw, 'start') ?? today);
     const end = ymd(endRaw, 'end') ?? addDays(start ?? today, DEFAULT_SPAN_DAYS);
     if (start && end < start) throw new BadRequestException('end must not be before start');
@@ -214,7 +212,7 @@ export class SchedulingController {
   @Get('scheduling/confirm')
   @RequirePermission('deliveries.view')
   async confirm(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
     @Query('locationId') locationId?: string,
     @Query('date') dateRaw?: string,
     @Query('start') startRaw?: string,
@@ -228,7 +226,8 @@ export class SchedulingController {
     totals: ScheduleTotals & { confirmed: number };
   }> {
     const date = ymd(dateRaw, 'date');
-    const start = date ?? ymd(startRaw, 'start') ?? isoToday();
+    const start =
+      date ?? ymd(startRaw, 'start') ?? (await businessToday(this.db, tenant.businessId!));
     const end = date ?? ymd(endRaw, 'end') ?? start;
     if (end < start) throw new BadRequestException('end must not be before start');
     const statuses = csv(deliveryStatus);

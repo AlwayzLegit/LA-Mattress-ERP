@@ -36,6 +36,7 @@ import { api } from '@/lib/api';
 import { autofillFormFromZip, type ZipHit } from '@/lib/zip-lookup';
 import { downloadFile } from '@/lib/download';
 import { Money } from '@/components/money';
+import { localToday } from '@/lib/date-range';
 
 interface OpenOrderRow {
   id: string;
@@ -494,7 +495,7 @@ export default function CustomerDetailPage() {
 
   async function exportPurchases() {
     const start = '2000-01-01';
-    const end = new Date().toISOString().slice(0, 10);
+    const end = localToday();
     setExporting(true);
     try {
       await downloadFile(

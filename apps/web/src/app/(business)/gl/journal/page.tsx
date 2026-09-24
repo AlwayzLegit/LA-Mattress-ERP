@@ -27,6 +27,7 @@ import {
   TableWrap,
   useListColumns,
 } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 interface Account {
   id: string;
@@ -61,7 +62,7 @@ export default function GlJournalPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [businessDate, setBusinessDate] = useState(() => localToday());
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState<LineDraft[]>([emptyLine(), emptyLine()]);
 

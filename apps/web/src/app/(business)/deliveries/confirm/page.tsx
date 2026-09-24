@@ -30,6 +30,7 @@ import {
   TableWrap,
   useListColumns,
 } from '@/components/ui';
+import { localToday } from '@/lib/date-range';
 
 /**
  * STORIS Logistical Scheduling → "Confirm schedule" (A22 slice 5): the
@@ -93,7 +94,7 @@ const FLAGS: { key: keyof Row['flags']; label: string; title: string }[] = [
 ];
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 /** The Contact cell writes through `setContact`, so the columns are built per render. */

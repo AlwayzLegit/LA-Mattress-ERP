@@ -6062,3 +6062,38 @@ error reached the exception filter.
   select; flagged to the owner.
 - **Ops (owner):** SKU 4760005 already exists in the catalog — find it on Products with
   "Include inactive" on.
+
+### Checkpoint — 2026-09-24 (Deliver On refused today after 5 PM; undated deliveries were silent)
+
+Owner report (2026-09-23): the New Sale line's **Deliver on** calendar would not accept
+9/23 on 9/23 though the day was not full; a sale completed with no date never reached
+Deliveries, so it had to be found and scheduled from the order page.
+
+- **Cause.** Every "today" in the web app was `new Date().toISOString().slice(0, 10)` — the
+  **UTC** date. From 5 PM Pacific (4 PM in winter) that is already tomorrow, so the
+  register's Promised and Deliver on pickers set their earliest day to tomorrow, and the
+  dispatch, confirm-schedule and print-deliveries screens opened on tomorrow. The API's
+  scheduling search, confirm list and capacity defaults had the same UTC today.
+- **Fix.** All 15 web call sites use `localToday()` (`lib/date-range.ts`, the browser's
+  calendar date). The API's defaults read `businessToday()` (`common/business-today.ts`: the
+  date in the business's first active store's timezone; spec covers 5:30 PM PDT → still
+  9/23). Reproduced in Chromium on the register preview in `America/Los_Angeles` with the
+  clock at 2026-09-23 17:30: before, both pickers had `min=2026-09-24` and 9/23 was invalid;
+  after, `min=2026-09-23` and 9/23 is accepted.
+- **Undated deliveries.** The register still lets a delivery be written without a date (the
+  customer may not know yet), but now says so twice: a hint under Promised while it is blank
+  ("Blank = not on the Deliveries calendar until it is scheduled"), and a warning on the
+  completion summary naming the order, with a link to schedule it from the order page.
+  Tests: `business-today.spec.ts` (2); deliveries (19), scheduling (6), schedule (10) int specs
+  and web unit tests green.
+
+### Checkpoint — 2026-09-24 (Purchase orders: SKU column on the lines being written)
+
+Owner (screenshots of New purchase order → Lines, and the receiving table): "We need a SKU
+column in the Lines section where added pieces are, not just the description." The receiving
+table already showed the SKU after each item; the lines being written did not. New purchase
+order → **Lines** now has a **SKU** column between Item and Qty, filled from whichever source
+added the line (search, reorder suggestion, sold-not-in-stock queue); the subtotal row moves
+with it. The PO page's **Edit order** table gets the same column, for existing lines and ones
+added while editing. Checked in Chromium on a local stack: two items added, both SKUs shown in
+the new-PO Lines and again in Edit order after placing the order.

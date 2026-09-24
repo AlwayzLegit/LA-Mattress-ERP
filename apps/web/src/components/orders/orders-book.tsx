@@ -7,7 +7,7 @@ import { PenLine } from 'lucide-react';
 import { formatMoney, formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { useOptionalActingStore } from '@/lib/acting-store';
-import { rangeFor } from '@/lib/date-range';
+import { rangeFor, localToday } from '@/lib/date-range';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -360,7 +360,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
   if (f.q.trim()) chips.push({ key: 'q', label: `“${f.q.trim()}”`, remove: () => set('q', '') });
   const filtered = chips.length > 0;
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const today = useMemo(() => localToday(), []);
   const columns: ColumnDef<OrderListRow>[] = [
     {
       id: 'number',

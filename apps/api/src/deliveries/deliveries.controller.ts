@@ -15,6 +15,7 @@ import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
+import { businessToday } from '../common/business-today';
 import { TicketFlagsService } from './ticket-flags.service';
 import { ExceptionsService } from '../controls/exceptions.service';
 import { SecurityOverrideService } from '../controls/security-override.service';
@@ -32,10 +33,6 @@ import {
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
-
-function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /**
  * §7 route auto-suggestion: LA-area routes group naturally by zip
@@ -255,7 +252,10 @@ export class DeliveriesController {
       capacityUnits: number;
     }[];
   }> {
-    const start = from && !Number.isNaN(new Date(from).getTime()) ? from : isoToday();
+    const start =
+      from && !Number.isNaN(new Date(from).getTime())
+        ? from
+        : await businessToday(this.db, tenant.businessId!);
     const end = to && !Number.isNaN(new Date(to).getTime()) ? to : start;
     if (end < start) throw new BadRequestException('to must not be before from');
     const span =
