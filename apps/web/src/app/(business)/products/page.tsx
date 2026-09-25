@@ -329,6 +329,8 @@ export default function ProductsPage() {
   const [brands, setBrands] = useState<RefOption[]>([]);
   const [collections, setCollections] = useState<RefOption[]>([]);
   const [categories, setCategories] = useState<RefOption[]>([]);
+  /** Raw category rows so the Group filter can list a category's children. */
+  const [catFlat, setCatFlat] = useState<CategoryFlat[]>([]);
   const [asIsReasons, setAsIsReasons] = useState<ReasonCodeOption[]>([]);
   const [refsLoaded, setRefsLoaded] = useState(false);
   const [tick, setTick] = useState(0);
@@ -399,8 +401,15 @@ export default function ProductsPage() {
 
   useEffect(() => {
     void api<CategoryFlat[] | { flat: CategoryFlat[] }>('/v1/categories')
-      .then((r) => setCategories(categoryOptions(categoryList(r))))
-      .catch(() => setCategories([]));
+      .then((r) => {
+        const flat = categoryList(r);
+        setCatFlat(flat);
+        setCategories(categoryOptions(flat));
+      })
+      .catch(() => {
+        setCatFlat([]);
+        setCategories([]);
+      });
     void api<LocationRow[]>('/v1/business/locations')
       .then((l) => setLocations(l))
       .catch(() => setLocations([]));
@@ -504,6 +513,20 @@ export default function ProductsPage() {
     setCriteria(EMPTY_CRITERIA);
   }
 
+  // Group filter (owner 2026-09-25): the tree is two levels, so once a
+  // category is picked the Group select narrows to one of its children
+  // (Mattresses → Hybrid / Memory Foam / …). Picking a group just moves
+  // categoryId to the child, so the URL, API call and Clear behavior are
+  // exactly the single-select ones.
+  const selectedCat = catFlat.find((c) => c.id === categoryId);
+  const groupParentId = selectedCat?.parentId ?? categoryId;
+  const groupChoices = groupParentId
+    ? [...catFlat.filter((c) => c.parentId === groupParentId)].sort(
+        (a, b) => a.position - b.position || a.name.localeCompare(b.name),
+      )
+    : [];
+  const groupValue = selectedCat?.parentId ? categoryId : '';
+
   const hasCriteria = Object.keys(criteriaParams(criteria)).length > 0;
   const filtered = !!(
     q.trim() ||
@@ -589,6 +612,22 @@ export default function ProductsPage() {
               ))}
             </Select>
           </Field>
+          {groupChoices.length > 0 && (
+            <Field label="Group">
+              <Select
+                value={groupValue}
+                onChange={(e) => setCategoryId(e.target.value || groupParentId)}
+                data-testid="products-group"
+              >
+                <option value="">Any</option>
+                {groupChoices.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Size">
             <Select
               value={size}

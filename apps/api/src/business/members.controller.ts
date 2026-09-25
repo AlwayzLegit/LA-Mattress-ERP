@@ -55,6 +55,8 @@ interface InviteBody {
 interface UpdateMemberBody {
   roleId?: string;
   status?: 'active' | 'disabled';
+  /** The person's display name (users.name) — how receipts, dashboards and audit rows label them. */
+  displayName?: string;
   /** Sales-data visibility: 'store' limits sales surfaces to scopeLocationIds. */
   dataScope?: 'all' | 'store';
   /** Selling rights: 'approved' limits ringing sales to scopeLocationIds. */
@@ -504,8 +506,35 @@ export class MembersController {
       after.scopeLocationIds = ids;
     }
 
-    if (Object.keys(update).length === 0 && scopeChange === null) {
+    let nameChange: string | null = null;
+    if (body.displayName !== undefined) {
+      if (typeof body.displayName !== 'string' || !body.displayName.trim()) {
+        throw new BadRequestException('displayName must be a non-empty string');
+      }
+      if (body.displayName.trim().length > 120) {
+        throw new BadRequestException('displayName must be 120 characters or fewer');
+      }
+      nameChange = body.displayName.trim();
+    }
+
+    if (Object.keys(update).length === 0 && scopeChange === null && nameChange === null) {
       throw new BadRequestException('Nothing to update');
+    }
+
+    if (nameChange !== null) {
+      const [person] = await this.db
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, existing.userId))
+        .limit(1);
+      if ((person?.name ?? null) !== nameChange) {
+        await this.db
+          .update(schema.users)
+          .set({ name: nameChange })
+          .where(eq(schema.users.id, existing.userId));
+        before.displayName = person?.name ?? null;
+        after.displayName = nameChange;
+      }
     }
 
     if (scopeChange !== null) {

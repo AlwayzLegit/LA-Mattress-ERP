@@ -44,6 +44,20 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 
 const ADJUST_REASONS = new Set(['count_correction', 'damage', 'theft', 'other']);
 
+interface MinStockRow {
+  variantId: string;
+  productId: string;
+  productName: string;
+  variantName: string | null;
+  variantSku: string | null;
+  onHand: number;
+  available: number;
+  /** The location's minimum (STORIS per-store Min Stock); null = not managed. */
+  reorderPoint: number | null;
+  /** Units written business-wide per trailing week; index 0 = the last 7 days. */
+  weekly: number[];
+}
+
 interface LevelRow {
   variantId: string;
   locationId: string;
@@ -594,6 +608,209 @@ export class InventoryController {
       targetId: level.id,
       before: { storageBinId: level.storageBinId },
       after: { storageBinId, variantId: body.variantId, locationId: body.locationId },
+    });
+    return { updated: true };
+  }
+
+  /**
+   * Min-stock grid (owner 2026-09-25): one row per active variant with the
+   * chosen location's minimum (`inventory_levels.reorder_point`, the STORIS
+   * per-store Min Stock — until now only the catalog import could write it)
+   * beside trailing sales velocity. `weekly[w]` counts units written
+   * business-wide in trailing week w+1 (0 = the last 7 days), on the same
+   * written basis the sales-rate replenishment engine uses: POS sale lines
+   * plus order lines, quotes/cancels and legacy-imported documents
+   * excluded. Business-wide on purpose — a warehouse minimum serves every
+   * store's demand, not just walk-ins at the warehouse.
+   */
+  @Get('min-stock')
+  @RequirePermission('inventory.view')
+  async minStock(
+    @CurrentTenant() _tenant: RequestTenantContext,
+    @Query('locationId') locationId?: string,
+    @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('weeks') weeksRaw?: string,
+  ): Promise<{ weeks: number; rows: MinStockRow[] }> {
+    if (!locationId) throw new BadRequestException('locationId is required');
+    const weeks = Math.min(52, Math.max(4, Number.parseInt(weeksRaw ?? '', 10) || 4));
+
+    const filters = [];
+    const query = q?.trim();
+    if (query) {
+      const tsq = sql`websearch_to_tsquery('simple', ${query})`;
+      filters.push(
+        sql`(${schema.productVariants.searchTsv} @@ ${tsq}
+             OR ${schema.products.searchTsv} @@ ${tsq})`,
+      );
+    }
+    if (categoryId) {
+      // Two-level tree: a parent category includes its children.
+      const kids = await this.db
+        .select({ id: schema.categories.id })
+        .from(schema.categories)
+        .where(eq(schema.categories.parentId, categoryId));
+      filters.push(inArray(schema.products.categoryId, [categoryId, ...kids.map((k) => k.id)]));
+    }
+
+    const rows = await this.db
+      .select({
+        variantId: schema.productVariants.id,
+        productId: schema.products.id,
+        productName: schema.products.name,
+        variantName: schema.productVariants.name,
+        variantSku: schema.productVariants.sku,
+        onHand: sql<number>`COALESCE(${schema.inventoryLevels.onHand}, 0)::int`,
+        reserved: sql<number>`COALESCE(${schema.inventoryLevels.reserved}, 0)::int`,
+        floorSample: sql<number>`COALESCE(${schema.inventoryLevels.floorSample}, 0)::int`,
+        reorderPoint: schema.inventoryLevels.reorderPoint,
+      })
+      .from(schema.productVariants)
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .leftJoin(
+        schema.inventoryLevels,
+        and(
+          eq(schema.inventoryLevels.variantId, schema.productVariants.id),
+          eq(schema.inventoryLevels.locationId, locationId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.products.isActive, true),
+          eq(schema.productVariants.isActive, true),
+          ...filters,
+        ),
+      )
+      .orderBy(asc(schema.products.name), asc(schema.productVariants.sku));
+
+    // Sold units bucketed by trailing week, one grouped query per source.
+    const windowStart = sql`now() - make_interval(days => ${weeks * 7})`;
+    const saleWeek = sql<number>`floor(extract(epoch from (now() - ${schema.sales.createdAt})) / 604800)::int`;
+    const orderWeek = sql<number>`floor(extract(epoch from (now() - ${schema.orders.createdAt})) / 604800)::int`;
+    const [posSold, orderSold] = await Promise.all([
+      this.db
+        .select({
+          variantId: schema.saleLines.variantId,
+          week: saleWeek,
+          qty: sql<number>`COALESCE(SUM(${schema.saleLines.quantity}), 0)::int`,
+        })
+        .from(schema.saleLines)
+        .innerJoin(schema.sales, eq(schema.sales.id, schema.saleLines.saleId))
+        .where(
+          and(
+            sql`${schema.sales.status} IN ('completed', 'partially_refunded', 'refunded')`,
+            sql`${schema.sales.importedAt} IS NULL`,
+            sql`${schema.sales.createdAt} >= ${windowStart}`,
+          ),
+        )
+        .groupBy(schema.saleLines.variantId, saleWeek),
+      this.db
+        .select({
+          variantId: schema.orderLines.variantId,
+          week: orderWeek,
+          qty: sql<number>`COALESCE(SUM(${schema.orderLines.quantity}), 0)::int`,
+        })
+        .from(schema.orderLines)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+        .where(
+          and(
+            sql`${schema.orders.status} NOT IN ('quote', 'cancelled')`,
+            sql`${schema.orders.importedAt} IS NULL`,
+            sql`${schema.orders.createdAt} >= ${windowStart}`,
+          ),
+        )
+        .groupBy(schema.orderLines.variantId, orderWeek),
+    ]);
+    const weeklyBy = new Map<string, number[]>();
+    for (const s of [...posSold, ...orderSold]) {
+      if (!s.variantId || s.week < 0 || s.week >= weeks) continue;
+      const arr = weeklyBy.get(s.variantId) ?? Array.from({ length: weeks }, () => 0);
+      arr[s.week] = (arr[s.week] ?? 0) + s.qty;
+      weeklyBy.set(s.variantId, arr);
+    }
+
+    return {
+      weeks,
+      rows: rows.map((r) => ({
+        variantId: r.variantId,
+        productId: r.productId,
+        productName: r.productName,
+        variantName: r.variantName,
+        variantSku: r.variantSku,
+        onHand: r.onHand,
+        available: Math.max(0, r.onHand - r.reserved - r.floorSample),
+        reorderPoint: r.reorderPoint,
+        weekly: weeklyBy.get(r.variantId) ?? Array.from({ length: weeks }, () => 0),
+      })),
+    };
+  }
+
+  /**
+   * Set a location's minimum for one variant. Keeps the catalog-import
+   * invariant: the variant's own reorderPoint stays the sum of its
+   * per-location minimums, so REPL-040 suggestions keep working.
+   */
+  @Patch('min-stock')
+  @RequirePermission('inventory.adjust')
+  async setMinStock(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: { variantId?: string; locationId?: string; reorderPoint?: number | null },
+  ): Promise<{ updated: true }> {
+    if (!body.variantId || !body.locationId) {
+      throw new BadRequestException('variantId and locationId are required');
+    }
+    const point = body.reorderPoint ?? null;
+    if (point !== null && (!Number.isInteger(point) || point < 0)) {
+      throw new BadRequestException('reorderPoint must be a non-negative integer or null');
+    }
+    const [variant] = await this.db
+      .select({ id: schema.productVariants.id })
+      .from(schema.productVariants)
+      .where(eq(schema.productVariants.id, body.variantId))
+      .limit(1);
+    if (!variant) throw new NotFoundException('variant not found');
+
+    const [level] = await this.db
+      .select({ id: schema.inventoryLevels.id, reorderPoint: schema.inventoryLevels.reorderPoint })
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.variantId, body.variantId),
+          eq(schema.inventoryLevels.locationId, body.locationId),
+        ),
+      )
+      .limit(1);
+    const before = level?.reorderPoint ?? null;
+    if (level) {
+      await this.db
+        .update(schema.inventoryLevels)
+        .set({ reorderPoint: point, updatedAt: new Date() })
+        .where(eq(schema.inventoryLevels.id, level.id));
+    } else {
+      await this.db.insert(schema.inventoryLevels).values({
+        businessId: tenant.businessId!,
+        variantId: body.variantId,
+        locationId: body.locationId,
+        onHand: 0,
+        reserved: 0,
+        reorderPoint: point,
+      });
+    }
+    await this.db
+      .update(schema.productVariants)
+      .set({
+        reorderPoint: sql`(SELECT COALESCE(SUM(${schema.inventoryLevels.reorderPoint}), 0)::int FROM ${schema.inventoryLevels} WHERE ${schema.inventoryLevels.variantId} = ${body.variantId})`,
+      })
+      .where(eq(schema.productVariants.id, body.variantId));
+
+    await this.audit.log({
+      action: 'inventory.min_stock.set',
+      targetType: 'inventory_level',
+      targetId: body.variantId,
+      before: { reorderPoint: before, locationId: body.locationId },
+      after: { reorderPoint: point, locationId: body.locationId },
+      actorUserId: actor?.id ?? null,
     });
     return { updated: true };
   }

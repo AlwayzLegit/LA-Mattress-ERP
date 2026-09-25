@@ -64,6 +64,14 @@ export interface PendingCashRow {
   amountCents: number;
 }
 
+export interface PickupItemRef {
+  paymentId: string;
+  amountCents: number;
+  docKind: 'order' | 'sale' | 'service';
+  docId: string;
+  docNumber: string;
+}
+
 export interface PickupSummary {
   id: string;
   number: string;
@@ -75,6 +83,8 @@ export interface PickupSummary {
   slip: string | null;
   note: string | null;
   paymentCount: number;
+  /** The payments carried out, each pointing at its document (owner 2026-09-25). */
+  items: PickupItemRef[];
 }
 
 export interface CashPickupStore {
@@ -238,6 +248,54 @@ export class CashPickupsController {
   }
 
   /** The most recent posted pickup per store, with its payment count. */
+  /**
+   * The documents behind each pickup's payments, so a "picked up by …"
+   * line can name the orders and link into them (owner 2026-09-25).
+   */
+  private async pickupItems(pickupIds: string[]): Promise<Map<string, PickupItemRef[]>> {
+    const itemsBy = new Map<string, PickupItemRef[]>();
+    if (pickupIds.length === 0) return itemsBy;
+    const itemRows = await this.db
+      .select({
+        pickupId: schema.cashPickupItems.pickupId,
+        paymentId: schema.payments.id,
+        amountCents: schema.payments.amountCents,
+        orderId: schema.orders.id,
+        orderNumber: schema.orders.number,
+        saleId: schema.sales.id,
+        saleNumber: schema.sales.number,
+        serviceId: schema.serviceOrders.id,
+        serviceNumber: schema.serviceOrders.number,
+      })
+      .from(schema.cashPickupItems)
+      .innerJoin(schema.payments, eq(schema.payments.id, schema.cashPickupItems.paymentId))
+      .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
+      .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
+      .leftJoin(schema.serviceOrders, eq(schema.serviceOrders.id, schema.payments.serviceOrderId))
+      .where(inArray(schema.cashPickupItems.pickupId, pickupIds))
+      .orderBy(desc(schema.payments.amountCents));
+    for (const it of itemRows) {
+      const docKind: PickupItemRef['docKind'] = it.orderId
+        ? 'order'
+        : it.saleId
+          ? 'sale'
+          : 'service';
+      const docId = it.orderId ?? it.saleId ?? it.serviceId;
+      const docNumber = it.orderNumber ?? it.saleNumber ?? it.serviceNumber;
+      if (!docId || !docNumber) continue;
+      const list = itemsBy.get(it.pickupId) ?? [];
+      list.push({
+        paymentId: it.paymentId,
+        amountCents: it.amountCents,
+        docKind,
+        docId,
+        docNumber,
+      });
+      itemsBy.set(it.pickupId, list);
+    }
+    return itemsBy;
+  }
+
   private async lastPickups(
     businessId: string,
     storeIds: string[],
@@ -267,6 +325,7 @@ export class CashPickupsController {
         ),
       )
       .orderBy(schema.cashPickups.locationId, desc(schema.cashPickups.recordedAt));
+    const itemsBy = await this.pickupItems(rows.map((r) => r.id));
     for (const r of rows) {
       out.set(r.locationId, {
         id: r.id,
@@ -279,6 +338,7 @@ export class CashPickupsController {
         slip: r.slip,
         note: r.note,
         paymentCount: r.paymentCount,
+        items: itemsBy.get(r.id) ?? [],
       });
     }
     return out;
@@ -506,6 +566,7 @@ export class CashPickupsController {
       )
       .orderBy(desc(schema.cashPickups.recordedAt))
       .limit(limit);
+    const historyItems = await this.pickupItems(rows.map((r) => r.id));
     return {
       rows: rows.map((r) => ({
         id: r.id,
@@ -520,6 +581,7 @@ export class CashPickupsController {
         slip: r.slip,
         note: r.note,
         paymentCount: r.paymentCount,
+        items: historyItems.get(r.id) ?? [],
       })),
     };
   }
@@ -715,6 +777,13 @@ export class CashPickupsController {
         slip,
         note,
         paymentCount: selected.length,
+        items: selected.map((p) => ({
+          paymentId: p.paymentId,
+          amountCents: p.amountCents,
+          docKind: p.docKind,
+          docId: p.docId,
+          docNumber: p.docNumber,
+        })),
         locationId: store.id,
         paymentIds,
       },

@@ -10,6 +10,7 @@ import { usePathname } from 'next/navigation';
 const TABS = [
   { href: '/products', label: 'Products', exact: true },
   { href: '/products/stock', label: 'Stock by location' },
+  { href: '/products/minimums', label: 'Min stock' },
   { href: '/products/counts', label: 'Counts' },
   { href: '/products/receive', label: 'Receive' },
 ];
@@ -24,7 +25,8 @@ export function ProductsNav() {
     >
       {TABS.map((t) => {
         const active = t.exact
-          ? pathname === t.href || /^\/products\/(?!stock|counts|receive)[^/]+/.test(pathname)
+          ? pathname === t.href ||
+            /^\/products\/(?!stock|minimums|counts|receive)[^/]+/.test(pathname)
           : pathname === t.href || pathname.startsWith(`${t.href}/`);
         return (
           <Link
