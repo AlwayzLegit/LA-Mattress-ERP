@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { Field, StatusChip } from '@/components/ui';
 import type { StatusKey } from '@/lib/design-tokens';
 import { api } from '@/lib/api';
 import { usdWhole } from '../owner/owner-kit';
-import { dayShort, plural, stamp } from './kit';
+import { dayShort, docHref, plural, stamp } from './kit';
 import type { CashPickupQueue, CashPickupStore, PickupStatus, PostPickupResult } from './types';
 
 /**
@@ -580,9 +581,24 @@ export function CashOnHandPanel({
         </div>
       )}
 
-      {lp && store.payments.length === 0 && (
-        <div className="coh-history">
-          {plural(lp.paymentCount, 'payment')} picked up {stamp(lp.recordedAt, store.timezone)}
+      {lp && (
+        <div className="coh-history" data-testid="coh-last-pickup">
+          <div>
+            {lp.number} · {plural(lp.paymentCount, 'payment')} · {usdCents(lp.countedCents)} picked
+            up {stamp(lp.recordedAt, store.timezone)} by <strong>{lp.byName}</strong>
+          </div>
+          {lp.items?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px', marginTop: 2 }}>
+              {lp.items.map((it) => (
+                <span key={it.paymentId} data-testid="coh-pickup-item">
+                  <Link href={docHref(it.docKind, it.docId)} className="mono">
+                    {it.docNumber}
+                  </Link>{' '}
+                  <span style={{ color: 'var(--muted)' }}>{usdCents(it.amountCents)}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

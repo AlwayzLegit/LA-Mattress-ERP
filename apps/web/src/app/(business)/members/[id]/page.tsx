@@ -78,6 +78,8 @@ export default function MemberDetailPage() {
   const router = useRouter();
 
   const [member, setMember] = useState<Member | null>(null);
+  /** Draft for the display-name edit; null = not editing. */
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [access, setAccess] = useState<MemberAccess | null>(null);
@@ -294,6 +296,36 @@ export default function MemberDetailPage() {
       <Stack>
         <div className="grid gap-4 lg:grid-cols-2">
           <Card title="Role">
+            <Field
+              label="Display name"
+              hint="How receipts, dashboards, and pickup stamps label this person."
+            >
+              <div className="flex gap-2">
+                <Input
+                  value={nameDraft ?? member.name ?? ''}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  placeholder={member.email}
+                  maxLength={120}
+                  data-testid="member-display-name"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={
+                    nameDraft === null ||
+                    !nameDraft.trim() ||
+                    nameDraft.trim() === (member.name ?? '')
+                  }
+                  onClick={async () => {
+                    await patchMember({ displayName: nameDraft!.trim() }, 'Name updated.');
+                    setNameDraft(null);
+                  }}
+                  data-testid="member-display-name-save"
+                >
+                  Save
+                </Button>
+              </div>
+            </Field>
             <Field
               label="Assigned role"
               hint={

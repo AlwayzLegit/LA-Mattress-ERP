@@ -196,6 +196,14 @@ export interface PendingCashRow {
   amountCents: number;
 }
 
+export interface PickupItemRef {
+  paymentId: string;
+  amountCents: number;
+  docKind: 'order' | 'sale' | 'service';
+  docId: string;
+  docNumber: string;
+}
+
 export interface PickupSummary {
   id: string;
   number: string;
@@ -207,6 +215,8 @@ export interface PickupSummary {
   slip: string | null;
   note: string | null;
   paymentCount: number;
+  /** The payments carried out, each pointing at its document. */
+  items: PickupItemRef[];
 }
 
 export interface CashPickupStore {
