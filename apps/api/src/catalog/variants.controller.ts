@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -252,6 +253,7 @@ export class VariantsController {
   @Patch('variants/:id')
   @RequirePermission('products.update')
   async update(
+    @CurrentTenant() tenant: RequestTenantContext,
     @Param('id') id: string,
     @Body() body: UpdateVariantBody,
   ): Promise<{ updated: true }> {
@@ -264,6 +266,22 @@ export class VariantsController {
 
     if (body.priceCents !== undefined) {
       validateVariants([{ priceCents: body.priceCents, costCents: body.costCents ?? null }]);
+    }
+    // Owner 2026-09-25: cost is edited on the product screen. Someone who
+    // cannot see cost (no products.cost.view) must not be able to set it
+    // blind, and a cost-only change still has to be whole cents.
+    if (body.costCents !== undefined) {
+      if (
+        body.costCents !== null &&
+        (typeof body.costCents !== 'number' ||
+          !Number.isInteger(body.costCents) ||
+          body.costCents < 0)
+      ) {
+        throw new BadRequestException('costCents must be a whole number of cents ≥ 0, or null');
+      }
+      if (!tenant.isSuperAdmin && !tenant.permissions.has('products.cost.view')) {
+        throw new ForbiddenException('Changing cost needs the "View product cost" permission');
+      }
     }
 
     const update: Partial<typeof schema.productVariants.$inferInsert> = {};
