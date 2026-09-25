@@ -390,7 +390,10 @@ export default function WrittenSalesPage() {
 
   useEffect(() => {
     api<Location[]>('/v1/business/locations')
-      .then((l) => setLocations(l.filter((x) => (x.locationType ?? 'store') !== 'warehouse')))
+      // Every location, warehouses included — orders written while acting
+      // for a warehouse are attributed to it, so it must be filterable
+      // here (owner 2026-09-25).
+      .then(setLocations)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
