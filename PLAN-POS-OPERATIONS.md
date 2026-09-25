@@ -169,6 +169,12 @@ Single-screen order entry — customer, products, payment all on one screen (no 
   the system (existing Resend infra); replies route per admin setting.
 - Every PO line bought for a customer order carries that sales order # on the PO.
 - Receiving: single screen; per line Received → Inspected → Accepted.
+  _Amendment 2026-09-24 (owner):_ the screen asks for **+Received** and **+Rejected** only.
+  Receiving a unit includes inspecting and accepting it, so received units are recorded as
+  inspected and accepted except the ones entered as rejected, which go to the As-Is review
+  queue as before. A unit that arrives damaged but is kept (the vendor settles by credit) is
+  received, not rejected, with a receiving note. The API keeps the three stages; the screen
+  fills them, and also settles a line left half-staged by the old screen.
 - Partial receipts: accepted lines flip linked sales-order lines to Reserved;
   remainder stays open with "X of Y remaining"; PO auto-completes only when full.
 - Vendor invoices auto-match to the PO (by PO #) for approval.

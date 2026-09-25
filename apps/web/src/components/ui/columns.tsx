@@ -46,12 +46,25 @@ export interface ColumnDef<Row> {
 
 const KEY_PREFIX = 'jetnine.columns.';
 
-/** Merge a saved order with the current column set: unknown ids drop, new ids append. */
+/**
+ * Merge a saved order with the current column set: unknown ids drop, and a
+ * column added since the order was saved lands right after its neighbour
+ * in the default order (first when it has none), so a new column shows up
+ * where it belongs rather than after the row actions.
+ */
 export function applySavedOrder(saved: unknown, defaultOrder: string[]): string[] {
   if (!Array.isArray(saved)) return defaultOrder;
-  const known = saved.filter((id): id is string => defaultOrder.includes(String(id)));
-  if (known.length === 0) return defaultOrder;
-  return [...known, ...defaultOrder.filter((id) => !known.includes(id))];
+  const out = saved.filter((id): id is string => defaultOrder.includes(String(id)));
+  if (out.length === 0) return defaultOrder;
+  defaultOrder.forEach((id, i) => {
+    if (out.includes(id)) return;
+    const prev = defaultOrder
+      .slice(0, i)
+      .reverse()
+      .find((p) => out.includes(p));
+    out.splice(prev === undefined ? 0 : out.indexOf(prev) + 1, 0, id);
+  });
+  return out;
 }
 
 /**

@@ -45,6 +45,11 @@ interface Level {
   reserved: number;
   floorSample: number;
   available: number;
+  asIsOnHand: number;
+  asIsAvailable: number;
+  asIsNonSellable: number;
+  /** False when the row exists only for its As-Is pieces (no stock record to bin). */
+  hasLevel?: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
 }
@@ -251,25 +256,52 @@ export default function InventoryPage() {
       render: (l) => l.available,
     },
     {
+      id: 'asIsOnHand',
+      label: 'As-Is on hand',
+      num: true,
+      title: 'As-Is pieces here still in review',
+      sortValue: (l) => l.asIsOnHand,
+      render: (l) => (l.asIsOnHand > 0 ? l.asIsOnHand : '—'),
+    },
+    {
+      id: 'asIsAvailable',
+      label: 'As-Is available',
+      num: true,
+      title: 'As-Is pieces here that can be sold',
+      sortValue: (l) => l.asIsAvailable,
+      render: (l) => (l.asIsAvailable > 0 ? l.asIsAvailable : '—'),
+    },
+    {
+      id: 'asIsNonSellable',
+      label: 'As-Is non-sellable',
+      num: true,
+      title: 'As-Is pieces here marked damaged or parts',
+      sortValue: (l) => l.asIsNonSellable,
+      render: (l) => (l.asIsNonSellable > 0 ? l.asIsNonSellable : '—'),
+    },
+    {
       id: 'bin',
       label: 'Bin',
       sortValue: (l) => l.storageBinCode,
-      render: (l) => (
-        <Select
-          value={l.storageBinId ?? ''}
-          onChange={(e) => void assignBin(l, e.target.value || null)}
-          aria-label={`Bin for ${l.variantSku ?? l.productName}`}
-        >
-          <option value="">—</option>
-          {bins
-            .filter((b) => b.isActive || b.id === l.storageBinId)
-            .map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.code}
-              </option>
-            ))}
-        </Select>
-      ),
+      render: (l) =>
+        l.hasLevel === false ? (
+          <span className="muted">—</span>
+        ) : (
+          <Select
+            value={l.storageBinId ?? ''}
+            onChange={(e) => void assignBin(l, e.target.value || null)}
+            aria-label={`Bin for ${l.variantSku ?? l.productName}`}
+          >
+            <option value="">—</option>
+            {bins
+              .filter((b) => b.isActive || b.id === l.storageBinId)
+              .map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code}
+                </option>
+              ))}
+          </Select>
+        ),
     },
     {
       id: 'actions',

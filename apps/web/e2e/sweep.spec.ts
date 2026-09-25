@@ -240,10 +240,9 @@ test.describe('Day 9 — QA sweep', () => {
       .then((r) => r.json())) as { data?: { id: string }[] } | { id: string }[];
     const poId = Array.isArray(pos) ? pos[0]!.id : pos.data![0]!.id;
     await page.goto(`/purchase-orders/${poId}`);
-    // Staged receiving (P6): dock → inspected → accepted in one submit.
+    // Receiving (P6, owner amendment 2026-09-24): +Received alone receives,
+    // inspects and accepts the unit.
     await page.getByTestId('stage-received').first().fill('1');
-    await page.getByTestId('stage-inspected').first().fill('1');
-    await page.getByTestId('stage-accepted').first().fill('1');
     const receiveDone = page.waitForResponse(
       (res) => res.url().includes('/receiving') && res.request().method() === 'POST',
     );

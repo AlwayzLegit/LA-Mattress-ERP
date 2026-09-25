@@ -6097,3 +6097,29 @@ added the line (search, reorder suggestion, sold-not-in-stock queue); the subtot
 with it. The PO page's **Edit order** table gets the same column, for existing lines and ones
 added while editing. Checked in Chromium on a local stack: two items added, both SKUs shown in
 the new-PO Lines and again in Edit order after placing the order.
+
+### Checkpoint — 2026-09-24 (Purchasing: cost pre-fills, receiving is Received + Rejected; Stock by location shows As-Is)
+
+Three owner asks, one PR.
+
+- **Unit cost pre-fills.** A line added to a new purchase order from the item search (and an
+  item added in the PO page's Edit order) starts at the catalog cost —
+  `product_variants.cost_cents`, the STORIS replacement cost the import loads — and stays
+  editable. `GET /v1/purchase-orders/unit-costs?variantIds=…` (`purchase_orders.create`; a
+  cashier is refused). Reorder suggestions already carried the cost.
+- **Receiving is +Received and +Rejected.** "Receiving an item already includes inspecting and
+  accepting"; the API refused a receipt unless Inspected and Accepted were filled too. The
+  screen now asks for the two numbers and fills the API's three stages itself: received units
+  are inspected, and accepted except the rejected ones, which go to As-Is review as before. A
+  line left half-staged by the old screen settles on the next receipt. A damaged unit the
+  vendor settles by credit is received with a note. `PLAN-POS-OPERATIONS.md` §6 amended; the
+  sweep e2e fills only +Received.
+- **Stock by location: As-Is on hand / available / non-sellable** per store, the Products
+  list's definitions (`product-stock.ts`: pieces still in review; damaged or parts can't be
+  sold). `GET /v1/inventory/levels` carries them. A column added after someone rearranged a
+  table now lands beside its default neighbour instead of after the row actions
+  (`applySavedOrder`).
+  Checked in Chromium on a local stack: cost pre-filled at the catalog $123.45 and saved the
+  edited $120.00; receiving 2 with 1 rejected recorded received 2 / accepted 1 / rejected 1; the
+  rejected unit showed under As-Is on hand at that store. Tests: purchasing (62, +1 unit-costs),
+  product-stock (11, +1 per-location As-Is), inventory (21), web unit tests (98).
