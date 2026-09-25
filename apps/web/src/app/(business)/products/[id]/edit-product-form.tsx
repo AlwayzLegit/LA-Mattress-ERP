@@ -237,7 +237,12 @@ export function EditProductForm({
   // Deactivate) keeps what is being typed; a reload after our own save
   // starts clean from what the server now holds.
   useEffect(() => {
-    setDraft((cur) => (resetOnReload.current || same(cur, prevBaseline.current) ? baseline : cur));
+    setDraft((cur) =>
+      resetOnReload.current || same(cur, prevBaseline.current)
+        ? baseline
+        : // Keep the edits; an item that appeared meanwhile starts from the server.
+          { ...cur, variants: { ...baseline.variants, ...cur.variants } },
+    );
     resetOnReload.current = false;
     prevBaseline.current = baseline;
   }, [baseline]);
