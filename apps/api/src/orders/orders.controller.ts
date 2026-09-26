@@ -763,8 +763,14 @@ export class OrdersController {
         requestedDate: schema.orders.requestedDate,
         importedAt: schema.orders.importedAt,
         createdAt: schema.orders.createdAt,
+        // Owner 2026-09-26: the register's draft list says whose draft it is.
+        customerName: sql<
+          string | null
+        >`nullif(concat_ws(' ', ${schema.customers.firstName}, ${schema.customers.lastName}), '')`,
+        customerPhone: schema.customers.phone,
       })
       .from(schema.orders)
+      .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
       .where(filters.length > 0 ? and(...filters) : undefined)
       .orderBy(desc(schema.orders.createdAt), desc(schema.orders.id))
       .limit(limit + 1);

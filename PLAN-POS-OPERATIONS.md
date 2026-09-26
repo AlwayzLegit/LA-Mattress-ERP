@@ -646,6 +646,15 @@ itemization beyond the $0 Removal line · signature capture at POS · dark mode.
 
 ### 12.8 Report Cash Drawer Balancing Totals (amendment A12, owner 2026-09-02)
 
+**Owner amendment — 2026-09-26:** "Add name, phone number". Each order row
+shows salespeople by **name** (the user's name, else their email) instead of
+STORIS initials, and the customer's **phone** beside the customer name; the
+CSV gains a Customer phone column after Customer name. Line-level Entered by
+stays initials. Cancelling a **draft or quote** is not an adjustment: they
+were never written sales, so the ADJUSTMENT section leaves out any
+cancellation whose `order.cancel` audit row records `before.status` draft or
+quote (the register retires a draft each time it is re-saved or completed).
+
 **Print amendment — 2026-09-14:** Browser Print and PDF use the same compact
 AR.317 register, in Letter landscape, Courier 8pt with 9.2pt line spacing
 and 0.3-inch margins. Preserve every sample header/column, group and tender

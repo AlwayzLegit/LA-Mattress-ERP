@@ -67,6 +67,7 @@ interface Doc {
   time: string;
   customerCode: string | null;
   customerName: string | null;
+  customerPhone?: string | null;
   address: string | null;
   salespeople: string[];
   marketingCode: string | null;
@@ -705,9 +706,15 @@ export default function WrittenSalesPage() {
                                         <span className="text-muted">Customer name </span>
                                         {d.customerName ?? '—'}
                                       </span>
+                                      {d.customerPhone ? (
+                                        <span data-testid="ws-customer-phone">
+                                          <span className="text-muted">Phone </span>
+                                          {d.customerPhone}
+                                        </span>
+                                      ) : null}
                                       <span>
                                         <span className="text-muted">Salespeople </span>
-                                        {d.salespeople.length ? d.salespeople.join(',') : '—'}
+                                        {d.salespeople.length ? d.salespeople.join(', ') : '—'}
                                       </span>
                                       {d.marketingCode ? (
                                         <span>

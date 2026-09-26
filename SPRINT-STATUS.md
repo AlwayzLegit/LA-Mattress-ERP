@@ -6166,3 +6166,44 @@ Checked in Chromium on a local stack:
 
 Tests: catalog (35, +2: cost edit incl. 400s and the 403; category pick incl. unknown and
 malformed ids), web unit (edit-product-form: money parsing, margin).
+
+### Checkpoint — 2026-09-26 (Drafts: a way out without a copy; name and phone on drafts and Written Sales)
+
+Owner asks: "When there is a draft and you go into the draft, how do you get out without having
+to create another draft which duplicates it" and "Add name, phone number" (on a Written Sales
+screenshot listing four cancelled copies of one sale).
+
+- **New Sale: Close draft.** A resumed draft now shows **Close draft**, which returns to an empty
+  sale and leaves the draft as saved.
+  - With unsaved edits it asks first: "Discard your changes to SO-…? The draft stays as it was
+    last saved."
+  - The header shows whether the draft is saved or has unsaved changes.
+  - Leaving the page from an unchanged draft no longer warns; the draft is already saved.
+- **Save changes, not a copy.**
+  - The button reads **Save changes** on a resumed draft.
+  - Unchanged, it just closes (no POST).
+  - Changed, it writes the replacement and retires the old draft, and says so ("the draft is now
+    SO-… (replaces SO-…)").
+  - If retiring the old draft fails, a warning names it. Before, that failure was swallowed, which
+    is how true duplicates could be left behind.
+  - The draft on screen is no longer offered again under Resume a draft.
+- **Draft chips show the customer's name and phone.** `GET /v1/orders` (the plain list) now
+  carries `customerName` and `customerPhone`.
+- **Written Sales:**
+  - Salespeople appear by name, and each order shows the customer's phone. The CSV gains a
+    Customer phone column.
+  - Cancelled drafts and quotes are no longer ADJUSTMENT cancellations. They were never written
+    sales, yet each retired draft was being subtracted: the four "Cancellation" rows in the
+    owner's screenshot. `PLAN-POS-OPERATIONS.md` §12.9 amended.
+
+Checked in Chromium on a local stack, with a seeded draft:
+
+- Opening and closing it asked nothing and kept one draft.
+- Leaving the page from it unchanged asked nothing.
+- Changing the qty and closing asked, and the discard kept the saved qty at 1.
+- Save changes with no change sent no POST.
+- Save changes with a change replaced SO-2 with SO-3, leaving 2 drafts, not 3.
+- The chips read "Dana Draftson · 818-555-0142".
+
+Tests: written-sales (6; names, phone, CSV columns, a retired draft left out), orders (111;
+draft list carries the customer).

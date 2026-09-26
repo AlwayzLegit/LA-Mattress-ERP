@@ -196,6 +196,7 @@ async function seed() {
         businessId,
         firstName: 'Abe',
         lastName: 'Clements',
+        phone: '323-555-0198',
         addressesJson: [
           { line1: '644 N. Gramercy Pl.', city: 'Los Angeles', region: 'CA', postalCode: '90004' },
         ],
@@ -331,6 +332,31 @@ async function seed() {
         },
       ],
     );
+    // D-1: a draft written 10 days ago, retired today when the register
+    // re-saved it (cancel audit keeps before.status = draft). Never a
+    // written sale, so its cancellation takes nothing back.
+    const d1 = await mkOrder(
+      {
+        number: 'D-1',
+        locationId: bStoreId,
+        status: 'cancelled',
+        createdAt: atLocal(earlier, '09:15'),
+        cancelledAt: atLocal(day, '16:30'),
+      },
+      [{ variantId: king!.id, description: 'DRAFT COPY', quantity: 1, totalCents: 183_400 }],
+    );
+    await db.insert(schema.auditLogs).values({
+      businessId,
+      actorType: 'user',
+      action: 'order.cancel',
+      targetType: 'order',
+      targetId: d1.id,
+      changesJson: {
+        before: { status: 'draft' },
+        after: { status: 'cancelled', reason: 'superseded by completed New Sale' },
+      },
+      createdAt: atLocal(day, '16:30'),
+    });
     // Quote and imported orders are never written sales.
     await mkOrder({ number: 'Q-1', status: 'quote', createdAt: atLocal(day, '09:00') }, [
       { variantId: king!.id, description: 'QUOTE', quantity: 1, totalCents: 999_999 },
@@ -448,7 +474,8 @@ describe('Report Written Sales Dollars', () => {
       date: day,
       time: '11:09',
       customerName: 'CLEMENTS ABE',
-      salespeople: ['BF', 'GC'],
+      customerPhone: '323-555-0198',
+      salespeople: ['Ben Franklin', 'Grace Chen'],
       marketingCode: 'LABOR-DAY-TV',
       address: '644 N. GRAMERCY PL., LOS ANGELES, CA 90004',
       comments: [],
@@ -482,7 +509,7 @@ describe('Report Written Sales Dollars', () => {
       documentType: 'sale',
       number: 'S-0001',
       time: '13:05',
-      salespeople: ['GC'],
+      salespeople: ['Grace Chen'],
     });
     expect(register.totals).toMatchObject({ merchCents: 1_800, taxCents: 175, totalCents: 1_975 });
 
@@ -522,6 +549,8 @@ describe('Report Written Sales Dollars', () => {
     expect(adj.totals.merchCents).toBe(-16_400);
 
     const hancock = loc(r, 'Hancock Park');
+    // Only the written order's cancellation; the retired draft D-1 is absent.
+    expect(type(hancock, 'adjustments').documents.map((d) => d.number)).toEqual(['03108400']);
     const cancel = type(hancock, 'adjustments').documents[0]!;
     expect(cancel).toMatchObject({
       number: '03108400',
@@ -562,7 +591,7 @@ describe('Report Written Sales Dollars', () => {
       }).expect(200)
     ).body as WrittenSalesReport;
     const o1 = type(loc(flags, '201 Western'), 'orders').documents[0]!;
-    expect(o1.salespeople).toEqual(['BF']);
+    expect(o1.salespeople).toEqual(['Ben Franklin']);
     expect(o1.address).toBeNull();
     expect(o1.comments).toEqual(['Note: Leave at side door']);
 
@@ -602,7 +631,9 @@ describe('Report Written Sales Dollars', () => {
     expect(res.text).toContain('Total for order 01108587');
     expect(res.text).toContain('Grand total');
     const grand = res.text.split('\r\n').find((row: string) => row.startsWith('Grand total,'))!;
-    expect(grand.split(',').slice(13, 16)).toEqual(['2072.00', '666.00', '1406.00']);
+    expect(res.text).toContain('Customer name,Customer phone,Salespeople');
+    expect(res.text).toContain('CLEMENTS ABE,323-555-0198,"Ben Franklin, Grace Chen"');
+    expect(grand.split(',').slice(14, 17)).toEqual(['2072.00', '666.00', '1406.00']);
     const summary = await get({ format: 'csv', reportType: 'summary' }).expect(200);
     expect(summary.text).toContain(grand);
   });
