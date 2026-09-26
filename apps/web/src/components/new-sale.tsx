@@ -158,6 +158,9 @@ interface DraftRow {
   id: string;
   number: string;
   customerId: string;
+  /** Owner 2026-09-26: whose draft it is, at a glance. */
+  customerName?: string | null;
+  customerPhone?: string | null;
   totalCents: number;
   createdAt: string;
 }
@@ -221,6 +224,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [draftsOpen, setDraftsOpen] = useState(false);
   const [resumedDraft, setResumedDraft] = useState<{ id: string; number: string } | null>(null);
+  /**
+   * What the resumed draft looked like when it was opened (owner 2026-09-26:
+   * "when you go into the draft, how do you get out without having to create
+   * another draft which duplicates it"). Unchanged → Close draft just leaves
+   * it as saved; changed → Save changes replaces it, or Close discards them.
+   */
+  const [resumeBaseline, setResumeBaseline] = useState<string | null>(null);
+  const captureBaseline = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // --- customer ---
@@ -582,8 +593,72 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     };
   }, [lines, avail]);
 
-  // BA-0001: an in-progress sale must not vanish on a stray nav click.
-  const dirty = !done && (customer != null || lines.length > 0);
+  // Everything a saved draft keeps; a resumed draft is "changed" when this
+  // differs from the snapshot taken as it opened.
+  const saleSignature = useMemo(
+    () =>
+      JSON.stringify([
+        customer?.id ?? null,
+        locationId,
+        orderType,
+        fulfillment,
+        requestedDate,
+        deliveryInstructions,
+        notes,
+        orderDiscount,
+        installFee,
+        deliveryFee,
+        shipDiffers ? ship : null,
+        salespeople,
+        payments.length,
+        lines.map((l) => [
+          l.variantId,
+          l.description,
+          l.quantity,
+          l.unitPriceCents,
+          l.lineDiscountCents,
+          l.lineType,
+          l.fulfillmentMethod,
+          l.sourceLocationId,
+          l.deliveryDate,
+          l.addons,
+        ]),
+      ]),
+    [
+      customer,
+      locationId,
+      orderType,
+      fulfillment,
+      requestedDate,
+      deliveryInstructions,
+      notes,
+      orderDiscount,
+      installFee,
+      deliveryFee,
+      shipDiffers,
+      ship,
+      salespeople,
+      payments,
+      lines,
+    ],
+  );
+  useEffect(() => {
+    if (!captureBaseline.current || !resumedDraft) return;
+    captureBaseline.current = false;
+    setResumeBaseline(saleSignature);
+  }, [saleSignature, resumedDraft]);
+  const draftChanged =
+    resumedDraft != null && resumeBaseline != null && saleSignature !== resumeBaseline;
+  /** The draft on screen is not offered again under Resume a draft. */
+  const otherDrafts = drafts.filter((d) => d.id !== resumedDraft?.id);
+
+  // BA-0001: an in-progress sale must not vanish on a stray nav click. A
+  // resumed draft nobody has touched is already saved, so leaving is safe.
+  const dirty =
+    !done && (customer != null || lines.length > 0) && (resumedDraft == null || draftChanged);
+  const leaveWarning = resumedDraft
+    ? `Your changes to ${resumedDraft.number} aren't saved — leave anyway? The draft keeps what was last saved.`
+    : "This sale isn't saved — leave anyway? Use Save draft first to keep it.";
   useEffect(() => {
     if (!dirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -595,9 +670,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       if (!a) return;
       const href = a.getAttribute('href') ?? '';
       if (!href.startsWith('/') || href.startsWith('/pos')) return;
-      if (
-        !window.confirm("This sale isn't saved — leave anyway? Use Save draft first to keep it.")
-      ) {
+      if (!window.confirm(leaveWarning)) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -608,7 +681,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClickCapture, true);
     };
-  }, [dirty]);
+  }, [dirty, leaveWarning]);
 
   // ---------------------------------------------------------------- totals
 
@@ -1026,7 +1099,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           }),
       );
       setResumedDraft({ id, number: o.number });
-      toast.success(`${o.number} resumed — completing it replaces the draft`);
+      setResumeBaseline(null);
+      captureBaseline.current = true;
+      toast.success(`${o.number} opened — Close draft leaves it as saved`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -1036,6 +1111,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   async function submit(mode: 'complete' | 'draft') {
     setError(null);
+    // Saving a resumed draft nobody changed would only make a copy of it.
+    if (mode === 'draft' && resumedDraft && !draftChanged) {
+      const n = resumedDraft.number;
+      resetAll();
+      loadDrafts();
+      toast.success(`No changes — ${n} is still in Drafts as it was`);
+      return;
+    }
     if (!customer) {
       setError('Attach a customer first.');
       return;
@@ -1158,7 +1241,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           ],
         }),
       });
-      if (resumedDraft) await cancelDraft(resumedDraft.id);
+      if (resumedDraft && !(await cancelDraft(resumedDraft.id))) warnLeftover(resumedDraft.number);
       setDone({
         id: sale.id,
         number: sale.number,
@@ -1224,7 +1307,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         });
       }
     }
-    if (resumedDraft && resumedDraft.id !== order.id) await cancelDraft(resumedDraft.id);
+    if (resumedDraft && resumedDraft.id !== order.id && !(await cancelDraft(resumedDraft.id)))
+      warnLeftover(resumedDraft.number);
 
     // Take-with hand-over: completing a sale with take-with lines splits
     // them to a -A piece and completes it when stock and money allow.
@@ -1278,7 +1362,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
 
     if (mode === 'draft') {
-      toast.success(`Draft ${order.number} saved — visible store-wide`);
+      toast.success(
+        resumedDraft
+          ? `Changes saved — the draft is now ${order.number} (replaces ${resumedDraft.number})`
+          : `Draft ${order.number} saved — visible store-wide`,
+      );
       resetAll();
       loadDrafts();
     } else {
@@ -1460,11 +1548,41 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
   }
 
-  async function cancelDraft(id: string) {
-    await api(`/v1/orders/${id}/cancel`, {
+  /** Retires the draft a save or completion replaced; false when that failed. */
+  async function cancelDraft(id: string): Promise<boolean> {
+    return api(`/v1/orders/${id}/cancel`, {
       method: 'POST',
       body: JSON.stringify({ reason: 'superseded by completed New Sale' }),
-    }).catch(() => undefined);
+    })
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  /** A replaced draft that could not be retired would sit in Drafts as a duplicate: say so. */
+  function warnLeftover(oldNumber: string) {
+    toast.error(
+      `${oldNumber} could not be removed — delete it under Resume a draft so it isn't worked twice.`,
+      { duration: 10000 },
+    );
+  }
+
+  /**
+   * Leave a resumed draft without writing anything: it stays in Drafts
+   * exactly as last saved. Unsaved edits are thrown away after a confirm.
+   */
+  function closeDraft() {
+    if (!resumedDraft) return;
+    if (
+      draftChanged &&
+      !window.confirm(
+        `Discard your changes to ${resumedDraft.number}? The draft stays as it was last saved.`,
+      )
+    )
+      return;
+    const n = resumedDraft.number;
+    resetAll();
+    loadDrafts();
+    toast.success(`${n} is still in Drafts`);
   }
 
   function clearNewCustomer() {
@@ -1508,6 +1626,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     setPickerFrom(null);
     setZeroOk(false);
     setResumedDraft(null);
+    setResumeBaseline(null);
+    captureBaseline.current = false;
     setOrderType('sales_order');
     setError(null);
     setDone(null);
@@ -1712,22 +1832,35 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               : locked
                 ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
                 : resumedDraft
-                  ? 'Draft resumed · completing it replaces the draft'
+                  ? draftChanged
+                    ? `Editing draft ${resumedDraft.number} · unsaved changes`
+                    : `Draft ${resumedDraft.number} · saved`
                   : lines.length > 0
                     ? 'Save draft keeps this for the store'
                     : ' '}
           </span>
-          {!locked && !isExchange && drafts.length > 0 && (
+          {resumedDraft && !locked && !isExchange && (
+            <Button
+              size="sm"
+              onClick={closeDraft}
+              disabled={busy}
+              title="Back to an empty sale. The draft stays in Drafts as last saved."
+              data-testid="close-draft"
+            >
+              Close draft
+            </Button>
+          )}
+          {!locked && !isExchange && otherDrafts.length > 0 && (
             <Button size="sm" onClick={() => setDraftsOpen((v) => !v)} aria-expanded={draftsOpen}>
-              Resume a draft <span className="mono">{drafts.length}</span>
+              Resume a draft <span className="mono">{otherDrafts.length}</span>
             </Button>
           )}
         </div>
       </header>
 
-      {draftsOpen && !isExchange && drafts.length > 0 && (
+      {draftsOpen && !isExchange && otherDrafts.length > 0 && (
         <div className="reg-drafts" data-testid="draft-chips">
-          {drafts.map((d) => (
+          {otherDrafts.map((d) => (
             <div key={d.id} className="reg-draft-row">
               <button
                 type="button"
@@ -1735,6 +1868,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 onClick={() => void resumeDraft(d.id)}
               >
                 <span className="mono">{d.number}</span>
+                <span className="reg-draft-cust" data-testid="draft-customer">
+                  {d.customerName && d.customerName !== '—' ? d.customerName : 'No customer'}
+                  {d.customerPhone ? (
+                    <span className="reg-draft-phone"> · {d.customerPhone}</span>
+                  ) : null}
+                </span>
                 <span className="reg-draft-when">{ago(d.createdAt)}</span>
                 <span className="mono reg-draft-total">{formatMoney(d.totalCents)}</span>
               </button>
@@ -2774,8 +2913,15 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     onClick={() => void submit('draft')}
                     disabled={busy}
                     data-testid="save-draft"
+                    title={
+                      resumedDraft
+                        ? draftChanged
+                          ? `Save your changes; the draft replaces ${resumedDraft.number}`
+                          : `Nothing changed — ${resumedDraft.number} stays as it is`
+                        : undefined
+                    }
                   >
-                    Save draft
+                    {resumedDraft ? 'Save changes' : 'Save draft'}
                   </Button>
                 </div>
               )}

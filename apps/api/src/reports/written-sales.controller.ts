@@ -75,8 +75,19 @@ export interface WrittenDocument {
   customerId: string | null;
   customerCode: string | null;
   customerName: string | null;
+  /** Owner 2026-09-26: the customer's phone beside the name. */
+  customerPhone: string | null;
+  /** "Maria Gonzalez" — the on-screen spelling; `customerName` stays STORIS "GONZALEZ MARIA". */
+  customerDisplayName: string | null;
   address: string | null;
+  /** Owner 2026-09-26: salespeople by name, not STORIS initials. */
   salespeople: string[];
+  /**
+   * Who is credited with this document and how much (basis points), the
+   * commissions rule: a second salesperson with a split shares it,
+   * otherwise the first takes all. Independent of includeAllSalespeople.
+   */
+  salespersonShares: { name: string; bps: number }[];
   marketingCode: string | null;
   /** Adjustments: what kind of change this row records. */
   adjustmentKind: 'price_adjustment' | 'cancellation' | 'lines_added' | null;
@@ -165,6 +176,33 @@ function initials(name: string | null, email: string | null): string | null {
       .toUpperCase();
   }
   return email ? email.slice(0, 2).toUpperCase() : null;
+}
+
+/** A salesperson as the report shows them: their name, else their email. */
+function personName(name: string | null, email: string | null): string | null {
+  const n = (name ?? '').trim();
+  return n || email || null;
+}
+
+function customerDisplayName(first: string | null, last: string | null): string | null {
+  const s = [first, last].filter(Boolean).join(' ').trim();
+  return s || null;
+}
+
+/** Commission-style credit: split between two salespeople, else all to the first. */
+function sharesFor(
+  sp1: string | null,
+  sp2: string | null,
+  splitBps: number | null,
+): { name: string; bps: number }[] {
+  if (sp1 && sp2 && splitBps != null) {
+    return [
+      { name: sp1, bps: splitBps },
+      { name: sp2, bps: 10_000 - splitBps },
+    ].filter((x) => x.bps > 0);
+  }
+  const only = sp1 ?? sp2;
+  return only ? [{ name: only, bps: 10_000 }] : [];
 }
 
 function customerCode(id: string | null): string | null {
@@ -359,6 +397,7 @@ export class WrittenSalesController {
         'Time',
         'Customer code',
         'Customer name',
+        'Customer phone',
         'Salespeople',
         'Marketing code',
         'Address',
@@ -378,6 +417,7 @@ export class WrittenSalesController {
       const data: (string | number | null)[][] = [];
       const totalsRow = (label: string, t: WrittenTotals) => [
         label,
+        '',
         '',
         '',
         '',
@@ -411,7 +451,8 @@ export class WrittenSalesController {
               d.time,
               d.customerCode,
               d.customerName,
-              d.salespeople.join(','),
+              d.customerPhone,
+              d.salespeople.join(', '),
               d.marketingCode,
               d.address,
             ];
@@ -495,6 +536,7 @@ export class WrittenSalesController {
         customerId: schema.orders.customerId,
         customerFirst: schema.customers.firstName,
         customerLast: schema.customers.lastName,
+        customerPhone: schema.customers.phone,
         customerAddresses: schema.customers.addressesJson,
         addressLine1: schema.orders.addressLine1,
         addressLine2: schema.orders.addressLine2,
@@ -578,12 +620,11 @@ export class WrittenSalesController {
     }
 
     for (const o of orders) {
-      const sp1 = initials(o.sp1Name, o.sp1Email);
-      const sp2 = initials(o.sp2Name, o.sp2Email);
-      const salespeople = [sp1, opts.includeAllSalespeople ? sp2 : null].filter((s): s is string =>
-        Boolean(s),
-      );
-      const enteredBy = sp1 ?? sp2;
+      const salespeople = [
+        personName(o.sp1Name, o.sp1Email),
+        opts.includeAllSalespeople ? personName(o.sp2Name, o.sp2Email) : null,
+      ].filter((s): s is string => Boolean(s));
+      const enteredBy = initials(o.sp1Name, o.sp1Email) ?? initials(o.sp2Name, o.sp2Email);
       const wl: WrittenLine[] = (linesByOrder.get(o.id) ?? []).map((l) => {
         const cost = canSeeProfit ? l.quantity * (l.costCents ?? 0) : null;
         const profit = cost == null ? null : l.totalCents - cost;
@@ -625,8 +666,15 @@ export class WrittenSalesController {
         customerId: o.customerId,
         customerCode: customerCode(o.customerId),
         customerName: customerName(o.customerFirst, o.customerLast),
+        customerPhone: o.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(o.customerFirst, o.customerLast),
         address,
         salespeople,
+        salespersonShares: sharesFor(
+          personName(o.sp1Name, o.sp1Email),
+          personName(o.sp2Name, o.sp2Email),
+          o.splitBps,
+        ),
         marketingCode: o.marketingCode,
         adjustmentKind: null,
         adjustmentReason: null,
@@ -670,6 +718,7 @@ export class WrittenSalesController {
         customerId: schema.sales.customerId,
         customerFirst: schema.customers.firstName,
         customerLast: schema.customers.lastName,
+        customerPhone: schema.customers.phone,
         customerAddresses: schema.customers.addressesJson,
         discountCents: schema.sales.discountCents,
         taxCents: schema.sales.taxCents,
@@ -745,10 +794,15 @@ export class WrittenSalesController {
         customerId: s.customerId,
         customerCode: customerCode(s.customerId),
         customerName: customerName(s.customerFirst, s.customerLast),
+        customerPhone: s.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(s.customerFirst, s.customerLast),
         address: opts.includeAddress
           ? formatAddress(firstCustomerAddress(s.customerAddresses))
           : null,
-        salespeople: enteredBy ? [enteredBy] : [],
+        salespeople: [personName(s.associateName, s.associateEmail)].filter((x): x is string =>
+          Boolean(x),
+        ),
+        salespersonShares: sharesFor(personName(s.associateName, s.associateEmail), null, null),
         marketingCode: null,
         adjustmentKind: null,
         adjustmentReason: null,
@@ -803,6 +857,7 @@ export class WrittenSalesController {
       customerId: schema.orders.customerId,
       customerFirst: schema.customers.firstName,
       customerLast: schema.customers.lastName,
+      customerPhone: schema.customers.phone,
       customerAddresses: schema.customers.addressesJson,
       addressLine1: schema.orders.addressLine1,
       addressLine2: schema.orders.addressLine2,
@@ -822,6 +877,7 @@ export class WrittenSalesController {
       sp1Email: sp1u.email,
       sp2Name: sp2u.name,
       sp2Email: sp2u.email,
+      splitBps: schema.orders.splitBps,
     };
     const base = () =>
       this.db
@@ -860,8 +916,8 @@ export class WrittenSalesController {
       lines: WrittenLine[],
       totals: WrittenTotals,
     ): WrittenDocument => {
-      const sp1 = initials(o.sp1Name, o.sp1Email);
-      const sp2 = initials(o.sp2Name, o.sp2Email);
+      const sp1 = personName(o.sp1Name, o.sp1Email);
+      const sp2 = personName(o.sp2Name, o.sp2Email);
       const { date, time } = local(at, o.timezone);
       return {
         documentType: 'adjustment',
@@ -872,6 +928,8 @@ export class WrittenSalesController {
         customerId: o.customerId,
         customerCode: customerCode(o.customerId),
         customerName: customerName(o.customerFirst, o.customerLast),
+        customerPhone: o.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(o.customerFirst, o.customerLast),
         address: opts.includeAddress
           ? (formatAddress({
               line1: o.addressLine1,
@@ -884,6 +942,7 @@ export class WrittenSalesController {
         salespeople: [sp1, opts.includeAllSalespeople ? sp2 : null].filter((s): s is string =>
           Boolean(s),
         ),
+        salespersonShares: sharesFor(sp1, sp2, o.splitBps),
         marketingCode: o.marketingCode,
         adjustmentKind: kind,
         adjustmentReason: reason,
@@ -983,6 +1042,18 @@ export class WrittenSalesController {
         beforeWindow,
         inWindow(sql`${schema.orders.cancelledAt}`),
         isNull(schema.orders.importedAt),
+        // A draft or quote was never a written sale, so cancelling one
+        // (the register retires a draft each time it is re-saved or
+        // completed) takes nothing back (owner 2026-09-26). The cancel's
+        // audit row keeps the status it left.
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${schema.auditLogs} a
+          WHERE a.business_id = ${schema.orders.businessId}
+            AND a.action = 'order.cancel'
+            AND a.target_type = 'order'
+            AND a.target_id = ${schema.orders.id}::text
+            AND a.changes_json -> 'before' ->> 'status' IN ('draft', 'quote')
+        )`,
       ),
     );
     if (cancelled.length > 0) {

@@ -4058,7 +4058,7 @@ kbd.key {
 .reg-draft-btn {
   flex: 1;
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr) auto;
+  grid-template-columns: 110px minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 8px 10px;
@@ -4075,6 +4075,15 @@ kbd.key {
   background: var(--surface-2);
 }
 .reg-draft-when {
+  color: var(--muted);
+}
+.reg-draft-cust {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reg-draft-phone {
   color: var(--muted);
 }
 .reg-draft-total {

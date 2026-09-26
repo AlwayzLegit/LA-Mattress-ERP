@@ -646,6 +646,38 @@ itemization beyond the $0 Removal line · signature capture at POS · dark mode.
 
 ### 12.8 Report Cash Drawer Balancing Totals (amendment A12, owner 2026-09-02)
 
+**Owner amendment — 2026-09-26:** "Add name, phone number". Each order row
+shows salespeople by **name** (the user's name, else their email) instead of
+STORIS initials, and the customer's **phone** beside the customer name; the
+CSV gains a Customer phone column after Customer name. Line-level Entered by
+stays initials. Cancelling a **draft or quote** is not an adjustment: they
+were never written sales, so the ADJUSTMENT section leaves out any
+cancellation whose `order.cancel` audit row records `before.status` draft or
+quote (the register retires a draft each time it is re-saved or completed).
+
+**Owner amendment — 2026-09-26 (UX audit: "more helpful, useful, friendly,
+compact"):** the screen is reworked; the endpoint and CSV keep the STORIS
+columns.
+
+- One filter row that applies as it changes (no Run): date range, a store
+  checklist (none = all), All / Sales / Adjustments, the view, a search
+  (customer, phone, order #, salesperson; totals stay whole-report), and the
+  three include switches under **More**.
+- One headline row (Written, Sales, Avg sale, Merch, Gross profit $ and %,
+  Tax, Adjustments when any) replaces the six tiles and the Grand total card.
+- Three views. **Orders** (default): one row per order (number, time,
+  customer name + phone, salesperson, items, merch, cost, GP, GP %, tax,
+  total), opening to its items; cards on a phone. **Summary**: by store and
+  type, and **by salesperson**, credited like commissions (the document's
+  `salespersonShares`: a split sale by its split, else all to the first).
+  **Lines**: the STORIS body with a "By" (entered-by) column instead of
+  initials under Total, Charges / Misc fee only when non-zero, % on
+  percents, "— Default" variant suffixes dropped, and a one-line order
+  heading (customer code prints on paper only).
+- Print prints the view on screen (headline included); CSV is detail, or
+  totals from Summary. The endpoint adds `customerDisplayName` and
+  `salespersonShares`.
+
 **Print amendment — 2026-09-14:** Browser Print and PDF use the same compact
 AR.317 register, in Letter landscape, Courier 8pt with 9.2pt line spacing
 and 0.3-inch margins. Preserve every sample header/column, group and tender

@@ -350,7 +350,10 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
       .set('Cookie', cashierCookie)
       .set('X-Business-Id', businessId);
     expect(list.status).toBe(200);
-    expect(list.body.data.some((o: { id: string }) => o.id === res.body.id)).toBe(true);
+    const listed = list.body.data.find((o: { id: string }) => o.id === res.body.id);
+    expect(listed).toBeTruthy();
+    // The register's Resume a draft list shows whose draft it is.
+    expect(listed).toMatchObject({ customerName: 'Dana Reyes', customerPhone: null });
 
     const confirmed = await request(app.getHttpServer())
       .patch(`/v1/orders/${res.body.id}`)
