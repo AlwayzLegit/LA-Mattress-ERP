@@ -253,6 +253,7 @@ async function seed() {
         number: '01108587',
         createdAt: atLocal(day, '11:09'),
         secondSalespersonMembershipId: gc.membershipId,
+        splitBps: 6000,
         marketingCode: 'LABOR-DAY-TV',
         addressLine1: '644 N. Gramercy Pl.',
         addressCity: 'Los Angeles',
@@ -475,7 +476,12 @@ describe('Report Written Sales Dollars', () => {
       time: '11:09',
       customerName: 'CLEMENTS ABE',
       customerPhone: '323-555-0198',
+      customerDisplayName: 'Abe Clements',
       salespeople: ['Ben Franklin', 'Grace Chen'],
+      salespersonShares: [
+        { name: 'Ben Franklin', bps: 6000 },
+        { name: 'Grace Chen', bps: 4000 },
+      ],
       marketingCode: 'LABOR-DAY-TV',
       address: '644 N. GRAMERCY PL., LOS ANGELES, CA 90004',
       comments: [],
@@ -510,6 +516,7 @@ describe('Report Written Sales Dollars', () => {
       number: 'S-0001',
       time: '13:05',
       salespeople: ['Grace Chen'],
+      salespersonShares: [{ name: 'Grace Chen', bps: 10_000 }],
     });
     expect(register.totals).toMatchObject({ merchCents: 1_800, taxCents: 175, totalCents: 1_975 });
 
@@ -592,6 +599,8 @@ describe('Report Written Sales Dollars', () => {
     ).body as WrittenSalesReport;
     const o1 = type(loc(flags, '201 Western'), 'orders').documents[0]!;
     expect(o1.salespeople).toEqual(['Ben Franklin']);
+    // Credit still follows the split when only the first name is printed.
+    expect(o1.salespersonShares.map((x) => x.name)).toEqual(['Ben Franklin', 'Grace Chen']);
     expect(o1.address).toBeNull();
     expect(o1.comments).toEqual(['Note: Leave at side door']);
 

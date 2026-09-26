@@ -77,9 +77,17 @@ export interface WrittenDocument {
   customerName: string | null;
   /** Owner 2026-09-26: the customer's phone beside the name. */
   customerPhone: string | null;
+  /** "Maria Gonzalez" — the on-screen spelling; `customerName` stays STORIS "GONZALEZ MARIA". */
+  customerDisplayName: string | null;
   address: string | null;
   /** Owner 2026-09-26: salespeople by name, not STORIS initials. */
   salespeople: string[];
+  /**
+   * Who is credited with this document and how much (basis points), the
+   * commissions rule: a second salesperson with a split shares it,
+   * otherwise the first takes all. Independent of includeAllSalespeople.
+   */
+  salespersonShares: { name: string; bps: number }[];
   marketingCode: string | null;
   /** Adjustments: what kind of change this row records. */
   adjustmentKind: 'price_adjustment' | 'cancellation' | 'lines_added' | null;
@@ -174,6 +182,27 @@ function initials(name: string | null, email: string | null): string | null {
 function personName(name: string | null, email: string | null): string | null {
   const n = (name ?? '').trim();
   return n || email || null;
+}
+
+function customerDisplayName(first: string | null, last: string | null): string | null {
+  const s = [first, last].filter(Boolean).join(' ').trim();
+  return s || null;
+}
+
+/** Commission-style credit: split between two salespeople, else all to the first. */
+function sharesFor(
+  sp1: string | null,
+  sp2: string | null,
+  splitBps: number | null,
+): { name: string; bps: number }[] {
+  if (sp1 && sp2 && splitBps != null) {
+    return [
+      { name: sp1, bps: splitBps },
+      { name: sp2, bps: 10_000 - splitBps },
+    ].filter((x) => x.bps > 0);
+  }
+  const only = sp1 ?? sp2;
+  return only ? [{ name: only, bps: 10_000 }] : [];
 }
 
 function customerCode(id: string | null): string | null {
@@ -638,8 +667,14 @@ export class WrittenSalesController {
         customerCode: customerCode(o.customerId),
         customerName: customerName(o.customerFirst, o.customerLast),
         customerPhone: o.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(o.customerFirst, o.customerLast),
         address,
         salespeople,
+        salespersonShares: sharesFor(
+          personName(o.sp1Name, o.sp1Email),
+          personName(o.sp2Name, o.sp2Email),
+          o.splitBps,
+        ),
         marketingCode: o.marketingCode,
         adjustmentKind: null,
         adjustmentReason: null,
@@ -760,12 +795,14 @@ export class WrittenSalesController {
         customerCode: customerCode(s.customerId),
         customerName: customerName(s.customerFirst, s.customerLast),
         customerPhone: s.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(s.customerFirst, s.customerLast),
         address: opts.includeAddress
           ? formatAddress(firstCustomerAddress(s.customerAddresses))
           : null,
         salespeople: [personName(s.associateName, s.associateEmail)].filter((x): x is string =>
           Boolean(x),
         ),
+        salespersonShares: sharesFor(personName(s.associateName, s.associateEmail), null, null),
         marketingCode: null,
         adjustmentKind: null,
         adjustmentReason: null,
@@ -840,6 +877,7 @@ export class WrittenSalesController {
       sp1Email: sp1u.email,
       sp2Name: sp2u.name,
       sp2Email: sp2u.email,
+      splitBps: schema.orders.splitBps,
     };
     const base = () =>
       this.db
@@ -891,6 +929,7 @@ export class WrittenSalesController {
         customerCode: customerCode(o.customerId),
         customerName: customerName(o.customerFirst, o.customerLast),
         customerPhone: o.customerPhone ?? null,
+        customerDisplayName: customerDisplayName(o.customerFirst, o.customerLast),
         address: opts.includeAddress
           ? (formatAddress({
               line1: o.addressLine1,
@@ -903,6 +942,7 @@ export class WrittenSalesController {
         salespeople: [sp1, opts.includeAllSalespeople ? sp2 : null].filter((s): s is string =>
           Boolean(s),
         ),
+        salespersonShares: sharesFor(sp1, sp2, o.splitBps),
         marketingCode: o.marketingCode,
         adjustmentKind: kind,
         adjustmentReason: reason,
