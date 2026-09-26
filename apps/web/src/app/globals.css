@@ -5751,6 +5751,72 @@ select.picker-from {
 }
 
 /* ------------------------------------------------------------------
+   Edit product (owner 2026-09-25): one form, one Save. The bar sticks to
+   the bottom of the viewport while there are unsaved changes.
+   ------------------------------------------------------------------ */
+.pe-savebar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+}
+.pe-savebar-note {
+  flex: 1;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pe-savebar.is-dirty .pe-savebar-note {
+  color: var(--text);
+  font-weight: 500;
+}
+.pe-money {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pe-money > span {
+  color: var(--muted);
+}
+.pe-margin {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.pe-margin.is-low {
+  color: var(--danger);
+}
+.pe-inline-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.pe-readonly {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pe-cost-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+}
+.pe-cost-facts strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------
    Adjust stock dialog (canvas 6c): now → change → after.
    ------------------------------------------------------------------ */
 .adj-body {

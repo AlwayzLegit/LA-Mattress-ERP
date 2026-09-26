@@ -6123,3 +6123,46 @@ Three owner asks, one PR.
   edited $120.00; receiving 2 with 1 rejected recorded received 2 / accepted 1 / rejected 1; the
   rejected unit showed under As-Is on hand at that store. Tests: purchasing (62, +1 unit-costs),
   product-stock (11, +1 per-location As-Is), inventory (21), web unit tests (98).
+
+### Checkpoint — 2026-09-25 (Edit product: one form, one Save; cost is editable)
+
+Owner ask: "make the product edit screen more user friendly, also need to be able to change the
+item cost".
+
+- **One form instead of eight cards.** The Edit product tab used to save each field the moment
+  you left it, with no sign it had saved. Several values showed twice, and some rows were only
+  placeholders ("not modeled"). It is now four sections:
+  - Product details: description, second description, category, purchase status, brand and
+    collection (each with inline Add), tax class.
+  - Price & cost.
+  - Reordering & vendor.
+  - Packing & shipping.
+
+  A bar at the bottom says whether anything is unsaved, with **Discard** and **Save changes**.
+  Invalid entries are flagged and block Save. Leaving the tab or the page with unsaved edits
+  asks first. Images stay below the form.
+
+- **Cost is editable.** It sits in the Price & cost table next to each item's selling price,
+  with a live margin % (red below cost). The average, landed and freight cost facts are
+  underneath. The API (`PATCH /v1/products/variants/:id`) now:
+  - validates a cost-only change: whole cents ≥ 0, or null;
+  - refuses it with 403 without `products.cost.view`, so a role that can edit products but
+    not see cost cannot set it blind.
+- **Category is pickable** from the tree. The earlier note said "no editor for it yet".
+  `PATCH /v1/products/:id` refuses a `categoryId` that is not one of the business's categories.
+- The Availability tab's Merchandising card is read-only now: price, cost, margin, SRP and
+  status, with **Edit price & cost** jumping to the form. Two places no longer save the same
+  field. `activity/general-panel.tsx` is removed; its useful parts moved into the form.
+
+Checked in Chromium on a local stack:
+
+- Typing a cost moved the margin (90% → 15%) and showed "unsaved".
+- A blank description blocked Save.
+- Leaving the tab asked first.
+- Save sent one product PATCH and one variant PATCH, and "Changes saved" showed. A reload kept
+  the cost, second description and category.
+- The Merchandising card showed the new cost.
+- Discard restored the saved value.
+
+Tests: catalog (35, +2: cost edit incl. 400s and the 403; category pick incl. unknown and
+malformed ids), web unit (edit-product-form: money parsing, margin).

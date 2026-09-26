@@ -31,6 +31,7 @@ let app: INestApplication;
 let businessId: string;
 let ownerCookie = '';
 let cashierCookie = '';
+let editorCookie = '';
 
 async function resetTestDb() {
   const env = { ...process.env, DATABASE_URL: TEST_DB_URL };
@@ -95,8 +96,22 @@ async function seed(): Promise<void> {
         acceptedAt: new Date(),
       });
     }
+    // A custom role that may edit products but not see their cost.
+    const [editor] = await db
+      .insert(schema.roles)
+      .values({ businessId: biz!.id, name: 'Catalog Editor', isSystem: false })
+      .returning();
+    roles.set('Catalog Editor', editor!.id);
+    await db.insert(schema.rolePermissions).values(
+      ['products.view', 'products.update'].map((permission) => ({
+        roleId: editor!.id,
+        permission,
+      })),
+    );
+
     await makeUser('owner@catalog-test.local', 'Owner');
     await makeUser('cashier@catalog-test.local', 'Cashier');
+    await makeUser('editor@catalog-test.local', 'Catalog Editor');
   } finally {
     await sql.end({ timeout: 5 });
   }
@@ -133,6 +148,7 @@ beforeAll(async () => {
 
   ownerCookie = await captureCookie('owner@catalog-test.local');
   cashierCookie = await captureCookie('cashier@catalog-test.local');
+  editorCookie = await captureCookie('editor@catalog-test.local');
 });
 
 afterAll(async () => {
@@ -1024,5 +1040,88 @@ describe('Size and firmness (A22.2)', () => {
       .set(h())
       .send({ firmness: 'rock hard' })
       .expect(400);
+  });
+
+  it('the product screen edits cost: whole cents, and only for someone who can see cost', async () => {
+    const created = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        sku: 'COST-EDIT-1',
+        name: 'Cost edit mattress',
+        variants: [{ sku: 'COST-EDIT-1-Q', priceCents: 99900, costCents: 40000 }],
+      });
+    expect(created.status).toBe(201);
+    const variantId = created.body.variants[0].id as string;
+    const patch = (cookie: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .patch(`/v1/products/variants/${variantId}`)
+        .set('Cookie', cookie)
+        .set('X-Business-Id', businessId)
+        .send(body);
+
+    await patch(ownerCookie, { costCents: 42550 }).expect(200);
+    let detail = await request(app.getHttpServer())
+      .get(`/v1/products/${created.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(detail.body.variants[0].costCents).toBe(42550);
+
+    await patch(ownerCookie, { costCents: -1 }).expect(400);
+    await patch(ownerCookie, { costCents: 12.5 }).expect(400);
+    await patch(ownerCookie, { costCents: '100' }).expect(400);
+
+    // products.update without products.cost.view: price yes, cost no.
+    await patch(editorCookie, { priceCents: 89900 }).expect(200);
+    const blind = await patch(editorCookie, { costCents: 1 });
+    expect(blind.status).toBe(403);
+    detail = await request(app.getHttpServer())
+      .get(`/v1/products/${created.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(detail.body.variants[0]).toMatchObject({ priceCents: 89900, costCents: 42550 });
+
+    // Clearing the cost is allowed (no cost on file).
+    await patch(ownerCookie, { costCents: null }).expect(200);
+  });
+
+  it('the product screen picks the category; an unknown id is refused', async () => {
+    const parent = await request(app.getHttpServer())
+      .post('/v1/categories')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ name: 'Edit Screen Beds' });
+    expect(parent.status).toBe(201);
+    const child = await request(app.getHttpServer())
+      .post('/v1/categories')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ name: 'Hybrid', parentId: parent.body.id });
+    expect(child.status).toBe(201);
+    const product = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ sku: 'CAT-EDIT-1', name: 'Category edit mattress' });
+    expect(product.status).toBe(201);
+    const patch = (categoryId: string | null) =>
+      request(app.getHttpServer())
+        .patch(`/v1/products/${product.body.id}`)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({ categoryId });
+
+    const set = await patch(child.body.id).expect(200);
+    expect(set.body.categoryId).toBe(child.body.id);
+    expect(set.body.categoryPath).toBe('Edit Screen Beds › Hybrid');
+
+    await patch('00000000-0000-4000-8000-000000000000').expect(400);
+    await patch('not-a-uuid').expect(400);
+
+    const cleared = await patch(null).expect(200);
+    expect(cleared.body.categoryId).toBeNull();
   });
 });

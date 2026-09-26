@@ -53,6 +53,8 @@ import type { RequestTenantContext } from '../tenancy/request-context';
 
 /** Connector syncs write import batches under their provider name. */
 const CONNECTOR_SOURCES = new Set(['shopify', 'woocommerce', 'wix']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function isFileImport(source: string | null): boolean {
   return source != null && !CONNECTOR_SOURCES.has(source.toLowerCase());
 }
@@ -1110,6 +1112,21 @@ export class CatalogProductsController {
       after.description = body.description;
     }
     if (body.categoryId !== undefined && body.categoryId !== existing.categoryId) {
+      // The product screen now picks the category (owner 2026-09-25); an id
+      // that is not one of this business's categories is refused rather
+      // than stored.
+      if (body.categoryId !== null) {
+        const known =
+          UUID_RE.test(body.categoryId) &&
+          (
+            await this.db
+              .select({ id: schema.categories.id })
+              .from(schema.categories)
+              .where(eq(schema.categories.id, body.categoryId))
+              .limit(1)
+          ).length > 0;
+        if (!known) throw new BadRequestException('categoryId is not a category of this business');
+      }
       update.categoryId = body.categoryId;
       before.categoryId = existing.categoryId;
       after.categoryId = body.categoryId;

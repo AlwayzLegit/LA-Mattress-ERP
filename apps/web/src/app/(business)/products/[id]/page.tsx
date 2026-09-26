@@ -1,15 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   centsToInputString,
-  FIRMNESS_LEVELS,
-  MATTRESS_SIZES,
   PRODUCT_PURCHASE_STATUS_LABELS,
-  PRODUCT_PURCHASE_STATUSES,
   type ProductPurchaseStatus,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
@@ -23,7 +20,6 @@ import { StatusChip } from '@/components/ui';
 import type { PurchaseOrderRow } from './activity/types';
 import { AsIsPanel } from './activity/as-is-panel';
 import { AtpCard } from './activity/atp-card';
-import { GeneralPanel } from './activity/general-panel';
 import { InventoryDetailPanel } from './activity/inventory-detail-panel';
 import { fmtDate } from './activity/kit';
 import { OpenOrdersPanel } from './activity/open-orders-panel';
@@ -33,19 +29,15 @@ import { SerialsPanel } from './activity/serials-panel';
 import { SummaryPanel } from './activity/summary-panel';
 import { TransfersPanel } from './activity/transfers-panel';
 import { PRODUCT_TABS, type AtpResult, type ProductTab, type Shipping } from './activity/types';
+import { EditProductForm, marginPercent, type RefEntity } from './edit-product-form';
 import {
   Alert,
   BackLink,
   Button,
   Card,
-  Field,
-  FormGrid,
-  Input,
   KeyValue,
   LoadingRows,
-  MirrorValue,
   PageHeader,
-  Select,
   Stack,
   StatGrid,
   StatTile,
@@ -69,10 +61,6 @@ interface Variant {
   reorderQty: number | null;
   preferredVendorId: string | null;
   vendorSku: string | null;
-}
-interface Vendor {
-  id: string;
-  name: string;
 }
 interface ProductImage {
   id: string;
@@ -112,6 +100,7 @@ interface Product {
   name: string;
   description: string | null;
   taxClassId: string | null;
+  categoryId: string | null;
   brandId: string | null;
   collectionId: string | null;
   isActive: boolean;
@@ -140,11 +129,6 @@ interface Product {
   stock: { totals: StockTotals; byLocation: LocationStockRow[] };
 }
 
-interface RefEntity {
-  id: string;
-  name: string;
-  isActive: boolean;
-}
 interface TaxClass {
   id: string;
   name: string;
@@ -163,8 +147,9 @@ export default function ProductDetailPage() {
   const [taxClasses, setTaxClasses] = useState<TaxClass[]>([]);
   const [brands, setBrands] = useState<RefEntity[]>([]);
   const [collections, setCollections] = useState<RefEntity[]>([]);
-  const [newBrand, setNewBrand] = useState('');
-  const [newCollection, setNewCollection] = useState('');
+  // Unsaved edits on the Edit product tab: leaving the tab asks first.
+  const [editDirty, setEditDirty] = useState(false);
+  const onDirtyChange = useCallback((d: boolean) => setEditDirty(d), []);
   const [error, setError] = useState<string | null>(null);
   // A21: the STORIS View Product Activity section list; the picked one
   // lives in the URL so a reload or a shared link lands on the same tab.
@@ -204,6 +189,14 @@ export default function ProductDetailPage() {
   }, []);
 
   function pickTab(next: ProductTab) {
+    if (
+      tab === 'general' &&
+      next !== 'general' &&
+      editDirty &&
+      !confirm('You have unsaved changes to this product. Leave without saving?')
+    )
+      return;
+    if (next !== 'general') setEditDirty(false);
     setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set('tab', next);
@@ -237,76 +230,9 @@ export default function ProductDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function setTaxClass(taxClassId: string | null) {
-    try {
-      await api(`/v1/products/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ taxClassId }),
-      });
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function patchProduct(patch: Record<string, unknown>) {
     try {
       await api(`/v1/products/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function createAndAssign(kind: 'brand' | 'collection', name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    try {
-      const created = await api<{ id: string }>(
-        kind === 'brand' ? '/v1/brands' : '/v1/collections',
-        {
-          method: 'POST',
-          body: JSON.stringify({ name: trimmed }),
-        },
-      );
-      await api(`/v1/products/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(
-          kind === 'brand' ? { brandId: created.id } : { collectionId: created.id },
-        ),
-      });
-      if (kind === 'brand') setNewBrand('');
-      else setNewCollection('');
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  // A22.2: size and firmness live on the variant; any spelling the API
-  // knows ("cal king", "CK") lands as the canonical label.
-  async function setVariantSizing(variantId: string, patch: { size?: string; firmness?: string }) {
-    try {
-      await api(`/v1/products/variants/${variantId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          ...(patch.size !== undefined ? { size: patch.size || null } : {}),
-          ...(patch.firmness !== undefined ? { firmness: patch.firmness || null } : {}),
-        }),
-      });
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function setVariantPrice(variantId: string, dollars: string) {
-    try {
-      const cents = Math.round(Number(dollars) * 100);
-      await api(`/v1/products/variants/${variantId}/price`, {
-        method: 'PATCH',
-        body: JSON.stringify({ priceCents: cents }),
-      });
       void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -433,33 +359,6 @@ export default function ProductDetailPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
-  }
-
-  /**
-   * Sends the reader to the card that actually owns a value the Descriptive
-   * card only mirrors (owner 2026-09-21). Scrolls it into view and flashes
-   * its outline, so the jump is visible rather than a silent reposition.
-   */
-  function JumpTo({ to, children }: { to: string; children: ReactNode }) {
-    return (
-      <button
-        type="button"
-        className="btn-link"
-        data-testid={`jump-${to}`}
-        onClick={() => {
-          const el = document.getElementById(to);
-          if (!el) return;
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.classList.remove('is-jump-target');
-          // Restart the animation even when the same card is jumped to twice.
-          void el.offsetWidth;
-          el.classList.add('is-jump-target');
-          window.setTimeout(() => el.classList.remove('is-jump-target'), 1600);
-        }}
-      >
-        {children}
-      </button>
-    );
   }
 
   function primaryVariant(product: Product): Variant | undefined {
@@ -764,79 +663,58 @@ export default function ProductDetailPage() {
                 <StatTile label="Total PO" value={p.stock.totals.totalPo} />
               </StatGrid>
 
-              <Card title="Merchandising" data-testid="product-merchandising">
+              <Card
+                title="Merchandising"
+                data-testid="product-merchandising"
+                actions={
+                  <Button size="sm" onClick={() => pickTab('general')} data-testid="merch-edit">
+                    Edit price & cost
+                  </Button>
+                }
+              >
                 {(() => {
                   const v = primaryVariant(p);
+                  const m = marginPercent(v?.priceCents, v?.costCents);
                   return (
                     <KeyValue
                       rows={[
                         {
                           label: 'Selling price',
                           value: v ? (
-                            <Input
-                              defaultValue={centsToInputString(v.priceCents)}
-                              type="number"
-                              step="0.01"
-                              aria-label="Selling price"
-                              data-testid="selling-price"
-                              onBlur={(e) => {
-                                if (e.target.value !== centsToInputString(v.priceCents)) {
-                                  void setVariantPrice(v.id, e.target.value);
-                                }
-                              }}
-                              className="w-28"
-                            />
+                            <span data-testid="selling-price">
+                              <Money cents={v.priceCents} />
+                            </span>
                           ) : (
                             '—'
                           ),
                         },
                         {
-                          label: 'Sales margin cost',
-                          value: v?.costCents != null ? <Money cents={v.costCents} /> : costHidden,
+                          label: 'Cost',
+                          value:
+                            v?.costCents != null ? (
+                              <span data-testid="merch-cost">
+                                <Money cents={v.costCents} />
+                              </span>
+                            ) : (
+                              costHidden
+                            ),
                         },
+                        { label: 'Margin', value: m != null ? `${m}%` : '—' },
                         {
                           label: 'Suggested retail price',
-                          value: (
-                            <Input
-                              defaultValue={
-                                p.suggestedRetailCents != null
-                                  ? centsToInputString(p.suggestedRetailCents)
-                                  : ''
-                              }
-                              type="number"
-                              step="0.01"
-                              min={0}
-                              aria-label="Suggested retail price"
-                              data-testid="merch-suggested-retail"
-                              className="w-28"
-                              onBlur={(e) => {
-                                const raw = e.target.value.trim();
-                                const next = raw === '' ? null : Math.round(Number(raw) * 100);
-                                if (next !== null && (!Number.isInteger(next) || next < 0)) return;
-                                if (next !== p.suggestedRetailCents)
-                                  void patchProduct({ suggestedRetailCents: next });
-                              }}
-                            />
-                          ),
+                          value:
+                            p.suggestedRetailCents != null ? (
+                              <Money cents={p.suggestedRetailCents} />
+                            ) : (
+                              '—'
+                            ),
                         },
                         {
                           label: 'Purchase status',
-                          value: (
-                            <Select
-                              value={p.purchaseStatus}
-                              aria-label="Purchase status"
-                              data-testid="purchase-status"
-                              onChange={(e) =>
-                                void patchProduct({ purchaseStatus: e.target.value })
-                              }
-                            >
-                              {PRODUCT_PURCHASE_STATUSES.map((st) => (
-                                <option key={st} value={st}>
-                                  {PRODUCT_PURCHASE_STATUS_LABELS[st]}
-                                </option>
-                              ))}
-                            </Select>
-                          ),
+                          value:
+                            PRODUCT_PURCHASE_STATUS_LABELS[
+                              p.purchaseStatus as ProductPurchaseStatus
+                            ] ?? String(p.purchaseStatus),
                         },
                         {
                           label: 'Product status',
@@ -977,398 +855,22 @@ export default function ProductDetailPage() {
 
           {tab === 'general' && (
             <Stack>
-              <GeneralPanel product={p} primary={primaryVariant(p)} patchProduct={patchProduct} />
-              <Card
-                title="Descriptive"
-                description="What STORIS calls Description, Second Description, Brand, Vendor Model, Vendor and Group."
-                data-testid="product-descriptive"
-              >
-                <FormGrid cols={2}>
-                  <Field label="Description">
-                    <Input
-                      defaultValue={p.name}
-                      aria-label="Description"
-                      data-testid="product-name"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim();
-                        if (next && next !== p.name) void patchProduct({ name: next });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Second description">
-                    <Input
-                      defaultValue={p.secondDescription ?? ''}
-                      aria-label="Second description"
-                      data-testid="second-description"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim() || null;
-                        if (next !== p.secondDescription)
-                          void patchProduct({ secondDescription: next });
-                      }}
-                    />
-                  </Field>
-                  {/*
-                    Owner 2026-09-21: these seven were read-only boxes that
-                    looked exactly like the two above them — you could click in,
-                    type, and nothing happened. They are values this card only
-                    shows, so they read as text now and each hint jumps to the
-                    card that does own them.
-                  */}
-                  <Field
-                    as="div"
-                    label="Brand"
-                    hint={
-                      <JumpTo to="card-brand-collection">Change it in Brand & collection</JumpTo>
-                    }
-                  >
-                    <MirrorValue value={p.brandName ?? ''} data-testid="mirror-brand" />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Vendor model"
-                    hint={<JumpTo to="card-reorder">Edit on the Reorder automation card</JumpTo>}
-                  >
-                    <MirrorValue value={p.vendorModel ?? ''} />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Vendor"
-                    hint={
-                      <JumpTo to="card-reorder">
-                        The preferred vendor on the Reorder automation card
-                      </JumpTo>
-                    }
-                  >
-                    <MirrorValue value={p.vendorName ?? ''} data-testid="mirror-vendor" />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Group"
-                    hint="STORIS size / product group, set by the import."
-                  >
-                    <MirrorValue value={p.group ?? ''} />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Size"
-                    hint={<JumpTo to="card-variants">Set per variant in the Variants card</JumpTo>}
-                  >
-                    <MirrorValue value={p.size ?? ''} empty="Mixed — see Variants" />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Firmness"
-                    hint={<JumpTo to="card-variants">Set per variant in the Variants card</JumpTo>}
-                  >
-                    <MirrorValue value={p.firmness ?? ''} empty="Mixed — see Variants" />
-                  </Field>
-                  <Field
-                    as="div"
-                    label="Category"
-                    hint="Set by the catalog import; there is no editor for it yet."
-                  >
-                    <MirrorValue value={p.categoryPath ?? p.categoryName ?? ''} />
-                  </Field>
-                </FormGrid>
-              </Card>
-
-              <Card
-                title="Purchase status & packing"
-                description="Whether the buyer may still order it, and the box and carton multiples it moves in."
-                data-testid="product-packing"
-              >
-                <FormGrid cols={2}>
-                  <Field label="Current purchase status">
-                    <Select
-                      value={p.purchaseStatus}
-                      aria-label="Current purchase status"
-                      onChange={(e) => void patchProduct({ purchaseStatus: e.target.value })}
-                    >
-                      {PRODUCT_PURCHASE_STATUSES.map((st) => (
-                        <option key={st} value={st}>
-                          {PRODUCT_PURCHASE_STATUS_LABELS[st]}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Boxes per product">
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      defaultValue={p.boxesPerProduct}
-                      aria-label="Boxes per product"
-                      data-testid="boxes-per-product"
-                      onBlur={(e) => {
-                        const n = Number(e.target.value);
-                        if (Number.isInteger(n) && n >= 1 && n !== p.boxesPerProduct)
-                          void patchProduct({ boxesPerProduct: n });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Logistical carton quantity">
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      defaultValue={p.logisticalCartonQty}
-                      aria-label="Logistical carton quantity"
-                      onBlur={(e) => {
-                        const n = Number(e.target.value);
-                        if (Number.isInteger(n) && n >= 1 && n !== p.logisticalCartonQty)
-                          void patchProduct({ logisticalCartonQty: n });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Purchase carton quantity">
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      defaultValue={p.purchaseCartonQty}
-                      aria-label="Purchase carton quantity"
-                      onBlur={(e) => {
-                        const n = Number(e.target.value);
-                        if (Number.isInteger(n) && n >= 1 && n !== p.purchaseCartonQty)
-                          void patchProduct({ purchaseCartonQty: n });
-                      }}
-                    />
-                  </Field>
-                  <Field label="Logistical carton transfers" as="div">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={p.logisticalCartonTransfers}
-                        onChange={(e) =>
-                          void patchProduct({ logisticalCartonTransfers: e.target.checked })
-                        }
-                      />
-                      Transfer in whole cartons
-                    </label>
-                  </Field>
-                </FormGrid>
-              </Card>
-
-              {taxClasses.length > 0 && (
-                <Card
-                  title="Tax class"
-                  description={
-                    <>
-                      Override the location/business default tax rate for this product. Manage
-                      classes in <Link href="/settings/tax-classes">Settings → Tax classes</Link>.
-                    </>
-                  }
-                >
-                  <FormGrid cols={2}>
-                    <Field label="Tax class">
-                      <Select
-                        value={p.taxClassId ?? ''}
-                        onChange={(e) => setTaxClass(e.target.value || null)}
-                      >
-                        <option value="">(use location/business default)</option>
-                        {taxClasses.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} — {(c.rateBps / 100).toFixed(2)}%
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                  </FormGrid>
-                </Card>
-              )}
-
-              <Card
-                id="card-brand-collection"
-                title="Brand & collection"
-                description="The invoice's Brand column prints this brand; without one it falls back to the variant's preferred vendor."
-              >
-                <FormGrid cols={2}>
-                  <Stack gap="sm">
-                    <Field label="Brand">
-                      <Select
-                        value={p.brandId ?? ''}
-                        onChange={(e) => void patchProduct({ brandId: e.target.value || null })}
-                      >
-                        <option value="">(no brand)</option>
-                        {brands
-                          .filter((b) => b.isActive || b.id === p.brandId)
-                          .map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                      </Select>
-                    </Field>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="New brand…"
-                        aria-label="New brand"
-                        value={newBrand}
-                        onChange={(e) => setNewBrand(e.target.value)}
-                        className="min-w-0 flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!newBrand.trim()}
-                        onClick={() => void createAndAssign('brand', newBrand)}
-                      >
-                        Add
-                      </Button>
-                    </div>
-                  </Stack>
-                  <Stack gap="sm">
-                    <Field label="Collection">
-                      <Select
-                        value={p.collectionId ?? ''}
-                        onChange={(e) =>
-                          void patchProduct({ collectionId: e.target.value || null })
-                        }
-                      >
-                        <option value="">(no collection)</option>
-                        {collections
-                          .filter((c) => c.isActive || c.id === p.collectionId)
-                          .map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                      </Select>
-                    </Field>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="New collection…"
-                        aria-label="New collection"
-                        value={newCollection}
-                        onChange={(e) => setNewCollection(e.target.value)}
-                        className="min-w-0 flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!newCollection.trim()}
-                        onClick={() => void createAndAssign('collection', newCollection)}
-                      >
-                        Add
-                      </Button>
-                    </div>
-                  </Stack>
-                </FormGrid>
-              </Card>
-
-              <Card id="card-variants" title="Variants" flush>
-                <TableWrap>
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>SKU</th>
-                        <th>Size</th>
-                        <th>Firmness</th>
-                        <th>Barcode</th>
-                        <th className="num">Price</th>
-                        <th className="num">Cost</th>
-                        <th className="actions" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {p.variants.length === 0 && (
-                        <TableEmpty colSpan={8}>This product has no variants.</TableEmpty>
-                      )}
-                      {p.variants.map((v) => (
-                        <tr key={v.id}>
-                          <td>{v.name ?? '—'}</td>
-                          <td>
-                            <code>{v.sku ?? '—'}</code>
-                          </td>
-                          <td>
-                            <Select
-                              value={v.size ?? ''}
-                              aria-label={`Size for ${v.name ?? v.sku ?? 'variant'}`}
-                              data-testid="variant-size"
-                              onChange={(e) =>
-                                void setVariantSizing(v.id, { size: e.target.value })
-                              }
-                            >
-                              <option value="">—</option>
-                              {MATTRESS_SIZES.map((x) => (
-                                <option key={x} value={x}>
-                                  {x}
-                                </option>
-                              ))}
-                            </Select>
-                          </td>
-                          <td>
-                            <Select
-                              value={v.firmness ?? ''}
-                              aria-label={`Firmness for ${v.name ?? v.sku ?? 'variant'}`}
-                              data-testid="variant-firmness"
-                              onChange={(e) =>
-                                void setVariantSizing(v.id, { firmness: e.target.value })
-                              }
-                            >
-                              <option value="">—</option>
-                              {FIRMNESS_LEVELS.map((x) => (
-                                <option key={x} value={x}>
-                                  {x}
-                                </option>
-                              ))}
-                            </Select>
-                          </td>
-                          <td>
-                            <code>{v.barcode ?? '—'}</code>
-                          </td>
-                          <td className="num">
-                            <Input
-                              defaultValue={centsToInputString(v.priceCents)}
-                              type="number"
-                              step="0.01"
-                              aria-label={`Price for ${v.name ?? v.sku ?? 'variant'}`}
-                              onBlur={(e) => {
-                                if (e.target.value !== centsToInputString(v.priceCents)) {
-                                  void setVariantPrice(v.id, e.target.value);
-                                }
-                              }}
-                              className="w-24"
-                            />
-                          </td>
-                          <td className="num">
-                            {v.costCents != null ? <Money cents={v.costCents} /> : costHidden}
-                          </td>
-                          <td className="actions">
-                            {v.isActive ? (
-                              <Button
-                                size="sm"
-                                variant="danger"
-                                onClick={() => deactivateVariant(v.id)}
-                              >
-                                Deactivate
-                              </Button>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <StatusBadge status="inactive" />
-                                <Button
-                                  size="sm"
-                                  onClick={() => void reactivateVariant(v.id)}
-                                  data-testid="variant-reactivate"
-                                >
-                                  Reactivate
-                                </Button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </TableWrap>
-              </Card>
-
-              <div id="card-reorder">
-                <ReorderSettingsCard variants={p.variants} onSaved={load} />
-              </div>
+              <EditProductForm
+                product={p}
+                taxClasses={taxClasses}
+                brands={brands}
+                collections={collections}
+                onRefCreated={(kind, ref) =>
+                  kind === 'brand'
+                    ? setBrands((cur) => [...cur, ref])
+                    : setCollections((cur) => [...cur, ref])
+                }
+                onSaved={load}
+                onToggleVariant={(variantId, active) =>
+                  void (active ? reactivateVariant(variantId) : deactivateVariant(variantId))
+                }
+                onDirtyChange={onDirtyChange}
+              />
 
               <Card
                 title="Images"
@@ -1466,192 +968,4 @@ export default function ProductDetailPage() {
 
 function EmptyImages() {
   return <p className="muted">No images registered yet.</p>;
-}
-
-/**
- * Reorder automation per variant: the stock level that triggers a
- * suggestion, how many to order, and which vendor's PO it lands on.
- * Saved per row — a blank point turns the variant's automation off.
- */
-function ReorderSettingsCard({
-  variants,
-  onSaved,
-}: {
-  variants: Variant[];
-  onSaved: () => Promise<void> | void;
-}) {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<
-    Record<string, { point: string; qty: string; vendorId: string; vendorSku: string }>
-  >({});
-
-  useEffect(() => {
-    void api<Vendor[]>('/v1/vendors')
-      .then(setVendors)
-      .catch(() => setVendors([]));
-  }, []);
-
-  function valueFor(v: Variant) {
-    return (
-      draft[v.id] ?? {
-        point: v.reorderPoint != null ? String(v.reorderPoint) : '',
-        qty: v.reorderQty != null ? String(v.reorderQty) : '',
-        vendorId: v.preferredVendorId ?? '',
-        vendorSku: v.vendorSku ?? '',
-      }
-    );
-  }
-
-  async function save(v: Variant) {
-    const d = valueFor(v);
-    setSavingId(v.id);
-    try {
-      const sentVendorSku = d.vendorSku.trim() === '' ? null : d.vendorSku.trim();
-      const res = await api<{ vendorSku?: string | null }>(
-        `/v1/products/variants/${v.id}/reorder`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({
-            reorderPoint: d.point === '' ? null : Number(d.point),
-            reorderQty: d.qty === '' ? null : Number(d.qty),
-            preferredVendorId: d.vendorId === '' ? null : d.vendorId,
-            vendorSku: sentVendorSku,
-          }),
-        },
-      );
-      // Trust but verify: only claim success if the server echoed the
-      // vendor SKU back. A backend that predates the field returns 200
-      // without the key while silently dropping it — a false "saved"
-      // here would tell a buyer the part number reached the PO.
-      if (sentVendorSku !== null && (res.vendorSku ?? null) !== sentVendorSku) {
-        toast.error(
-          'Reorder point saved, but the server did not store the vendor SKU — the API may need an update.',
-        );
-        await onSaved();
-        return;
-      }
-      toast.success('Reorder settings saved');
-      await onSaved();
-      setDraft((cur) => {
-        const next = { ...cur };
-        delete next[v.id];
-        return next;
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  const active = variants.filter((v) => v.isActive);
-
-  return (
-    <Card
-      title="Reorder automation"
-      flush
-      description="When available stock (on hand − committed, all locations) falls to the reorder point, the item appears in Purchasing → Reorder suggestions under its vendor. Leave the point blank to turn automation off for a variant. If the vendor uses a different part number than your SKU (common for Shopify-synced catalogs), set it as the Vendor SKU — purchase orders will show the vendor's number."
-    >
-      <TableWrap>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Variant</th>
-              <th className="num">Reorder point</th>
-              <th className="num">Order qty</th>
-              <th>Preferred vendor</th>
-              <th>Vendor SKU</th>
-              <th className="actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {active.length === 0 && (
-              <TableEmpty colSpan={6}>No active variants to automate.</TableEmpty>
-            )}
-            {active.map((v) => {
-              const d = valueFor(v);
-              return (
-                <tr key={v.id}>
-                  <td>{v.name ?? <code>{v.sku ?? v.id.slice(0, 8)}</code>}</td>
-                  <td className="num">
-                    <Input
-                      type="number"
-                      min={0}
-                      value={d.point}
-                      placeholder="off"
-                      aria-label="Reorder point"
-                      onChange={(e) =>
-                        setDraft((cur) => ({ ...cur, [v.id]: { ...d, point: e.target.value } }))
-                      }
-                      className="w-20"
-                      data-testid={`reorder-point-${v.sku}`}
-                    />
-                  </td>
-                  <td className="num">
-                    <Input
-                      type="number"
-                      min={1}
-                      value={d.qty}
-                      placeholder="auto"
-                      aria-label="Order quantity"
-                      onChange={(e) =>
-                        setDraft((cur) => ({ ...cur, [v.id]: { ...d, qty: e.target.value } }))
-                      }
-                      className="w-20"
-                    />
-                  </td>
-                  <td>
-                    <Select
-                      value={d.vendorId}
-                      aria-label="Preferred vendor"
-                      onChange={(e) =>
-                        setDraft((cur) => ({
-                          ...cur,
-                          [v.id]: { ...d, vendorId: e.target.value },
-                        }))
-                      }
-                    >
-                      <option value="">— none —</option>
-                      {vendors.map((vd) => (
-                        <option key={vd.id} value={vd.id}>
-                          {vd.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </td>
-                  <td>
-                    <Input
-                      value={d.vendorSku}
-                      placeholder={v.sku ? `same as ${v.sku}` : 'vendor part #'}
-                      aria-label="Vendor SKU"
-                      onChange={(e) =>
-                        setDraft((cur) => ({
-                          ...cur,
-                          [v.id]: { ...d, vendorSku: e.target.value },
-                        }))
-                      }
-                      className="w-36"
-                      data-testid={`vendor-sku-${v.sku}`}
-                    />
-                  </td>
-                  <td className="actions">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={savingId === v.id}
-                      onClick={() => void save(v)}
-                      data-testid={`save-reorder-${v.sku}`}
-                    >
-                      {savingId === v.id ? 'Saving…' : 'Save'}
-                    </Button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </TableWrap>
-    </Card>
-  );
 }
