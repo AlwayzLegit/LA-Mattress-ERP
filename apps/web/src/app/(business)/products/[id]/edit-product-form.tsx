@@ -483,7 +483,8 @@ export function EditProductForm({
         <AddItemCard
           product={product}
           vendors={vendors}
-          costEditable={costEditable}
+          // Only once the permission is known to be granted (Codex on #205).
+          costEditable={canSeeCost === true}
           hasInactive={product.variants.length > 0}
           onAdded={onSaved}
         />
@@ -1075,18 +1076,31 @@ function AddItemCard({
           ...(costEditable ? { costCents: costCents ?? null } : {}),
         }),
       });
+      // The item exists from here on: whatever happens to the vendor, the
+      // page reloads so the card cannot offer to add a second one.
+      let vendorFailed: string | null = null;
       if (vendorId) {
-        await api(`/v1/products/variants/${created.id}/reorder`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            reorderPoint: null,
-            reorderQty: null,
-            preferredVendorId: vendorId,
-            vendorSku: null,
-          }),
-        });
+        try {
+          await api(`/v1/products/variants/${created.id}/reorder`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              reorderPoint: null,
+              reorderQty: null,
+              preferredVendorId: vendorId,
+              vendorSku: null,
+            }),
+          });
+        } catch (err) {
+          vendorFailed = err instanceof Error ? err.message : String(err);
+        }
       }
-      toast.success('Item added');
+      if (vendorFailed) {
+        toast.error(
+          `Item added, but the vendor was not set (${vendorFailed}). Pick it under Reordering & vendor.`,
+        );
+      } else {
+        toast.success('Item added');
+      }
       await onAdded();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));

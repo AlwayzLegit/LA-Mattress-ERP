@@ -64,7 +64,7 @@ export default function NewProductPage() {
         // no item at all — unsellable, unstockable, no vendor, and nothing
         // on its page could fix it. Rows with a price, SKU or name are kept,
         // and the first row always is (at $0 until priced).
-        variants: variants
+        variants: (variants.length > 0 ? variants : [{ ...blankVariant }])
           .filter((v, i) => i === 0 || Number(v.priceDollars) > 0 || v.sku.trim() || v.name.trim())
           .map((v, i) => ({
             // The first item takes the product's SKU when it has none of its own.
@@ -186,6 +186,8 @@ export default function NewProductPage() {
                     type="button"
                     variant="danger"
                     size="sm"
+                    disabled={variants.length === 1}
+                    title={variants.length === 1 ? 'A product keeps at least one item' : undefined}
                     onClick={() => setVariants((prev) => prev.filter((_, idx) => idx !== i))}
                   >
                     Remove
