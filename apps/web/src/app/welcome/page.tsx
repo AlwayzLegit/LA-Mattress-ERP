@@ -18,6 +18,7 @@ import {
 } from '@/components/form/form';
 import { Button, FormGrid, Skeleton, Stack } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
+import { safeNext } from '@/lib/safe-next';
 
 interface MembershipSummary {
   businessId: string;
@@ -61,10 +62,10 @@ export default function WelcomePage() {
         method: 'POST',
         body: JSON.stringify({ businessId }),
       });
-      // Back to the page that needed a business (lib/api.ts sends ?next=);
-      // same-site paths only.
-      const next = new URLSearchParams(window.location.search).get('next');
-      router.push(next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard');
+      // Back to the page that needed a business (lib/api.ts sends ?next=).
+      // Resolved against this origin and followed only if it stays here, so
+      // "/\\evil.example" and friends cannot bounce anyone off-site.
+      router.push(safeNext(new URLSearchParams(window.location.search).get('next')));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
