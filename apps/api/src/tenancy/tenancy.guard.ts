@@ -107,11 +107,14 @@ export class TenancyGuard implements CanActivate {
     }
 
     let businessId = pickActiveBusinessId(req);
+    let membershipCount = 0;
     if (!businessId && !user.isSuperAdmin) {
       // The active-business cookie expires (30 days) while the session
       // keeps renewing, which left signed-in staff on "No active business
       // selected" everywhere (owner 2026-09-28). One business → use it.
-      const only = await this.soleBusinessId(user.id);
+      const ids = await this.activeBusinessIds(user.id);
+      membershipCount = ids.length;
+      const only = ids.length === 1 ? ids[0]! : null;
       if (only) {
         businessId = only;
         const res = ctx.switchToHttp().getResponse<Response>();
@@ -130,9 +133,15 @@ export class TenancyGuard implements CanActivate {
         req.tenant = emptyTenantContext(user, ip, userAgent, impersonatorUserId);
         return true;
       }
-      throw new PreconditionFailedException(
-        'No active business selected. POST /v1/auth/active-business first.',
-      );
+      // `code` tells the web client what to do: several businesses → send
+      // them to the picker; none yet (a fresh sign-up) → leave the page
+      // alone, /welcome's create-a-business flow is theirs to open.
+      throw new PreconditionFailedException({
+        statusCode: 412,
+        error: 'Precondition Failed',
+        message: 'No active business selected. POST /v1/auth/active-business first.',
+        code: membershipCount > 1 ? 'BUSINESS_NOT_SELECTED' : 'NO_BUSINESS',
+      });
     }
 
     const membership = await this.loadMembership(user.id, businessId);
@@ -209,14 +218,14 @@ export class TenancyGuard implements CanActivate {
     return true;
   }
 
-  /** The user's only active business, or null when they have none or several. */
-  private async soleBusinessId(userId: string): Promise<string | null> {
+  /** Up to two of the user's active businesses — enough to tell none / one / several. */
+  private async activeBusinessIds(userId: string): Promise<string[]> {
     const rows = await this.db
       .select({ businessId: schema.memberships.businessId })
       .from(schema.memberships)
       .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.status, 'active')))
       .limit(2);
-    return rows.length === 1 ? rows[0]!.businessId : null;
+    return rows.map((r) => r.businessId);
   }
 
   private async loadMembership(

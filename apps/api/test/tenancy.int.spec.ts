@@ -208,6 +208,7 @@ describe('Epic 1.3 — @RequirePermission gating', () => {
   it('No active business, several memberships → 412 so the client shows the picker', async () => {
     const res = await request(app.getHttpServer()).get('/v1/products').set('Cookie', twoBiz.cookie);
     expect(res.status).toBe(412);
+    expect(res.body.code).toBe('BUSINESS_NOT_SELECTED');
   });
 
   it('No session → 401 Unauthorized', async () => {
