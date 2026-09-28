@@ -37,6 +37,7 @@ let app: INestApplication;
 let businessId: string;
 let owner: TestUser;
 let bookkeeper: TestUser;
+let twoBiz: TestUser;
 
 async function resetTestDb() {
   const env = { ...process.env, DATABASE_URL: TEST_DB_URL };
@@ -113,6 +114,23 @@ async function seedFixtures() {
 
     owner = await makeUser('owner@tenancy-test.local', 'Owner', 'Owner');
     bookkeeper = await makeUser('bookkeeper@tenancy-test.local', 'Bookkeeper', 'Bookkeeper');
+    // A member of two businesses still has to pick one.
+    twoBiz = await makeUser('two@tenancy-test.local', 'Two Biz', 'Owner');
+    const [other] = await db
+      .insert(schema.businesses)
+      .values({ slug: 'tenancy-test-2', name: 'Second Co', status: 'active' })
+      .returning();
+    const [otherRole] = await db
+      .insert(schema.roles)
+      .values({ businessId: other!.id, name: 'Owner', description: 'Owner', isSystem: true })
+      .returning();
+    await db.insert(schema.memberships).values({
+      businessId: other!.id,
+      userId: twoBiz.id,
+      roleId: otherRole!.id,
+      status: 'active',
+      acceptedAt: new Date(),
+    });
   } finally {
     await sql.end({ timeout: 5 });
   }
@@ -151,6 +169,7 @@ beforeAll(async () => {
 
   owner.cookie = await captureCookie(owner);
   bookkeeper.cookie = await captureCookie(bookkeeper);
+  twoBiz.cookie = await captureCookie(twoBiz);
 });
 
 afterAll(async () => {
@@ -176,8 +195,18 @@ describe('Epic 1.3 — @RequirePermission gating', () => {
     expect(res.body.message).toMatch(/products\.view/);
   });
 
-  it('No active business → 412 PreconditionFailed', async () => {
+  it('No active business, one membership → that business, and the cookie comes back', async () => {
+    // Owner 2026-09-28: the 30-day cookie had expired under a live session.
     const res = await request(app.getHttpServer()).get('/v1/products').set('Cookie', owner.cookie);
+    expect(res.status).toBe(200);
+    const set = (res.get('Set-Cookie') ?? []).find((c) =>
+      c.startsWith('jetnine.active_business_id='),
+    );
+    expect(set).toContain(businessId);
+  });
+
+  it('No active business, several memberships → 412 so the client shows the picker', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/products').set('Cookie', twoBiz.cookie);
     expect(res.status).toBe(412);
   });
 

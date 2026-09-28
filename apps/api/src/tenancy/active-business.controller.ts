@@ -16,6 +16,7 @@ import type { Response } from 'express';
 import { schema } from '@jetnine/db';
 import { CurrentUser, type CurrentUserPayload } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
+import { activeBusinessCookieOptions } from './active-business-cookie';
 import { ACTIVE_BUSINESS_COOKIE } from './tenancy.guard';
 
 interface MembershipSummary {
@@ -125,31 +126,7 @@ export class ActiveBusinessController {
   }
 
   private cookieOptions() {
-    return {
-      /**
-       * Deliberately readable from JavaScript. The offline POS layer reads
-       * this cookie directly — `readActiveBusinessId()` in
-       * `apps/web/src/lib/offline.ts` — to partition the IndexedDB sale queue
-       * and variant cache by tenant. Marked `httpOnly` it was invisible to
-       * `document.cookie`, so `businessId` was always null in the browser and
-       * every Phase 2.16 path silently died: offline sales were never queued,
-       * variants were never cached, and the reconnect sync never ran. The
-       * register just stopped working the moment it lost connectivity.
-       *
-       * Safe to expose: the value is a business id the caller was already
-       * proven a member of above, and it grants nothing on its own —
-       * TenancyGuard re-resolves membership from the session on every single
-       * request, and RLS enforces the boundary in the database besides. The
-       * session cookie stays httpOnly; this one is a UI hint.
-       */
-      httpOnly: false,
-      sameSite: 'lax' as const,
-      secure: this.config.get<string>('NODE_ENV') === 'production',
-      path: '/',
-      // 30 days — the picker isn't sensitive on its own; it's a UI hint that
-      // RLS still enforces server-side.
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    };
+    return activeBusinessCookieOptions(this.config.get<string>('NODE_ENV') === 'production');
   }
 }
 

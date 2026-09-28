@@ -64,6 +64,19 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       if (text) message = text;
     }
+    // Several businesses and none picked (the picker cookie expires after
+    // 30 days while the session lives on): send them to the picker, then
+    // back here, instead of leaving every panel on the raw error. Someone
+    // in one business never sees this — the API picks it for them.
+    if (
+      res.status === 412 &&
+      /no active business/i.test(message) &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/welcome')
+    ) {
+      const back = window.location.pathname + window.location.search;
+      window.location.assign(`/welcome?next=${encodeURIComponent(back)}`);
+    }
     throw new ApiError(res.status, message, body);
   }
   if (res.status === 204) return undefined as T;

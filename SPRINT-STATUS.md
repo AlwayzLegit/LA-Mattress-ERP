@@ -6249,3 +6249,26 @@ Checked in Chromium on a local stack with 4 written orders:
 
 Tests: web `ws-lib.test` (8: formatting, search, headline, salesperson credit, used columns);
 written-sales int (6, now with shares and display name).
+
+### Checkpoint — 2026-09-28 (Register: "No active business selected" after 30 days)
+
+Owner report (screenshot of `/pos`): "The register could not load its stores: No active business
+selected. POST /v1/auth/active-business first." Beneath it: "The register is taking longer than it
+should".
+
+**Root cause.** The active business lives in the `jetnine.active_business_id` cookie, which expires
+a fixed 30 days after it is set. The login session is renewed while in use and outlives it. Thirty
+days after go-live, signed-in staff lost the cookie, and every tenant request answered 412.
+
+**Fix:**
+
+- **API** (`TenancyGuard`): with no cookie and no header, a user who belongs to exactly one business
+  is put in it and the cookie is set again. Only a member of several gets 412, which matches
+  PLAN.md: "a user picks a business after login if they belong to multiple". The cookie options are
+  shared in `tenancy/active-business-cookie.ts`.
+- **Web** (`lib/api.ts`): a 412 "no active business" sends the user to `/welcome?next=…`. Picking
+  a business returns them to the page they were on (same-site paths only).
+
+Checked in Chromium on a local stack: signed in, cleared the cookie, opened `/pos`. The register
+loaded with no error and the cookie came back. Tests: tenancy (9, +1). One membership → 200 plus
+Set-Cookie; two memberships → 412.
