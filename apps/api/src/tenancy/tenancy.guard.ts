@@ -11,8 +11,9 @@ import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import type { Permission } from '@jetnine/shared';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { DRIZZLE } from '../database/database.module';
+import { activeBusinessCookieOptions } from './active-business-cookie';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import { IS_PUBLIC_KEY, IS_SUPER_ADMIN_ONLY_KEY } from './decorators';
 import type { RequestTenantContext } from './request-context';
@@ -28,9 +29,12 @@ export const ACTIVE_BUSINESS_HEADER = 'x-business-id';
  *   1. The X-Business-Id header (mostly for tests + machine clients)
  *   2. The jetnine.active_business_id cookie (set by POST /v1/auth/active-business)
  *
- * If the user holds no membership for that business, this guard 403s. If
- * the user has memberships but none was selected, it 412 (Precondition
- * Failed) so the client knows to show a "pick a business" picker.
+ * If the user holds no membership for that business, this guard 403s. With
+ * nothing selected, a user who belongs to exactly one business is simply
+ * in it (and the cookie is set again); only someone with several gets 412
+ * (Precondition Failed) so the client shows the "pick a business" picker
+ * (PLAN.md: "a user picks a business after login if they belong to
+ * multiple").
  *
  * Routes marked @SuperAdminOnly() bypass tenant resolution entirely (super
  * admins do platform-level work; their tenant context is empty).
@@ -102,7 +106,25 @@ export class TenancyGuard implements CanActivate {
       return true;
     }
 
-    const businessId = pickActiveBusinessId(req);
+    let businessId = pickActiveBusinessId(req);
+    let membershipCount = 0;
+    if (!businessId && !user.isSuperAdmin) {
+      // The active-business cookie expires (30 days) while the session
+      // keeps renewing, which left signed-in staff on "No active business
+      // selected" everywhere (owner 2026-09-28). One business → use it.
+      const ids = await this.activeBusinessIds(user.id);
+      membershipCount = ids.length;
+      const only = ids.length === 1 ? ids[0]! : null;
+      if (only) {
+        businessId = only;
+        const res = ctx.switchToHttp().getResponse<Response>();
+        res.cookie?.(
+          ACTIVE_BUSINESS_COOKIE,
+          only,
+          activeBusinessCookieOptions(process.env.NODE_ENV === 'production'),
+        );
+      }
+    }
     if (!businessId) {
       // For super admins we still let them through with an empty tenant
       // context — they may be calling super-admin-only endpoints from a UI
@@ -111,9 +133,15 @@ export class TenancyGuard implements CanActivate {
         req.tenant = emptyTenantContext(user, ip, userAgent, impersonatorUserId);
         return true;
       }
-      throw new PreconditionFailedException(
-        'No active business selected. POST /v1/auth/active-business first.',
-      );
+      // `code` tells the web client what to do: several businesses → send
+      // them to the picker; none yet (a fresh sign-up) → leave the page
+      // alone, /welcome's create-a-business flow is theirs to open.
+      throw new PreconditionFailedException({
+        statusCode: 412,
+        error: 'Precondition Failed',
+        message: 'No active business selected. POST /v1/auth/active-business first.',
+        code: membershipCount > 1 ? 'BUSINESS_NOT_SELECTED' : 'NO_BUSINESS',
+      });
     }
 
     const membership = await this.loadMembership(user.id, businessId);
@@ -188,6 +216,16 @@ export class TenancyGuard implements CanActivate {
       auditLogged: false,
     };
     return true;
+  }
+
+  /** Up to two of the user's active businesses — enough to tell none / one / several. */
+  private async activeBusinessIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ businessId: schema.memberships.businessId })
+      .from(schema.memberships)
+      .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.status, 'active')))
+      .limit(2);
+    return rows.map((r) => r.businessId);
   }
 
   private async loadMembership(

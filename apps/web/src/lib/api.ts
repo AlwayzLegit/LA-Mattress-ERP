@@ -10,6 +10,9 @@ import { isOutageStatus, noteFailure, noteSuccess } from './api-status';
 
 export const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
 
+/** One redirect to the business picker per page load, however many calls fail. */
+let redirectingToPicker = false;
+
 /**
  * Error with the parsed response body attached, so callers can react to
  * structured API errors — e.g. `code: 'OVERRIDE_REQUIRED'` from the
@@ -63,6 +66,22 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof body.message === 'string') message = body.message;
     } catch {
       if (text) message = text;
+    }
+    // Several businesses and none picked (the picker cookie expires after
+    // 30 days while the session lives on): send them to the picker, then
+    // back here, instead of leaving every panel on the raw error. Someone
+    // in one business never gets here — the API picks it — and someone in
+    // none yet (a fresh sign-up) is left where they are.
+    if (
+      res.status === 412 &&
+      body?.code === 'BUSINESS_NOT_SELECTED' &&
+      typeof window !== 'undefined' &&
+      !redirectingToPicker &&
+      !window.location.pathname.startsWith('/welcome')
+    ) {
+      redirectingToPicker = true;
+      const back = window.location.pathname + window.location.search;
+      window.location.assign(`/welcome?next=${encodeURIComponent(back)}`);
     }
     throw new ApiError(res.status, message, body);
   }
