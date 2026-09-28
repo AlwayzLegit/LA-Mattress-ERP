@@ -55,16 +55,22 @@ export default function NewProductPage() {
     setError(null);
     try {
       const data = new FormData(e.currentTarget);
+      const productSku = String(data.get('sku') ?? '').trim() || null;
       const body = {
         name: String(data.get('name') ?? ''),
-        sku: String(data.get('sku') ?? '') || null,
+        sku: productSku,
         description: String(data.get('description') ?? '') || null,
+        // Owner 2026-09-28: a product saved with no priced row used to get
+        // no item at all — unsellable, unstockable, no vendor, and nothing
+        // on its page could fix it. Rows with a price, SKU or name are kept,
+        // and the first row always is (at $0 until priced).
         variants: variants
-          .filter((v) => Number(v.priceDollars) > 0)
-          .map((v) => ({
-            sku: v.sku || null,
+          .filter((v, i) => i === 0 || Number(v.priceDollars) > 0 || v.sku.trim() || v.name.trim())
+          .map((v, i) => ({
+            // The first item takes the product's SKU when it has none of its own.
+            sku: v.sku || (i === 0 ? productSku : null),
             name: v.name || null,
-            priceCents: Math.round(Number(v.priceDollars) * 100),
+            priceCents: Math.max(0, Math.round(Number(v.priceDollars || 0) * 100)),
             costCents: v.costDollars ? Math.round(Number(v.costDollars) * 100) : null,
             barcode: v.barcode || null,
             // A22.2: blank → the API reads the size / firmness off the names.
@@ -107,7 +113,7 @@ export default function NewProductPage() {
 
           <Card
             title="Variants"
-            description="Only variants with a price above $0 are created; leave the rest blank."
+            description="The first row is always created (at $0 until you price it). Other rows are created when they have a price, SKU or name."
           >
             <Stack gap="sm">
               {variants.map((v, i) => (

@@ -57,6 +57,8 @@ export interface EditableVariant {
 
 export interface EditableProduct {
   id: string;
+  /** Product-level SKU; the default SKU for a first item added here. */
+  sku?: string | null;
   name: string;
   secondDescription: string | null;
   categoryId: string | null;
@@ -476,509 +478,525 @@ export function EditProductForm({
   );
 
   return (
-    <form
-      className="pe-form stack"
-      data-testid="edit-product-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save();
-      }}
-    >
-      <Card
-        title="Product details"
-        description="What the product is called and how it is filed."
-        data-testid="edit-details"
+    <>
+      {activeVariants.length === 0 && (
+        <AddItemCard
+          product={product}
+          vendors={vendors}
+          costEditable={costEditable}
+          hasInactive={product.variants.length > 0}
+          onAdded={onSaved}
+        />
+      )}
+      <form
+        className="pe-form stack"
+        data-testid="edit-product-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
       >
-        <FormGrid cols={2}>
-          <Field label="Description" required error={errors.name}>
-            <Input
-              value={draft.name}
-              onChange={(e) => set('name', e.target.value)}
-              data-testid="product-name"
-            />
-          </Field>
-          <Field label="Second description">
-            <Input
-              value={draft.secondDescription}
-              onChange={(e) => set('secondDescription', e.target.value)}
-              data-testid="second-description"
-            />
-          </Field>
-          <Field label="Category">
-            <Select
-              value={draft.categoryId}
-              onChange={(e) => set('categoryId', e.target.value)}
-              data-testid="edit-category"
-            >
-              <option value="">(no category)</option>
-              {catOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Purchase status" hint="Whether buyers can still order it from the vendor.">
-            <Select
-              value={draft.purchaseStatus}
-              onChange={(e) => set('purchaseStatus', e.target.value)}
-              data-testid="purchase-status"
-            >
-              {PRODUCT_PURCHASE_STATUSES.map((st) => (
-                <option key={st} value={st}>
-                  {PRODUCT_PURCHASE_STATUS_LABELS[st]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field as="div" label="Brand" hint="Printed in the Brand column of the invoice.">
-            <Select
-              value={draft.brandId}
-              aria-label="Brand"
-              onChange={(e) => set('brandId', e.target.value)}
-              data-testid="edit-brand"
-            >
-              <option value="">(no brand)</option>
-              {brands
-                .filter((x) => x.isActive || x.id === draft.brandId)
-                .map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-            </Select>
-            <div className="pe-inline-add">
+        <Card
+          title="Product details"
+          description="What the product is called and how it is filed."
+          data-testid="edit-details"
+        >
+          <FormGrid cols={2}>
+            <Field label="Description" required error={errors.name}>
               <Input
-                placeholder="New brand…"
-                aria-label="New brand"
-                value={newBrand}
-                onChange={(e) => setNewBrand(e.target.value)}
-                className="min-w-0 flex-1"
+                value={draft.name}
+                onChange={(e) => set('name', e.target.value)}
+                data-testid="product-name"
               />
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={!newBrand.trim()}
-                onClick={() => void createRef('brand')}
-              >
-                Add
-              </Button>
-            </div>
-          </Field>
-          <Field as="div" label="Collection">
-            <Select
-              value={draft.collectionId}
-              aria-label="Collection"
-              onChange={(e) => set('collectionId', e.target.value)}
-              data-testid="edit-collection"
-            >
-              <option value="">(no collection)</option>
-              {collections
-                .filter((x) => x.isActive || x.id === draft.collectionId)
-                .map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-            </Select>
-            <div className="pe-inline-add">
+            </Field>
+            <Field label="Second description">
               <Input
-                placeholder="New collection…"
-                aria-label="New collection"
-                value={newCollection}
-                onChange={(e) => setNewCollection(e.target.value)}
-                className="min-w-0 flex-1"
+                value={draft.secondDescription}
+                onChange={(e) => set('secondDescription', e.target.value)}
+                data-testid="second-description"
               />
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={!newCollection.trim()}
-                onClick={() => void createRef('collection')}
-              >
-                Add
-              </Button>
-            </div>
-          </Field>
-          {taxClasses.length > 0 && (
-            <Field label="Tax class" hint="Blank uses the store's normal rate.">
+            </Field>
+            <Field label="Category">
               <Select
-                value={draft.taxClassId}
-                onChange={(e) => set('taxClassId', e.target.value)}
-                data-testid="edit-tax-class"
+                value={draft.categoryId}
+                onChange={(e) => set('categoryId', e.target.value)}
+                data-testid="edit-category"
               >
-                <option value="">(store default)</option>
-                {taxClasses.map((c) => (
+                <option value="">(no category)</option>
+                {catOptions.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} — {(c.rateBps / 100).toFixed(2)}%
+                    {c.name}
                   </option>
                 ))}
               </Select>
             </Field>
-          )}
-        </FormGrid>
-        {(product.group || product.vendorModel) && (
-          <p className="pe-readonly" data-testid="edit-import-facts">
-            From the catalog import:{' '}
-            {[
-              product.group ? `Group ${product.group}` : null,
-              product.vendorModel ? `Vendor model ${product.vendorModel}` : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-        )}
-      </Card>
-
-      <Card
-        title="Price & cost"
-        description="Cost is what one unit costs you from the vendor. It fills in new purchase orders and is the cost behind margin and commission. Stock already received keeps the cost it came in at."
-        flush
-        data-testid="edit-pricing"
-      >
-        <TableWrap>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Size</th>
-                <th>Firmness</th>
-                <th>Barcode</th>
-                <th className="num">Selling price</th>
-                <th className="num">Cost</th>
-                <th className="num">Margin</th>
-                <th className="actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {product.variants.length === 0 && (
-                <TableEmpty colSpan={8}>This product has no sizes to price.</TableEmpty>
-              )}
-              {product.variants.map((v) => {
-                const d = draft.variants[v.id]!;
-                const label = v.name ?? v.sku ?? 'item';
-                const m = marginPercent(
-                  parseMoney(d.price) ?? null,
-                  costEditable ? (parseMoney(d.cost) ?? null) : v.costCents,
-                );
-                return (
-                  <tr key={v.id} data-testid="edit-variant-row">
-                    <td>
-                      <div>{v.name ?? '—'}</div>
-                      <code className="muted">{v.sku ?? '—'}</code>
-                      {!v.isActive && (
-                        <>
-                          {' '}
-                          <StatusBadge status="inactive" />
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      <Select
-                        value={d.size}
-                        aria-label={`Size for ${label}`}
-                        data-testid="variant-size"
-                        onChange={(e) => setVariant(v.id, { size: e.target.value })}
-                      >
-                        <option value="">—</option>
-                        {MATTRESS_SIZES.map((x) => (
-                          <option key={x} value={x}>
-                            {x}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td>
-                      <Select
-                        value={d.firmness}
-                        aria-label={`Firmness for ${label}`}
-                        data-testid="variant-firmness"
-                        onChange={(e) => setVariant(v.id, { firmness: e.target.value })}
-                      >
-                        <option value="">—</option>
-                        {FIRMNESS_LEVELS.map((x) => (
-                          <option key={x} value={x}>
-                            {x}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td>
-                      <Input
-                        value={d.barcode}
-                        aria-label={`Barcode for ${label}`}
-                        onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
-                        className="w-36"
-                      />
-                    </td>
-                    <td className="num">
-                      <MoneyInput
-                        value={d.price}
-                        label={`Selling price for ${label}`}
-                        error={errors[`${v.id}.price`]}
-                        testId="variant-price"
-                        onChange={(price) => setVariant(v.id, { price })}
-                      />
-                    </td>
-                    <td className="num">
-                      {costEditable ? (
-                        <MoneyInput
-                          value={d.cost}
-                          label={`Cost for ${label}`}
-                          error={errors[`${v.id}.cost`]}
-                          placeholder="none"
-                          testId="variant-cost"
-                          onChange={(cost) => setVariant(v.id, { cost })}
-                        />
-                      ) : (
-                        <em className="muted">hidden</em>
-                      )}
-                    </td>
-                    <td className="num">
-                      <span
-                        className={cx('pe-margin', m != null && m < 0 && 'is-low')}
-                        data-testid="variant-margin"
-                        title={m != null && m < 0 ? 'Selling below cost' : undefined}
-                      >
-                        {m != null ? `${m}%` : '—'}
-                      </span>
-                    </td>
-                    <td className="actions">
-                      {v.isActive ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="text-danger"
-                          onClick={() => onToggleVariant(v.id, false)}
-                        >
-                          Deactivate
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => onToggleVariant(v.id, true)}
-                          data-testid="variant-reactivate"
-                        >
-                          Reactivate
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </TableWrap>
-        <div style={{ padding: '12px 14px' }}>
-          <FormGrid cols={3}>
             <Field
-              label="Suggested retail price"
-              hint="The vendor's list price, for reference."
-              error={errors.suggestedRetail}
+              label="Purchase status"
+              hint="Whether buyers can still order it from the vendor."
             >
+              <Select
+                value={draft.purchaseStatus}
+                onChange={(e) => set('purchaseStatus', e.target.value)}
+                data-testid="purchase-status"
+              >
+                {PRODUCT_PURCHASE_STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {PRODUCT_PURCHASE_STATUS_LABELS[st]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field as="div" label="Brand" hint="Printed in the Brand column of the invoice.">
+              <Select
+                value={draft.brandId}
+                aria-label="Brand"
+                onChange={(e) => set('brandId', e.target.value)}
+                data-testid="edit-brand"
+              >
+                <option value="">(no brand)</option>
+                {brands
+                  .filter((x) => x.isActive || x.id === draft.brandId)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+              </Select>
+              <div className="pe-inline-add">
+                <Input
+                  placeholder="New brand…"
+                  aria-label="New brand"
+                  value={newBrand}
+                  onChange={(e) => setNewBrand(e.target.value)}
+                  className="min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!newBrand.trim()}
+                  onClick={() => void createRef('brand')}
+                >
+                  Add
+                </Button>
+              </div>
+            </Field>
+            <Field as="div" label="Collection">
+              <Select
+                value={draft.collectionId}
+                aria-label="Collection"
+                onChange={(e) => set('collectionId', e.target.value)}
+                data-testid="edit-collection"
+              >
+                <option value="">(no collection)</option>
+                {collections
+                  .filter((x) => x.isActive || x.id === draft.collectionId)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+              </Select>
+              <div className="pe-inline-add">
+                <Input
+                  placeholder="New collection…"
+                  aria-label="New collection"
+                  value={newCollection}
+                  onChange={(e) => setNewCollection(e.target.value)}
+                  className="min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!newCollection.trim()}
+                  onClick={() => void createRef('collection')}
+                >
+                  Add
+                </Button>
+              </div>
+            </Field>
+            {taxClasses.length > 0 && (
+              <Field label="Tax class" hint="Blank uses the store's normal rate.">
+                <Select
+                  value={draft.taxClassId}
+                  onChange={(e) => set('taxClassId', e.target.value)}
+                  data-testid="edit-tax-class"
+                >
+                  <option value="">(store default)</option>
+                  {taxClasses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {(c.rateBps / 100).toFixed(2)}%
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </FormGrid>
+          {(product.group || product.vendorModel) && (
+            <p className="pe-readonly" data-testid="edit-import-facts">
+              From the catalog import:{' '}
+              {[
+                product.group ? `Group ${product.group}` : null,
+                product.vendorModel ? `Vendor model ${product.vendorModel}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          )}
+        </Card>
+
+        <Card
+          title="Price & cost"
+          description="Cost is what one unit costs you from the vendor. It fills in new purchase orders and is the cost behind margin and commission. Stock already received keeps the cost it came in at."
+          flush
+          data-testid="edit-pricing"
+        >
+          <TableWrap>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Size</th>
+                  <th>Firmness</th>
+                  <th>Barcode</th>
+                  <th className="num">Selling price</th>
+                  <th className="num">Cost</th>
+                  <th className="num">Margin</th>
+                  <th className="actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {product.variants.length === 0 && (
+                  <TableEmpty colSpan={8}>This product has no sizes to price.</TableEmpty>
+                )}
+                {product.variants.map((v) => {
+                  // A just-added item is drawn once before the draft picks it up.
+                  const d = (draft.variants[v.id] ?? baseline.variants[v.id])!;
+                  const label = v.name ?? v.sku ?? 'item';
+                  const m = marginPercent(
+                    parseMoney(d.price) ?? null,
+                    costEditable ? (parseMoney(d.cost) ?? null) : v.costCents,
+                  );
+                  return (
+                    <tr key={v.id} data-testid="edit-variant-row">
+                      <td>
+                        <div>{v.name ?? '—'}</div>
+                        <code className="muted">{v.sku ?? '—'}</code>
+                        {!v.isActive && (
+                          <>
+                            {' '}
+                            <StatusBadge status="inactive" />
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        <Select
+                          value={d.size}
+                          aria-label={`Size for ${label}`}
+                          data-testid="variant-size"
+                          onChange={(e) => setVariant(v.id, { size: e.target.value })}
+                        >
+                          <option value="">—</option>
+                          {MATTRESS_SIZES.map((x) => (
+                            <option key={x} value={x}>
+                              {x}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                      <td>
+                        <Select
+                          value={d.firmness}
+                          aria-label={`Firmness for ${label}`}
+                          data-testid="variant-firmness"
+                          onChange={(e) => setVariant(v.id, { firmness: e.target.value })}
+                        >
+                          <option value="">—</option>
+                          {FIRMNESS_LEVELS.map((x) => (
+                            <option key={x} value={x}>
+                              {x}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                      <td>
+                        <Input
+                          value={d.barcode}
+                          aria-label={`Barcode for ${label}`}
+                          onChange={(e) => setVariant(v.id, { barcode: e.target.value })}
+                          className="w-36"
+                        />
+                      </td>
+                      <td className="num">
+                        <MoneyInput
+                          value={d.price}
+                          label={`Selling price for ${label}`}
+                          error={errors[`${v.id}.price`]}
+                          testId="variant-price"
+                          onChange={(price) => setVariant(v.id, { price })}
+                        />
+                      </td>
+                      <td className="num">
+                        {costEditable ? (
+                          <MoneyInput
+                            value={d.cost}
+                            label={`Cost for ${label}`}
+                            error={errors[`${v.id}.cost`]}
+                            placeholder="none"
+                            testId="variant-cost"
+                            onChange={(cost) => setVariant(v.id, { cost })}
+                          />
+                        ) : (
+                          <em className="muted">hidden</em>
+                        )}
+                      </td>
+                      <td className="num">
+                        <span
+                          className={cx('pe-margin', m != null && m < 0 && 'is-low')}
+                          data-testid="variant-margin"
+                          title={m != null && m < 0 ? 'Selling below cost' : undefined}
+                        >
+                          {m != null ? `${m}%` : '—'}
+                        </span>
+                      </td>
+                      <td className="actions">
+                        {v.isActive ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-danger"
+                            onClick={() => onToggleVariant(v.id, false)}
+                          >
+                            Deactivate
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => onToggleVariant(v.id, true)}
+                            data-testid="variant-reactivate"
+                          >
+                            Reactivate
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+          <div style={{ padding: '12px 14px' }}>
+            <FormGrid cols={3}>
+              <Field
+                label="Suggested retail price"
+                hint="The vendor's list price, for reference."
+                error={errors.suggestedRetail}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={draft.suggestedRetail}
+                  onChange={(e) => set('suggestedRetail', e.target.value)}
+                  data-testid="suggested-retail"
+                />
+              </Field>
+            </FormGrid>
+          </div>
+          {costEditable && factsLine}
+        </Card>
+
+        <Card
+          title="Reordering & vendor"
+          description="When available stock across all locations falls to the reorder point, the item shows in Purchasing → Reorder suggestions under its vendor. Leave the point blank to turn that off. Vendor SKU is the vendor's own part number, printed on purchase orders."
+          flush
+          data-testid="edit-reorder"
+        >
+          <TableWrap>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Preferred vendor</th>
+                  <th>Vendor SKU</th>
+                  <th className="num">Reorder point</th>
+                  <th className="num">Order qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeVariants.length === 0 && (
+                  <TableEmpty colSpan={5}>No active sizes to reorder.</TableEmpty>
+                )}
+                {activeVariants.map((v) => {
+                  // A just-added item is drawn once before the draft picks it up.
+                  const d = (draft.variants[v.id] ?? baseline.variants[v.id])!;
+                  return (
+                    <tr key={v.id}>
+                      <td>{v.name ?? <code>{v.sku ?? v.id.slice(0, 8)}</code>}</td>
+                      <td>
+                        <Select
+                          value={d.vendorId}
+                          aria-label="Preferred vendor"
+                          onChange={(e) => setVariant(v.id, { vendorId: e.target.value })}
+                        >
+                          <option value="">— none —</option>
+                          {vendors.map((vd) => (
+                            <option key={vd.id} value={vd.id}>
+                              {vd.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                      <td>
+                        <Input
+                          value={d.vendorSku}
+                          placeholder={v.sku ? `same as ${v.sku}` : 'vendor part #'}
+                          aria-label="Vendor SKU"
+                          onChange={(e) => setVariant(v.id, { vendorSku: e.target.value })}
+                          className="w-44"
+                          data-testid={`vendor-sku-${v.sku}`}
+                        />
+                      </td>
+                      <td className="num">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={d.reorderPoint}
+                          placeholder="off"
+                          aria-label="Reorder point"
+                          aria-invalid={errors[`${v.id}.point`] ? true : undefined}
+                          onChange={(e) => setVariant(v.id, { reorderPoint: e.target.value })}
+                          className="w-20"
+                          data-testid={`reorder-point-${v.sku}`}
+                        />
+                      </td>
+                      <td className="num">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={d.reorderQty}
+                          placeholder="auto"
+                          aria-label="Order quantity"
+                          aria-invalid={errors[`${v.id}.qty`] ? true : undefined}
+                          onChange={(e) => setVariant(v.id, { reorderQty: e.target.value })}
+                          className="w-20"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+        </Card>
+
+        <Card
+          title="Packing & shipping"
+          description="How it is boxed and shipped. Delivery capacity keeps using the item's capacity units."
+          data-testid="edit-packing"
+        >
+          <FormGrid cols={3}>
+            <Field label="Boxes per product" error={errors.boxesPerProduct}>
               <Input
                 type="number"
-                min={0}
-                step="0.01"
-                inputMode="decimal"
-                value={draft.suggestedRetail}
-                onChange={(e) => set('suggestedRetail', e.target.value)}
-                data-testid="suggested-retail"
+                min={1}
+                step={1}
+                value={draft.boxesPerProduct}
+                onChange={(e) => set('boxesPerProduct', e.target.value)}
+                data-testid="boxes-per-product"
               />
+            </Field>
+            <Field label="Purchase carton quantity" error={errors.purchaseCartonQty}>
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={draft.purchaseCartonQty}
+                onChange={(e) => set('purchaseCartonQty', e.target.value)}
+              />
+            </Field>
+            <Field label="Logistical carton quantity" error={errors.logisticalCartonQty}>
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={draft.logisticalCartonQty}
+                onChange={(e) => set('logisticalCartonQty', e.target.value)}
+              />
+            </Field>
+            {SHIPPING_FIELDS.map(({ key, label }) => (
+              <Field
+                key={key}
+                label={label}
+                error={errors[`ship.${key}`]}
+                hint={
+                  key === 'deliveryVolume' && general?.capacityUnits != null
+                    ? `Capacity units: ${general.capacityUnits}`
+                    : undefined
+                }
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={draft.shipping[key]}
+                  onChange={(e) => setShipping(key, e.target.value)}
+                  data-testid={`shipping-${key}`}
+                />
+              </Field>
+            ))}
+            <Field label="Carton transfers" as="div">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={draft.logisticalCartonTransfers}
+                  onChange={(e) => set('logisticalCartonTransfers', e.target.checked)}
+                />
+                Transfer in whole cartons
+              </label>
             </Field>
           </FormGrid>
+        </Card>
+
+        <div
+          className={cx('pe-savebar', dirty && 'is-dirty')}
+          role="region"
+          aria-label="Save changes"
+          data-testid="edit-savebar"
+        >
+          <span className="pe-savebar-note" data-testid="edit-save-state">
+            {saving
+              ? 'Saving…'
+              : errorCount > 0
+                ? `Fix ${errorCount === 1 ? 'the highlighted field' : `${errorCount} highlighted fields`} to save`
+                : dirty
+                  ? 'You have unsaved changes'
+                  : 'All changes saved'}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!dirty || saving}
+            onClick={() => setDraft(baseline)}
+            data-testid="edit-discard"
+          >
+            Discard
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!dirty || saving || errorCount > 0}
+            data-testid="edit-save"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
         </div>
-        {costEditable && factsLine}
-      </Card>
-
-      <Card
-        title="Reordering & vendor"
-        description="When available stock across all locations falls to the reorder point, the item shows in Purchasing → Reorder suggestions under its vendor. Leave the point blank to turn that off. Vendor SKU is the vendor's own part number, printed on purchase orders."
-        flush
-        data-testid="edit-reorder"
-      >
-        <TableWrap>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Preferred vendor</th>
-                <th>Vendor SKU</th>
-                <th className="num">Reorder point</th>
-                <th className="num">Order qty</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeVariants.length === 0 && (
-                <TableEmpty colSpan={5}>No active sizes to reorder.</TableEmpty>
-              )}
-              {activeVariants.map((v) => {
-                const d = draft.variants[v.id]!;
-                return (
-                  <tr key={v.id}>
-                    <td>{v.name ?? <code>{v.sku ?? v.id.slice(0, 8)}</code>}</td>
-                    <td>
-                      <Select
-                        value={d.vendorId}
-                        aria-label="Preferred vendor"
-                        onChange={(e) => setVariant(v.id, { vendorId: e.target.value })}
-                      >
-                        <option value="">— none —</option>
-                        {vendors.map((vd) => (
-                          <option key={vd.id} value={vd.id}>
-                            {vd.name}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td>
-                      <Input
-                        value={d.vendorSku}
-                        placeholder={v.sku ? `same as ${v.sku}` : 'vendor part #'}
-                        aria-label="Vendor SKU"
-                        onChange={(e) => setVariant(v.id, { vendorSku: e.target.value })}
-                        className="w-44"
-                        data-testid={`vendor-sku-${v.sku}`}
-                      />
-                    </td>
-                    <td className="num">
-                      <Input
-                        type="number"
-                        min={0}
-                        value={d.reorderPoint}
-                        placeholder="off"
-                        aria-label="Reorder point"
-                        aria-invalid={errors[`${v.id}.point`] ? true : undefined}
-                        onChange={(e) => setVariant(v.id, { reorderPoint: e.target.value })}
-                        className="w-20"
-                        data-testid={`reorder-point-${v.sku}`}
-                      />
-                    </td>
-                    <td className="num">
-                      <Input
-                        type="number"
-                        min={1}
-                        value={d.reorderQty}
-                        placeholder="auto"
-                        aria-label="Order quantity"
-                        aria-invalid={errors[`${v.id}.qty`] ? true : undefined}
-                        onChange={(e) => setVariant(v.id, { reorderQty: e.target.value })}
-                        className="w-20"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </TableWrap>
-      </Card>
-
-      <Card
-        title="Packing & shipping"
-        description="How it is boxed and shipped. Delivery capacity keeps using the item's capacity units."
-        data-testid="edit-packing"
-      >
-        <FormGrid cols={3}>
-          <Field label="Boxes per product" error={errors.boxesPerProduct}>
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              value={draft.boxesPerProduct}
-              onChange={(e) => set('boxesPerProduct', e.target.value)}
-              data-testid="boxes-per-product"
-            />
-          </Field>
-          <Field label="Purchase carton quantity" error={errors.purchaseCartonQty}>
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              value={draft.purchaseCartonQty}
-              onChange={(e) => set('purchaseCartonQty', e.target.value)}
-            />
-          </Field>
-          <Field label="Logistical carton quantity" error={errors.logisticalCartonQty}>
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              value={draft.logisticalCartonQty}
-              onChange={(e) => set('logisticalCartonQty', e.target.value)}
-            />
-          </Field>
-          {SHIPPING_FIELDS.map(({ key, label }) => (
-            <Field
-              key={key}
-              label={label}
-              error={errors[`ship.${key}`]}
-              hint={
-                key === 'deliveryVolume' && general?.capacityUnits != null
-                  ? `Capacity units: ${general.capacityUnits}`
-                  : undefined
-              }
-            >
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={draft.shipping[key]}
-                onChange={(e) => setShipping(key, e.target.value)}
-                data-testid={`shipping-${key}`}
-              />
-            </Field>
-          ))}
-          <Field label="Carton transfers" as="div">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.logisticalCartonTransfers}
-                onChange={(e) => set('logisticalCartonTransfers', e.target.checked)}
-              />
-              Transfer in whole cartons
-            </label>
-          </Field>
-        </FormGrid>
-      </Card>
-
-      <div
-        className={cx('pe-savebar', dirty && 'is-dirty')}
-        role="region"
-        aria-label="Save changes"
-        data-testid="edit-savebar"
-      >
-        <span className="pe-savebar-note" data-testid="edit-save-state">
-          {saving
-            ? 'Saving…'
-            : errorCount > 0
-              ? `Fix ${errorCount === 1 ? 'the highlighted field' : `${errorCount} highlighted fields`} to save`
-              : dirty
-                ? 'You have unsaved changes'
-                : 'All changes saved'}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={!dirty || saving}
-          onClick={() => setDraft(baseline)}
-          data-testid="edit-discard"
-        >
-          Discard
-        </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={!dirty || saving || errorCount > 0}
-          data-testid="edit-save"
-        >
-          {saving ? 'Saving…' : 'Save changes'}
-        </Button>
-      </div>
-    </form>
+      </form>
+    </>
   );
 }
 
@@ -1014,5 +1032,138 @@ function MoneyInput({
         data-testid={testId}
       />
     </span>
+  );
+}
+
+/**
+ * Owner 2026-09-28 ("how do I add a vendor to an existing product"): a
+ * product saved from New product without a price had no item under it, so
+ * it could not be sold, stocked or given a vendor — and nothing on the page
+ * could fix that. This adds its first item, with the vendor, in one go.
+ */
+function AddItemCard({
+  product,
+  vendors,
+  costEditable,
+  hasInactive,
+  onAdded,
+}: {
+  product: EditableProduct;
+  vendors: Vendor[];
+  costEditable: boolean;
+  hasInactive: boolean;
+  onAdded: () => Promise<void>;
+}) {
+  const [sku, setSku] = useState(product.sku ?? '');
+  const [price, setPrice] = useState('');
+  const [cost, setCost] = useState('');
+  const [vendorId, setVendorId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const priceCents = parseMoney(price);
+  const costCents = parseMoney(cost);
+  const invalid = priceCents === undefined || (costEditable && costCents === undefined);
+
+  async function add() {
+    if (invalid) return;
+    setBusy(true);
+    try {
+      const created = await api<{ id: string }>(`/v1/products/${product.id}/variants`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sku: sku.trim() || undefined,
+          priceCents: priceCents ?? 0,
+          ...(costEditable ? { costCents: costCents ?? null } : {}),
+        }),
+      });
+      if (vendorId) {
+        await api(`/v1/products/variants/${created.id}/reorder`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            reorderPoint: null,
+            reorderQty: null,
+            preferredVendorId: vendorId,
+            vendorSku: null,
+          }),
+        });
+      }
+      toast.success('Item added');
+      await onAdded();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="This product has nothing to sell yet"
+      description={
+        hasInactive
+          ? 'Its only item is deactivated — reactivate it under Price & cost, or add a new item here. Stock, the vendor and prices all live on an item.'
+          : 'It has no item under it, so it cannot be sold, stocked or given a vendor. Add its item here.'
+      }
+      className="pe-add-item"
+      data-testid="edit-add-item"
+    >
+      <FormGrid cols={3}>
+        <Field label="SKU">
+          <Input value={sku} onChange={(e) => setSku(e.target.value)} data-testid="add-item-sku" />
+        </Field>
+        <Field
+          label="Selling price"
+          hint="Blank = $0 for now"
+          error={priceCents === undefined ? 'Enter an amount' : undefined}
+        >
+          <Input
+            type="number"
+            min={0}
+            step="0.01"
+            inputMode="decimal"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            data-testid="add-item-price"
+          />
+        </Field>
+        {costEditable && (
+          <Field label="Cost" error={costCents === undefined ? 'Enter an amount' : undefined}>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              inputMode="decimal"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              data-testid="add-item-cost"
+            />
+          </Field>
+        )}
+        <Field label="Vendor">
+          <Select
+            value={vendorId}
+            onChange={(e) => setVendorId(e.target.value)}
+            data-testid="add-item-vendor"
+          >
+            <option value="">— none —</option>
+            {vendors.map((vd) => (
+              <option key={vd.id} value={vd.id}>
+                {vd.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </FormGrid>
+      <div style={{ marginTop: 12 }}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={busy || invalid}
+          onClick={() => void add()}
+          data-testid="add-item-save"
+        >
+          {busy ? 'Adding…' : 'Add item'}
+        </Button>
+      </div>
+    </Card>
   );
 }
