@@ -36,13 +36,14 @@ on:
         options:
           - docs/imports/2026-09-03/products.csv
           - docs/imports/2026-09-03/inventory.csv
+          - docs/imports/2026-09-29/king-koil-jewel-city.csv
       mode:
         description: validate stops after validation; commit writes the rows
         required: true
         type: choice
         options: [validate, commit]
       expect_rows:
-        description: Exact data-row count the file must have (products.csv 1948, inventory.csv 3246)
+        description: Exact data-row count the file must have (products.csv 1948, inventory.csv 3246, king-koil-jewel-city.csv 48)
         required: true
         type: string
       replace_catalog:
