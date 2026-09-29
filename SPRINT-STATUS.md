@@ -6272,3 +6272,27 @@ days after go-live, signed-in staff lost the cookie, and every tenant request an
 Checked in Chromium on a local stack: signed in, cleared the cookie, opened `/pos`. The register
 loaded with no error and the cookie came back. Tests: tenancy (9, +1). One membership → 200 plus
 Set-Cookie; two memberships → 412.
+
+### Checkpoint — 2026-09-28 (Products: a product with no item can get one, and its vendor)
+
+Owner ask: "how do I add a vendor to an existing product". The screenshot was FULL XL SPRUCE FIRM
+(7700-4XL): "No active locations or variants", Adjust stock greyed out, and Vendor "—" on the list.
+
+**Cause.** The vendor, like price, cost and stock, lives on a product's item (variant). New
+product only created rows with a price above $0. A product saved without a price therefore had no
+item, so it could not be sold, stocked or given a vendor, and nothing on its page could add one.
+
+**Fix:**
+
+- **Edit product:** a product with no active item shows "This product has nothing to sell yet",
+  with SKU (defaulting to the product's), selling price (blank means $0), cost and vendor, and an
+  **Add item** button. The button creates the item (`POST /v1/products/:id/variants`) and sets
+  its preferred vendor. When the only item is deactivated, the text points at Reactivate instead.
+- **New product:** the first row is always created ($0 until priced, taking the product SKU when
+  it has none of its own). Other rows are created when they have a price, SKU or name.
+- **Existing products that already have items:** Edit product → Reordering & vendor → Preferred
+  vendor → Save changes.
+
+Checked in Chromium on a local stack: a product with no items showed the card. Add item with
+$899 / $410 / AMERI created the item and set the vendor (AMERI on the product), and the card went
+away. New product with no price created one $0 item carrying the product SKU. No page errors.

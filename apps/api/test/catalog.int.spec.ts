@@ -103,7 +103,7 @@ async function seed(): Promise<void> {
       .returning();
     roles.set('Catalog Editor', editor!.id);
     await db.insert(schema.rolePermissions).values(
-      ['products.view', 'products.update'].map((permission) => ({
+      ['products.view', 'products.create', 'products.update'].map((permission) => ({
         roleId: editor!.id,
         permission,
       })),
@@ -1086,6 +1086,31 @@ describe('Size and firmness (A22.2)', () => {
 
     // Clearing the cost is allowed (no cost on file).
     await patch(ownerCookie, { costCents: null }).expect(200);
+
+    // Creating with a cost needs the same permission (Codex on #205).
+    const post = (path: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post(path)
+        .set('Cookie', editorCookie)
+        .set('X-Business-Id', businessId)
+        .send(body);
+    await post(`/v1/products/${created.body.id}/variants`, {
+      sku: 'COST-EDIT-1-K',
+      priceCents: 1000,
+      costCents: 500,
+    }).expect(403);
+    await post(`/v1/products/${created.body.id}/variants`, {
+      sku: 'COST-EDIT-1-K',
+      priceCents: 1000,
+    }).expect(201);
+    await post('/v1/products', {
+      name: 'Blind cost',
+      variants: [{ priceCents: 1000, costCents: 1 }],
+    }).expect(403);
+    await post('/v1/products', {
+      name: 'No cost given',
+      variants: [{ priceCents: 1000 }],
+    }).expect(201);
   });
 
   it('the product screen picks the category; an unknown id is refused', async () => {

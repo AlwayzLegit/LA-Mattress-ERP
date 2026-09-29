@@ -220,6 +220,14 @@ export class VariantsController {
       .where(eq(schema.products.id, productId))
       .limit(1);
     if (!product) throw new NotFoundException('Product not found');
+    // Cost is set only by someone who may see it (as on PATCH variants/:id).
+    if (
+      body.costCents != null &&
+      !tenant.isSuperAdmin &&
+      !tenant.permissions.has('products.cost.view')
+    ) {
+      throw new ForbiddenException('Setting cost needs the "View product cost" permission');
+    }
     validateVariants([
       {
         priceCents: body.priceCents,
