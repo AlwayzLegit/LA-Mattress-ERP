@@ -36,13 +36,14 @@ on:
         options:
           - docs/imports/2026-09-03/products.csv
           - docs/imports/2026-09-03/inventory.csv
+          - docs/imports/2026-09-29/king-koil-jewel-city.csv
       mode:
         description: validate stops after validation; commit writes the rows
         required: true
         type: choice
         options: [validate, commit]
       expect_rows:
-        description: Exact data-row count the file must have (products.csv 1948, inventory.csv 3246)
+        description: Exact data-row count the file must have (products.csv 1948, inventory.csv 3246, king-koil-jewel-city.csv 48)
         required: true
         type: string
       replace_catalog:
@@ -103,6 +104,16 @@ jobs:
           fi
           if [ "$REPLACE_CATALOG" = "true" ] && [ "$ENTITY" != "product" ]; then
             echo "::error::replace_catalog applies to entity=product only"; exit 1
+          fi
+          # Tenant-specific files may only be loaded into their own tenant:
+          # the business input defaults to la-mattress, and a file meant for
+          # another store must never land there by omission.
+          case "$FILE" in
+            docs/imports/2026-09-29/king-koil-jewel-city.csv) required_business=jewelcitymattress ;;
+            *) required_business="" ;;
+          esac
+          if [ -n "$required_business" ] && [ "$BUSINESS" != "$required_business" ]; then
+            echo "::error::$FILE belongs to business '$required_business', not '$BUSINESS'"; exit 1
           fi
           # The live service is Render's native Node runtime (repo checkout,
           # apps/api/dist); the Dockerfile layout puts the same build at
