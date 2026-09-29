@@ -142,11 +142,14 @@ function CreateBusinessForm({ onCreated }: { onCreated: () => void }) {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // Capture the form before awaiting: React nulls `currentTarget` once
+    // the handler returns, so reading it after the request throws.
+    const form = e.currentTarget;
     setSubmitting(true);
     setError(null);
     setSuccess(null);
     try {
-      const data = new FormData(e.currentTarget);
+      const data = new FormData(form);
       const result = await api<{ businessId: string }>('/v1/admin/businesses', {
         method: 'POST',
         body: JSON.stringify({
@@ -157,7 +160,7 @@ function CreateBusinessForm({ onCreated }: { onCreated: () => void }) {
         }),
       });
       setSuccess(`Created ${result.businessId}. Invitation sent.`);
-      e.currentTarget.reset();
+      form.reset();
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
