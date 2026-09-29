@@ -11,8 +11,8 @@ Firm / Medium incl. split sizes, HC Blue Indigo Plush, Grove Firm / Medium Euro 
 - `CATG` is `MATT`, which the importer aliases onto the business's "Mattresses" root.
 - `VENDOR` = `KING KOIL` (created on the fly by the importer).
 
-Load with `.github/workflows/ops-catalog-import.yml`: business slug of the Jewel City
-tenant, entity `product`, this file, `expect_rows` 48, `replace_catalog` **off**
+Load with `.github/workflows/ops-catalog-import.yml`: business `jewelcitymattress`
+(Jewel City Mattress Store), entity `product`, this file, `expect_rows` 48, `replace_catalog` **off**
 (validate first, then commit).
 
 Transcription caveats: the second photo's model line reads "INDIGO … PLUSH" with the
