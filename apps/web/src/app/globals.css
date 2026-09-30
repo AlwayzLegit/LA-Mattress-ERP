@@ -7272,6 +7272,82 @@ select.picker-from {
   color: var(--muted);
 }
 
+/* Owner cash hand-off (owner 2026-09-30): pickups not yet with the owner. */
+.ho.is-waiting {
+  border-color: var(--status-waiting-border);
+  box-shadow: inset 3px 0 0 var(--status-waiting-fg);
+}
+.ho.is-waiting .cq-total-amt {
+  color: var(--status-waiting-fg);
+}
+.ho-group {
+  padding: 8px 14px 6px;
+  border-top: 1px solid var(--border);
+}
+.ho-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  padding-bottom: 4px;
+}
+.ho-group-head strong {
+  font-weight: 600;
+}
+.ho-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 6px;
+  margin: 0 -6px;
+  border-radius: 3px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ho-row + .ho-row {
+  border-top: 1px solid var(--border);
+}
+.ho-row.is-received {
+  background: var(--status-fulfilled-bg);
+}
+.ho-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ho-row-main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ho-row-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ho-row-status {
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ho-row-amt {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 84px;
+}
+@media (max-width: 640px) {
+  .ho-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .ho-row-status {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
 @media (max-width: 1100px) {
   .dh-head {
     grid-template-columns: minmax(0, 1fr);

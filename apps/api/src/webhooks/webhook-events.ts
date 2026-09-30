@@ -50,6 +50,10 @@ export const WEBHOOK_EVENT_TYPES = [
   // varianceCents, slip, paymentIds, recordedByMembershipId } — a posted
   // drawer pickup (redesign Phase 9).
   'cash_pickup.posted',
+  // Payload: { pickupId, number, locationId, countedCents, from,
+  // recordedByMembershipId, ownerReceivedByMembershipId } — the owner's
+  // tick that a posted pickup's cash is in their hands (owner 2026-09-30).
+  'cash_pickup.owner_received',
   'close_out.signed_off',
   'lead.logged',
   'lead.converted',

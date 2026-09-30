@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useDashboardFilters } from '@/lib/dashboard-filters';
 import { CompetitionStrip } from '@/components/competition/competition-strip';
+import { CashHandoffs } from '../shared/cash-handoffs';
 import { ChangesCard } from '../shared/changes-card';
 import { StaffSchedule } from '../shared/staff-schedule';
 import { StoresSection } from '../shared/stores-section';
@@ -404,6 +405,10 @@ export default function OwnerHome({
           </button>
         </div>
       )}
+
+      {/* Owner 2026-09-30: pickups an operator is still holding — the
+          owner's "notification", pinned above the movable cards. */}
+      <CashHandoffs />
 
       <div className="sr-only" role="status" aria-live="polite">
         {moveNotice}
