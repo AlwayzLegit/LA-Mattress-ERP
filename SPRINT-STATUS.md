@@ -6296,3 +6296,44 @@ item, so it could not be sold, stocked or given a vendor, and nothing on its pag
 Checked in Chromium on a local stack: a product with no items showed the card. Add item with
 $899 / $410 / AMERI created the item and set the vendor (AMERI on the product), and the card went
 away. New product with no price created one $0 item carrying the product SKU. No page errors.
+
+### Checkpoint — 2026-09-30 (Cash pickups: the owner's hand-off tick)
+
+Owner ask: "The operator picks it up and owner gets notified on dashboard that operator picked up
+and Owner ticks the box too indicating that owner picked up from operator or store."
+Spec: PLAN-POS-OPERATIONS §12.21 (amendment A23, D50–D52).
+
+- **Schema:** `cash_pickups.owner_received_at` / `owner_received_by_membership_id` /
+  `owner_received_from` (`operator` | `store` | `legacy`), with a check constraint and a partial
+  "awaiting owner" index. Migration `0109` backfills every existing pickup as `legacy`, so the
+  owner does not wake up to a list of old slips.
+- **Permission:** `pos.cash.pickup_owner_receive`. Owner only (Manager excludes it by name).
+  Existing tenants get it from the boot-time role sync.
+- **API (`cash-pickups.controller.ts`):**
+  - `GET …/handoffs` lists waiting pickups plus the week's receipts.
+  - `PUT` / `DELETE …/:id/owner-received` ticks and unticks. Only an `operator` receipt can be
+    unticked; the others return 409.
+  - `POST …/owner-received` ticks in bulk.
+  - A pickup the owner posts is received from the store on the spot.
+  - Pickup summaries (queue, history, post) now carry `ownerReceipt`.
+  - Audited, with webhook `cash_pickup.owner_received`.
+- **Fix found on the way:** the pickup "N payments" count was always 0. The correlated subquery
+  rendered a bare `"id"`, which resolved to `cash_pickup_items.id`. The column is now qualified.
+- **Web:**
+  - The owner home pins **Cash handed to you** above the movable cards while anything is still
+    with an operator.
+  - It groups pickups by holder, with a tick per pickup (undoable) and "Received all from
+    <name>".
+  - Each store card's last-pickup line says "with <operator> — not yet with the owner" or
+    "handed to <owner> <time>".
+  - The poster's toast says the owner has been notified.
+- **Tests:** `store-dashboard.int.spec.ts` 28 (+6: owner-only permission, waiting list and 403s,
+  receive plus audit and idempotence, undo and bulk, owner-posted = from store, legacy never
+  listed). Web `handoff-label.test.ts` (4).
+
+Checked in Chromium on a local stack:
+
+- Operations posted two pickups. The store card read "with Dana Whitmore — not yet with the owner".
+- The owner's home showed "Cash handed to you · $2,259.50".
+- Tick, undo and "Received all from Dana" all worked. The card then read "handed to Acme Owner
+  Sep 30 2:15 PM", and the panel was gone after a reload.

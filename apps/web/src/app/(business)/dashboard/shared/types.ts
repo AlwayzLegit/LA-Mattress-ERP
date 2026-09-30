@@ -204,10 +204,20 @@ export interface PickupItemRef {
   docNumber: string;
 }
 
+/** The owner's tick on a pickup (owner 2026-09-30): the cash reached them. */
+export interface OwnerReceipt {
+  receivedAt: string;
+  /** Null for a legacy pickup (settled before the hand-off existed). */
+  byName: string | null;
+  /** 'operator' = handed over by the poster; 'store' = the owner took it from the store. */
+  from: 'operator' | 'store' | 'legacy';
+}
+
 export interface PickupSummary {
   id: string;
   number: string;
   recordedAt: string;
+  recordedByMembershipId?: string | null;
   byName: string;
   countedCents: number;
   expectedCents: number;
@@ -217,6 +227,20 @@ export interface PickupSummary {
   paymentCount: number;
   /** The payments carried out, each pointing at its document. */
   items: PickupItemRef[];
+  /** Null while the cash is still with whoever posted the pickup. */
+  ownerReceipt?: OwnerReceipt | null;
+}
+
+export interface HandoffRow extends PickupSummary {
+  locationId: string;
+  locationName: string;
+  timezone: string;
+}
+
+export interface HandoffsResponse {
+  awaiting: HandoffRow[];
+  recent: HandoffRow[];
+  totals: { awaitingCount: number; awaitingCents: number };
 }
 
 export interface CashPickupStore {

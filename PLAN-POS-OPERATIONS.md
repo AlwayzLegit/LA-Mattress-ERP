@@ -1713,6 +1713,41 @@ size pick at all.
   codes, sizes and firmness levels in use, with counts) so the Product
   group criterion offers the codes instead of asking for one.
 
+### 12.21 Cash hand-off — the owner's second tick (amendment A23, owner 2026-09-30)
+
+Owner ask: "The operator picks it up and owner gets notified on dashboard that
+operator picked up and Owner ticks the box too indicating that owner picked up
+from operator or store." A posted cash pickup (Phase 9, `PU-nnnn`) said who
+carried the cash out of the store, but nothing said the cash then reached the
+owner.
+
+- **D50 Two-step custody, per pickup.** Stage 1 is unchanged: whoever holds
+  `pos.cash.pickup_record` (Operations for every store, a manager for their
+  own) ticks the payments, counts and posts the pickup. Stage 2 is new, on
+  the pickup row: `cash_pickups.owner_received_at` / `_by_membership_id` /
+  `_from` (`operator` | `store` | `legacy`, migration `0109`). The owner
+  ticks a pickup as received and it reads "received from <operator>". A
+  pickup the owner posts is received "from the store" on the spot. Pickups
+  posted before this existed are backfilled `legacy`: settled, with no one
+  named, never listed as waiting.
+- **D51 Owner only.** New permission `pos.cash.pickup_owner_receive`. The
+  Owner role has it, and Manager excludes it by name. Operations and every
+  other role lack it. It can be granted per member like any other.
+- **D52 The notification is a panel, not a message.** The owner home pins
+  "Cash handed to you" above the movable cards whenever a pickup is still
+  with an operator. The panel groups pickups by who holds them and offers
+  a tick per pickup plus "Received all from <name>". It refreshes on focus
+  and after a pickup is posted. A tick can be undone from the panel (it
+  goes back to "with <operator>"). A store-taken or legacy receipt cannot
+  be unticked. Every store card's last-pickup line says where the cash is:
+  "with Dana — not yet with the owner" or "handed to <owner> Sep 30 4:10
+  PM". Audited as `cash_pickup.owner_receive` / `cash_pickup.owner_unreceive`,
+  with webhook `cash_pickup.owner_received`.
+- API: `GET /v1/dashboard/cash-pickups/handoffs` (waiting, oldest first,
+  plus the week's receipts), `PUT`/`DELETE /v1/dashboard/cash-pickups/:id/owner-received`,
+  `POST /v1/dashboard/cash-pickups/owner-received` (bulk). The older
+  per-payment tick (`pos.cash.pickup_confirm`) is untouched.
+
 ## 14. Build Order
 
 1. Schema: order types/statuses, store prefixes + per-store sequences, fee settings

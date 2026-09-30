@@ -7,8 +7,13 @@ import { Field, StatusChip } from '@/components/ui';
 import type { StatusKey } from '@/lib/design-tokens';
 import { api } from '@/lib/api';
 import { usdWhole } from '../owner/owner-kit';
-import { dayShort, docHref, plural, stamp } from './kit';
+import { dayShort, docHref, handoffLabel, plural, stamp } from './kit';
 import type { CashPickupQueue, CashPickupStore, PickupStatus, PostPickupResult } from './types';
+
+/** Fired after the owner's hand-off tick so the "last pickup" line refreshes. */
+export const HANDOFF_EVENT = 'jetnine:cash-handoff';
+/** Fired after a pickup is posted so the owner's hand-off panel picks it up. */
+export const PICKUP_POSTED_EVENT = 'jetnine:cash-pickup-posted';
 
 /**
  * Cash pickups (redesign Phase 9, README §3.5, canvas 8). Every store
@@ -82,6 +87,10 @@ export function useCashPickups(locationIds: string[] | null) {
   }, [scopeKey]);
   useEffect(() => {
     void load();
+    // The owner's hand-off tick changes the "last pickup" line.
+    const onHandoff = () => void load();
+    window.addEventListener(HANDOFF_EVENT, onHandoff);
+    return () => window.removeEventListener(HANDOFF_EVENT, onHandoff);
   }, [load]);
 
   const storeOf = useCallback(
@@ -196,8 +205,9 @@ export function useCashPickups(locationIds: string[] | null) {
       setRecording((f) => ({ ...f, [locationId]: undefined }));
       const v = r.pickup.varianceCents;
       toast.success(
-        `${r.pickup.number} · ${usdCents(r.pickup.countedCents)} picked up from ${store.name} by ${r.pickup.byName}${v ? ` · variance ${varianceLabel(v)} flagged` : ' · balanced'}`,
+        `${r.pickup.number} · ${usdCents(r.pickup.countedCents)} picked up from ${store.name} by ${r.pickup.byName}${v ? ` · variance ${varianceLabel(v)} flagged` : ' · balanced'}${r.pickup.ownerReceipt === null ? ' · the owner has been notified' : ''}`,
       );
+      window.dispatchEvent(new Event(PICKUP_POSTED_EVENT));
       return r;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -444,6 +454,18 @@ export function CashOnHandPanel({
         {lp
           ? `Last pickup ${dayShort(lp.recordedAt, store.timezone)} · ${lp.byName} · ${usdCents(lp.countedCents)}${lp.slip ? ` · slip ${lp.slip}` : ''}${lp.varianceCents ? ` · variance ${varianceLabel(lp.varianceCents)}` : ''}`
           : 'No pickup recorded yet'}
+        {lp && handoffLabel(lp, store.timezone) ? (
+          <span
+            data-testid="coh-handoff"
+            style={{
+              color: lp.ownerReceipt ? undefined : 'var(--status-waiting-fg)',
+              fontWeight: lp.ownerReceipt ? undefined : 500,
+            }}
+          >
+            {' · '}
+            {handoffLabel(lp, store.timezone)}
+          </span>
+        ) : null}
         {store.pendingCount > 0
           ? ` · ${plural(store.pendingCount, 'cash payment')} since${
               store.oldestDays && store.oldestDays > 0 ? ` · oldest ${store.oldestDays}d` : ''

@@ -1064,3 +1064,165 @@ describe('GET /v1/dashboard/cash-pickups/queue', () => {
     expect((one.body.stores as { locationId: string }[]).map((s) => s.locationId)).toEqual([first]);
   });
 });
+
+describe('owner cash hand-off', () => {
+  interface Handoff {
+    id: string;
+    number: string;
+    locationId: string;
+    locationName: string;
+    byName: string;
+    countedCents: number;
+    paymentCount: number;
+    ownerReceipt: { byName: string | null; from: string; receivedAt: string } | null;
+  }
+  let opsPickupId = '';
+
+  it('is the owner’s tick alone', () => {
+    const has = (name: string) =>
+      SYSTEM_ROLES.find((r) => r.name === name)!.permissions.includes(
+        'pos.cash.pickup_owner_receive',
+      );
+    expect(has('Owner')).toBe(true);
+    expect(has('Operations')).toBe(false);
+    expect(has('Manager')).toBe(false);
+    expect(has('Cashier')).toBe(false);
+  });
+
+  it('puts an operator’s pickup on the owner’s dashboard until the owner ticks it', async () => {
+    const posted = await as('ops')
+      .post('/v1/dashboard/cash-pickups')
+      .send({ locationId: aStoreId, countedCents: 50_000, slip: 'BAG-7' })
+      .expect(201);
+    opsPickupId = posted.body.pickup.id;
+    expect(posted.body.pickup.ownerReceipt).toBeNull();
+    expect(posted.body.pickup.byName).toBe('Dana Whitmore');
+
+    const h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    const awaiting = h.body.awaiting as Handoff[];
+    expect(awaiting.map((r) => r.id)).toEqual([opsPickupId]);
+    expect(awaiting[0]).toMatchObject({
+      locationName: 'A Store',
+      byName: 'Dana Whitmore',
+      countedCents: 50_000,
+      paymentCount: 2,
+      ownerReceipt: null,
+    });
+    expect(h.body.totals).toEqual({ awaitingCount: 1, awaitingCents: 50_000 });
+
+    // Everyone sees the pickup is still with the operator.
+    const q = await as('ops').get(`/v1/dashboard/cash-pickups/queue?locationIds=${aStoreId}`);
+    expect(q.body.stores[0].lastPickup.ownerReceipt).toBeNull();
+
+    // Operations and the manager neither see the list nor tick it.
+    await as('ops').get('/v1/dashboard/cash-pickups/handoffs').expect(403);
+    await as('manager').get('/v1/dashboard/cash-pickups/handoffs').expect(403);
+    await as('ops').put(`/v1/dashboard/cash-pickups/${opsPickupId}/owner-received`).expect(403);
+  });
+
+  it('records the owner receiving it from the operator, audited and idempotent', async () => {
+    const res = await as('owner')
+      .put(`/v1/dashboard/cash-pickups/${opsPickupId}/owner-received`)
+      .expect(200);
+    expect(res.body.ownerReceipt).toMatchObject({ byName: 'Olive Owner', from: 'operator' });
+    const first = res.body.ownerReceipt.receivedAt;
+    const again = await as('owner')
+      .put(`/v1/dashboard/cash-pickups/${opsPickupId}/owner-received`)
+      .expect(200);
+    expect(again.body.ownerReceipt.receivedAt).toBe(first);
+
+    const h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect(h.body.awaiting).toEqual([]);
+    expect((h.body.recent as Handoff[]).map((r) => r.id)).toEqual([opsPickupId]);
+
+    const q = await as('ops').get(`/v1/dashboard/cash-pickups/queue?locationIds=${aStoreId}`);
+    expect(q.body.stores[0].lastPickup.ownerReceipt).toMatchObject({
+      byName: 'Olive Owner',
+      from: 'operator',
+    });
+
+    const audits = await withDb((db) =>
+      db
+        .select({ targetId: schema.auditLogs.targetId, changes: schema.auditLogs.changesJson })
+        .from(schema.auditLogs)
+        .where(eq(schema.auditLogs.action, 'cash_pickup.owner_receive')),
+    );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.targetId).toBe(opsPickupId);
+    expect(audits[0]!.changes).toMatchObject({
+      metadata: { from: 'operator', recordedByName: 'Dana Whitmore' },
+    });
+  });
+
+  it('lets the owner undo a mis-tick, then tick in bulk', async () => {
+    await as('ops').delete(`/v1/dashboard/cash-pickups/${opsPickupId}/owner-received`).expect(403);
+    const undone = await as('owner')
+      .delete(`/v1/dashboard/cash-pickups/${opsPickupId}/owner-received`)
+      .expect(200);
+    expect(undone.body.ownerReceipt).toBeNull();
+    let h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect((h.body.awaiting as Handoff[]).map((r) => r.id)).toEqual([opsPickupId]);
+
+    const bulk = await as('owner')
+      .post('/v1/dashboard/cash-pickups/owner-received')
+      .send({ pickupIds: [opsPickupId] })
+      .expect(201);
+    expect(bulk.body.rows[0].ownerReceipt.from).toBe('operator');
+    h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect(h.body.awaiting).toEqual([]);
+
+    await as('owner')
+      .post('/v1/dashboard/cash-pickups/owner-received')
+      .send({ pickupIds: [] })
+      .expect(400);
+    await as('owner')
+      .post('/v1/dashboard/cash-pickups/owner-received')
+      .send({ pickupIds: ['nope'] })
+      .expect(400);
+    await as('owner').put('/v1/dashboard/cash-pickups/nope/owner-received').expect(400);
+    await as('owner')
+      .put('/v1/dashboard/cash-pickups/00000000-0000-4000-8000-000000000000/owner-received')
+      .expect(404);
+  });
+
+  it('counts a pickup the owner posts as taken straight from the store', async () => {
+    const posted = await as('owner')
+      .post('/v1/dashboard/cash-pickups')
+      .send({ locationId: bStoreId, countedCents: 50_000 })
+      .expect(201);
+    expect(posted.body.pickup.ownerReceipt).toMatchObject({
+      byName: 'Olive Owner',
+      from: 'store',
+    });
+    const h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect(h.body.awaiting).toEqual([]);
+    await as('owner')
+      .delete(`/v1/dashboard/cash-pickups/${posted.body.pickup.id}/owner-received`)
+      .expect(409);
+  });
+
+  it('never lists a pickup settled before the hand-off existed', async () => {
+    const [legacy] = await withDb((db) =>
+      db
+        .insert(schema.cashPickups)
+        .values({
+          businessId,
+          locationId: aStoreId,
+          number: 'PU-0900',
+          recordedAt: new Date(Date.now() - 86_400_000),
+          countedCents: 1_000,
+          expectedCents: 1_000,
+          varianceCents: 0,
+          ownerReceivedAt: new Date(Date.now() - 86_400_000),
+          ownerReceivedFrom: 'legacy',
+        })
+        .returning(),
+    );
+    const h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    const ids = [...(h.body.awaiting as Handoff[]), ...(h.body.recent as Handoff[])].map(
+      (r) => r.id,
+    );
+    expect(ids).not.toContain(legacy!.id);
+    await as('owner').delete(`/v1/dashboard/cash-pickups/${legacy!.id}/owner-received`).expect(409);
+  });
+});

@@ -1,15 +1,32 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Inject,
   NotFoundException,
+  Param,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
-import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -36,6 +53,13 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
  * stores their membership is scoped to). The older per-payment tick
  * (`pos.cash.pickup_confirm`) still works and is what a posted pickup
  * writes for each payment, so both views agree.
+ *
+ * Owner hand-off (owner 2026-09-30): the pickup is the first step of a
+ * custody chain. Whoever posts it has carried the cash out of the store;
+ * the owner (`pos.cash.pickup_owner_receive`) then ticks that the cash
+ * is in their hands — "received from <operator>". A pickup the owner
+ * posts themselves is received from the store on the spot. Pickups still
+ * with an operator sit on the owner's dashboard until ticked.
  */
 
 export const PICKUP_DUE_CENTS = 150_000;
@@ -72,10 +96,20 @@ export interface PickupItemRef {
   docNumber: string;
 }
 
+/** The owner's tick on a pickup: the cash reached them. */
+export interface OwnerReceipt {
+  receivedAt: Date;
+  /** Null for a `legacy` pickup (posted before the hand-off existed) or a former member. */
+  byName: string | null;
+  /** 'operator' = handed over by the poster; 'store' = the owner took it from the store. */
+  from: 'operator' | 'store' | 'legacy';
+}
+
 export interface PickupSummary {
   id: string;
   number: string;
   recordedAt: Date;
+  recordedByMembershipId: string | null;
   byName: string;
   countedCents: number;
   expectedCents: number;
@@ -85,6 +119,22 @@ export interface PickupSummary {
   paymentCount: number;
   /** The payments carried out, each pointing at its document (owner 2026-09-25). */
   items: PickupItemRef[];
+  /** Null while the cash is still with whoever posted the pickup. */
+  ownerReceipt: OwnerReceipt | null;
+}
+
+export interface HandoffRow extends PickupSummary {
+  locationId: string;
+  locationName: string;
+  timezone: string;
+}
+
+export interface HandoffsResponse {
+  /** Posted pickups whose cash has not reached the owner yet, oldest first. */
+  awaiting: HandoffRow[];
+  /** Pickups the owner received in the last week, newest first (undo lives here). */
+  recent: HandoffRow[];
+  totals: { awaitingCount: number; awaitingCents: number };
 }
 
 export interface CashPickupStore {
@@ -164,6 +214,79 @@ function usd(cents: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function ownerReceiptOf(
+  r: { ownerAt: Date | null; ownerBy: string | null; ownerFrom: string | null },
+  names: Map<string, string>,
+): OwnerReceipt | null {
+  if (!r.ownerAt) return null;
+  const from =
+    r.ownerFrom === 'store' || r.ownerFrom === 'legacy' ? r.ownerFrom : ('operator' as const);
+  return {
+    receivedAt: r.ownerAt,
+    byName: r.ownerBy ? (names.get(r.ownerBy) ?? 'a former member') : null,
+    from,
+  };
+}
+
+/** The pickup columns every summary reads, owner hand-off included. */
+const pickupCols = {
+  id: schema.cashPickups.id,
+  locationId: schema.cashPickups.locationId,
+  number: schema.cashPickups.number,
+  recordedAt: schema.cashPickups.recordedAt,
+  by: schema.cashPickups.recordedByMembershipId,
+  countedCents: schema.cashPickups.countedCents,
+  expectedCents: schema.cashPickups.expectedCents,
+  varianceCents: schema.cashPickups.varianceCents,
+  slip: schema.cashPickups.slip,
+  note: schema.cashPickups.note,
+  ownerAt: schema.cashPickups.ownerReceivedAt,
+  ownerBy: schema.cashPickups.ownerReceivedByMembershipId,
+  ownerFrom: schema.cashPickups.ownerReceivedFrom,
+  // Qualified by hand: drizzle renders a single-table column as a bare
+  // "id", which inside this subquery resolved to `i.id` and counted 0.
+  paymentCount: sql<number>`(SELECT count(*) FROM cash_pickup_items i WHERE i.pickup_id = "cash_pickups"."id")::int`,
+};
+
+type PickupColsRow = {
+  id: string;
+  locationId: string;
+  number: string;
+  recordedAt: Date;
+  by: string | null;
+  countedCents: number;
+  expectedCents: number;
+  varianceCents: number;
+  slip: string | null;
+  note: string | null;
+  ownerAt: Date | null;
+  ownerBy: string | null;
+  ownerFrom: string | null;
+  paymentCount: number;
+};
+
+function summaryOf(
+  r: PickupColsRow,
+  names: Map<string, string>,
+  items: PickupItemRef[],
+): PickupSummary {
+  return {
+    id: r.id,
+    number: r.number,
+    recordedAt: r.recordedAt,
+    recordedByMembershipId: r.by,
+    byName: (r.by && names.get(r.by)) || 'a former member',
+    countedCents: r.countedCents,
+    expectedCents: r.expectedCents,
+    varianceCents: r.varianceCents,
+    slip: r.slip,
+    note: r.note,
+    paymentCount: r.paymentCount,
+    items,
+    ownerReceipt: ownerReceiptOf(r, names),
+  };
 }
 
 @TenantScoped()
@@ -304,19 +427,7 @@ export class CashPickupsController {
     const out = new Map<string, PickupSummary>();
     if (storeIds.length === 0) return out;
     const rows = await this.db
-      .selectDistinctOn([schema.cashPickups.locationId], {
-        id: schema.cashPickups.id,
-        locationId: schema.cashPickups.locationId,
-        number: schema.cashPickups.number,
-        recordedAt: schema.cashPickups.recordedAt,
-        by: schema.cashPickups.recordedByMembershipId,
-        countedCents: schema.cashPickups.countedCents,
-        expectedCents: schema.cashPickups.expectedCents,
-        varianceCents: schema.cashPickups.varianceCents,
-        slip: schema.cashPickups.slip,
-        note: schema.cashPickups.note,
-        paymentCount: sql<number>`(SELECT count(*) FROM cash_pickup_items i WHERE i.pickup_id = ${schema.cashPickups.id})::int`,
-      })
+      .selectDistinctOn([schema.cashPickups.locationId], pickupCols)
       .from(schema.cashPickups)
       .where(
         and(
@@ -327,19 +438,7 @@ export class CashPickupsController {
       .orderBy(schema.cashPickups.locationId, desc(schema.cashPickups.recordedAt));
     const itemsBy = await this.pickupItems(rows.map((r) => r.id));
     for (const r of rows) {
-      out.set(r.locationId, {
-        id: r.id,
-        number: r.number,
-        recordedAt: r.recordedAt,
-        byName: (r.by && names.get(r.by)) || 'a former member',
-        countedCents: r.countedCents,
-        expectedCents: r.expectedCents,
-        varianceCents: r.varianceCents,
-        slip: r.slip,
-        note: r.note,
-        paymentCount: r.paymentCount,
-        items: itemsBy.get(r.id) ?? [],
-      });
+      out.set(r.locationId, summaryOf(r, names, itemsBy.get(r.id) ?? []));
     }
     return out;
   }
@@ -541,19 +640,7 @@ export class CashPickupsController {
     const names = await this.memberNames(businessId);
     const storeName = new Map(stores.map((s) => [s.id, s.name]));
     const rows = await this.db
-      .select({
-        id: schema.cashPickups.id,
-        locationId: schema.cashPickups.locationId,
-        number: schema.cashPickups.number,
-        recordedAt: schema.cashPickups.recordedAt,
-        by: schema.cashPickups.recordedByMembershipId,
-        countedCents: schema.cashPickups.countedCents,
-        expectedCents: schema.cashPickups.expectedCents,
-        varianceCents: schema.cashPickups.varianceCents,
-        slip: schema.cashPickups.slip,
-        note: schema.cashPickups.note,
-        paymentCount: sql<number>`(SELECT count(*) FROM cash_pickup_items i WHERE i.pickup_id = ${schema.cashPickups.id})::int`,
-      })
+      .select(pickupCols)
       .from(schema.cashPickups)
       .where(
         and(
@@ -569,19 +656,9 @@ export class CashPickupsController {
     const historyItems = await this.pickupItems(rows.map((r) => r.id));
     return {
       rows: rows.map((r) => ({
-        id: r.id,
+        ...summaryOf(r, names, historyItems.get(r.id) ?? []),
         locationId: r.locationId,
         locationName: storeName.get(r.locationId) ?? '',
-        number: r.number,
-        recordedAt: r.recordedAt,
-        byName: (r.by && names.get(r.by)) || 'a former member',
-        countedCents: r.countedCents,
-        expectedCents: r.expectedCents,
-        varianceCents: r.varianceCents,
-        slip: r.slip,
-        note: r.note,
-        paymentCount: r.paymentCount,
-        items: historyItems.get(r.id) ?? [],
       })),
     };
   }
@@ -673,6 +750,9 @@ export class CashPickupsController {
     // Number under the per-business lock, then insert; the unique index
     // is the backstop, never the retry loop.
     const number = await this.nextNumber(businessId);
+    // The owner posting a pickup took the cash from the store themselves:
+    // the hand-off is complete the moment it is posted.
+    const ownerTakes = tenant.permissions.has('pos.cash.pickup_owner_receive');
     const [inserted] = await this.db
       .insert(schema.cashPickups)
       .values({
@@ -685,11 +765,21 @@ export class CashPickupsController {
         varianceCents: variance,
         slip,
         note,
+        ...(ownerTakes
+          ? {
+              ownerReceivedAt: sql`now()`,
+              ownerReceivedByMembershipId: tenant.membershipId,
+              ownerReceivedFrom: 'store',
+            }
+          : {}),
       })
       .returning({
         id: schema.cashPickups.id,
         number: schema.cashPickups.number,
         recordedAt: schema.cashPickups.recordedAt,
+        ownerAt: schema.cashPickups.ownerReceivedAt,
+        ownerBy: schema.cashPickups.ownerReceivedByMembershipId,
+        ownerFrom: schema.cashPickups.ownerReceivedFrom,
       });
     if (!inserted) throw new BadRequestException('Could not save the pickup — try again');
 
@@ -762,6 +852,21 @@ export class CashPickupsController {
         recordedByMembershipId: tenant.membershipId,
       },
     });
+    if (ownerTakes) {
+      void this.webhooks.fire({
+        businessId,
+        eventType: 'cash_pickup.owner_received',
+        payload: {
+          pickupId: inserted.id,
+          number: inserted.number,
+          locationId: store.id,
+          countedCents: counted,
+          from: 'store',
+          recordedByMembershipId: tenant.membershipId,
+          ownerReceivedByMembershipId: tenant.membershipId,
+        },
+      });
+    }
 
     const after = await this.buildQueue(tenant, businessId, [store]);
     const names = await this.memberNames(businessId);
@@ -770,6 +875,8 @@ export class CashPickupsController {
         id: inserted.id,
         number: inserted.number,
         recordedAt: inserted.recordedAt,
+        recordedByMembershipId: tenant.membershipId,
+        ownerReceipt: ownerReceiptOf(inserted, names),
         byName: (tenant.membershipId && names.get(tenant.membershipId)) || 'you',
         countedCents: counted,
         expectedCents: expected,
@@ -789,5 +896,256 @@ export class CashPickupsController {
       },
       store: after.stores[0]!,
     };
+  }
+  // ---- Owner hand-off (owner 2026-09-30) ---------------------------------
+
+  /** Pickups in the stores the member may see, with their documents resolved. */
+  private async handoffRows(
+    businessId: string,
+    stores: StoreRef[],
+    names: Map<string, string>,
+    where: SQL | undefined,
+    order: SQL,
+    limit: number,
+  ): Promise<HandoffRow[]> {
+    if (stores.length === 0) return [];
+    const byId = new Map(stores.map((st) => [st.id, st]));
+    const rows = await this.db
+      .select(pickupCols)
+      .from(schema.cashPickups)
+      .where(
+        and(
+          eq(schema.cashPickups.businessId, businessId),
+          inArray(
+            schema.cashPickups.locationId,
+            stores.map((st) => st.id),
+          ),
+          where,
+        ),
+      )
+      .orderBy(order)
+      .limit(limit);
+    const items = await this.pickupItems(rows.map((r) => r.id));
+    return rows.map((r) => ({
+      ...summaryOf(r, names, items.get(r.id) ?? []),
+      locationId: r.locationId,
+      locationName: byId.get(r.locationId)?.name ?? '',
+      timezone: byId.get(r.locationId)?.timezone ?? 'UTC',
+    }));
+  }
+
+  /**
+   * The owner's hand-off list: every posted pickup whose cash is still
+   * with whoever carried it out (oldest first), and what the owner
+   * received this past week so a mis-tick can be undone.
+   */
+  @Get('handoffs')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async handoffs(@CurrentTenant() tenant: RequestTenantContext): Promise<HandoffsResponse> {
+    const businessId = tenant.businessId!;
+    const stores = await this.storesFor(tenant, businessId, null);
+    const names = await this.memberNames(businessId);
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const [awaiting, recent] = await Promise.all([
+      this.handoffRows(
+        businessId,
+        stores,
+        names,
+        isNull(schema.cashPickups.ownerReceivedAt),
+        asc(schema.cashPickups.recordedAt),
+        200,
+      ),
+      this.handoffRows(
+        businessId,
+        stores,
+        names,
+        and(
+          isNotNull(schema.cashPickups.ownerReceivedAt),
+          ne(schema.cashPickups.ownerReceivedFrom, 'legacy'),
+          gte(schema.cashPickups.ownerReceivedAt, sql`${weekAgo}::timestamptz`),
+        ),
+        desc(schema.cashPickups.ownerReceivedAt),
+        20,
+      ),
+    ]);
+    return {
+      awaiting,
+      recent,
+      totals: {
+        awaitingCount: awaiting.length,
+        awaitingCents: awaiting.reduce((n, r) => n + r.countedCents, 0),
+      },
+    };
+  }
+
+  /** One pickup in a store the member may see, or 404. */
+  private async pickupFor(
+    tenant: RequestTenantContext,
+    businessId: string,
+    pickupId: string,
+  ): Promise<{ row: HandoffRow; stores: StoreRef[]; names: Map<string, string> }> {
+    if (!isUuid(pickupId)) throw new BadRequestException('pickupId must be a uuid');
+    const stores = await this.storesFor(tenant, businessId, null);
+    const names = await this.memberNames(businessId);
+    const [row] = await this.handoffRows(
+      businessId,
+      stores,
+      names,
+      eq(schema.cashPickups.id, pickupId),
+      asc(schema.cashPickups.recordedAt),
+      1,
+    );
+    if (!row) throw new NotFoundException('Pickup not found');
+    return { row, stores, names };
+  }
+
+  private async receiveOne(tenant: RequestTenantContext, pickupId: string): Promise<HandoffRow> {
+    const businessId = tenant.businessId!;
+    const { row, stores, names } = await this.pickupFor(tenant, businessId, pickupId);
+    if (row.ownerReceipt) return row;
+    // Posted by the owner themselves (e.g. an old pickup ticked later):
+    // the cash came from the store, not from an operator.
+    const from: 'operator' | 'store' =
+      row.recordedByMembershipId && row.recordedByMembershipId === tenant.membershipId
+        ? 'store'
+        : 'operator';
+    const updated = await this.db
+      .update(schema.cashPickups)
+      .set({
+        ownerReceivedAt: sql`now()`,
+        ownerReceivedByMembershipId: tenant.membershipId,
+        ownerReceivedFrom: from,
+      })
+      .where(
+        and(
+          eq(schema.cashPickups.businessId, businessId),
+          eq(schema.cashPickups.id, pickupId),
+          isNull(schema.cashPickups.ownerReceivedAt),
+        ),
+      )
+      .returning({ id: schema.cashPickups.id });
+    if (updated.length > 0) {
+      await this.audit.log({
+        action: 'cash_pickup.owner_receive',
+        targetType: 'cash_pickup',
+        targetId: pickupId,
+        metadata: {
+          number: row.number,
+          locationId: row.locationId,
+          locationName: row.locationName,
+          countedCents: row.countedCents,
+          from,
+          recordedByMembershipId: row.recordedByMembershipId,
+          recordedByName: row.byName,
+        },
+      });
+      void this.webhooks.fire({
+        businessId,
+        eventType: 'cash_pickup.owner_received',
+        payload: {
+          pickupId,
+          number: row.number,
+          locationId: row.locationId,
+          countedCents: row.countedCents,
+          from,
+          recordedByMembershipId: row.recordedByMembershipId,
+          ownerReceivedByMembershipId: tenant.membershipId,
+        },
+      });
+    }
+    const [after] = await this.handoffRows(
+      businessId,
+      stores,
+      names,
+      eq(schema.cashPickups.id, pickupId),
+      asc(schema.cashPickups.recordedAt),
+      1,
+    );
+    return after!;
+  }
+
+  /** Tick: the cash on this pickup is in the owner's hands. */
+  @Put(':pickupId/owner-received')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async receive(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('pickupId') pickupId: string,
+  ): Promise<HandoffRow> {
+    return this.receiveOne(tenant, pickupId);
+  }
+
+  /** "Received all from Ana": tick several pickups at once. */
+  @Post('owner-received')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async receiveMany(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Body() body: { pickupIds?: unknown },
+  ): Promise<{ rows: HandoffRow[] }> {
+    const ids = Array.isArray(body?.pickupIds) ? body.pickupIds.filter(isUuid) : [];
+    if (
+      ids.length === 0 ||
+      ids.length > 200 ||
+      (Array.isArray(body?.pickupIds) && ids.length !== body.pickupIds.length)
+    ) {
+      throw new BadRequestException('pickupIds must list 1–200 pickup ids');
+    }
+    const rows: HandoffRow[] = [];
+    for (const id of [...new Set(ids)]) rows.push(await this.receiveOne(tenant, id));
+    return { rows };
+  }
+
+  /**
+   * Untick — a mis-tick only. The cash goes back to "with the operator".
+   * A pickup the owner took from the store has no operator to go back to,
+   * and a legacy one was never ticked, so neither can be undone.
+   */
+  @Delete(':pickupId/owner-received')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async unreceive(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('pickupId') pickupId: string,
+  ): Promise<HandoffRow> {
+    const businessId = tenant.businessId!;
+    const { row, stores, names } = await this.pickupFor(tenant, businessId, pickupId);
+    const receipt = row.ownerReceipt;
+    if (!receipt) return row;
+    if (receipt.from !== 'operator') {
+      throw new ConflictException(
+        receipt.from === 'store'
+          ? `${row.number} was taken from the store by the owner — there is no hand-off to undo`
+          : `${row.number} was settled before the owner hand-off existed — there is nothing to undo`,
+      );
+    }
+    await this.db
+      .update(schema.cashPickups)
+      .set({
+        ownerReceivedAt: null,
+        ownerReceivedByMembershipId: null,
+        ownerReceivedFrom: null,
+      })
+      .where(
+        and(eq(schema.cashPickups.businessId, businessId), eq(schema.cashPickups.id, pickupId)),
+      );
+    await this.audit.log({
+      action: 'cash_pickup.owner_unreceive',
+      targetType: 'cash_pickup',
+      targetId: pickupId,
+      metadata: {
+        number: row.number,
+        locationId: row.locationId,
+        countedCents: row.countedCents,
+        previouslyReceivedAt: receipt.receivedAt,
+        previouslyReceivedBy: receipt.byName,
+      },
+    });
+    const [after] = await this.handoffRows(
+      businessId,
+      stores,
+      names,
+      eq(schema.cashPickups.id, pickupId),
+      asc(schema.cashPickups.recordedAt),
+      1,
+    );
+    return after!;
   }
 }

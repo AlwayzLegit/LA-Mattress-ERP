@@ -1,4 +1,14 @@
-import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { businesses } from './platform';
 import { locations, memberships } from './tenancy';
 import { payments } from './sales';
@@ -80,6 +90,14 @@ export const orderChangeAcks = pgTable(
  * payments also gets its `cash_pickup_receipts` stamp so the older
  * per-payment tick and this ledger agree. Variance (counted − expected)
  * is stored because it is what was true at the count, not derived.
+ *
+ * Owner hand-off (owner 2026-09-30): a pickup is a two-step custody
+ * chain. The poster (usually Operations) carries the cash out of the
+ * store; the owner then ticks that they have it — `owner_received_*`.
+ * `owner_received_from` says how it reached the owner: `operator` (the
+ * poster handed it over) or `store` (the owner posted the pickup, i.e.
+ * took it from the store themselves). Pickups posted before the
+ * hand-off existed are `legacy` — settled, with nobody named.
  */
 export const cashPickups = pgTable(
   'cash_pickups',
@@ -103,12 +121,26 @@ export const cashPickups = pgTable(
     /** Deposit slip / bag number written on the envelope. */
     slip: text('slip'),
     note: text('note'),
+    ownerReceivedAt: timestamp('owner_received_at', { withTimezone: true }),
+    ownerReceivedByMembershipId: uuid('owner_received_by_membership_id').references(
+      () => memberships.id,
+      { onDelete: 'set null' },
+    ),
+    /** 'operator' | 'store' | 'legacy' — set with `owner_received_at`. */
+    ownerReceivedFrom: text('owner_received_from'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     businessIdx: index('cash_pickups_business_idx').on(t.businessId),
     storeIdx: index('cash_pickups_store_idx').on(t.businessId, t.locationId, t.recordedAt),
     numberUnique: uniqueIndex('cash_pickups_number_uniq').on(t.businessId, t.number),
+    awaitingOwnerIdx: index('cash_pickups_awaiting_owner_idx')
+      .on(t.businessId, t.recordedAt)
+      .where(sql`owner_received_at IS NULL`),
+    ownerReceivedCheck: check(
+      'cash_pickups_owner_received_check',
+      sql`(owner_received_at IS NULL AND owner_received_from IS NULL) OR (owner_received_at IS NOT NULL AND owner_received_from IN ('operator', 'store', 'legacy'))`,
+    ),
   }),
 );
 

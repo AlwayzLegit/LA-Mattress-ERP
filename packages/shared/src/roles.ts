@@ -36,6 +36,9 @@ const managerExclusions = new Set<Permission>([
   // schedule is set by the owner and Operations — the manager reads it.
   'pos.cash.pickup_confirm',
   'schedule.edit',
+  // Owner 2026-09-30: the second tick of the cash hand-off — "the owner
+  // has it" — is the owner's alone.
+  'pos.cash.pickup_owner_receive',
 ]);
 
 const managerPermissions: Permission[] = businessPermissions.filter(

@@ -130,6 +130,8 @@ export const PERMISSIONS = {
     'Tick a cash payment as physically picked up from the store (dashboard store cards)',
   'pos.cash.pickup_record':
     'Record and post a cash pickup — count the drawer against its cash payments, write the slip (Owner, Operations, and a manager for their own store)',
+  'pos.cash.pickup_owner_receive':
+    'Tick a posted cash pickup as received by the owner — handed over by the operator, or taken from the store directly (Owner only)',
   'sales.view': 'View completed sales and refund history',
 
   'reports.sales.view': 'View sales reports',

@@ -1,4 +1,4 @@
-import type { StorePeriod } from './types';
+import type { PickupSummary, StorePeriod } from './types';
 
 /**
  * Formatting shared by the store cards, the payment list and the
@@ -186,3 +186,16 @@ export const PUNCH_LABELS: Record<string, string> = {
   break_end: 'Break end',
   clock_out: 'Clock out',
 };
+
+/**
+ * Where a posted pickup's cash is now (owner 2026-09-30): still with the
+ * person who carried it out, or with the owner. Empty for pickups settled
+ * before the hand-off existed, and when the API predates it.
+ */
+export function handoffLabel(lp: PickupSummary, tz?: string): string {
+  const got = lp.ownerReceipt;
+  if (lp.ownerReceipt === undefined || got?.from === 'legacy') return '';
+  if (!got) return `with ${lp.byName} — not yet with the owner`;
+  if (got.from === 'store') return 'with the owner';
+  return `handed to ${got.byName ?? 'the owner'} ${stamp(got.receivedAt, tz)}`;
+}
