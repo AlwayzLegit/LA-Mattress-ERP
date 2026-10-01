@@ -64,6 +64,34 @@ Roles: **Associate, Store Manager, Warehouse, Owner/Admin**.
   only. Owner/Admin sees everything.
 - Owner/Admin selects (settings) which roles may unlock a locked order (§7).
 
+### 2.1 Taking payment at another store (amendment A24, owner 2026-10-01)
+
+Owner ask: "I need them to be able to take payments on invoices from other stores
+but not sell — if the customer comes into a different store to make a payment, the
+payment registers at the store that the payment was taken at, with the member who
+took the payment. That member still should not be able to make sales at stores they
+are not assigned to."
+
+- **D53 Paying is not selling.** Approved-only selling (amendment 2026-08-29) still
+  blocks writing a new sale or order at an unassigned store. Taking a payment on an
+  existing order, draft or service ticket from any store is allowed. The payment must
+  be taken at one of the member's own stores, the store chip they are working at.
+- **D54 A payment belongs to the store that took it.** `payments.location_id` (taken
+  at) and `payments.taken_by_membership_id` (migration `0110`). Older rows are
+  backfilled with their document's store, and their taker stays unknown. Money
+  reports place tenders by the payment's store:
+  - cash in the drawer, shift close expected cash and cash pickups;
+  - store cards' money received, drawer balancing (operator = the taker);
+  - close-out and Z tenders, daily tender mix and "collected" figures.
+    Written sales, balances and commissions stay with the order's store and
+    salespeople. A refund or reversal is booked at the store that took the money it
+    reverses.
+- **D55 Paying a draft confirms it in place.** A payment on a draft confirms it and
+  commits its stock, exactly as it already did for a quote. In the register, another
+  store's draft opens as payment-only: its items, customer and prices are locked. If
+  any were changed, Complete refuses. Otherwise Complete takes the payment on that
+  same draft, and nothing is re-written at the other store.
+
 ## 3. Order Types
 
 - **Sales Order** (standard)
@@ -122,6 +150,11 @@ Single-screen order entry — customer, products, payment all on one screen (no 
   line's quantity. A take-with sale whose every product line goes with the customer
   completes in place — no -A piece is carved off just to strand the fee. An order
   left holding only fee lines (nothing to deliver) can be completed.
+  _Amendment 2026-10-01:_ the toggles (and the recycling-fee exception check) cover
+  lines filed under Mattresses, Foundations & Box Springs and Adjustable Bases (not
+  base accessories/parts) **and platform bed bases — "Bed Frames › Platform &
+  Folding Frames"** (X-Plat, Highrise, hotel bed base), which stand in for a
+  foundation. Metal bed frames and frame parts get no chips.
   _Amendment 2026-09-17:_ the **Warehouse is a selling location** like any store —
   it appears in New Sale's Store picker (and the "Acting for" chip) and a sale
   rung there books its drawer, tax and inventory at the warehouse. The default

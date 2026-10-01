@@ -63,6 +63,24 @@ describe('lineHasAddons', () => {
     ).toBe(false);
   });
 
+  it('offers the chips on platform bed bases (X-Plat), not on plain frames or parts', () => {
+    expect(
+      lineHasAddons({
+        categoryPath: 'Bed Frames › Platform & Folding Frames',
+        description: 'QUEEN X-PLAT BED FRAME',
+      }),
+    ).toBe(true);
+    expect(
+      lineHasAddons({
+        categoryPath: 'Bed Frames › Frame Parts & Hardware',
+        description: 'BED FRAME GLIDES',
+      }),
+    ).toBe(false);
+    expect(lineHasAddons({ categoryPath: 'Bed Frames', description: 'QUEEN FRAME' })).toBe(false);
+    expect(lineHasAddons({ categoryPath: null, description: 'QUEEN X-PLAT BED FRAME' })).toBe(true);
+    expect(lineHasAddons({ categoryPath: null, description: 'Q METAL FRAME' })).toBe(false);
+  });
+
   it('falls back to the name only when there is no category', () => {
     expect(lineHasAddons({ categoryPath: null, description: 'Cloud Comfort Mattress' })).toBe(true);
     expect(lineHasAddons({ categoryPath: null, description: 'Adjustable base' })).toBe(true);

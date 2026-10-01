@@ -441,7 +441,7 @@ export class OwnerDashboardController {
       start: `${lastMonthDay.slice(0, 7)}-01`,
       end: lastMonthDay,
     };
-    const payLocation = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const payLocation = sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const scopePayments = and(
       salesScopeCond(tenant, payLocation),
       locationIds

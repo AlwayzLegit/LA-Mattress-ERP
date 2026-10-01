@@ -10,7 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { businesses, users } from './platform';
-import { locations } from './tenancy';
+import { locations, memberships } from './tenancy';
 import { customers } from './customers';
 import { productVariants } from './catalog';
 import { orders } from './orders';
@@ -136,10 +136,28 @@ export const payments = pgTable(
     financingMonths: integer('financing_months'),
     // 'pending' | 'succeeded' | 'failed' | 'refunded'
     status: text('status').notNull(),
+    /**
+     * Where the money was taken (owner 2026-10-01): a customer may pay a
+     * Koreatown order at West LA — the tender belongs to West LA's drawer,
+     * pickups and close-out, while the order stays Koreatown's sale.
+     * NULL only on rows written before this column (migration 0110
+     * backfills them with the document's store); readers fall back to the
+     * document's store.
+     */
+    locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+    /** The member who took the payment (NULL on legacy / imported rows). */
+    takenByMembershipId: uuid('taken_by_membership_id').references(() => memberships.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     saleIdx: index('payments_sale_id_idx').on(t.saleId),
+    locationIdx: index('payments_business_location_idx').on(
+      t.businessId,
+      t.locationId,
+      t.createdAt,
+    ),
     orderIdx: index('payments_order_id_idx').on(t.orderId),
     businessIdx: index('payments_business_id_idx').on(t.businessId),
     processorRefIdx: index('payments_processor_ref_idx').on(t.processor, t.processorRef),

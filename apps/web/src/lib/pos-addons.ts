@@ -13,10 +13,19 @@
  * Bases", "Foundations & Box Springs › Low Profile (4–5")"), so the rule
  * reads the path's root, not the leaf. Base accessories and parts (remotes,
  * legs) sit under Adjustable Bases but are not a base — no chips.
+ *
+ * Owner 2026-10-01: the X-Plat needs a recycling fee. Platform bed bases
+ * ("Bed Frames › Platform & Folding Frames" — X-Plat, Highrise, hotel bed
+ * base) stand in for a foundation, so they get the chips too; ordinary
+ * metal frames and frame parts do not.
  */
 export const CATEGORY_PATH_SEPARATOR = ' › ';
 const ADDON_ROOTS = /^(mattresses|adjustable bases|foundations & box springs)$/i;
 const NOT_ADDON_LEAVES = /accessor|part/i;
+const PLATFORM_ROOT = /^bed frames$/i;
+const PLATFORM_LEAF = /platform/i;
+/** Uncategorized platform bases, named like "QUEEN X-PLAT BED FRAME". */
+const PLATFORM_NAMES = /x-?plat|platform|bed base/i;
 const ADDON_NAMES =
   /mattress|foundation|box ?spring|adjustable|\bbase\b|hybrid|posturepedic|tempur/i;
 /** Names that match the fallback but are accessories, never a sleep surface. */
@@ -33,8 +42,10 @@ export function lineHasAddons(line: {
     const segments = line.categoryPath.split(CATEGORY_PATH_SEPARATOR).map((s) => s.trim());
     const root = segments[0] ?? '';
     const leaf = segments[segments.length - 1] ?? '';
+    if (PLATFORM_ROOT.test(root)) return segments.length > 1 && PLATFORM_LEAF.test(leaf);
     if (!ADDON_ROOTS.test(root)) return false;
     return segments.length === 1 || !NOT_ADDON_LEAVES.test(leaf);
   }
+  if (PLATFORM_NAMES.test(line.description)) return true;
   return ADDON_NAMES.test(line.description) && !NOT_ADDON_NAMES.test(line.description);
 }

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { formatMoney, formatPhone } from '@jetnine/shared';
 import { ApiError, api } from '@/lib/api';
-import { useOptionalActingStore } from '@/lib/acting-store';
+import { actingStoreId, useOptionalActingStore } from '@/lib/acting-store';
 import {
   Alert,
   Button,
@@ -323,6 +323,7 @@ export function OrderSheet({ id }: { id: string }) {
           method: payMethod,
           amountCents: cents,
           processorRef: payRef.trim() || undefined,
+          takenAtLocationId: actingStoreId(),
         }),
       });
       setOrder(next);

@@ -342,10 +342,15 @@ describe('Enter a Return — salesperson, store, fees, pickup on the calendar, t
         .where(eq(schema.orderLines.id, line1Id));
       expect(line!.qtyReturned).toBe(1);
       const refunds = await db
-        .select({ amountCents: schema.payments.amountCents })
+        .select({
+          amountCents: schema.payments.amountCents,
+          takenBy: schema.payments.takenByMembershipId,
+        })
         .from(schema.payments)
         .where(and(eq(schema.payments.orderId, order1Id), eq(schema.payments.kind, 'refund')));
       expect(refunds.map((r) => r.amountCents)).toEqual([-42500]);
+      // The member who received the return is the refund's taker.
+      expect(refunds[0]!.takenBy).toBe(ownerMembershipId);
     });
   });
 
@@ -422,13 +427,30 @@ describe('Enter an Exchange — fulfillment, refund tender, ticket', () => {
     expect(settled.body.settlement.saleBalanceDueCents).toBe(0);
     await withDb(async (db) => {
       const refunds = await db
-        .select({ amountCents: schema.payments.amountCents, method: schema.payments.method })
+        .select({
+          amountCents: schema.payments.amountCents,
+          method: schema.payments.method,
+          takenBy: schema.payments.takenByMembershipId,
+        })
         .from(schema.payments)
         .where(and(eq(schema.payments.orderId, order2Id), eq(schema.payments.kind, 'refund')));
       // $1,000 credit − the $500 (+ tax-free) replacement → $500 back by card.
       const total = refunds.reduce((s, r) => s + r.amountCents, 0);
       expect(total).toBe(-(100000 - settled.body.settlement.saleTotalCents));
       expect(refunds.every((r) => r.method === 'card')).toBe(true);
+      expect(refunds.every((r) => r.takenBy === ownerMembershipId)).toBe(true);
+      // The credit applied to the replacement is stamped with the same member.
+      const applied = await db
+        .select({ takenBy: schema.payments.takenByMembershipId })
+        .from(schema.payments)
+        .where(
+          and(
+            eq(schema.payments.orderId, replacement.body.id),
+            eq(schema.payments.method, 'store_credit'),
+          ),
+        );
+      expect(applied.length).toBeGreaterThan(0);
+      expect(applied.every((r) => r.takenBy === ownerMembershipId)).toBe(true);
     });
     const print = await as(ownerCookie)
       .post(`/v1/exchanges/${bound.body.id}/ticket-print`)

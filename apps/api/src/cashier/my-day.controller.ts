@@ -340,9 +340,11 @@ export class MyDayController {
           salesScopeCond(tenant, schema.sales.locationId),
         ),
       );
-    // Collected: money that landed today on documents I wrote, whenever
-    // they were written — a deposit taken today on last week's order is
-    // today's collection.
+    // Collected: money I took today on orders, whenever they were written
+    // — a deposit taken today on last week's order is today's collection.
+    // The member who took the payment gets it (owner 2026-10-01: a payment
+    // registers with the member who took it, at the store it was taken);
+    // rows from before takers were recorded fall back to the salesperson.
     const [orderPay] = await this.db
       .select({ cents: sql<number>`COALESCE(SUM(${schema.payments.amountCents}), 0)::int` })
       .from(schema.payments)
@@ -352,9 +354,15 @@ export class MyDayController {
           eq(schema.payments.businessId, businessId),
           eq(schema.payments.status, 'succeeded'),
           isNull(schema.orders.importedAt),
-          this.mineCond(me),
+          or(
+            eq(schema.payments.takenByMembershipId, me),
+            and(isNull(schema.payments.takenByMembershipId), this.mineCond(me)),
+          ),
           sql`${localDay(schema.payments.createdAt)} = ${day}`,
-          salesScopeCond(tenant, schema.orders.locationId),
+          salesScopeCond(
+            tenant,
+            sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId})`,
+          ),
         ),
       );
     const [salePay] = await this.db
@@ -435,7 +443,8 @@ export class MyDayController {
         .where(
           and(
             eq(schema.payments.businessId, businessId),
-            eq(schema.orders.locationId, open.locationId),
+            // Cash taken at this drawer's store (owner 2026-10-01).
+            sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${open.locationId}::uuid`,
             eq(schema.payments.method, 'cash'),
             eq(schema.payments.status, 'succeeded'),
             isNull(schema.orders.importedAt),

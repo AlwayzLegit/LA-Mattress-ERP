@@ -25,6 +25,7 @@ import {
 } from '../common/pagination';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
+import { resolveTakenAt } from '../common/payment-taken-at';
 import { DRIZZLE } from '../database/database.module';
 import { EmailService } from '../email/email.service';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
@@ -398,10 +399,18 @@ export class ServiceOrdersController {
   async takePayment(
     @CurrentTenant() tenant: RequestTenantContext,
     @Param('id') id: string,
-    @Body() body: { method?: string; amountCents?: number; processorRef?: string },
+    @Body()
+    body: {
+      method?: string;
+      amountCents?: number;
+      processorRef?: string;
+      /** The store the money is taken at (owner 2026-10-01); defaults to the ticket's. */
+      takenAtLocationId?: string;
+    },
   ): Promise<Detail> {
     const row = await this.load(id);
     if (row.status === 'cancelled') throw new BadRequestException('Ticket is cancelled');
+    const takenAt = await resolveTakenAt(this.db, tenant, row.locationId, body.takenAtLocationId);
     const method = body.method ?? 'cash';
     if (!(PAYMENT_METHODS as readonly string[]).includes(method)) {
       throw new BadRequestException(`method must be one of: ${PAYMENT_METHODS.join(', ')}`);
@@ -426,12 +435,14 @@ export class ServiceOrdersController {
       amountCents: amount,
       processorRef: body.processorRef ?? null,
       status: 'succeeded',
+      locationId: takenAt.locationId,
+      takenByMembershipId: takenAt.takenByMembershipId,
     });
     await this.audit.log({
       action: 'service_order.payment',
       targetType: 'service_order',
       targetId: id,
-      after: { method, amountCents: amount },
+      after: { method, amountCents: amount, takenAtLocationId: takenAt.locationId },
     });
     return this.detail(id);
   }

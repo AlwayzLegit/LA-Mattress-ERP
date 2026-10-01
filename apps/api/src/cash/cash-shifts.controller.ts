@@ -205,7 +205,9 @@ export class CashShiftsController {
       .innerJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
       .where(
         and(
-          eq(schema.orders.locationId, shift.locationId),
+          // The drawer holds cash taken HERE — a Koreatown order paid at
+          // West LA is West LA's cash (owner 2026-10-01).
+          sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${shift.locationId}::uuid`,
           eq(schema.payments.method, 'cash'),
           eq(schema.payments.status, 'succeeded'),
           gte(schema.payments.createdAt, shift.openedAt),

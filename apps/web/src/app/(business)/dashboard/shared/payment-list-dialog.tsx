@@ -145,6 +145,7 @@ export function PaymentListDialog({
                 <th>Payment date</th>
                 <th>Sale date</th>
                 <th>Salesperson</th>
+                <th>Taken by</th>
                 <th>Type</th>
                 <th className="last" style={{ textAlign: 'right' }}>
                   Amount
@@ -171,6 +172,7 @@ export function PaymentListDialog({
                     {dayShort(r.soldAt, timezone)}
                   </td>
                   <td style={{ color: 'var(--text2)' }}>{r.salespersonName ?? '—'}</td>
+                  <td style={{ color: 'var(--text2)' }}>{r.takenByName ?? '—'}</td>
                   <td>
                     <div>{r.kind}</div>
                     {(r.cardBrand || r.financingMonths) && (

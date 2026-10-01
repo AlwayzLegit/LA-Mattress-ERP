@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import request from 'supertest';
 import { Test } from '@nestjs/testing';
@@ -3567,6 +3567,102 @@ describe('Per-member selling scope + nav visibility', () => {
     expect(ownerLocs.body.every((l: { canSellHere: boolean }) => l.canSellHere === true)).toBe(
       true,
     );
+  });
+
+  it("approved-only member takes payments on other stores' orders and drafts, at their own store (owner 2026-10-01)", async () => {
+    // Another store's order and draft, written by the owner.
+    const order = await asCookie(ownerCookie)
+      .post('/v1/orders')
+      .send({
+        locationId: otherStoreId,
+        customerId,
+        confirm: true,
+        lines: [{ variantId: sofaVariantId, quantity: 1 }],
+      })
+      .expect(201);
+    const draft = await asCookie(ownerCookie)
+      .post('/v1/orders')
+      .send({
+        locationId: otherStoreId,
+        customerId,
+        draft: true,
+        lines: [{ variantId: sofaVariantId, quantity: 1 }],
+      })
+      .expect(201);
+    expect(draft.body.status).toBe('draft');
+
+    // My Day "Collected" before the cashier takes anything.
+    const myDayBefore = await asCookie(cashierCookie).get('/v1/dashboard/my-day').expect(200);
+    const collectedBefore = myDayBefore.body.myDay.today.collectedCents as number;
+
+    // Taking money is not selling: the restricted cashier pays the other
+    // store's order, recorded at the store they are standing in.
+    await asCookie(cashierCookie)
+      .post(`/v1/orders/${order.body.id}/payments`)
+      .send({ method: 'cash', amountCents: 1_000, takenAtLocationId: locationId })
+      .expect(201);
+    // …but never as taken at a store they are not set up for.
+    const elsewhere = await asCookie(cashierCookie)
+      .post(`/v1/orders/${order.body.id}/payments`)
+      .send({ method: 'cash', amountCents: 1_000, takenAtLocationId: otherStoreId });
+    expect(elsewhere.status).toBe(403);
+    expect(elsewhere.body.message).toMatch(/only at a store you are set up for/);
+    // An older screen sending no store: their one approved store.
+    await asCookie(cashierCookie)
+      .post(`/v1/orders/${order.body.id}/payments`)
+      .send({ method: 'card', amountCents: 500 })
+      .expect(201);
+    // Paying the other store's draft confirms it in place — no new order.
+    const paidDraft = await asCookie(cashierCookie)
+      .post(`/v1/orders/${draft.body.id}/payments`)
+      .send({ method: 'cash', amountCents: 2_000, takenAtLocationId: locationId })
+      .expect(201);
+    expect(paidDraft.body.status).toBe('open');
+    // The owner (any store) without a store named: the order's own store.
+    await asCookie(ownerCookie)
+      .post(`/v1/orders/${order.body.id}/payments`)
+      .send({ method: 'cash', amountCents: 700 })
+      .expect(201);
+    // Writing a NEW sale at the other store is still refused.
+    const sell = await asCookie(cashierCookie)
+      .post('/v1/orders')
+      .send({
+        locationId: otherStoreId,
+        customerId,
+        confirm: true,
+        lines: [{ variantId: sofaVariantId, quantity: 1 }],
+      });
+    expect(sell.status).toBe(403);
+
+    // The payments the cashier took count on their My Day, though the
+    // owner wrote the orders; the owner's own payment does not.
+    const myDayAfter = await asCookie(cashierCookie).get('/v1/dashboard/my-day').expect(200);
+    expect(myDayAfter.body.myDay.today.collectedCents - collectedBefore).toBe(3_500);
+
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const db = drizzle(sql);
+      const rows = await db
+        .select({
+          orderId: schema.payments.orderId,
+          amountCents: schema.payments.amountCents,
+          locationId: schema.payments.locationId,
+          takenBy: schema.payments.takenByMembershipId,
+        })
+        .from(schema.payments)
+        .where(inArray(schema.payments.orderId, [order.body.id, draft.body.id]))
+        .orderBy(schema.payments.createdAt);
+      expect(rows.map((r) => [r.amountCents, r.locationId === locationId])).toEqual([
+        [1_000, true],
+        [500, true],
+        [2_000, true],
+        [700, false],
+      ]);
+      expect(rows.slice(0, 3).every((r) => r.takenBy === cashierMembershipId)).toBe(true);
+      expect(rows[3]!.locationId).toBe(otherStoreId);
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
   });
 
   it('/me carries the login picker payload and hidden nav round-trips', async () => {

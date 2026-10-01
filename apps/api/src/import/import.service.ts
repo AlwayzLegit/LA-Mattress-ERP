@@ -1261,6 +1261,7 @@ export class ImportService {
         .values({
           businessId,
           orderId,
+          locationId,
           kind: 'deposit',
           method: 'legacy',
           amountCents: depositCents,
@@ -1363,6 +1364,7 @@ export class ImportService {
         .values({
           businessId,
           saleId,
+          locationId,
           kind: 'sale',
           method,
           amountCents: totalCents,

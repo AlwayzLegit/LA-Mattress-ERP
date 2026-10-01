@@ -27,6 +27,7 @@ import {
   Toolbar,
   useListColumns,
 } from '@/components/ui';
+import { actingStoreId } from '@/lib/acting-store';
 
 /**
  * Service ticket detail (G6): the working view of one repair — charges
@@ -405,9 +406,11 @@ export default function ServiceTicketPage() {
                       onClick={() => {
                         const cents = Math.round(Number(payAmount) * 100);
                         if (!Number.isFinite(cents) || cents <= 0) return;
-                        void act('/payments', { method: payMethod, amountCents: cents }).then(() =>
-                          setPayAmount(''),
-                        );
+                        void act('/payments', {
+                          method: payMethod,
+                          amountCents: cents,
+                          takenAtLocationId: actingStoreId(),
+                        }).then(() => setPayAmount(''));
                       }}
                       disabled={busy}
                       data-testid="ticket-take-payment"

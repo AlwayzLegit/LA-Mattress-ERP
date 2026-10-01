@@ -1188,6 +1188,9 @@ export class SalesController {
           return {
             businessId: tenant.businessId!,
             saleId: sale.id,
+            // A register sale is taken where it is rung (owner 2026-10-01).
+            locationId: body.locationId,
+            takenByMembershipId: tenant.membershipId ?? null,
             method: p.method!,
             amountCents: p.amountCents!,
             processor:

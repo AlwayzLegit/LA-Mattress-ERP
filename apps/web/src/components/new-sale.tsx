@@ -22,7 +22,7 @@ import {
   returnableQty,
 } from '@/lib/exchange-math';
 import { setDraftSummary } from '@/lib/api-status';
-import { SELLING_STORE_KEY } from '@/lib/acting-store';
+import { SELLING_STORE_KEY, actingStoreId } from '@/lib/acting-store';
 import {
   defaultSourceFor,
   effectiveFulfillment,
@@ -231,6 +231,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
    * it as saved; changed → Save changes replaces it, or Close discards them.
    */
   const [resumeBaseline, setResumeBaseline] = useState<string | null>(null);
+  const [resumeContentBaseline, setResumeContentBaseline] = useState<string | null>(null);
   const captureBaseline = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -593,9 +594,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     };
   }, [lines, avail]);
 
-  // Everything a saved draft keeps; a resumed draft is "changed" when this
-  // differs from the snapshot taken as it opened.
-  const saleSignature = useMemo(
+  // Everything a saved draft keeps except the money recorded on screen;
+  // a resumed draft is "edited" when this differs from its snapshot.
+  const contentSignature = useMemo(
     () =>
       JSON.stringify([
         customer?.id ?? null,
@@ -610,7 +611,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         deliveryFee,
         shipDiffers ? ship : null,
         salespeople,
-        payments.length,
         lines.map((l) => [
           l.variantId,
           l.description,
@@ -638,17 +638,36 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       shipDiffers,
       ship,
       salespeople,
-      payments,
       lines,
     ],
+  );
+  // …and with the recorded payments: "changed" (anything to save).
+  const saleSignature = useMemo(
+    () => JSON.stringify([contentSignature, payments.length]),
+    [contentSignature, payments.length],
   );
   useEffect(() => {
     if (!captureBaseline.current || !resumedDraft) return;
     captureBaseline.current = false;
     setResumeBaseline(saleSignature);
-  }, [saleSignature, resumedDraft]);
+    setResumeContentBaseline(contentSignature);
+  }, [saleSignature, contentSignature, resumedDraft]);
   const draftChanged =
     resumedDraft != null && resumeBaseline != null && saleSignature !== resumeBaseline;
+  /** Items, customer, prices or terms changed since the draft opened (payments aside). */
+  const draftEdited =
+    resumedDraft != null &&
+    resumeContentBaseline != null &&
+    contentSignature !== resumeContentBaseline;
+  /**
+   * Owner 2026-10-01: a draft from a store this member is not set up to
+   * sell at can still be paid here — the money is taken at this store,
+   * by this member — but not changed: that would be selling there.
+   */
+  const payOnlyStore =
+    resumedDraft != null && locs.find((l) => l.id === locationId)?.canSellHere === false
+      ? (locs.find((l) => l.id === locationId)?.name ?? 'another store')
+      : null;
   /** The draft on screen is not offered again under Resume a draft. */
   const otherDrafts = drafts.filter((d) => d.id !== resumedDraft?.id);
 
@@ -1100,6 +1119,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       );
       setResumedDraft({ id, number: o.number });
       setResumeBaseline(null);
+      setResumeContentBaseline(null);
       captureBaseline.current = true;
       toast.success(`${o.number} opened — Close draft leaves it as saved`);
     } catch (err) {
@@ -1117,6 +1137,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       resetAll();
       loadDrafts();
       toast.success(`No changes — ${n} is still in Drafts as it was`);
+      return;
+    }
+    if (payOnlyStore && resumedDraft && draftEdited) {
+      setError(
+        `${resumedDraft.number} is a ${payOnlyStore} draft — you can take a payment on it here, but not change it. Close the draft and reopen it to undo your changes, or ask someone at ${payOnlyStore}.`,
+      );
+      return;
+    }
+    if (payOnlyStore && mode === 'draft') {
+      setError(`Only ${payOnlyStore} can save changes to ${resumedDraft?.number ?? 'this draft'}.`);
       return;
     }
     if (!customer) {
@@ -1196,6 +1226,41 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     if (!customer) throw new Error('Attach a customer first.');
     if (exchangeOriginal) {
       await submitExchange();
+      return;
+    }
+    // Another store's draft: take the money on THAT order — recorded at the
+    // store chip's store, by this member — and the first payment confirms
+    // it (owner 2026-10-01). Nothing is re-written at the other store.
+    if (payOnlyStore && resumedDraft && mode === 'complete') {
+      const takenAtLocationId = actingStoreId();
+      if (payments.length === 0) {
+        await api(`/v1/orders/${resumedDraft.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'open' }),
+        });
+      }
+      for (const p of payments) {
+        await api(`/v1/orders/${resumedDraft.id}/payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            method: p.method,
+            amountCents: p.amountCents,
+            kind: 'deposit',
+            processorRef: p.ref || undefined,
+            cardBrand: p.cardBrand,
+            financingMonths: p.financingMonths,
+            takenAtLocationId,
+          }),
+        });
+      }
+      setDone({
+        id: resumedDraft.id,
+        number: resumedDraft.number,
+        kind: 'order',
+        sources: [],
+        dueCents: Math.max(0, totals.totalCents - totals.paidCents),
+        at: new Date(),
+      });
       return;
     }
     const linePayload = expandLines();
@@ -1303,6 +1368,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             processorRef: p.ref || undefined,
             cardBrand: p.cardBrand,
             financingMonths: p.financingMonths,
+            takenAtLocationId: actingStoreId(),
           }),
         });
       }
@@ -1501,6 +1567,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   cardBrand: isCardMethod(payMethod) ? payCardBrand || undefined : undefined,
                   financingMonths:
                     isFinancingMethod(payMethod) && payMonths ? Number(payMonths) : undefined,
+                  takenAtLocationId: actingStoreId(),
                 }),
               });
             }
@@ -1832,9 +1899,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               : locked
                 ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
                 : resumedDraft
-                  ? draftChanged
-                    ? `Editing draft ${resumedDraft.number} · unsaved changes`
-                    : `Draft ${resumedDraft.number} · saved`
+                  ? payOnlyStore
+                    ? `${payOnlyStore} draft ${resumedDraft.number} · payment only`
+                    : draftChanged
+                      ? `Editing draft ${resumedDraft.number} · unsaved changes`
+                      : `Draft ${resumedDraft.number} · saved`
                   : lines.length > 0
                     ? 'Save draft keeps this for the store'
                     : ' '}
@@ -1902,6 +1971,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         </div>
       )}
 
+      {payOnlyStore && resumedDraft && !locked && (
+        <Alert tone="info" data-testid="pay-only-banner">
+          <strong>Payment only.</strong> {resumedDraft.number} is a {payOnlyStore} draft. You can
+          take the customer&apos;s payment here — it is recorded at your store, under your name —
+          but items, customer and prices stay as {payOnlyStore} wrote them. Completing confirms the
+          draft as {payOnlyStore}&apos;s order.
+        </Alert>
+      )}
       {exchangeOriginal && (
         <Alert tone="warning" data-testid="exchange-banner">
           <strong>Exchange Order</strong> against original invoice{' '}
@@ -2405,12 +2482,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     const next = locs.find((l) => l.id === e.target.value);
                     if (next) setTaxRateBps(next.taxRateBps ?? taxRateBps);
                   }}
-                  disabled={locked}
+                  disabled={locked || payOnlyStore != null}
                   data-testid="order-store"
                 >
                   {/* Owner 2026-09-17: the Warehouse sells like any store. */}
                   {locs
-                    .filter((l) => l.canSellHere !== false)
+                    .filter((l) => l.canSellHere !== false || l.id === locationId)
                     .map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name}
