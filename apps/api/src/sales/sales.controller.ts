@@ -37,7 +37,7 @@ import {
   type PageResponse,
   clampLimit as clampPageLimit,
 } from '../common/pagination';
-import { vendorMatchFor } from '../common/vendor-match';
+import { brandMatchFor, vendorMatchFor } from '../common/vendor-match';
 import { DRIZZLE } from '../database/database.module';
 import { CommissionsService } from '../money/commissions.service';
 import { GiftCardsService } from '../gift-cards/gift-cards.service';
@@ -268,6 +268,47 @@ export class SalesController {
   }
 
   /**
+   * The Add Product popup's Vendor list (owner 2026-10-01: "Brooklyn and
+   * Helix aren't showing"): every vendor, plus every brand that has
+   * sellable products but no vendor of the same name yet — imported
+   * catalogs carry the brand long before anyone sets the vendor up.
+   * Register permission, so a salesperson without `vendors.view` still
+   * gets the list.
+   */
+  @Get('pos/vendor-options')
+  @RequirePermission('pos.access')
+  async vendorOptions(
+    @CurrentTenant() tenant: RequestTenantContext,
+  ): Promise<{ vendors: { id: string; name: string }[]; brands: { id: string; name: string }[] }> {
+    const businessId = tenant.businessId!;
+    const vendors = await this.db
+      .select({ id: schema.vendors.id, name: schema.vendors.name })
+      .from(schema.vendors)
+      .where(eq(schema.vendors.businessId, businessId))
+      .orderBy(sql`lower(${schema.vendors.name})`);
+    const taken = new Set(vendors.map((v) => v.name.trim().toLowerCase()));
+    const brands = await this.db
+      .select({ id: schema.brands.id, name: schema.brands.name })
+      .from(schema.brands)
+      .where(
+        and(
+          eq(schema.brands.businessId, businessId),
+          eq(schema.brands.isActive, true),
+          sql`EXISTS (
+            SELECT 1 FROM products p
+            JOIN product_variants pv ON pv.product_id = p.id AND pv.is_active
+            WHERE p.brand_id = ${schema.brands.id} AND p.is_active
+          )`,
+        ),
+      )
+      .orderBy(sql`lower(${schema.brands.name})`);
+    return {
+      vendors,
+      brands: brands.filter((b) => b.name.trim() && !taken.has(b.name.trim().toLowerCase())),
+    };
+  }
+
+  /**
    * New Sale product popup (PLAN-POS-OPERATIONS §4): searchable, vendor-
    * filterable results carrying live stock at the selling location plus
    * everywhere, and — when a variant is out of stock — the ATP date: the
@@ -279,6 +320,7 @@ export class SalesController {
     @CurrentTenant() tenant: RequestTenantContext,
     @Query('q') q?: string,
     @Query('vendorId') vendorId?: string,
+    @Query('brandId') brandId?: string,
     @Query('inStock') inStock?: string,
     @Query('locationId') locationId?: string,
     @Query('limit') limitStr?: string,
@@ -335,6 +377,12 @@ export class SalesController {
     // product's brand or the vendor's name inside the product name
     // ("Twin Helix Dusk …" for vendor Helix).
     if (vendorId) filters.push(await vendorMatchFor(this.db, tenant.businessId!, vendorId));
+    // A brand with no vendor set up yet (owner 2026-10-01).
+    if (brandId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(brandId))
+        throw new BadRequestException('brandId must be a uuid');
+      filters.push(await brandMatchFor(this.db, tenant.businessId!, brandId));
+    }
     // Size / firmness are read off what the catalog actually says —
     // attributes when a variant has them, else the product and variant
     // names — so Shopify-shaped "Queen Helix Dusk 12\" Medium Firm …"

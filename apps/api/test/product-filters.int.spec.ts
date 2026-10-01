@@ -570,3 +570,57 @@ describe('vendor counts and doors', () => {
     ]);
   });
 });
+
+describe('brands with no vendor set up (owner 2026-10-01)', () => {
+  let brooklynId = '';
+
+  it('lists every vendor plus each selling brand that has no vendor of its name', async () => {
+    await withDb(async (db) => {
+      const [brooklyn, ghost] = await db
+        .insert(schema.brands)
+        .values([
+          { businessId, name: 'Brooklyn Bedding' },
+          { businessId, name: 'Ghost Brand' },
+        ])
+        .returning();
+      brooklynId = brooklyn!.id;
+      const [branded, named, retired] = await db
+        .insert(schema.products)
+        .values([
+          { businessId, name: 'Queen Aurora Luxe Hybrid', brandId: brooklynId },
+          { businessId, name: 'King Brooklyn Bedding Signature Hybrid' },
+          { businessId, name: 'Retired Ghost Pillow', brandId: ghost!.id, isActive: false },
+        ])
+        .returning();
+      await db.insert(schema.productVariants).values([
+        { businessId, productId: branded!.id, sku: 'BB-Q-AUR', priceCents: 129_900 },
+        { businessId, productId: named!.id, sku: 'BB-K-SIG', priceCents: 99_900 },
+        { businessId, productId: retired!.id, sku: 'GH-PIL', priceCents: 4_900 },
+      ]);
+    });
+    const res = await request(app.getHttpServer())
+      .get('/v1/pos/vendor-options')
+      .set('Cookie', cookie)
+      .set('x-business-id', businessId)
+      .expect(200);
+    const body = res.body as {
+      vendors: { id: string; name: string }[];
+      brands: { id: string; name: string }[];
+    };
+    expect(body.vendors.map((v) => v.name)).toEqual(['Helix', 'Purple']);
+    // Purple has a vendor already; the ghost brand sells nothing active.
+    expect(body.brands).toEqual([{ id: brooklynId, name: 'Brooklyn Bedding' }]);
+  });
+
+  it('filters the search by that brand — brand link or the name', async () => {
+    expect(skus(await search({ brandId: brooklynId }))).toEqual(['BB-K-SIG', 'BB-Q-AUR']);
+    // A malformed id is a 400, never a database error (36 dashes included).
+    for (const bad of ['nope', '-'.repeat(36), `${brooklynId.slice(1)}-`]) {
+      await request(app.getHttpServer())
+        .get(`/v1/pos/product-search?locationId=${locationId}&brandId=${bad}`)
+        .set('Cookie', cookie)
+        .set('x-business-id', businessId)
+        .expect(400);
+    }
+  });
+});
