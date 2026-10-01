@@ -35,8 +35,13 @@ export class OrderReturnsService {
   async receiveGoods(
     returnId: string,
     actorUserId: string | null,
-    opts: { receiveLocationId?: string | null } = {},
+    opts: {
+      receiveLocationId?: string | null;
+      /** The member receiving the return — recorded as the taker on refund rows. */
+      actorMembershipId?: string | null;
+    } = {},
   ): Promise<void> {
+    const takenByMembershipId = opts.actorMembershipId ?? null;
     const [ret] = await this.db
       .select()
       .from(schema.orderReturns)
@@ -213,6 +218,7 @@ export class OrderReturnsService {
           amountCents: applied,
           status: 'succeeded',
           locationId: saleOrder.locationId,
+          takenByMembershipId,
         });
         await this.storeCredit.redeem(this.db, {
           businessId: ret.businessId,
@@ -257,6 +263,7 @@ export class OrderReturnsService {
               status: 'succeeded',
               // A reversal nets out of the store that took the money.
               locationId: p.locationId ?? order.locationId,
+              takenByMembershipId,
             });
             remaining -= slice;
           }
@@ -271,6 +278,7 @@ export class OrderReturnsService {
             amountCents: -residual,
             status: 'succeeded',
             locationId: opts.receiveLocationId ?? order.locationId,
+            takenByMembershipId,
           });
           refundedCents = residual;
         }
@@ -334,6 +342,7 @@ export class OrderReturnsService {
           amountCents: -slice,
           status: 'succeeded',
           locationId: p.locationId ?? order.locationId,
+          takenByMembershipId,
         });
         remaining -= slice;
       }

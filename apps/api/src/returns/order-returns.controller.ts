@@ -515,13 +515,14 @@ export class OrderReturnsController {
   @Post(':id/receive')
   @RequirePermission('inventory.receive')
   async receive(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
     @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
     @Body() body: { locationId?: string | null },
   ): Promise<{ status: string }> {
     await this.returns.receiveGoods(id, actor?.id ?? null, {
       receiveLocationId: body?.locationId ?? null,
+      actorMembershipId: tenant.membershipId ?? null,
     });
     return { status: 'completed' };
   }

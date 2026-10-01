@@ -4928,6 +4928,7 @@ export class OrdersController {
     if (fulfillment === 'drop_off') {
       await this.orderReturns.receiveGoods(ret!.id, actor?.id ?? null, {
         receiveLocationId: body.returnToLocationId ?? null,
+        actorMembershipId: tenant.membershipId ?? null,
       });
     } else if (body.pickupDate) {
       // A22 slice 6: the pickup is a stop on the delivery calendar — a

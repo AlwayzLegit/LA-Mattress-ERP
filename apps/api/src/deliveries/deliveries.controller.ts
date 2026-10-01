@@ -770,6 +770,7 @@ export class DeliveriesController {
         .limit(1);
       await this.returns.receiveGoods(row.returnId, actor?.id ?? null, {
         receiveLocationId: stockOwner?.stockLocationId ?? row.locationId,
+        actorMembershipId: tenant.membershipId ?? null,
       });
       await this.db
         .update(schema.deliveries)

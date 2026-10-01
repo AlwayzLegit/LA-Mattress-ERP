@@ -3591,6 +3591,10 @@ describe('Per-member selling scope + nav visibility', () => {
       .expect(201);
     expect(draft.body.status).toBe('draft');
 
+    // My Day "Collected" before the cashier takes anything.
+    const myDayBefore = await asCookie(cashierCookie).get('/v1/dashboard/my-day').expect(200);
+    const collectedBefore = myDayBefore.body.myDay.today.collectedCents as number;
+
     // Taking money is not selling: the restricted cashier pays the other
     // store's order, recorded at the store they are standing in.
     await asCookie(cashierCookie)
@@ -3629,6 +3633,11 @@ describe('Per-member selling scope + nav visibility', () => {
         lines: [{ variantId: sofaVariantId, quantity: 1 }],
       });
     expect(sell.status).toBe(403);
+
+    // The payments the cashier took count on their My Day, though the
+    // owner wrote the orders; the owner's own payment does not.
+    const myDayAfter = await asCookie(cashierCookie).get('/v1/dashboard/my-day').expect(200);
+    expect(myDayAfter.body.myDay.today.collectedCents - collectedBefore).toBe(3_500);
 
     const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
     try {

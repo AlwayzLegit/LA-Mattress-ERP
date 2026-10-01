@@ -416,7 +416,7 @@ export class ExchangesController {
     // A no-original return's credit is already banked — apply it to the
     // replacement now (unless held; the approve step settles then).
     if (noOriginal && !onHold) {
-      await this.settleFromLedger(exchange.id, actor?.id ?? null);
+      await this.settleFromLedger(exchange.id, actor?.id ?? null, tenant.membershipId ?? null);
     }
     return this.hydrate(exchange.id);
   }
@@ -425,7 +425,7 @@ export class ExchangesController {
   @Post(':id/approve')
   @RequirePermission('exchanges.approve')
   async approve(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
     @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<ExchangeDetail> {
@@ -465,7 +465,7 @@ export class ExchangesController {
       .where(eq(schema.orderReturns.id, exchange.returnId))
       .limit(1);
     if (ret && ret.orderId == null) {
-      await this.settleFromLedger(id, actor?.id ?? null);
+      await this.settleFromLedger(id, actor?.id ?? null, tenant.membershipId ?? null);
     }
     return this.hydrate(id);
   }
@@ -645,7 +645,11 @@ export class ExchangesController {
    * the replacement's balance can absorb, capped by what the ledger
    * still holds.
    */
-  private async settleFromLedger(exchangeId: string, actorUserId: string | null): Promise<void> {
+  private async settleFromLedger(
+    exchangeId: string,
+    actorUserId: string | null,
+    actorMembershipId: string | null,
+  ): Promise<void> {
     const [exchange] = await this.db
       .select()
       .from(schema.exchanges)
@@ -677,6 +681,7 @@ export class ExchangesController {
         saleId: null,
         orderId: saleOrder.id,
         locationId: saleOrder.locationId,
+        takenByMembershipId: actorMembershipId,
         kind: 'balance',
         method: 'store_credit',
         amountCents: applied,
