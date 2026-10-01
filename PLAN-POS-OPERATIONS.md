@@ -231,6 +231,29 @@ as editable lines and **writes nothing**.
   **Place order** commits to the vendor. Before this the builder could only
   place, so the draft path existed nowhere but the eager button.
 
+### 6.3 Reorder suggestions count customers waiting (CR 2026-10-01)
+
+Owner report: "making the order still doesn't prompt purchasing to increase
+the # in the suggested column" — a sale for 2 of an item with no stock left
+the Purchasing card at 1. The card read shelf stock only, so a sold-not-in-stock
+line (which cannot reserve stock that isn't there) never counted.
+
+- **Suggested = customer need + shelf top-up.** Customer need is units on open
+  order lines (stock and special-order; not direct-ship, not services) short of
+  stock after reservations and PO allocations, less free stock and placed PO
+  units no customer holds. The top-up is the old rule (reorder qty, else 2× point,
+  at least 1), taken on the position after those customers are served. A variant
+  with customers waiting shows even without a reorder point; a placed PO now
+  removes what it covers. Same shortfall definition as the Replenish screen's
+  allocated-order run.
+- **Review & order links the customer units.** The builder stages them as lines
+  tied to the waiting order lines (oldest order first), so the PO shows
+  "KO-… ×2", the order shows On PO, and receipt commits the units to that
+  customer. The top-up is one plain stock line.
+- Services follow migration 0108's rule (Delivery & Installation / Services &
+  Fees, or "install" in the name). The nightly auto-replenishment draft nets only
+  drafts now; placed POs are netted inside the suggestion.
+
 ## 7. Delivery & Dispatch
 
 - Dispatcher view: simple table (orders by date/route).

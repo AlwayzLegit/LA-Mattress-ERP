@@ -324,11 +324,14 @@ describe('GET /v1/competitions/current', () => {
   it('prints a people-only winners sheet, and an empty past month crowns nobody', async () => {
     // A snapshot frozen before the Owner role left the board still names
     // the owner as last month's Most Sales winner. It must be rebuilt.
+    // The month before the store's own today: in UTC the night of the
+    // last day of a month is already the 1st, a month ahead of the store.
     const lastMonth = (() => {
-      const d = new Date();
-      d.setUTCDate(1);
-      d.setUTCMonth(d.getUTCMonth() - 1);
-      return d.toISOString().slice(0, 7);
+      const [y, m] = new Date()
+        .toLocaleDateString('en-CA', { timeZone: TZ })
+        .split('-')
+        .map(Number) as [number, number];
+      return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
     })();
     await withDb(async (db) => {
       await db.insert(schema.competitionResults).values({

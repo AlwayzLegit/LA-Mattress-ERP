@@ -2177,3 +2177,192 @@ describe('CR — deleting a draft purchase order', () => {
     expect(actions).toContain('purchase_order.restore');
   });
 });
+
+describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () => {
+  let vendorId = '';
+  let sandsId = '';
+  let orderLineId = '';
+  let orderId = '';
+
+  async function suggestionFor(variantId: string) {
+    const res = await request(app.getHttpServer())
+      .get('/v1/purchase-orders/reorder-suggestions')
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    return res.body.vendors
+      .flatMap(
+        (g: { lines: { variantId: string }[] }) =>
+          g.lines as {
+            variantId: string;
+            available: number;
+            waitingQty: number;
+            onPoQty: number;
+            customerQty: number;
+            stockQty: number;
+            suggestedQty: number;
+            waitingOrders: { orderLineId: string; orderNumber: string; quantity: number }[];
+          }[],
+      )
+      .find((l: { variantId: string }) => l.variantId === variantId);
+  }
+
+  async function withDb<T>(fn: (db: ReturnType<typeof drizzle>) => Promise<T>): Promise<T> {
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      return await fn(drizzle(sql));
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+  }
+
+  async function sellUnstocked(variantId: string, number: string, quantity: number) {
+    return withDb(async (db) => {
+      const [customer] = await db
+        .insert(schema.customers)
+        .values({ businessId, firstName: 'Kara', lastName: 'Kensington' })
+        .returning();
+      const [order] = await db
+        .insert(schema.orders)
+        .values({
+          businessId,
+          locationId,
+          customerId: customer!.id,
+          number,
+          status: 'open',
+          totalCents: 94_000,
+          subtotalCents: 94_000,
+        })
+        .returning();
+      const [line] = await db
+        .insert(schema.orderLines)
+        .values({
+          businessId,
+          orderId: order!.id,
+          variantId,
+          description: 'TWINXL ROYAL SANDS FIRM',
+          quantity,
+          unitPriceCents: 47_000,
+          totalCents: 47_000 * quantity,
+        })
+        .returning();
+      return { orderId: order!.id, orderLineId: line!.id };
+    });
+  }
+
+  it('setup: a point-0 mattress suggests 1 for the shelf', async () => {
+    const vendor = await request(app.getHttpServer())
+      .post('/v1/vendors')
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId)
+      .send({ name: 'BIA Sleep' })
+      .expect(201);
+    vendorId = vendor.body.id;
+    const product = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        name: 'TWINXL ROYAL SANDS FIRM',
+        sku: '7786-3X',
+        variants: [{ sku: '7786-3X', priceCents: 99_900, costCents: 47_000 }],
+      })
+      .expect(201);
+    sandsId = product.body.variants[0].id;
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sandsId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: 0, preferredVendorId: vendorId })
+      .expect(200);
+    const s = await suggestionFor(sandsId);
+    expect(s).toMatchObject({ available: 0, waitingQty: 0, customerQty: 0, stockQty: 1 });
+    expect(s.suggestedQty).toBe(1);
+  });
+
+  it('an order for 2 with no stock raises it to 3, naming the order', async () => {
+    ({ orderId, orderLineId } = await sellUnstocked(sandsId, 'KO-20001', 2));
+    const s = await suggestionFor(sandsId);
+    expect(s).toMatchObject({ waitingQty: 2, customerQty: 2, stockQty: 1, suggestedQty: 3 });
+    expect(s.waitingOrders).toEqual([
+      expect.objectContaining({ orderLineId, orderNumber: 'KO-20001', quantity: 2 }),
+    ]);
+  });
+
+  it('a variant with no reorder point still shows while a customer waits', async () => {
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sandsId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: null })
+      .expect(200);
+    const s = await suggestionFor(sandsId);
+    expect(s).toMatchObject({ customerQty: 2, stockQty: 0, suggestedQty: 2 });
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sandsId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: 0 })
+      .expect(200);
+  });
+
+  it('a placed PO linked to the order covers the customer and links both ways', async () => {
+    const po = await request(app.getHttpServer())
+      .post('/v1/purchase-orders')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        vendorId,
+        locationId,
+        lines: [
+          { variantId: sandsId, quantity: 2, unitCostCents: 47_000, orderLineId },
+          { variantId: sandsId, quantity: 1, unitCostCents: 47_000 },
+        ],
+      })
+      .expect(201);
+    // Customers covered, and the one stock unit on order lifts the shelf above its point.
+    expect(await suggestionFor(sandsId)).toBeUndefined();
+
+    const detail = await request(app.getHttpServer())
+      .get(`/v1/purchase-orders/${po.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const linked = (
+      detail.body.lines as { linkedOrders: { orderId: string; orderNumber: string }[] }[]
+    ).flatMap((l) => l.linkedOrders);
+    expect(linked).toEqual([expect.objectContaining({ orderId, orderNumber: 'KO-20001' })]);
+  });
+
+  it('a second unstocked order is netted against the free unit on the PO', async () => {
+    await sellUnstocked(sandsId, 'KO-20002', 2);
+    // 2 waiting − 1 free on PO = 1 for the customer; shelf back at 0 → +1.
+    expect(await suggestionFor(sandsId)).toMatchObject({
+      waitingQty: 2,
+      onPoQty: 1,
+      customerQty: 1,
+      stockQty: 1,
+      suggestedQty: 2,
+    });
+  });
+
+  it('services are never suggested', async () => {
+    const [cat] = await withDb((db) =>
+      db.insert(schema.categories).values({ businessId, name: 'Services & Fees' }).returning(),
+    );
+    const product = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        name: 'White glove setup',
+        sku: 'SVC-WG',
+        categoryId: cat!.id,
+        variants: [{ sku: 'SVC-WG', priceCents: 9_900 }],
+      })
+      .expect(201);
+    const svcId = product.body.variants[0].id;
+    await sellUnstocked(svcId, 'KO-20003', 1);
+    expect(await suggestionFor(svcId)).toBeUndefined();
+  });
+});

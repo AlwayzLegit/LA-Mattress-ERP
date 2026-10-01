@@ -28,7 +28,7 @@ import {
 } from '../common/pagination';
 import { AuditService } from '../audit/audit.service';
 import { checkPoDeletable, checkPoRestorable } from './po-delete-guard';
-import { computeReorderSuggestions } from './replenishment';
+import { computeReorderSuggestions, type ReorderVendorGroup } from './replenishment';
 import { CostingService } from '../costing/costing.service';
 import { ExceptionsService } from '../controls/exceptions.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
@@ -289,26 +289,10 @@ export class PurchaseOrdersController {
    */
   @Get('reorder-suggestions')
   @RequirePermission('purchase_orders.view')
-  async reorderSuggestions(@CurrentTenant() _tenant: RequestTenantContext): Promise<{
-    vendors: {
-      vendorId: string | null;
-      vendorName: string | null;
-      lines: {
-        variantId: string;
-        productName: string;
-        variantName: string | null;
-        sku: string | null;
-        vendorSku: string | null;
-        available: number;
-        reorderPoint: number;
-        suggestedQty: number;
-        unitCostCents: number | null;
-      }[];
-    }[];
-  }> {
-    const vendors = (await computeReorderSuggestions(this.db)) as Awaited<
-      ReturnType<PurchaseOrdersController['reorderSuggestions']>
-    >['vendors'];
+  async reorderSuggestions(
+    @CurrentTenant() _tenant: RequestTenantContext,
+  ): Promise<{ vendors: ReorderVendorGroup[] }> {
+    const vendors = await computeReorderSuggestions(this.db);
     return { vendors };
   }
 

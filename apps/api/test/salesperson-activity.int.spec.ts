@@ -345,7 +345,8 @@ describe('View Salesperson Activity', () => {
       cartsCount: 1,
     });
     // Written today: open 43,900 + canceled excluded + layaway 30,000 written today.
-    expect(g.writtenTodayCents).toBe(43_900 + 30_000);
+    // On the 1st, the order "written on the 1st" was written today as well.
+    expect(g.writtenTodayCents).toBe(43_900 + 30_000 + (TODAY === MONTH_START ? 78_625 : 0));
     // MTD adds the completed order written on the 1st (78,625).
     expect(g.writtenMtdCents).toBe(43_900 + 30_000 + 78_625);
     expect(g.deliveredTodayCents).toBe(78_625);
