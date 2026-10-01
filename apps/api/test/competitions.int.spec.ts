@@ -13,7 +13,7 @@ import request from 'supertest';
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { schema } from '@jetnine/db';
 import { SYSTEM_ROLES } from '@jetnine/shared';
 import { AppModule } from '../src/app.module';
@@ -334,6 +334,16 @@ describe('GET /v1/competitions/current', () => {
       return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
     })();
     await withDb(async (db) => {
+      // On the first days of a month the board above has already settled
+      // last month; plant the stale snapshot in its place.
+      await db
+        .delete(schema.competitionResults)
+        .where(
+          and(
+            eq(schema.competitionResults.businessId, businessId),
+            eq(schema.competitionResults.month, lastMonth),
+          ),
+        );
       await db.insert(schema.competitionResults).values({
         businessId,
         month: lastMonth,
