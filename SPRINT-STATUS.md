@@ -6477,3 +6477,14 @@ the "qualifying order without a recycling fee" exception. Covered: the 11 items 
 subcategory (X-Plat, Malouf Highrise, Leggett hotel bed base, folding Atlas, Framos). Metal bed
 frames and frame parts are unchanged. An uncategorized line named X-Plat, platform or bed base
 also qualifies. PLAN-POS-OPERATIONS §2 fee-lines amendment.
+
+### Checkpoint — 2026-10-01 (Helix Twin XL mattresses — catalog file)
+
+Owner asked to add the six Helix Twin XL mattresses (STORIS screen photo). Added
+`docs/imports/2026-10-01/helix-twinxl.csv` (6 rows: Twilight-Luxe, Twilight, Midnight,
+Midnight-Luxe, Twilight-Elite, Midnight-Elite; price and cost from the screen; HELIX / SOUTH /
+Mattresses › Hybrid / TWINXL) with a README, and made it an option in
+`ops-catalog-import.yml`, locked to `la-mattress`. Trial run against a local copy: validate
+6/6, commit 6/6. All six land under Mattresses › Hybrid with size and firmness, the existing
+HEXSTW_FP-3980 is adopted rather than duplicated, and no categories are created.
+**Ops:** after merge and deploy, run the workflow — validate, then commit, `expect_rows` 6.
