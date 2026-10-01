@@ -6391,3 +6391,30 @@ Checked in Chromium on a local stack:
 
 Note: legacy STORIS orders imported as open count as customers waiting, the same as on the
 Replenish screen. If old imported orders inflate the card, they need closing.
+
+### Checkpoint — 2026-10-01 (Add Product: brands with no vendor in the Vendor filter)
+
+Owner report: "When adding product to an invoice and searching by vendor, Brooklyn and Helix aren't
+showing as a search option."
+
+**Cause.** The Vendor dropdown in the Add Product popup listed only `vendors` rows. Brooklyn and Helix
+came in from Shopify as **brands**, and no vendor rows were ever created for them. The dropdown also
+read `/v1/vendors`, which needs `vendors.view`, a permission salespeople may not have.
+
+**Fix:**
+
+- **API:**
+  - `GET /v1/pos/vendor-options` (`pos.access`) returns every vendor, plus every active brand that
+    has sellable products and no vendor of the same name.
+  - `GET /v1/pos/product-search` takes `brandId`. It matches the product's brand, or the brand
+    name as a whole word in the product name (`brandMatchFor`, the same rule as vendors).
+- **Web:** the dropdown groups the list as **Vendors** and **Brands (no vendor set up)**, and falls
+  back to `/v1/vendors` against an older API. Once a vendor named like the brand is created, the
+  brand drops out of the second group and the vendor's own filter takes over.
+- **Tests:** `product-filters.int.spec.ts` 15 (+2): the options list skips brands that already have
+  a vendor and brands with no active products; the brand filter matches by brand link and by name;
+  a bad `brandId` returns 400.
+
+Checked in Chromium on a local stack: the order page's Add product showed Vendors: BIA, and
+Brands (no vendor set up): Brooklyn Bedding, Helix Sleep. Picking Brooklyn Bedding listed its
+product. A React missing-key warning in the dialog shows on main as well; it is not from this change.

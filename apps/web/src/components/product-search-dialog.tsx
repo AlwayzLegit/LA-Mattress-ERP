@@ -73,12 +73,14 @@ export function ProductSearchDialog({
   sourceNote?: string;
 }) {
   const [q, setQ] = useState('');
-  const [vendorId, setVendorId] = useState('');
+  /** 'v:<vendor id>' or 'b:<brand id>' (a brand with no vendor set up yet), '' = any. */
+  const [maker, setMaker] = useState('');
   const [size, setSize] = useState('');
   const [firmness, setFirmness] = useState('');
   const [inStockFirst, setInStockFirst] = useState(true);
   const [rows, setRows] = useState<SearchRow[] | null>(null);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
+  const [brands, setBrands] = useState<VendorRow[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [hi, setHi] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,9 +88,18 @@ export function ProductSearchDialog({
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void api<{ data: VendorRow[] } | VendorRow[]>('/v1/vendors?limit=100')
-      .then((r) => setVendors(Array.isArray(r) ? r : r.data))
-      .catch(() => setVendors([]));
+    // Vendors plus brands that have no vendor yet (owner 2026-10-01:
+    // Brooklyn and Helix came in from Shopify as brands only).
+    void api<{ vendors: VendorRow[]; brands: VendorRow[] }>('/v1/pos/vendor-options')
+      .then((r) => {
+        setVendors(r.vendors);
+        setBrands(r.brands);
+      })
+      .catch(() =>
+        api<{ data: VendorRow[] } | VendorRow[]>('/v1/vendors?limit=100')
+          .then((r) => setVendors(Array.isArray(r) ? r : r.data))
+          .catch(() => setVendors([])),
+      );
     void api<{ total: number }>('/v1/pos/catalog-count')
       .then((r) => setTotal(r.total))
       .catch(() => setTotal(null));
@@ -99,7 +110,8 @@ export function ProductSearchDialog({
     timer.current = setTimeout(() => {
       const params = new URLSearchParams();
       if (q.trim()) params.set('q', q.trim());
-      if (vendorId) params.set('vendorId', vendorId);
+      if (maker.startsWith('v:')) params.set('vendorId', maker.slice(2));
+      if (maker.startsWith('b:')) params.set('brandId', maker.slice(2));
       if (size) params.set('size', size);
       if (firmness) params.set('firmness', firmness);
       params.set('locationId', locationId);
@@ -111,7 +123,7 @@ export function ProductSearchDialog({
         })
         .catch(() => setRows([]));
     }, 220);
-  }, [q, vendorId, size, firmness, locationId]);
+  }, [q, maker, size, firmness, locationId]);
 
   const shown = useMemo(() => {
     if (!rows) return [];
@@ -185,16 +197,35 @@ export function ProductSearchDialog({
           </Field>
           <Field label="Vendor">
             <Select
-              value={vendorId}
-              onChange={(e) => setVendorId(e.target.value)}
+              value={maker}
+              onChange={(e) => setMaker(e.target.value)}
               data-testid="vendor-filter"
             >
               <option value="">Any</option>
-              {vendors.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
+              {brands.length > 0 ? (
+                <>
+                  <optgroup label="Vendors">
+                    {vendors.map((v) => (
+                      <option key={v.id} value={`v:${v.id}`}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Brands (no vendor set up)">
+                    {brands.map((b) => (
+                      <option key={b.id} value={`b:${b.id}`}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </>
+              ) : (
+                vendors.map((v) => (
+                  <option key={v.id} value={`v:${v.id}`}>
+                    {v.name}
+                  </option>
+                ))
+              )}
             </Select>
           </Field>
           <Field label="Size">
