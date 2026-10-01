@@ -52,6 +52,10 @@ const OPEN_PO_STATUSES = ['ordered', 'partially_received'];
  *   position (free stock + open PO − waiting + customer need) is
  *   compared with the reorder point; at or below it, the variant's
  *   reorder qty, else a top-up to 2× the point (never less than 1).
+ *   A point of 0 means the item is not kept on the shelf (owner
+ *   2026-10-01: every STORIS Min Stock came in as 0, and "0 on hand,
+ *   point 0" suggested 1 for every out-of-stock item) — no top-up;
+ *   customers waiting still count.
  *
  * Returns null when there is nothing to suggest.
  */
@@ -68,7 +72,7 @@ export function suggestionFor(input: {
   const position = input.available + onPo - input.waiting + customerQty;
   const point = input.reorderPoint;
   const stockQty =
-    point != null && position <= point
+    point != null && point > 0 && position <= point
       ? (input.reorderQty ?? Math.max(1, point * 2 - position))
       : 0;
   const suggestedQty = customerQty + stockQty;

@@ -2250,7 +2250,7 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
     });
   }
 
-  it('setup: a point-0 mattress suggests 1 for the shelf', async () => {
+  it('setup: a point-0 mattress is not suggested on its own (owner 2026-10-01)', async () => {
     const vendor = await request(app.getHttpServer())
       .post('/v1/vendors')
       .set('Cookie', clerkCookie)
@@ -2275,15 +2275,30 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
       .set('X-Business-Id', businessId)
       .send({ reorderPoint: 0, preferredVendorId: vendorId })
       .expect(200);
+    // Min stock 0 = not kept on the shelf: nothing on hand is no reason to buy.
+    expect(await suggestionFor(sandsId)).toBeUndefined();
+    // A real minimum still tops the shelf up.
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sandsId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: 1 })
+      .expect(200);
     const s = await suggestionFor(sandsId);
-    expect(s).toMatchObject({ available: 0, waitingQty: 0, customerQty: 0, stockQty: 1 });
-    expect(s.suggestedQty).toBe(1);
+    expect(s).toMatchObject({ available: 0, waitingQty: 0, customerQty: 0, stockQty: 2 });
+    expect(s.suggestedQty).toBe(2);
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${sandsId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: 0 })
+      .expect(200);
   });
 
-  it('an order for 2 with no stock raises it to 3, naming the order', async () => {
+  it('an order for 2 with no stock suggests 2, naming the order', async () => {
     ({ orderId, orderLineId } = await sellUnstocked(sandsId, 'KO-20001', 2));
     const s = await suggestionFor(sandsId);
-    expect(s).toMatchObject({ waitingQty: 2, customerQty: 2, stockQty: 1, suggestedQty: 3 });
+    expect(s).toMatchObject({ waitingQty: 2, customerQty: 2, stockQty: 0, suggestedQty: 2 });
     expect(s.waitingOrders).toEqual([
       expect.objectContaining({ orderLineId, orderNumber: 'KO-20001', quantity: 2 }),
     ]);
@@ -2336,13 +2351,13 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
 
   it('a second unstocked order is netted against the free unit on the PO', async () => {
     await sellUnstocked(sandsId, 'KO-20002', 2);
-    // 2 waiting − 1 free on PO = 1 for the customer; shelf back at 0 → +1.
+    // 2 waiting − 1 free on PO = 1 for the customer; point 0 → no shelf top-up.
     expect(await suggestionFor(sandsId)).toMatchObject({
       waitingQty: 2,
       onPoQty: 1,
       customerQty: 1,
-      stockQty: 1,
-      suggestedQty: 2,
+      stockQty: 0,
+      suggestedQty: 1,
     });
   });
 

@@ -279,6 +279,12 @@ line (which cannot reserve stock that isn't there) never counted.
   with customers waiting shows even without a reorder point; a placed PO now
   removes what it covers. Same shortfall definition as the Replenish screen's
   allocated-order run.
+  _Amendment 2026-10-01 (later):_ a reorder point (Min stock) of **0** means the
+  item is not kept on the shelf — no top-up, so "0 on hand, point 0" no longer
+  suggests 1. Every STORIS Min Stock imported as 0, which put a 1 against every
+  out-of-stock item. Customers waiting still drive the suggestion; set a minimum
+  of 1 or more (Products → Min stock) for what should stay on the shelf. The
+  Replenish screen's stock-level run already treated 0 this way.
 - **Review & order links the customer units.** The builder stages them as lines
   tied to the waiting order lines (oldest order first), so the PO shows
   "KO-… ×2", the order shows On PO, and receipt commits the units to that
