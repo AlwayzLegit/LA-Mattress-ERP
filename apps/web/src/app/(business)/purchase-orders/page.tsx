@@ -29,6 +29,7 @@ import {
   Toolbar,
   useListColumns,
 } from '@/components/ui';
+import { suggestionBreakdown, type ReorderSuggestion } from './new/stage-suggestion';
 
 interface PoRow {
   id: string;
@@ -43,17 +44,7 @@ interface PoRow {
   deletedByEmail: string | null;
 }
 
-interface SuggestionLine {
-  variantId: string;
-  productName: string;
-  variantName: string | null;
-  sku: string | null;
-  vendorSku: string | null;
-  available: number;
-  reorderPoint: number;
-  suggestedQty: number;
-  unitCostCents: number | null;
-}
+type SuggestionLine = ReorderSuggestion & { vendorSku: string | null };
 interface SuggestionGroup {
   vendorId: string | null;
   vendorName: string | null;
@@ -262,10 +253,12 @@ export default function PurchaseOrdersPage() {
             title="Reorder suggestions"
             description={
               <>
-                Items at or below their reorder point (available = on hand − committed, all
-                locations). Set points on each product&apos;s variants.{' '}
-                <strong>Review &amp; order</strong> opens the builder with these lines staged —
-                nothing is written until you save there.
+                Items customers are waiting for, plus items at or below their reorder point.
+                Suggested = what waiting customers still need (after free stock and open POs) + the
+                shelf top-up; hover a number for the split. Set points on each product&apos;s
+                variants. <strong>Review &amp; order</strong> opens the builder with these lines
+                staged — customer units linked to their sales order — and nothing is written until
+                you save there.
               </>
             }
             actions={
@@ -319,6 +312,8 @@ export default function PurchaseOrdersPage() {
                           <th>Product</th>
                           <th>SKU</th>
                           <th className="num">Available</th>
+                          <th className="num">On PO</th>
+                          <th>Customers waiting</th>
                           <th className="num">Point</th>
                           <th className="num">Suggested</th>
                           <th className="num">Unit cost</th>
@@ -340,8 +335,37 @@ export default function PurchaseOrdersPage() {
                             <td className="num">
                               <span className="badge badge-danger">{l.available}</span>
                             </td>
-                            <td className="num">{l.reorderPoint}</td>
-                            <td className="num">
+                            <td className="num">{l.onPoQty ? l.onPoQty : '—'}</td>
+                            <td data-testid="suggestion-waiting">
+                              {l.waitingQty ? (
+                                <>
+                                  <strong>{l.waitingQty}</strong>
+                                  <span className="muted"> · </span>
+                                  {[
+                                    ...new Map(
+                                      (l.waitingOrders ?? []).map((w) => [w.orderId, w]),
+                                    ).values(),
+                                  ]
+                                    .slice(0, 3)
+                                    .map((w, i) => (
+                                      <span key={w.orderId}>
+                                        {i > 0 && ', '}
+                                        <Link href={`/orders/${w.orderId}`}>{w.orderNumber}</Link>
+                                      </span>
+                                    ))}
+                                  {new Set((l.waitingOrders ?? []).map((w) => w.orderId)).size >
+                                    3 && <span className="muted"> …</span>}
+                                </>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
+                            <td className="num">{l.reorderPoint ?? '—'}</td>
+                            <td
+                              className="num"
+                              title={suggestionBreakdown(l) ?? undefined}
+                              data-testid="suggestion-qty"
+                            >
                               <strong>{l.suggestedQty}</strong>
                             </td>
                             <td className="num">

@@ -6337,3 +6337,57 @@ Checked in Chromium on a local stack:
 - The owner's home showed "Cash handed to you · $2,259.50".
 - Tick, undo and "Received all from Dana" all worked. The card then read "handed to Acme Owner
   Sep 30 2:15 PM", and the panel was gone after a reload.
+
+### Checkpoint — 2026-10-01 (Purchasing: suggestions count customers waiting)
+
+Owner report: they wrote an order for 2 TXL Royal Sands Firm with no stock, and the Purchasing card's
+Suggested stayed at 1 when it should have read 3. Separately, a PO built with Review & order filled
+the Kensington order on receipt, but neither the PO nor the order showed the link.
+Spec: PLAN-POS-OPERATIONS §6.3.
+
+**Cause.** `computeReorderSuggestions` only compared shelf stock (on hand − reserved − floor
+samples) with the reorder point.
+
+- A sale with no stock can't reserve anything, so it never reached the number.
+- Open POs were ignored too, so placing a PO didn't clear its suggestion.
+- The Review & order preload staged plain stock lines, so receiving filled the waiting order
+  through the background first-come allocation. Nothing on the PO or the order recorded which
+  order those units were for.
+
+**Fix:**
+
+- **API (`purchasing/replenishment.ts`):**
+  - Suggested is now customer need plus the shelf top-up (`suggestionFor`, pure).
+  - Each row returns `waitingQty`, `waitingOrders`, `onPoQty`, `customerQty` and `stockQty`.
+  - A variant with customers waiting shows even with no reorder point.
+  - Services are excluded, using the same rule as migration 0108.
+  - The nightly auto-replenishment job now subtracts only draft POs, because placed POs are
+    already subtracted inside the suggestion.
+- **Purchasing card:**
+  - New **On PO** and **Customers waiting** columns; waiting orders link to the order.
+  - Hovering Suggested shows the split, e.g. "2 for KO-10060 + 1 for stock".
+  - The card description explains the rule.
+- **PO builder:**
+  - Review & order (and each Add) stages the customer units as lines linked to the waiting
+    order lines, oldest first, plus one plain stock line for the top-up (`stage-suggestion.ts`).
+  - The PO then shows "KO-… ×2", the order shows On PO, and receiving commits the units to
+    that customer.
+- **Tests:**
+  - `purchasing.int.spec.ts` 68 (+6):
+    - a point-0 item suggests 1, and an order for 2 makes it 3 and names the order;
+    - a variant with no reorder point still shows while a customer waits;
+    - a linked, placed PO covers the customer and links both ways;
+    - a second order is netted against the free unit on the PO;
+    - services are never suggested.
+  - Web `stage-suggestion.test.ts` (4).
+
+Checked in Chromium on a local stack:
+
+- The card showed TWINXL ROYAL SANDS FIRM: Available 0, Customers waiting "2 · KO-10060",
+  Suggested **3**.
+- Review & order staged 2 "for KO-10060" plus 1 stock line.
+- Placing the order showed "KO-10060 ×2" on the PO, and the suggestion cleared.
+- No page errors.
+
+Note: legacy STORIS orders imported as open count as customers waiting, the same as on the
+Replenish screen. If old imported orders inflate the card, they need closing.

@@ -23,6 +23,7 @@ import {
   TableWrap,
   Toolbar,
 } from '@/components/ui';
+import { stageSuggestion, suggestionBreakdown, type ReorderSuggestion } from './stage-suggestion';
 
 interface Vendor {
   id: string;
@@ -50,17 +51,6 @@ interface Line {
   orderLineId?: string;
   /** Display-only: the sales order this line is bought for. */
   orderNumber?: string;
-}
-
-interface ReorderSuggestion {
-  variantId: string;
-  productName: string;
-  variantName: string | null;
-  sku: string | null;
-  available: number;
-  reorderPoint: number;
-  suggestedQty: number;
-  unitCostCents: number | null;
 }
 
 interface QueueRow {
@@ -162,20 +152,12 @@ function NewPurchaseOrderInner() {
     if (preloadKind !== 'reorder' || !preloadVendorId) return;
     if (vendorId !== preloadVendorId || reorder.length === 0) return;
     preloaded.current = true;
+    // Customer units go in linked to their sales order (owner 2026-10-01),
+    // so the PO and the order both show the link.
     setLines((prev) => {
-      const have = new Set(prev.filter((l) => !l.orderLineId).map((l) => l.variantId));
-      return [
-        ...prev,
-        ...reorder
-          .filter((s) => !have.has(s.variantId))
-          .map((s) => ({
-            variantId: s.variantId,
-            description: [s.productName, s.variantName].filter(Boolean).join(' — '),
-            sku: s.sku,
-            quantity: s.suggestedQty,
-            unitCostStr: s.unitCostCents != null ? (s.unitCostCents / 100).toFixed(2) : '',
-          })),
-      ];
+      const next = [...prev];
+      for (const s of reorder) next.push(...stageSuggestion(s, next));
+      return next;
     });
   }, [preloadKind, preloadVendorId, vendorId, reorder]);
 
@@ -365,7 +347,11 @@ function NewPurchaseOrderInner() {
             <Card title="Suggested for this vendor" data-testid="builder-suggestions">
               {reorder.length > 0 && (
                 <>
-                  <SectionHeading as="h3" title="At or below reorder point" />
+                  <SectionHeading
+                    as="h3"
+                    title="Customers waiting · at or below reorder point"
+                    description="Units for a customer go in linked to their sales order."
+                  />
                   <Stack gap="sm">
                     {reorder.map((s) => (
                       <div key={s.variantId} className="flex items-center gap-2">
@@ -373,31 +359,25 @@ function NewPurchaseOrderInner() {
                           {s.productName}
                           {s.variantName ? ` — ${s.variantName}` : ''}{' '}
                           <span className="muted">
-                            ({s.available} avail, point {s.reorderPoint})
+                            ({s.available} avail
+                            {s.onPoQty ? `, ${s.onPoQty} on PO` : ''}
+                            {s.reorderPoint != null ? `, point ${s.reorderPoint}` : ''})
                           </span>
+                          {suggestionBreakdown(s) && (
+                            <span
+                              className="badge badge-info"
+                              style={{ marginLeft: 6, textTransform: 'none' }}
+                            >
+                              {suggestionBreakdown(s)}
+                            </span>
+                          )}
                         </span>
                         <Button
                           type="button"
                           size="sm"
                           variant="secondary"
-                          disabled={lines.some(
-                            (l) => l.variantId === s.variantId && !l.orderLineId,
-                          )}
-                          onClick={() =>
-                            setLines((prev) => [
-                              ...prev,
-                              {
-                                variantId: s.variantId,
-                                description: [s.productName, s.variantName]
-                                  .filter(Boolean)
-                                  .join(' — '),
-                                sku: s.sku,
-                                quantity: s.suggestedQty,
-                                unitCostStr:
-                                  s.unitCostCents != null ? (s.unitCostCents / 100).toFixed(2) : '',
-                              },
-                            ])
-                          }
+                          disabled={stageSuggestion(s, lines).length === 0}
+                          onClick={() => setLines((prev) => [...prev, ...stageSuggestion(s, prev)])}
                         >
                           Add {s.suggestedQty}
                         </Button>

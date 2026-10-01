@@ -392,7 +392,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
 
     const groups = await computeReorderSuggestions(this.rootDb, businessId);
 
-    // Net out units already on order — open POs cover the gap already.
+    // Placed POs are already netted inside the suggestion (owner
+    // 2026-10-01); a draft — tonight's from an earlier run, or a buyer's
+    // unplaced basket — still covers the gap, so net those here.
     const variantIds = groups.flatMap((g) => g.lines.map((l) => l.variantId));
     const onOrder = new Map<string, number>();
     if (variantIds.length > 0) {
@@ -409,7 +411,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
         .where(
           and(
             eq(schema.purchaseOrderLines.businessId, businessId),
-            inArray(schema.purchaseOrders.status, ['draft', 'ordered', 'partially_received']),
+            eq(schema.purchaseOrders.status, 'draft'),
             sql`${schema.purchaseOrders.deletedAt} IS NULL`,
             inArray(schema.purchaseOrderLines.variantId, variantIds),
           ),
