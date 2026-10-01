@@ -435,7 +435,8 @@ export class MyDayController {
         .where(
           and(
             eq(schema.payments.businessId, businessId),
-            eq(schema.orders.locationId, open.locationId),
+            // Cash taken at this drawer's store (owner 2026-10-01).
+            sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${open.locationId}::uuid`,
             eq(schema.payments.method, 'cash'),
             eq(schema.payments.status, 'succeeded'),
             isNull(schema.orders.importedAt),

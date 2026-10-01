@@ -185,3 +185,12 @@ export function useActingStore(): ActingStore {
 export function useOptionalActingStore(): ActingStore | null {
   return useContext(Ctx);
 }
+
+/**
+ * The store this browser is working at (the topbar chip), for stamping a
+ * payment with where it was taken (owner 2026-10-01). Undefined when
+ * nothing is picked — the API then uses the document's own store.
+ */
+export function actingStoreId(): string | undefined {
+  return readSaved()?.id ?? undefined;
+}

@@ -14,6 +14,7 @@ import {
 } from '@jetnine/shared';
 import { orderNextSteps } from '@/lib/order-next-steps';
 import { api, ApiError } from '@/lib/api';
+import { actingStoreId } from '@/lib/acting-store';
 import { lineHasAddons } from '@/lib/pos-addons';
 import { Money } from '@/components/money';
 import {
@@ -731,6 +732,8 @@ export default function OrderDetailPage() {
     await act('/payments', {
       method: payMethod,
       amountCents: cents,
+      // Where the money is taken (owner 2026-10-01): the store chip.
+      takenAtLocationId: actingStoreId(),
       ...(payMethod === 'card' ? { cardBrand: payCardBrand } : {}),
       // A20 Step 4 Financing: Synchrony / Acima carry the provider and
       // the account / approval number the API already stores.
@@ -2365,7 +2368,7 @@ function PaymentPlanCard(props: {
         `/v1/payment-plans/${plan.id}/installments/${seq}/pay`,
         {
           method: 'POST',
-          body: JSON.stringify({ method: 'cash' }),
+          body: JSON.stringify({ method: 'cash', takenAtLocationId: actingStoreId() }),
         },
       );
       setPlan(updated);

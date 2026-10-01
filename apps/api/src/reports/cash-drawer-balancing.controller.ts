@@ -261,7 +261,11 @@ export class CashDrawerBalancingController {
     const saleAssociate = alias(schema.users, 'sale_associate');
     const spMembership = alias(schema.memberships, 'sp_membership');
     const spUser = alias(schema.users, 'sp_user');
-    const docLocation = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    // The member who took the payment (owner 2026-10-01) is the operator;
+    // older rows fall back to the document's associate / salesperson.
+    const takerMembership = alias(schema.memberships, 'taker_membership');
+    const takerUser = alias(schema.users, 'taker_user');
+    const docLocation = sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const localTs = sql`(${schema.payments.createdAt} AT TIME ZONE ${schema.locations.timezone})`;
     const windowFrom = sql`(${range.start} || ' ' || ${startTime})::timestamp`;
     const windowTo = sql`((${range.end} || ' ' || ${endTime})::timestamp + interval '1 minute')`;
@@ -294,9 +298,15 @@ export class CashDrawerBalancingController {
         timezone: schema.locations.timezone,
         day: sql<string>`to_char(${localTs}, 'YYYY-MM-DD')`,
         time: sql<string>`to_char(${localTs}, 'HH24:MI')`,
-        operatorId: sql<string | null>`COALESCE(${saleAssociate.id}, ${spUser.id})`,
-        operatorName: sql<string | null>`COALESCE(${saleAssociate.name}, ${spUser.name})`,
-        operatorEmail: sql<string | null>`COALESCE(${saleAssociate.email}, ${spUser.email})`,
+        operatorId: sql<
+          string | null
+        >`COALESCE(${takerUser.id}, ${saleAssociate.id}, ${spUser.id})`,
+        operatorName: sql<
+          string | null
+        >`COALESCE(${takerUser.name}, ${saleAssociate.name}, ${spUser.name})`,
+        operatorEmail: sql<
+          string | null
+        >`COALESCE(${takerUser.email}, ${saleAssociate.email}, ${spUser.email})`,
       })
       .from(schema.payments)
       .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
@@ -310,6 +320,8 @@ export class CashDrawerBalancingController {
       .leftJoin(saleAssociate, eq(saleAssociate.id, schema.sales.associateUserId))
       .leftJoin(spMembership, eq(spMembership.id, schema.orders.salespersonMembershipId))
       .leftJoin(spUser, eq(spUser.id, spMembership.userId))
+      .leftJoin(takerMembership, eq(takerMembership.id, schema.payments.takenByMembershipId))
+      .leftJoin(takerUser, eq(takerUser.id, takerMembership.userId))
       .where(
         and(
           eq(schema.payments.businessId, businessId),

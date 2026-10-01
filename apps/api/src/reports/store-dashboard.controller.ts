@@ -87,6 +87,8 @@ export interface CashPaymentRow {
   /** Financing tenders: the promo term signed (months). */
   financingMonths: number | null;
   salespersonName: string | null;
+  /** Who took the money (owner 2026-10-01); null on rows from before it was recorded. */
+  takenByName: string | null;
   amountCents: number;
   receipt: PickupReceipt | null;
 }
@@ -157,6 +159,7 @@ interface PaymentRecord extends CashPaymentRow {
   method: string;
   locationId: string;
   salespersonMembershipId: string | null;
+  takenByMembershipId: string | null;
 }
 
 interface MemberInfo {
@@ -377,7 +380,7 @@ export class StoreDashboardController {
     const receiptMember = alias(schema.memberships, 'receipt_member');
     const receiptUser = alias(schema.users, 'receipt_user');
     const receiptRole = alias(schema.roles, 'receipt_role');
-    const locationExpr = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const locationExpr = sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const customerExpr = sql<string>`COALESCE(${schema.orders.customerId}, ${schema.sales.customerId}, ${schema.serviceOrders.customerId})`;
 
     const rows = await this.db
@@ -389,6 +392,7 @@ export class StoreDashboardController {
         financingMonths: schema.payments.financingMonths,
         amountCents: schema.payments.amountCents,
         paidAt: schema.payments.createdAt,
+        takenBy: schema.payments.takenByMembershipId,
         locationId: locationExpr,
         orderId: schema.orders.id,
         orderNumber: schema.orders.number,
@@ -493,6 +497,8 @@ export class StoreDashboardController {
         salespersonName: salespersonMembershipId
           ? (members.get(salespersonMembershipId)?.name ?? null)
           : null,
+        takenByMembershipId: r.takenBy ?? null,
+        takenByName: r.takenBy ? (members.get(r.takenBy)?.name ?? 'Former member') : null,
         amountCents: r.amountCents,
         receipt,
       };
@@ -601,7 +607,7 @@ export class StoreDashboardController {
     const members = await this.members(businessId);
     const managers = await this.managersByStore(businessId, members);
 
-    const refundLocation = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const refundLocation = sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const liveOrder = and(
       eq(schema.orders.businessId, businessId),
       sql`${schema.orders.status} NOT IN ('draft', 'quote', 'cancelled')`,
@@ -766,11 +772,19 @@ export class StoreDashboardController {
           tenders.push({ method: p.method, cents: p.amountCents, count: 1 });
           tenderIdx.set(p.method, tenders.length - 1);
         }
-        if (p.docKind === 'order' && p.salespersonMembershipId) {
-          rep(p.salespersonMembershipId).collectedCents += p.amountCents;
-        }
+        // Collected = what the member took here (owner 2026-10-01); rows
+        // from before the taker was recorded credit the order's salesperson.
+        const collector =
+          p.takenByMembershipId ?? (p.docKind === 'order' ? p.salespersonMembershipId : null);
+        if (collector) rep(collector).collectedCents += p.amountCents;
         if (p.method === 'cash') {
-          const { method: _m, locationId: _l, salespersonMembershipId: _s, ...row } = p;
+          const {
+            method: _m,
+            locationId: _l,
+            salespersonMembershipId: _s,
+            takenByMembershipId: _t,
+            ...row
+          } = p;
           cashPayments.push(row);
         }
       }
@@ -867,7 +881,15 @@ export class StoreDashboardController {
     const range = this.rangeFor(this.periodOf(periodQ), today);
     const members = await this.members(businessId);
     const rows = await this.paymentsIn(tenant, businessId, [store], range, members, { method });
-    const list = rows.map(({ method: _m, locationId: _l, salespersonMembershipId: _s, ...r }) => r);
+    const list = rows.map(
+      ({
+        method: _m,
+        locationId: _l,
+        salespersonMembershipId: _s,
+        takenByMembershipId: _t,
+        ...r
+      }) => r,
+    );
     return {
       location: { id: store.id, name: store.name },
       method,

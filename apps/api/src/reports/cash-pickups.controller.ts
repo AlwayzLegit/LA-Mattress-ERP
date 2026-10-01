@@ -459,7 +459,7 @@ export class CashPickupsController {
   ): Promise<Map<string, PendingCashRow[]>> {
     const out = new Map<string, PendingCashRow[]>(stores.map((s) => [s.id, []]));
     if (stores.length === 0) return out;
-    const locationExpr = sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const locationExpr = sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const customerExpr = sql<string>`COALESCE(${schema.orders.customerId}, ${schema.sales.customerId}, ${schema.serviceOrders.customerId})`;
     // Drizzle's postgres-js driver hands timestamptz params through
     // untouched, so a raw Date here reached the wire as an object and the

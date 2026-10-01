@@ -389,7 +389,11 @@ export class ReportsController {
       lt(schema.payments.createdAt, endTsExclusive),
       eq(schema.payments.status, 'succeeded'),
       isNull(schema.orders.importedAt),
-      salesScopeCond(tenant, schema.orders.locationId),
+      // Scoped by where the money was taken (owner 2026-10-01).
+      salesScopeCond(
+        tenant,
+        sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId})`,
+      ),
     );
     const orderPayments = await this.db
       .select({
@@ -688,11 +692,11 @@ export class ReportsController {
           isNull(schema.orders.importedAt),
           isNull(schema.serviceOrders.importedAt),
           locationId
-            ? sql`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId}) = ${locationId}`
+            ? sql`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId}) = ${locationId}`
             : undefined,
           salesScopeCond(
             tenant,
-            sql`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`,
+            sql`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`,
           ),
         ),
       )
@@ -711,8 +715,14 @@ export class ReportsController {
           lt(schema.payments.createdAt, dayEnd),
           eq(schema.payments.status, 'succeeded'),
           isNull(schema.orders.importedAt),
-          locationId ? eq(schema.orders.locationId, locationId) : undefined,
-          salesScopeCond(tenant, schema.orders.locationId),
+          // Order money taken at this store (owner 2026-10-01).
+          locationId
+            ? sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${locationId}::uuid`
+            : undefined,
+          salesScopeCond(
+            tenant,
+            sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId})`,
+          ),
         ),
       );
 
@@ -1813,7 +1823,7 @@ export class ReportsController {
 
     const locExpr = sql<
       string | null
-    >`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    >`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const rows = await this.db
       .select({
         method: schema.payments.method,

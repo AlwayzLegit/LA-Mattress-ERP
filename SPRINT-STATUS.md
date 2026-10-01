@@ -6418,3 +6418,52 @@ read `/v1/vendors`, which needs `vendors.view`, a permission salespeople may not
 Checked in Chromium on a local stack: the order page's Add product showed Vendors: BIA, and
 Brands (no vendor set up): Brooklyn Bedding, Helix Sleep. Picking Brooklyn Bedding listed its
 product. A React missing-key warning in the dialog shows on main as well; it is not from this change.
+
+### Checkpoint — 2026-10-01 (Take payment at another store; payments record where and who)
+
+Owner ask: members limited to approved stores couldn't take payment on other stores' invoices
+and drafts. They should be able to take the payment, recorded at the store where it was taken
+and under the member who took it, but still not sell at stores they aren't assigned to.
+Spec: PLAN-POS-OPERATIONS §2.1 (amendment A24, D53–D55).
+
+- **Cause.** In the register, completing a resumed draft re-created it with `POST /v1/orders`
+  at the draft's store. That is the selling-scope check, so another store's draft was
+  refused. Payments also carried no store and no taker; every report placed them at the
+  document's store.
+- **Schema:** `payments.location_id` and `taken_by_membership_id`, plus an index.
+  Migration `0110` backfills `location_id` from the document's store.
+- **API:**
+  - `resolveTakenAt` (`common/payment-taken-at.ts`) works out where a payment was taken.
+    An approved-only member may name only one of their own stores. If no store is sent,
+    it falls back to the document's store, or to the member's single approved store.
+  - Every payment writer stamps the store and the taker:
+    - register sales;
+    - `orders/:id/payments` and service-ticket payments (both take `takenAtLocationId`);
+    - payment-plan installments;
+    - cancel / price-adjustment reversals (at the reversed payment's store);
+    - returns and exchanges;
+    - credit moves and split halves (these keep the original's store and taker);
+    - import.
+  - A payment on a **draft** now confirms it and commits stock, as it already did for a
+    quote.
+  - Readers that now place money by the payment's store:
+    - store dashboard (money received, cash list, refunds); "Collected" goes to the taker;
+    - cash pickups;
+    - shift close and the My Day drawer;
+    - drawer balancing (operator = the taker);
+    - close-out tenders, order money and refunds;
+    - Z tenders and order money, the receipts report, the daily tender mix;
+    - owner "collected", ops money and by-store, manager "collected" ("mine" = taken by me).
+- **Web:**
+  - The order page, order sheet, service ticket, plan installments and the register send
+    the acting store (`actingStoreId()`).
+  - In the register, a resumed draft from a store the member can't sell at becomes
+    payment-only. The header reads "<store> draft … · payment only", and the store picker
+    shows that draft's store, locked. Complete takes the money on that same draft and
+    does not re-create it. Edits are refused with a message, and Save draft is refused.
+  - The store-card payment list gains a **Taken by** column.
+- **Tests:** the orders spec gains one test. A restricted cashier pays another store's order
+  and draft, and both are recorded at their store under their name. Naming the other store
+  is a 403. With no store sent, payment goes to their single store. Paying the draft opens
+  it. The owner's payment defaults to the order's store. A new sale at the other store is
+  still refused.

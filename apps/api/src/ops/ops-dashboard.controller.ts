@@ -505,7 +505,7 @@ export class OpsDashboardController {
     dayStart: ReturnType<typeof sql>,
     dayEnd: ReturnType<typeof sql>,
   ): Promise<MoneyBlock> {
-    const locationExpr = sql`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const locationExpr = sql`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const byTender = await this.db
       .select({
         method: schema.payments.method,
@@ -734,7 +734,7 @@ export class OpsDashboardController {
 
     const collected = await this.db
       .select({
-        locationId: sql<string>`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId})`,
+        locationId: sql<string>`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId})`,
         cents: sql<number>`COALESCE(SUM(${schema.payments.amountCents}), 0)::int`,
       })
       .from(schema.payments)
@@ -750,7 +750,9 @@ export class OpsDashboardController {
           isNull(schema.orders.importedAt),
         ),
       )
-      .groupBy(sql`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId})`);
+      .groupBy(
+        sql`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId})`,
+      );
     for (const c of collected) {
       const row = rows.get(c.locationId);
       if (row) row.collectedCents += c.cents;

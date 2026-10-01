@@ -787,6 +787,7 @@ export class MorningDashboardController {
         method: schema.payments.method,
         primary: schema.orders.salespersonMembershipId,
         second: schema.orders.secondSalespersonMembershipId,
+        takenBy: schema.payments.takenByMembershipId,
       })
       .from(schema.payments)
       .innerJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
@@ -794,16 +795,21 @@ export class MorningDashboardController {
         and(
           eq(schema.payments.businessId, businessId),
           eq(schema.payments.status, 'succeeded'),
-          eq(schema.orders.locationId, loc.id),
+          // Money taken at this store, whichever store's order it paid
+          // (owner 2026-10-01).
+          sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${loc.id}::uuid`,
           sql`(${schema.payments.createdAt} AT TIME ZONE ${tz})::date::text = ${today}`,
         ),
       );
     for (const pRow of orderPays) {
       kpiStore.collectedCents += pRow.amountCents;
       tenderMix.set(pRow.method, (tenderMix.get(pRow.method) ?? 0) + pRow.amountCents);
-      if (pRow.primary === myMembershipId || pRow.second === myMembershipId) {
-        kpiMine.collectedCents += pRow.amountCents;
-      }
+      // Mine = what I took; rows from before the taker was recorded
+      // fall back to the order's salespeople.
+      const mine = pRow.takenBy
+        ? pRow.takenBy === myMembershipId
+        : pRow.primary === myMembershipId || pRow.second === myMembershipId;
+      if (mine) kpiMine.collectedCents += pRow.amountCents;
     }
     const salePays = await this.db
       .select({

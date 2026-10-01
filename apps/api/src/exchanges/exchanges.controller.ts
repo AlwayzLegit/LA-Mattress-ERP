@@ -676,6 +676,7 @@ export class ExchangesController {
         businessId: exchange.businessId,
         saleId: null,
         orderId: saleOrder.id,
+        locationId: saleOrder.locationId,
         kind: 'balance',
         method: 'store_credit',
         amountCents: applied,

@@ -63,6 +63,7 @@ import {
 } from './order-math';
 import { OrdersService } from './orders.service';
 import { parseDayRange, utcBounds } from '../common/date-range';
+import { resolveTakenAt } from '../common/payment-taken-at';
 
 /**
  * Fallback deposit policy: a quarter down, per the plan's example. Made a
@@ -297,6 +298,11 @@ interface OrderPaymentBody {
   cardBrand?: string;
   /** Financing tenders: the promo term signed — 6 | 12 | 15 | 18 | 24 | 36 | 48. */
   financingMonths?: number;
+  /**
+   * The store the money is taken at (owner 2026-10-01) — the screen's
+   * acting store. Defaults to the order's store; see `resolveTakenAt`.
+   */
+  takenAtLocationId?: string;
 }
 
 /** Body of PATCH /orders/:id/lines/:lineId (money fields + A20 line details). */
@@ -2859,6 +2865,9 @@ export class OrdersController {
           cardBrand: p.cardBrand,
           financingMonths: p.financingMonths,
           status: 'succeeded',
+          // The split half was still taken where and by whom the whole was.
+          locationId: p.locationId,
+          takenByMembershipId: p.takenByMembershipId,
           createdAt: p.createdAt,
         });
         remaining = 0;
@@ -3675,6 +3684,10 @@ export class OrdersController {
       }
     }
 
+    // Taking money on an existing order is not selling: any store's order,
+    // recorded at the store the money is taken at (owner 2026-10-01).
+    const takenAt = await resolveTakenAt(this.db, tenant, order.locationId, body.takenAtLocationId);
+
     const existing = await this.db
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
@@ -3750,8 +3763,9 @@ export class OrdersController {
       });
     }
 
-    // Money down means the customer committed, so a quote becomes an open
-    // order and commits its stock here. Taking a deposit is one action at
+    // Money down means the customer committed, so a quote — or a parked
+    // draft (owner 2026-10-01: another store can take the payment on it) —
+    // becomes an open order and commits its stock here. Taking a deposit is one action at
     // the register, and this keeps the invariant worth having: an order
     // holding money is an order holding its goods. Each order receiving a
     // share of the tender gets its own payment row, audit entry, ticket
@@ -3760,7 +3774,7 @@ export class OrdersController {
     for (const alloc of allocations) {
       const t = alloc.order;
       const allocKind = body.kind ?? (alloc.hadMoney ? 'balance' : 'deposit');
-      if (t.status === 'quote') {
+      if (t.status === 'quote' || t.status === 'draft') {
         await this.orders.reserveOrder(this.db, {
           businessId: tenant.businessId!,
           orderId: t.id,
@@ -3789,6 +3803,8 @@ export class OrdersController {
           cardBrand: body.cardBrand ?? null,
           financingMonths: body.financingMonths ?? null,
           status: 'succeeded',
+          locationId: takenAt.locationId,
+          takenByMembershipId: takenAt.takenByMembershipId,
         })
         .returning();
       if (t.id === id) primaryPaymentId = payment!.id;
@@ -3817,6 +3833,7 @@ export class OrdersController {
           kind: allocKind,
           method: body.method,
           amountCents: alloc.amountCents,
+          takenAtLocationId: takenAt.locationId,
           ...(t.id === id ? {} : { spilloverFrom: order.number, tenderedCents: body.amountCents }),
         },
       });
@@ -4295,6 +4312,7 @@ export class OrdersController {
         amountCents: schema.payments.amountCents,
         status: schema.payments.status,
         method: schema.payments.method,
+        locationId: schema.payments.locationId,
       })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id))
@@ -4322,6 +4340,9 @@ export class OrdersController {
           method: depositTo === 'store_credit' ? 'store_credit' : p.method,
           amountCents: -slice,
           status: 'succeeded',
+          // A reversal nets out of the store that took the money.
+          locationId: p.locationId ?? order.locationId,
+          takenByMembershipId: tenant.membershipId ?? null,
         });
         remaining -= slice;
       }
@@ -5020,6 +5041,8 @@ export class OrdersController {
           method: p.method,
           amountCents: -slice,
           status: 'succeeded',
+          locationId: p.locationId ?? order.locationId,
+          takenByMembershipId: tenant.membershipId ?? null,
         });
         remaining -= slice;
       }

@@ -28,6 +28,8 @@ export interface CashPaymentRow {
   /** Financing tenders: the promo term signed (months). */
   financingMonths: number | null;
   salespersonName: string | null;
+  /** Who took the money (owner 2026-10-01); null on older rows. */
+  takenByName?: string | null;
   amountCents: number;
   receipt: PickupReceipt | null;
 }

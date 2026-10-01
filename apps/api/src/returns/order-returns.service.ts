@@ -212,6 +212,7 @@ export class OrderReturnsService {
           method: 'store_credit',
           amountCents: applied,
           status: 'succeeded',
+          locationId: saleOrder.locationId,
         });
         await this.storeCredit.redeem(this.db, {
           businessId: ret.businessId,
@@ -254,6 +255,8 @@ export class OrderReturnsService {
               method: p.method,
               amountCents: -slice,
               status: 'succeeded',
+              // A reversal nets out of the store that took the money.
+              locationId: p.locationId ?? order.locationId,
             });
             remaining -= slice;
           }
@@ -267,6 +270,7 @@ export class OrderReturnsService {
             method: liveExchange.refundTender,
             amountCents: -residual,
             status: 'succeeded',
+            locationId: opts.receiveLocationId ?? order.locationId,
           });
           refundedCents = residual;
         }
@@ -329,6 +333,7 @@ export class OrderReturnsService {
           method: p.method,
           amountCents: -slice,
           status: 'succeeded',
+          locationId: p.locationId ?? order.locationId,
         });
         remaining -= slice;
       }

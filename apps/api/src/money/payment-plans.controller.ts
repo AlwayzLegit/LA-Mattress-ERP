@@ -15,6 +15,7 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
+import { resolveTakenAt } from '../common/payment-taken-at';
 import { DRIZZLE } from '../database/database.module';
 import { EmailService } from '../email/email.service';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
@@ -314,7 +315,7 @@ export class PaymentPlansController {
     @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
     @Param('seq') seqStr: string,
-    @Body() body: { method?: string; processorRef?: string },
+    @Body() body: { method?: string; processorRef?: string; takenAtLocationId?: string },
   ): Promise<PlanDetail> {
     const seq = Number(seqStr);
     const method = body.method ?? 'cash';
@@ -343,12 +344,26 @@ export class PaymentPlansController {
       throw new BadRequestException(`Installment ${seq} is already ${inst.status}`);
     }
 
+    const [planOrder] = await this.db
+      .select({ locationId: schema.orders.locationId })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, plan.orderId))
+      .limit(1);
+    if (!planOrder) throw new NotFoundException('Order not found');
+    const takenAt = await resolveTakenAt(
+      this.db,
+      tenant,
+      planOrder.locationId,
+      body.takenAtLocationId,
+    );
     const [payment] = await this.db
       .insert(schema.payments)
       .values({
         businessId: tenant.businessId!,
         saleId: null,
         orderId: plan.orderId,
+        locationId: takenAt.locationId,
+        takenByMembershipId: takenAt.takenByMembershipId,
         kind: 'installment',
         method,
         amountCents: inst.amountCents,

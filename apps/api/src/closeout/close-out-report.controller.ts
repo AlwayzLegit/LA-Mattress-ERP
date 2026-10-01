@@ -298,7 +298,7 @@ export class CloseOutReportController {
     };
 
     // --- Money: payments in/out by method, this store's documents -------
-    const payLocation = sql`COALESCE(${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
+    const payLocation = sql`COALESCE(${schema.payments.locationId}, ${schema.sales.locationId}, ${schema.orders.locationId}, ${schema.serviceOrders.locationId})`;
     const paymentsBase = (d: string, sign: 'in' | 'out') =>
       and(
         eq(schema.payments.businessId, businessId),
@@ -375,7 +375,8 @@ export class CloseOutReportController {
             eq(schema.payments.businessId, businessId),
             eq(schema.payments.status, 'succeeded'),
             sql`${schema.payments.amountCents} > 0`,
-            eq(schema.orders.locationId, store.id),
+            // Order money taken at this store (owner 2026-10-01).
+            sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${store.id}::uuid`,
             isNull(schema.orders.importedAt),
             sql`${schema.payments.createdAt} >= ${from(d)} AND ${schema.payments.createdAt} < ${to(d)}`,
           ),
@@ -673,7 +674,7 @@ export class CloseOutReportController {
           eq(schema.payments.businessId, businessId),
           eq(schema.payments.status, 'succeeded'),
           sql`${schema.payments.amountCents} < 0`,
-          eq(schema.orders.locationId, store.id),
+          sql`COALESCE(${schema.payments.locationId}, ${schema.orders.locationId}) = ${store.id}::uuid`,
           isNull(schema.orders.importedAt),
           sql`${schema.payments.createdAt} >= ${from(date)} AND ${schema.payments.createdAt} < ${to(date)}`,
         ),
