@@ -6488,3 +6488,13 @@ Mattresses › Hybrid / TWINXL) with a README, and made it an option in
 6/6, commit 6/6. All six land under Mattresses › Hybrid with size and firmness, the existing
 HEXSTW_FP-3980 is adopted rather than duplicated, and no categories are created.
 **Ops:** after merge and deploy, run the workflow — validate, then commit, `expect_rows` 6.
+
+### Checkpoint — 2026-10-01 (Min stock 0 no longer suggests 1)
+
+Owner: "I need to clean up the suggested column on the purchasing screen where everything says
+1" (asked to let the product page's ATP "Desired quantity" take 0, but that box is a read-only
+availability check). Cause: every STORIS Min Stock imported as 0 (all 3,246 inventory rows), and
+the Purchasing card's top-up treated "0 available, point 0" as at the point, so it added 1 for
+every out-of-stock item. `suggestionFor` now tops up only when the point is above 0. Customers
+waiting still count, and a minimum of 1 or more still stocks the shelf. Unit spec plus the
+purchasing reorder-suggestion tests updated. PLAN-POS-OPERATIONS §6.3 amendment.

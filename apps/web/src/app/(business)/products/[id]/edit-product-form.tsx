@@ -813,7 +813,7 @@ export function EditProductForm({
 
         <Card
           title="Reordering & vendor"
-          description="When available stock across all locations falls to the reorder point, the item shows in Purchasing → Reorder suggestions under its vendor. Leave the point blank to turn that off. Vendor SKU is the vendor's own part number, printed on purchase orders."
+          description="When available stock across all locations falls to the reorder point, the item shows in Purchasing → Reorder suggestions under its vendor. Leave the point blank or 0 to turn that off (customers waiting still show). Vendor SKU is the vendor's own part number, printed on purchase orders."
           flush
           data-testid="edit-reorder"
         >
