@@ -1971,6 +1971,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         </div>
       )}
 
+      {payOnlyStore && resumedDraft && !locked && (
+        <Alert tone="info" data-testid="pay-only-banner">
+          <strong>Payment only.</strong> {resumedDraft.number} is a {payOnlyStore} draft. You can
+          take the customer&apos;s payment here — it is recorded at your store, under your name —
+          but items, customer and prices stay as {payOnlyStore} wrote them. Completing confirms the
+          draft as {payOnlyStore}&apos;s order.
+        </Alert>
+      )}
       {exchangeOriginal && (
         <Alert tone="warning" data-testid="exchange-banner">
           <strong>Exchange Order</strong> against original invoice{' '}
