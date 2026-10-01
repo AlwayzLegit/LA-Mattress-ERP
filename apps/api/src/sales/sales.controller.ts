@@ -379,7 +379,7 @@ export class SalesController {
     if (vendorId) filters.push(await vendorMatchFor(this.db, tenant.businessId!, vendorId));
     // A brand with no vendor set up yet (owner 2026-10-01).
     if (brandId) {
-      if (!/^[0-9a-f-]{36}$/i.test(brandId))
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(brandId))
         throw new BadRequestException('brandId must be a uuid');
       filters.push(await brandMatchFor(this.db, tenant.businessId!, brandId));
     }

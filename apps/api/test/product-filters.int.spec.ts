@@ -614,10 +614,13 @@ describe('brands with no vendor set up (owner 2026-10-01)', () => {
 
   it('filters the search by that brand — brand link or the name', async () => {
     expect(skus(await search({ brandId: brooklynId }))).toEqual(['BB-K-SIG', 'BB-Q-AUR']);
-    await request(app.getHttpServer())
-      .get(`/v1/pos/product-search?locationId=${locationId}&brandId=nope`)
-      .set('Cookie', cookie)
-      .set('x-business-id', businessId)
-      .expect(400);
+    // A malformed id is a 400, never a database error (36 dashes included).
+    for (const bad of ['nope', '-'.repeat(36), `${brooklynId.slice(1)}-`]) {
+      await request(app.getHttpServer())
+        .get(`/v1/pos/product-search?locationId=${locationId}&brandId=${bad}`)
+        .set('Cookie', cookie)
+        .set('x-business-id', businessId)
+        .expect(400);
+    }
   });
 });
