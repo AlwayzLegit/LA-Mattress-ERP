@@ -6467,3 +6467,13 @@ Spec: PLAN-POS-OPERATIONS §2.1 (amendment A24, D53–D55).
   is a 403. With no store sent, payment goes to their single store. Paying the draft opens
   it. The owner's payment defaults to the order's store. A new sale at the other store is
   still refused.
+
+### Checkpoint — 2026-10-01 (Recycling fee on platform bed bases)
+
+Owner: "X-Platform needs a recycling fee". The X-Plat (XPLAT-TW/FL/QN) is filed under
+"Bed Frames › Platform & Folding Frames", so the line had no Removal / Recycling / Declined
+foundation chips and could not take the fee. Platform bed bases now get the chips, and count for
+the "qualifying order without a recycling fee" exception. Covered: the 11 items in that
+subcategory (X-Plat, Malouf Highrise, Leggett hotel bed base, folding Atlas, Framos). Metal bed
+frames and frame parts are unchanged. An uncategorized line named X-Plat, platform or bed base
+also qualifies. PLAN-POS-OPERATIONS §2 fee-lines amendment.

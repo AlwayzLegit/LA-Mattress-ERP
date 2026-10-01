@@ -41,6 +41,28 @@ describe('qualifiesForRecyclingFee', () => {
     ).toBe(false);
   });
 
+  it('charges platform bed bases (X-Plat), not plain metal frames or frame parts', () => {
+    expect(
+      qualifiesForRecyclingFee({
+        categoryPath: 'Bed Frames › Platform & Folding Frames',
+        description: 'QUEEN X-PLAT BED FRAME',
+      }),
+    ).toBe(true);
+    expect(
+      qualifiesForRecyclingFee({
+        categoryPath: 'Bed Frames › Metal Bed Frames',
+        description: 'QUEEN ENGAUGE BED FRAME',
+      }),
+    ).toBe(false);
+    expect(
+      qualifiesForRecyclingFee({
+        categoryPath: 'Bed Frames › Frame Parts & Hardware',
+        description: 'FRAME GLIDES',
+      }),
+    ).toBe(false);
+    expect(qualifiesForRecyclingFee({ description: 'QUEEN X-PLAT BED FRAME' })).toBe(true);
+  });
+
   it('falls back to the description without a category and never charges custom lines', () => {
     expect(qualifiesForRecyclingFee({ description: 'QUEEN MATTRESS' })).toBe(true);
     expect(qualifiesForRecyclingFee({ description: 'QUEEN PILLOW' })).toBe(false);

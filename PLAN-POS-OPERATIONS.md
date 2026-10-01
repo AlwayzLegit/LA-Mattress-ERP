@@ -150,6 +150,11 @@ Single-screen order entry — customer, products, payment all on one screen (no 
   line's quantity. A take-with sale whose every product line goes with the customer
   completes in place — no -A piece is carved off just to strand the fee. An order
   left holding only fee lines (nothing to deliver) can be completed.
+  _Amendment 2026-10-01:_ the toggles (and the recycling-fee exception check) cover
+  lines filed under Mattresses, Foundations & Box Springs and Adjustable Bases (not
+  base accessories/parts) **and platform bed bases — "Bed Frames › Platform &
+  Folding Frames"** (X-Plat, Highrise, hotel bed base), which stand in for a
+  foundation. Metal bed frames and frame parts get no chips.
   _Amendment 2026-09-17:_ the **Warehouse is a selling location** like any store —
   it appears in New Sale's Store picker (and the "Acting for" chip) and a sale
   rung there books its drawer, tax and inventory at the warehouse. The default
