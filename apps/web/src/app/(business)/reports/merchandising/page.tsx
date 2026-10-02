@@ -153,9 +153,12 @@ const MERCH_COLUMNS: ColumnDef<MerchRow>[] = [
 export default function MerchandisingPage() {
   const [report, setReport] = useState<MerchReport | null>(null);
   const [vendors, setVendors] = useState<NamedRow[]>([]);
+  /** Brands with no vendor set up (Brooklyn, Helix), offered under Vendor too. */
+  const [vendorBrands, setVendorBrands] = useState<NamedRow[]>([]);
   const [categories, setCategories] = useState<NamedRow[]>([]);
   const [brands, setBrands] = useState<NamedRow[]>([]);
-  const [vendorId, setVendorId] = useState('');
+  /** `v:<vendorId>` or `b:<brandId>` (a brand with no vendor). */
+  const [maker, setMaker] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [brandId, setBrandId] = useState('');
   const [includeAll, setIncludeAll] = useState(false);
@@ -166,7 +169,8 @@ export default function MerchandisingPage() {
 
   function query(): string {
     const p = new URLSearchParams();
-    if (vendorId) p.set('vendorId', vendorId);
+    if (maker.startsWith('v:')) p.set('vendorId', maker.slice(2));
+    if (maker.startsWith('b:')) p.set('vendorBrandId', maker.slice(2));
     if (categoryId) p.set('categoryId', categoryId);
     if (brandId) p.set('brandId', brandId);
     if (includeAll) p.set('includeNoActivity', 'true');
@@ -188,16 +192,21 @@ export default function MerchandisingPage() {
   useEffect(() => {
     void load();
     void (async () => {
+      type Lookup = NamedRow[] | { data?: NamedRow[]; flat?: NamedRow[] };
+      // Vendors and brands come back as arrays; categories as `{ flat, tree }`.
+      const arr = (x: Lookup) => (Array.isArray(x) ? x : (x.data ?? x.flat ?? []));
       try {
-        type Lookup = NamedRow[] | { data?: NamedRow[]; flat?: NamedRow[] };
         const [v, c, b] = await Promise.all([
-          api<Lookup>('/v1/vendors'),
+          // Vendors plus brands with no vendor (the Add Product list);
+          // plain vendors when that list is not open to this member.
+          api<{ vendors: NamedRow[]; brands: NamedRow[] }>('/v1/pos/vendor-options').catch(
+            async () => ({ vendors: arr(await api<Lookup>('/v1/vendors')), brands: [] }),
+          ),
           api<Lookup>('/v1/categories'),
           api<Lookup>('/v1/brands'),
         ]);
-        // Vendors and brands come back as arrays; categories as `{ flat, tree }`.
-        const arr = (x: Lookup) => (Array.isArray(x) ? x : (x.data ?? x.flat ?? []));
-        setVendors(arr(v));
+        setVendors(v.vendors);
+        setVendorBrands(v.brands);
         setCategories(categoryOptions(categoryList(c as Parameters<typeof categoryList>[0])));
         setBrands(arr(b));
       } catch {
@@ -244,13 +253,36 @@ export default function MerchandisingPage() {
             }
           >
             <Field label="Vendor">
-              <Select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+              <Select
+                value={maker}
+                onChange={(e) => setMaker(e.target.value)}
+                data-testid="merch-vendor"
+              >
                 <option value="">All vendors</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
+                {vendorBrands.length > 0 ? (
+                  <>
+                    <optgroup label="Vendors">
+                      {vendors.map((v) => (
+                        <option key={v.id} value={`v:${v.id}`}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Brands (no vendor set up)">
+                      {vendorBrands.map((b) => (
+                        <option key={b.id} value={`b:${b.id}`}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </>
+                ) : (
+                  vendors.map((v) => (
+                    <option key={v.id} value={`v:${v.id}`}>
+                      {v.name}
+                    </option>
+                  ))
+                )}
               </Select>
             </Field>
             <Field label="Category">
