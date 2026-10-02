@@ -1,4 +1,12 @@
-import { Controller, ForbiddenException, Get, Inject, Query, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  ForbiddenException,
+  Get,
+  Inject,
+  Query,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -6,11 +14,14 @@ import { schema } from '@jetnine/db';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { salesScopeCond, sellingScopeCond } from '../common/sales-scope';
+import { brandMatchFor } from '../common/vendor-match';
 import { CostingService } from '../costing/costing.service';
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { toCsv } from './csv';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface DailyTotalRow {
   day: string; // ISO YYYY-MM-DD
@@ -1904,11 +1915,20 @@ export class ReportsController {
     @Query('categoryId') categoryId?: string,
     @Query('brandId') brandId?: string,
     @Query('includeNoActivity') includeNoActivityStr?: string,
+    // The Vendor list also offers brands with no vendor set up (Brooklyn,
+    // Helix — owner 2026-10-01), matched the way Add Product matches them.
+    @Query('vendorBrandId') vendorBrandId?: string,
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<MerchReport | void> {
     const includeNoActivity = includeNoActivityStr === 'true';
     const CAP = 2000;
+    if (vendorBrandId && !UUID_RE.test(vendorBrandId)) {
+      throw new BadRequestException('vendorBrandId must be a uuid');
+    }
+    const vendorBrandMatch = vendorBrandId
+      ? await brandMatchFor(this.db, tenant.businessId!, vendorBrandId)
+      : undefined;
 
     // A22.1: categories nest — filtering by "Mattresses" keeps the hybrids.
     const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
@@ -1937,6 +1957,7 @@ export class ReportsController {
             ? inArray(schema.products.categoryId, categoryIndex.treeIds(categoryId))
             : undefined,
           brandId ? eq(schema.products.brandId, brandId) : undefined,
+          vendorBrandMatch,
         ),
       );
     if (variants.length === 0) {

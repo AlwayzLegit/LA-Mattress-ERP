@@ -6498,3 +6498,23 @@ the Purchasing card's top-up treated "0 available, point 0" as at the point, so 
 every out-of-stock item. `suggestionFor` now tops up only when the point is above 0. Customers
 waiting still count, and a minimum of 1 or more still stocks the shelf. Unit spec plus the
 purchasing reorder-suggestion tests updated. PLAN-POS-OPERATIONS §6.3 amendment.
+
+### Checkpoint — 2026-10-02 (Reports print one at a time; Merchandising vendor list has Brooklyn/Helix)
+
+Owner: "on the daily Z report, can the print button be blue and print the Z only? Right now
+it prints all the reports, 411 pages. Each report should print individually." Also: Merchandising
+activity's Vendor list was missing Brooklyn and Helix.
+
+- `lib/print-section.ts` marks one section and its ancestors. The print stylesheet then hides
+  everything else (`display: none`, so the other reports take no pages), and the marks clear
+  on `afterprint`.
+- `PrintSectionButton` is a blue Print button (primary, hidden in print) on every card on
+  /reports: the Z, plus the eleven other reports beside their CSV buttons.
+- Merchandising Vendor list: uses the Add Product list (`/v1/pos/vendor-options`), so brands
+  with no vendor appear under "Brands (no vendor set up)". Picking one sends `vendorBrandId`,
+  which matches products the way Add Product does (`brandMatchFor`: brand link or brand name as a
+  whole word). Falls back to plain vendors without pos.access.
+- Checked in Chromium (local stack): a Print-mode render of Z, Receipts and Sales summary
+  each shows only that card, with no sidebar. Z PDF: 1 page (whole page: 5). The Merchandising
+  Vendor list shows BIA plus Brooklyn Bedding and Helix Sleep. reports.int +1 test, print-section
+  unit test.

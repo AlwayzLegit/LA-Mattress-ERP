@@ -1262,6 +1262,50 @@ describe('Sales Views — merchandising activity (buyer report)', () => {
       .set('X-Business-Id', businessId)
       .expect(403);
   });
+
+  it('the Vendor filter takes a brand with no vendor set up (owner 2026-10-01)', async () => {
+    // Helix: a brand with no vendor of its name — the Vendor list offers it.
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    let brandId = '';
+    try {
+      const db = drizzle(sql);
+      const [brand] = await db
+        .insert(schema.brands)
+        .values({ businessId, name: 'Helix Sleep' })
+        .returning({ id: schema.brands.id });
+      brandId = brand!.id;
+      const [widget] = await db
+        .select({ productId: schema.productVariants.productId })
+        .from(schema.productVariants)
+        .where(eq(schema.productVariants.sku, 'A-1'));
+      await db
+        .update(schema.products)
+        .set({ brandId })
+        .where(eq(schema.products.id, widget!.productId));
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+    const options = await request(app.getHttpServer())
+      .get('/v1/pos/vendor-options')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(options.body.brands.map((b: { id: string }) => b.id)).toContain(brandId);
+
+    const res = await request(app.getHttpServer())
+      .get(`/v1/reports/merchandising?vendorBrandId=${brandId}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(res.body.rows.map((r: { sku: string | null }) => r.sku)).toEqual(['A-1']);
+    expect(res.body.rows[0].brandName).toBe('Helix Sleep');
+
+    await request(app.getHttpServer())
+      .get('/v1/reports/merchandising?vendorBrandId=not-a-uuid')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(400);
+  });
 });
 
 describe('Sales Views — inventory adjustments + customer purchases', () => {

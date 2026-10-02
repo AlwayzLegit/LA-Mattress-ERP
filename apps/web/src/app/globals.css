@@ -1061,6 +1061,20 @@ pre {
   }
 }
 
+/* One section printed on its own (lib/print-section.ts): everything that is
+   neither the section nor one of its ancestors takes no space at all. */
+@media print {
+  html.printing-section
+    body
+    *:not([data-print-path]):not([data-print-target]):not([data-print-target] *) {
+    display: none !important;
+  }
+  html.printing-section [data-print-target] {
+    break-inside: auto;
+    border: none;
+  }
+}
+
 /* ---------------------------------------------------------------------
    Form kit + signed-out shell (auth/onboarding UX pass, 2026-09-02)
    --------------------------------------------------------------------- */

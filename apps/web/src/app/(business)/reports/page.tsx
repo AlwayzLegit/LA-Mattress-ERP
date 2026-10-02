@@ -32,6 +32,7 @@ import { api } from '@/lib/api';
 import { formatRange, localToday } from '@/lib/date-range';
 import { downloadFile } from '@/lib/download';
 import { Money } from '@/components/money';
+import { PrintSectionButton } from '@/components/print-section-button';
 
 /**
  * Export button that downloads via an in-page fetch (see lib/download)
@@ -966,9 +967,7 @@ export default function ReportsPage() {
                 }}
               />
             </Field>
-            <Button size="sm" variant="secondary" onClick={() => window.print()}>
-              Print
-            </Button>
+            <PrintSectionButton testid="z-report-print" />
           </Toolbar>
           {z ? (
             <>
@@ -1046,7 +1045,11 @@ export default function ReportsPage() {
           )}
         </Card>
 
-        <Card title="Sales summary — written vs delivered" data-testid="sales-summary">
+        <Card
+          title="Sales summary — written vs delivered"
+          data-testid="sales-summary"
+          actions={<PrintSectionButton />}
+        >
           <Toolbar
             className="items-end"
             end={
@@ -1131,7 +1134,7 @@ export default function ReportsPage() {
           )}
         </Card>
 
-        <Card title="Daily sales" description={formatRange(range)}>
+        <Card title="Daily sales" description={formatRange(range)} actions={<PrintSectionButton />}>
           <Toolbar
             end={
               <CsvButton
@@ -1233,11 +1236,14 @@ export default function ReportsPage() {
         <Card
           title="Sales by product"
           actions={
-            <CsvButton
-              size="sm"
-              path={`/v1/reports/sales/by-product?start=${range.start}&end=${range.end}&format=csv`}
-              filename={`sales-by-product-${range.start}-to-${range.end}.csv`}
-            />
+            <>
+              <CsvButton
+                size="sm"
+                path={`/v1/reports/sales/by-product?start=${range.start}&end=${range.end}&format=csv`}
+                filename={`sales-by-product-${range.start}-to-${range.end}.csv`}
+              />
+              <PrintSectionButton />
+            </>
           }
         >
           {products ? (
@@ -1264,7 +1270,7 @@ export default function ReportsPage() {
           )}
         </Card>
 
-        <Card title="Inventory on hand">
+        <Card title="Inventory on hand" actions={<PrintSectionButton />}>
           <Toolbar
             className="items-end"
             end={
@@ -1316,11 +1322,14 @@ export default function ReportsPage() {
         <Card
           title="Sales by category"
           actions={
-            <CsvButton
-              size="sm"
-              path={`/v1/reports/sales/by-category?start=${range.start}&end=${range.end}&format=csv`}
-              filename={`sales-by-category-${range.start}-to-${range.end}.csv`}
-            />
+            <>
+              <CsvButton
+                size="sm"
+                path={`/v1/reports/sales/by-category?start=${range.start}&end=${range.end}&format=csv`}
+                filename={`sales-by-category-${range.start}-to-${range.end}.csv`}
+              />
+              <PrintSectionButton />
+            </>
           }
         >
           {categories ? (
@@ -1352,11 +1361,14 @@ export default function ReportsPage() {
             title="Gift card liability"
             data-testid="gift-card-liability"
             actions={
-              <CsvButton
-                path="/v1/reports/gift-cards/liability?format=csv"
-                filename="gift-card-liability.csv"
-                size="sm"
-              />
+              <>
+                <CsvButton
+                  path="/v1/reports/gift-cards/liability?format=csv"
+                  filename="gift-card-liability.csv"
+                  size="sm"
+                />
+                <PrintSectionButton />
+              </>
             }
           >
             <Stack>
@@ -1390,7 +1402,11 @@ export default function ReportsPage() {
           </Card>
         )}
 
-        <Card title="Receipts by payment type" data-testid="receipts-report">
+        <Card
+          title="Receipts by payment type"
+          data-testid="receipts-report"
+          actions={<PrintSectionButton />}
+        >
           <Toolbar
             end={
               <CsvButton
@@ -1446,7 +1462,11 @@ export default function ReportsPage() {
           )}
         </Card>
 
-        <Card title="Inventory adjustments" data-testid="inventory-adjustments">
+        <Card
+          title="Inventory adjustments"
+          data-testid="inventory-adjustments"
+          actions={<PrintSectionButton />}
+        >
           <Toolbar
             end={
               <CsvButton
@@ -1499,7 +1519,11 @@ export default function ReportsPage() {
           )}
         </Card>
 
-        <Card title="Delivery date changes (30 days)" data-testid="delivery-date-changes">
+        <Card
+          title="Delivery date changes (30 days)"
+          data-testid="delivery-date-changes"
+          actions={<PrintSectionButton />}
+        >
           {!dateChanges ? (
             <LoadingRows />
           ) : (
@@ -1531,11 +1555,14 @@ export default function ReportsPage() {
           <Card
             title="Tax summary"
             actions={
-              <CsvButton
-                size="sm"
-                path={`/v1/reports/tax/summary?start=${range.start}&end=${range.end}&format=csv`}
-                filename={`tax-summary-${range.start}-to-${range.end}.csv`}
-              />
+              <>
+                <CsvButton
+                  size="sm"
+                  path={`/v1/reports/tax/summary?start=${range.start}&end=${range.end}&format=csv`}
+                  filename={`tax-summary-${range.start}-to-${range.end}.csv`}
+                />
+                <PrintSectionButton />
+              </>
             }
           >
             {taxSummary ? (
@@ -1601,11 +1628,14 @@ export default function ReportsPage() {
           <Card
             title="Inventory valuation"
             actions={
-              <CsvButton
-                size="sm"
-                path="/v1/reports/inventory/valuation?format=csv"
-                filename="inventory-valuation.csv"
-              />
+              <>
+                <CsvButton
+                  size="sm"
+                  path="/v1/reports/inventory/valuation?format=csv"
+                  filename="inventory-valuation.csv"
+                />
+                <PrintSectionButton />
+              </>
             }
           >
             {valuation ? (
