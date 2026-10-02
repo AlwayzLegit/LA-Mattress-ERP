@@ -678,7 +678,8 @@ export class OrderReturnsController {
             eq(schema.asIsItems.referenceType, 'order_return'),
             eq(schema.asIsItems.referenceId, id),
           ),
-        );
+        )
+        .for('update');
       const reviewed = pieces.filter((p) => p.status !== 'pending_review' && p.status !== 'voided');
       if (reviewed.length > 0) {
         throw new ConflictException(
@@ -704,6 +705,9 @@ export class OrderReturnsController {
         if (!ret.customerId) {
           throw new ConflictException(`${ret.rmaNumber} has no customer to take the credit from`);
         }
+        // Same per-customer lock redeem() takes — no checkout can spend
+        // the credit between this check and the debit.
+        await this.storeCredit.lockCustomer(tx, ret.customerId);
         const balance = await this.storeCredit.balanceCents(tx, ret.customerId);
         if (balance < creditCents) {
           throw new ConflictException(
