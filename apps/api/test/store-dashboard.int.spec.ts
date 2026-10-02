@@ -1063,6 +1063,50 @@ describe('GET /v1/dashboard/cash-pickups/queue', () => {
       .expect(200);
     expect((one.body.stores as { locationId: string }[]).map((s) => s.locationId)).toEqual([first]);
   });
+
+  it('says why a viewer cannot tick, and lets a manager with no store assigned tick every store (owner 2026-10-02)', async () => {
+    type Card = { locationId: string; canRecord: boolean; lockedReason: string | null };
+    const cards = async (who: Who) => {
+      const res = await as(who).get('/v1/dashboard/cash-pickups/queue').expect(200);
+      return {
+        viewer: res.body.viewer as { canRecord: boolean; roleName: string | null },
+        stores: res.body.stores as Card[],
+      };
+    };
+    // Operations: every store, nothing locked.
+    const ops = await cards('ops');
+    expect(ops.viewer.roleName).toBe('Operations');
+    expect(ops.stores.every((c) => c.canRecord && c.lockedReason === null)).toBe(true);
+    // A cashier's role lacks the permission: every card says so.
+    const rep = await cards('rep');
+    expect(rep.viewer).toMatchObject({ canRecord: false, roleName: 'Cashier' });
+    expect(rep.stores.every((c) => !c.canRecord && c.lockedReason === 'no_permission')).toBe(true);
+    // A store manager: their own store only; the others say it is not theirs.
+    const mgr = await cards('manager');
+    const a = mgr.stores.find((c) => c.locationId === aStoreId)!;
+    const b = mgr.stores.find((c) => c.locationId === bStoreId);
+    expect(a).toMatchObject({ canRecord: true, lockedReason: null });
+    if (b) expect(b).toMatchObject({ canRecord: false, lockedReason: 'not_your_store' });
+    // With no store assigned the manager is unscoped — every store.
+    await withDb((db) =>
+      db
+        .delete(schema.membershipLocationScopes)
+        .where(eq(schema.membershipLocationScopes.membershipId, members.manager.membershipId)),
+    );
+    try {
+      const unscoped = await cards('manager');
+      expect(unscoped.stores.length).toBeGreaterThan(0);
+      expect(unscoped.stores.every((c) => c.canRecord && c.lockedReason === null)).toBe(true);
+    } finally {
+      await withDb((db) =>
+        db.insert(schema.membershipLocationScopes).values({
+          businessId,
+          membershipId: members.manager.membershipId,
+          locationId: aStoreId,
+        }),
+      );
+    }
+  });
 });
 
 describe('owner cash hand-off', () => {

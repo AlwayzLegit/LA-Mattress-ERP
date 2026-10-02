@@ -257,12 +257,14 @@ export interface CashPickupStore {
   lastPickup: PickupSummary | null;
   payments: PendingCashRow[];
   canRecord: boolean;
+  /** Why the ticks are locked for this viewer; null when they can record. */
+  lockedReason?: 'no_permission' | 'not_your_store' | null;
 }
 
 export interface CashPickupQueue {
   date: string;
   rule: { dueCents: number; dueDays: number };
-  viewer: { membershipId: string | null; canRecord: boolean };
+  viewer: { membershipId: string | null; canRecord: boolean; roleName?: string | null };
   stores: CashPickupStore[];
   totals: { storeCount: number; pendingCents: number; dueCount: number; holdingCount: number };
 }
