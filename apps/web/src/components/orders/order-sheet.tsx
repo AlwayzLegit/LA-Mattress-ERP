@@ -20,6 +20,7 @@ import {
   StatusChip,
 } from '@/components/ui';
 import { Money } from '@/components/money';
+import { describeOrderEvent, type OrderAuditRow } from '@/lib/order-history';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { CancelOrderDialog } from './cancel-order-dialog';
 import {
@@ -115,106 +116,9 @@ interface DeliveryRow {
   windowStart?: string | null;
   windowEnd?: string | null;
 }
-interface AuditRow {
-  id: string;
-  action: string;
-  actorEmail: string | null;
-  createdAt: string;
-  changesJson: {
-    before?: Record<string, unknown>;
-    after?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-  } | null;
-}
+type AuditRow = OrderAuditRow;
 
 const TENDERS = ['card', 'cash', 'check', 'paypal', 'venmo', 'zelle', 'synchrony', 'acima'];
-
-/** Audit actions → what the timeline says, and the dot's tone. */
-function describe(row: AuditRow): { what: string; tone: string; detail: string } {
-  const a = row.changesJson?.after ?? {};
-  const b = row.changesJson?.before ?? {};
-  const money = (v: unknown) => (typeof v === 'number' ? formatMoney(v) : String(v ?? ''));
-  switch (row.action) {
-    case 'order.selling_store.correct':
-      return {
-        what: 'Selling store corrected',
-        tone: 'accent',
-        detail: `${String(b.locationName ?? '')} → ${String(a.locationName ?? '')} · ${String(a.reason ?? '')}`,
-      };
-    case 'order.create':
-      return { what: 'Order written', tone: 'accent', detail: '' };
-    case 'order.payment.take':
-      return {
-        what: 'Payment recorded',
-        tone: 'fulfilled',
-        detail: [
-          METHOD_LABEL[String(a.method ?? '')] ?? String(a.method ?? ''),
-          a.processorRef ? `••${String(a.processorRef).slice(-4)}` : '',
-          typeof a.amountCents === 'number' ? money(a.amountCents) : '',
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      };
-    case 'order.lock':
-      return {
-        what: 'Delivery ticket printed — order locked',
-        tone: 'scheduled',
-        detail: 'Unlock requires owner or store manager.',
-      };
-    case 'order.unlock':
-      return {
-        what: 'Order unlocked',
-        tone: 'scheduled',
-        detail: String(a.reason ?? a.reasonText ?? ''),
-      };
-    case 'order.cancel':
-      return {
-        what: 'Order cancelled',
-        tone: 'muted',
-        detail: [
-          a.reason ? String(a.reason) : '',
-          typeof a.depositCents === 'number' && a.depositCents > 0
-            ? `${money(a.depositCents)} deposit → ${a.depositTo === 'store_credit' ? 'store credit' : 'refund'}`
-            : '',
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      };
-    case 'order.reserve':
-      return { what: 'Stock reserved', tone: 'scheduled', detail: '' };
-    case 'order.release':
-    case 'order.auto_stock_release':
-      return { what: 'Reservation released', tone: 'waiting', detail: '' };
-    case 'order.allocate_pending':
-      return { what: 'Line short at source', tone: 'waiting', detail: '' };
-    case 'order.price_adjustment':
-      return {
-        what: 'Price adjusted',
-        tone: 'waiting',
-        detail: typeof a.amountCents === 'number' ? money(a.amountCents) : '',
-      };
-    case 'order.note.add':
-      return { what: 'Note added', tone: 'accent', detail: '' };
-    default: {
-      const fields = Object.keys({ ...b, ...a })
-        .filter((k) => k !== 'status' || b.status !== a.status)
-        .slice(0, 3)
-        .map((k) => {
-          const from = b[k];
-          const to = a[k];
-          const fmt = (v: unknown) =>
-            v == null || v === '' ? '—' : /cents$/i.test(k) ? money(v) : String(v);
-          return from === undefined ? `${k}: ${fmt(to)}` : `${k}: ${fmt(from)} → ${fmt(to)}`;
-        });
-      const word = row.action.replace(/^order\./, '').replace(/[._]/g, ' ');
-      return {
-        what: word.charAt(0).toUpperCase() + word.slice(1),
-        tone: 'accent',
-        detail: fields.join(' · '),
-      };
-    }
-  }
-}
 
 export function OrderSheet({ id }: { id: string }) {
   const router = useRouter();
@@ -954,7 +858,7 @@ export function OrderSheet({ id }: { id: string }) {
         ) : (
           <ol className="osh-timeline" data-testid="order-timeline">
             {history.map((h) => {
-              const d = describe(h);
+              const d = describeOrderEvent(h);
               return (
                 <li key={h.id} className="osh-event">
                   <div className="osh-event-rail">
@@ -962,11 +866,7 @@ export function OrderSheet({ id }: { id: string }) {
                     <span className="osh-line" aria-hidden />
                   </div>
                   <div className="osh-event-body">
-                    <div>
-                      <span className="osh-strong">{d.what}</span>
-                      <span className="osh-muted"> · {h.actorEmail ?? 'System'}</span>
-                    </div>
-                    {d.detail && <div className="osh-muted">{d.detail}</div>}
+                    <div title={h.actorEmail ?? undefined}>{d.text}</div>
                     <div className="osh-mono osh-when">{fmtWhen(h.createdAt)}</div>
                   </div>
                 </li>

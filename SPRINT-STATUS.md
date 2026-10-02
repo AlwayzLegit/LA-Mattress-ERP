@@ -6553,3 +6553,21 @@ calendar. The Returns page just never offered it, so staff used the no-invoice p
   require an order (`deliveries.order_id` NOT NULL, about 46 joins).
 - Checked in Chromium (local stack): an unknown number shows the toast, `ko-10060` opens
   KO-10060 with the Returns card in view, and the claimed-number warning shows.
+
+### Checkpoint — 2026-10-02 (Order change history in plain sentences)
+
+Owner: "make the Change history easier to understand". Answers to three questions: plain
+sentences; products by **name only**; the member's **name** (email on hover).
+
+- `GET /v1/audit-logs` rows now carry `actorName` (users.name) and `names`. `names` maps every
+  uuid inside `changesJson` to a readable name: order lines and variants give the product name
+  (a line with no product gives its own description), locations their name, memberships the
+  member's name. All ids resolve in one batch per kind under RLS. A removed line is gone, but
+  its `variantId` still names the product.
+- `lib/order-history.ts` `describeOrderEvent()` covers every `order.*` audit action, e.g.
+  "Ronnie created WE-10021 · 4 items · $1,828.00 · deposit due $457.00", "Ronnie took a
+  $1,828.00 card deposit", "Henry added 2 × QUEEN TWILIGHT FIRM", "… changed X: price $1,049.00 →
+  $999.00, quantity 1 → 2". Unknown actions fall back to a readable field list with no ids. Both
+  the full order page and the order sheet use it, and their old per-page formatters are removed.
+- Tests: web `order-history.test.ts` (7), store-dashboard.int +1 (actorName, product names for
+  line add and remove). Checked in Chromium on both surfaces.
