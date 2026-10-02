@@ -81,6 +81,7 @@ export const METHOD_LABEL: Record<string, string> = {
   paypal: 'PayPal',
   venmo: 'Venmo',
   zelle: 'Zelle',
+  shop_pay: 'Shop Pay',
   synchrony: 'Synchrony',
   acima: 'Acima',
   store_credit: 'Store credit',

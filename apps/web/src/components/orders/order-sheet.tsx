@@ -118,7 +118,17 @@ interface DeliveryRow {
 }
 type AuditRow = OrderAuditRow;
 
-const TENDERS = ['card', 'cash', 'check', 'paypal', 'venmo', 'zelle', 'synchrony', 'acima'];
+const TENDERS = [
+  'card',
+  'cash',
+  'check',
+  'paypal',
+  'venmo',
+  'zelle',
+  'shop_pay',
+  'synchrony',
+  'acima',
+];
 
 export function OrderSheet({ id }: { id: string }) {
   const router = useRouter();

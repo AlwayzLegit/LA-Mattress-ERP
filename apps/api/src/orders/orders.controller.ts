@@ -83,6 +83,7 @@ const PAYMENT_METHODS = [
   'paypal',
   'venmo',
   'zelle',
+  'shop_pay',
   'synchrony',
   'acima',
 ] as const;

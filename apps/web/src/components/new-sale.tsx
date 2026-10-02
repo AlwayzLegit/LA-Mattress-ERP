@@ -84,6 +84,7 @@ const TENDERS = [
   { value: 'paypal', label: 'PayPal' },
   { value: 'venmo', label: 'Venmo' },
   { value: 'zelle', label: 'Zelle' },
+  { value: 'shop_pay', label: 'Shop Pay' },
   { value: 'synchrony', label: 'Synchrony' },
   { value: 'acima', label: 'Acima' },
   { value: 'store_credit', label: 'Store credit' },
