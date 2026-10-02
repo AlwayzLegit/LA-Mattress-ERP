@@ -2723,6 +2723,105 @@ describe('Return windows + no-original returns (FAQ I4, I1/I8)', () => {
       });
     expect(invalid.status).toBe(400);
   });
+
+  it('void a no-original return entered by mistake: credit back, pieces voided, gated', async () => {
+    const list = await as(ownerCookie).get('/v1/order-returns');
+    const target = (list.body.data as { id: string; rmaNumber: string }[]).find(
+      (r) => r.rmaNumber === 'RMA-NOORIG-1',
+    )!;
+
+    const refused = await as(cashierCookie)
+      .post(`/v1/order-returns/${target.id}/void`)
+      .send({ reason: 'customer has an invoice' });
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe('OVERRIDE_REQUIRED');
+
+    const noReason = await as(ownerCookie).post(`/v1/order-returns/${target.id}/void`).send({});
+    expect(noReason.status).toBe(400);
+
+    const voided = await as(ownerCookie)
+      .post(`/v1/order-returns/${target.id}/void`)
+      .send({ reason: 'customer has an invoice — redo from it' });
+    expect(voided.status).toBe(201);
+    expect(voided.body).toEqual({
+      status: 'cancelled',
+      creditReversedCents: 5000,
+      piecesVoided: 1,
+    });
+
+    await withDb(async (db) => {
+      const credits = await db
+        .select()
+        .from(schema.storeCreditEntries)
+        .where(eq(schema.storeCreditEntries.referenceId, target.id));
+      expect(credits.map((c) => c.deltaCents).sort((a, b) => a - b)).toEqual([-5000, 5000]);
+      const pieces = await db
+        .select()
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.referenceId, target.id));
+      expect(pieces.map((p) => p.status)).toEqual(['voided']);
+      const [ret] = await db
+        .select()
+        .from(schema.orderReturns)
+        .where(eq(schema.orderReturns.id, target.id));
+      expect(ret!.status).toBe('cancelled');
+      expect(ret!.cancelReason).toMatch(/invoice/);
+      const events = await db
+        .select()
+        .from(schema.exceptionEvents)
+        .where(eq(schema.exceptionEvents.type, 'no_original_return_voided'));
+      expect(events).toHaveLength(1);
+    });
+
+    const again = await as(ownerCookie)
+      .post(`/v1/order-returns/${target.id}/void`)
+      .send({ reason: 'twice' });
+    expect(again.status).toBe(409);
+  });
+
+  it('void is refused once the customer spent the credit', async () => {
+    const spender = await withDb(async (db) => {
+      const [c] = await db
+        .insert(schema.customers)
+        .values({ businessId, firstName: 'Sam', lastName: 'Spender' })
+        .returning();
+      return c!.id;
+    });
+    const made = await as(ownerCookie)
+      .post('/v1/order-returns/no-original')
+      .send({
+        customerId: spender,
+        locationId,
+        lines: [{ variantId: rwVariantId, quantity: 1, unitRefundCents: 4000 }],
+      });
+    expect(made.status).toBe(201);
+    await withDb((db) =>
+      db.insert(schema.storeCreditEntries).values({
+        businessId,
+        customerId: spender,
+        deltaCents: -1000,
+        reason: 'Redeemed at checkout',
+        referenceType: 'payment',
+      }),
+    );
+    const refused = await as(ownerCookie)
+      .post(`/v1/order-returns/${made.body.id}/void`)
+      .send({ reason: 'mistake' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toMatch(/already used \$10\.00 of the \$40\.00/);
+    await withDb(async (db) => {
+      const [ret] = await db
+        .select()
+        .from(schema.orderReturns)
+        .where(eq(schema.orderReturns.id, made.body.id));
+      expect(ret!.status).toBe('completed');
+      const pieces = await db
+        .select()
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.referenceId, made.body.id));
+      expect(pieces.map((p) => p.status)).toEqual(['pending_review']);
+    });
+  });
 });
 
 describe('FIFO COGS — fulfillment consumes layers, pre-costing stock synthesizes opening layers', () => {

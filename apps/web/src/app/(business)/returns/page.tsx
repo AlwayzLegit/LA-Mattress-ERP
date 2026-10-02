@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
@@ -77,59 +77,81 @@ interface DraftLine {
  * customer with no findable invoice. Store-credit only; goods go to
  * As-Is review; a non-manager finishes through the override dialog.
  */
-const RETURN_COLUMNS: ColumnDef<ReturnRow>[] = [
-  {
-    id: 'rma',
-    label: 'RMA',
-    sortValue: (r) => r.rmaNumber,
-    render: (r) => <code>{r.rmaNumber}</code>,
-  },
-  {
-    id: 'order',
-    label: 'Order',
-    sortValue: (r) => (r.orderId ? 'a' : 'b'),
-    render: (r) =>
-      r.orderId ? (
-        <Link href={`/orders/${r.orderId}`}>View order</Link>
-      ) : (
-        <span className="muted">
-          No original
-          {r.referencedOrderNumber ? ` (claimed ${r.referencedOrderNumber})` : ''}
-        </span>
-      ),
-  },
-  {
-    id: 'status',
-    label: 'Status',
-    sortValue: (r) => r.status,
-    render: (r) => <StatusBadge status={r.status} />,
-  },
-  {
-    id: 'refund',
-    label: 'Refund',
-    sortValue: (r) => r.refundMethod,
-    render: (r) => (r.refundMethod === 'store_credit' ? 'Store credit' : 'Original tender'),
-  },
-  {
-    id: 'amount',
-    label: 'Amount',
-    num: true,
-    sortValue: (r) => r.amountCents,
-    render: (r) => <Money cents={r.amountCents} />,
-  },
-  {
-    id: 'authorized',
-    label: 'Authorized',
-    className: 'nowrap',
-    sortValue: (r) => r.authorizedAt,
-    render: (r) => new Date(r.authorizedAt).toLocaleString(),
-  },
-];
+function returnColumns(onVoid: (r: ReturnRow) => void): ColumnDef<ReturnRow>[] {
+  return [
+    {
+      id: 'rma',
+      label: 'RMA',
+      sortValue: (r) => r.rmaNumber,
+      render: (r) => <code>{r.rmaNumber}</code>,
+    },
+    {
+      id: 'order',
+      label: 'Order',
+      sortValue: (r) => (r.orderId ? 'a' : 'b'),
+      render: (r) =>
+        r.orderId ? (
+          <Link href={`/orders/${r.orderId}`}>View order</Link>
+        ) : (
+          <span className="muted">
+            No original
+            {r.referencedOrderNumber ? ` (claimed ${r.referencedOrderNumber})` : ''}
+          </span>
+        ),
+    },
+    {
+      id: 'status',
+      label: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <StatusBadge status={r.status} />,
+    },
+    {
+      id: 'refund',
+      label: 'Refund',
+      sortValue: (r) => r.refundMethod,
+      render: (r) => (r.refundMethod === 'store_credit' ? 'Store credit' : 'Original tender'),
+    },
+    {
+      id: 'amount',
+      label: 'Amount',
+      num: true,
+      sortValue: (r) => r.amountCents,
+      render: (r) => <Money cents={r.amountCents} />,
+    },
+    {
+      id: 'authorized',
+      label: 'Authorized',
+      className: 'nowrap',
+      sortValue: (r) => r.authorizedAt,
+      render: (r) => new Date(r.authorizedAt).toLocaleString(),
+    },
+    {
+      id: 'actions',
+      label: 'Actions',
+      srLabel: 'Actions',
+      fixed: true,
+      render: (r) =>
+        !r.orderId && r.status === 'completed' ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid={`return-void-${r.rmaNumber}`}
+            title="Entered by mistake? Takes the store credit back and voids the As-Is pieces"
+            onClick={() => onVoid(r)}
+          >
+            Void
+          </Button>
+        ) : null,
+    },
+  ];
+}
 
 export default function ReturnsPage() {
   const list = useCursorList<ReturnRow>('/v1/order-returns');
   const { rows, error } = list;
-  const cols = useListColumns('returns', RETURN_COLUMNS, rows);
+  const [voiding, setVoiding] = useState<ReturnRow | null>(null);
+  const columns = useMemo(() => returnColumns(setVoiding), []);
+  const cols = useListColumns('returns', columns, rows);
 
   useEffect(() => {
     void list.load();
@@ -139,6 +161,30 @@ export default function ReturnsPage() {
   return (
     <div>
       <PageHeader title="Returns" />
+      <SecurityOverrideDialog
+        open={voiding != null}
+        title={voiding ? `Void ${voiding.rmaNumber}?` : 'Void return'}
+        usageClass="exception"
+        submitLabel="Void return"
+        perform={async (payload) => {
+          const res = await api<{ creditReversedCents: number; piecesVoided: number }>(
+            `/v1/order-returns/${voiding!.id}/void`,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                reasonCodeId: payload.reasonCodeId,
+                reason: payload.reason,
+                override: payload.override,
+              }),
+            },
+          );
+          toast.success(
+            `${voiding!.rmaNumber} voided — $${(res.creditReversedCents / 100).toFixed(2)} store credit taken back, ${res.piecesVoided} As-Is piece(s) voided.`,
+          );
+        }}
+        onClose={() => setVoiding(null)}
+        onSuccess={() => void list.load()}
+      />
       <Stack>
         <InvoiceReturnCard />
         <NoOriginalCard onChanged={() => list.load()} />

@@ -6589,3 +6589,29 @@ failed with "A one-line note is required…".
 - deliveries.int +1 assertion block (a move onto a full day: 409 without the confirm, 200 with
   it and no note, and the day-sheet line names the actor). Checked in Chromium: the Orders
   sheet → Reschedule onto a full day → OK moves it.
+
+### Checkpoint — 2026-10-02 (Void a no-original return entered by mistake)
+
+RMA-NOORIG-1 was written on the no-invoice form for WE-10021, which has an invoice. That issued
+store credit and staged As-Is pieces with no order behind them. Until now, nothing could undo a
+no-original return: it is written completed in one step, and cancel only works on an authorized
+return.
+
+- `POST /v1/order-returns/:id/void`. Only a completed no-original return can be voided. The
+  gate matches writing one (`returns.no_original`; anyone else needs a manager's credentials),
+  and a reason is required. In one transaction, with the return row locked, it:
+  - takes back the store credit the return issued (refused if the customer has already spent
+    some of it, and the message says how much),
+  - voids its As-Is pieces still in review (refused once any piece was restocked, sent to the
+    vendor or scrapped),
+  - marks the return cancelled with the reason.
+    It is refused while a live exchange rides on the return. The void writes an
+    `order_return.void` audit row and a `no_original_return_voided` exception.
+- Returns register: a **Void** button on completed no-original rows opens the shared override
+  dialog (reason, plus manager credentials when needed).
+- orders.int +2: gated, credit back, piece voided, a second void gets 409; refused once credit
+  was spent, and the return and pieces are left untouched. Checked in Chromium: Void → reason
+  → the row reads Cancelled and the toast names the $ taken back.
+- **Ops (owner):** on Returns, click **Void** on RMA-NOORIG-1. Then redo the return through
+  **Return from an invoice** → WE-10021, which carries the restocking fee, pickup fee and driver
+  pickup date.

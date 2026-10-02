@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
@@ -583,6 +583,201 @@ export class OrderReturnsController {
       },
     });
     return { status: 'cancelled' };
+  }
+
+  /**
+   * Void a no-original return entered by mistake (owner 2026-10-02:
+   * RMA-NOORIG-1 was written for WE-10021, which has an invoice). It
+   * unwinds exactly what the no-original path wrote, all or nothing:
+   *   - the store credit it issued comes back off the customer — refused
+   *     when the customer has already spent it,
+   *   - its As-Is pieces leave review as `voided` — refused once any
+   *     piece was restocked, sent to the vendor or scrapped,
+   *   - the document reads cancelled with the reason.
+   * Refused while an exchange still rides on the return. Same gate as
+   * writing one (`returns.no_original`, manager credentials otherwise);
+   * the void lands in the exception register next to the original.
+   */
+  @Post(':id/void')
+  @RequirePermission('pos.refund.create')
+  async voidNoOriginal(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      reason?: string;
+      reasonCodeId?: string;
+      override?: import('../controls/security-override.service').OverrideCredentials;
+    },
+  ): Promise<{ status: string; creditReversedCents: number; piecesVoided: number }> {
+    const [ret] = await this.db
+      .select()
+      .from(schema.orderReturns)
+      .where(eq(schema.orderReturns.id, id))
+      .limit(1);
+    if (!ret) throw new NotFoundException('Return not found');
+    if (ret.orderId) {
+      throw new ConflictException(
+        `${ret.rmaNumber} is a return on an invoice — only a no-original return can be voided`,
+      );
+    }
+    if (ret.status !== 'completed') {
+      throw new ConflictException(`Return ${ret.rmaNumber} is already ${ret.status}`);
+    }
+    await this.overrides.require({
+      permission: 'returns.no_original',
+      action: `Void no-original return ${ret.rmaNumber}`,
+      entityType: 'order_return',
+      entityId: id,
+      override: body.override,
+    });
+    const reason = await this.overrides.resolveReason('exception', {
+      reasonCodeId: body.reasonCodeId,
+      reason: body.reason,
+    });
+    if (!reason.reasonText && !reason.reasonCode) {
+      throw new BadRequestException('A reason is required to void a return');
+    }
+
+    const result = await this.db.transaction(async (tx) => {
+      // Re-read under a row lock so two voids can't both pass the checks.
+      const [locked] = await tx
+        .select({ status: schema.orderReturns.status })
+        .from(schema.orderReturns)
+        .where(eq(schema.orderReturns.id, id))
+        .for('update');
+      if (locked?.status !== 'completed') {
+        throw new ConflictException(`Return ${ret.rmaNumber} is already ${locked?.status}`);
+      }
+      const [exchange] = await tx
+        .select({ number: schema.exchanges.number })
+        .from(schema.exchanges)
+        .where(
+          and(
+            eq(schema.exchanges.returnId, id),
+            notInArray(schema.exchanges.status, ['split', 'cancelled']),
+          ),
+        )
+        .limit(1);
+      if (exchange) {
+        throw new ConflictException(
+          `Exchange ${exchange.number} uses ${ret.rmaNumber} — cancel or split the exchange first`,
+        );
+      }
+
+      const pieces = await tx
+        .select({
+          id: schema.asIsItems.id,
+          status: schema.asIsItems.status,
+          pieceNumber: schema.asIsItems.pieceNumber,
+        })
+        .from(schema.asIsItems)
+        .where(
+          and(
+            eq(schema.asIsItems.referenceType, 'order_return'),
+            eq(schema.asIsItems.referenceId, id),
+          ),
+        );
+      const reviewed = pieces.filter((p) => p.status !== 'pending_review' && p.status !== 'voided');
+      if (reviewed.length > 0) {
+        throw new ConflictException(
+          `As-Is ${reviewed.map((p) => p.pieceNumber ?? p.id).join(', ')} already left review (${reviewed[0]!.status}) — undo that first`,
+        );
+      }
+
+      // What this return put on the customer, net of anything already
+      // taken back against it.
+      const [issued] = await tx
+        .select({
+          cents: sql<number>`COALESCE(SUM(${schema.storeCreditEntries.deltaCents}), 0)::int`,
+        })
+        .from(schema.storeCreditEntries)
+        .where(
+          and(
+            eq(schema.storeCreditEntries.referenceType, 'order_return'),
+            eq(schema.storeCreditEntries.referenceId, id),
+          ),
+        );
+      const creditCents = issued?.cents ?? 0;
+      if (creditCents > 0) {
+        if (!ret.customerId) {
+          throw new ConflictException(`${ret.rmaNumber} has no customer to take the credit from`);
+        }
+        const balance = await this.storeCredit.balanceCents(tx, ret.customerId);
+        if (balance < creditCents) {
+          throw new ConflictException(
+            `The customer has already used $${((creditCents - Math.max(balance, 0)) / 100).toFixed(2)} of the $${(creditCents / 100).toFixed(2)} credit from ${ret.rmaNumber} — it can't be voided`,
+          );
+        }
+        await tx.insert(schema.storeCreditEntries).values({
+          businessId: tenant.businessId!,
+          customerId: ret.customerId,
+          deltaCents: -creditCents,
+          reason: `Voided ${ret.rmaNumber}: ${reason.reasonText ?? reason.reasonCode}`,
+          referenceType: 'order_return',
+          referenceId: id,
+          createdByUserId: actor?.id ?? null,
+        });
+      }
+
+      const live = pieces.filter((p) => p.status === 'pending_review');
+      if (live.length > 0) {
+        await tx
+          .update(schema.asIsItems)
+          .set({
+            status: 'voided',
+            reviewedByUserId: actor?.id ?? null,
+            reviewedAt: new Date(),
+          })
+          .where(
+            inArray(
+              schema.asIsItems.id,
+              live.map((p) => p.id),
+            ),
+          );
+      }
+
+      await tx
+        .update(schema.orderReturns)
+        .set({
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancelledByUserId: actor?.id ?? null,
+          cancelReason: reason.reasonText,
+        })
+        .where(eq(schema.orderReturns.id, id));
+      return { creditReversedCents: Math.max(creditCents, 0), piecesVoided: live.length };
+    });
+
+    await this.exceptions.record({
+      type: 'no_original_return_voided',
+      severity: 'warning',
+      entityType: 'order_return',
+      entityId: id,
+      summary: `Voided no-original return ${ret.rmaNumber}: ${result.creditReversedCents} cents of store credit taken back, ${result.piecesVoided} As-Is piece(s) voided`,
+      metadata: {
+        rmaNumber: ret.rmaNumber,
+        customerId: ret.customerId,
+        referencedOrderNumber: ret.referencedOrderNumber,
+        reason: reason.reasonText,
+        reasonCode: reason.reasonCode,
+        ...result,
+      },
+    });
+    await this.audit.log({
+      action: 'order_return.void',
+      targetType: 'order_return',
+      targetId: id,
+      before: { status: 'completed' },
+      after: { status: 'cancelled', ...result },
+      metadata: {
+        rmaNumber: ret.rmaNumber,
+        reason: reason.reasonText,
+        reasonCode: reason.reasonCode,
+      },
+    });
+    return { status: 'cancelled', ...result };
   }
 
   private async loadDetail(businessId: string, id: string): Promise<OrderReturnDetail> {
