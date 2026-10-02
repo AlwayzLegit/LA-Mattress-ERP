@@ -6518,3 +6518,20 @@ activity's Vendor list was missing Brooklyn and Helix.
   each shows only that card, with no sidebar. Z PDF: 1 page (whole page: 5). The Merchandising
   Vendor list shows BIA plus Brooklyn Bedding and Helix Sleep. reports.int +1 test, print-section
   unit test.
+
+### Checkpoint — 2026-10-02 (Cash pickup ticks: say why they are locked; unscoped managers)
+
+Owner: "Ayron still can't tick the cash box." The store card's cash ticks lock unless the
+viewer's role has `pos.cash.pickup_record` (built-in Owner, Operations, Manager). A Manager is
+further limited to the stores assigned to them. The card greyed the boxes out with no reason.
+The boot role sync only tops up built-in roles: a hand-made role (one named "Operations" made
+before the built-in role existed included) never gets the permission.
+
+- The queue now carries `lockedReason` per store (`no_permission` | `not_your_store`) and
+  `viewer.roleName`. The card shows a line under the ticks saying why, and for a role without
+  the permission which one to turn on (Roles → <role> → "Record and post a cash pickup").
+- A Manager with no store assigned is unscoped, so every store. Before, they could tick
+  nowhere.
+- store-dashboard.int +1 (Operations all, Cashier no_permission, Manager own store vs
+  not_your_store, unscoped Manager all). Checked in Chromium with the permission removed from
+  Operations: the line names the role.

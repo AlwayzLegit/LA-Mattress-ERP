@@ -389,6 +389,21 @@ export function CashPickupsQueue({
  * line, one tick row per cash payment waiting, then Record pickup /
  * Tick all — or the recording form with Counted, Slip # and the variance.
  */
+/**
+ * Why a viewer cannot tick or record here (owner 2026-10-02: "Ayron still
+ * can't tick the cash box" — the boxes were greyed out with no word).
+ */
+export function lockedText(
+  reason: 'no_permission' | 'not_your_store' | null | undefined,
+  roleName: string | null | undefined,
+): string {
+  if (reason === 'not_your_store') {
+    return 'Ticking and recording pickups here is for this store’s manager, Operations or the owner — this store isn’t assigned to you.';
+  }
+  const role = roleName ? `the ${roleName} role` : 'your role';
+  return `Ticking and recording pickups needs the “Record and post a cash pickup” permission, and ${role} doesn’t have it. The owner can turn it on under Roles → ${roleName ?? 'your role'}.`;
+}
+
 export function CashOnHandPanel({
   cp,
   locationId,
@@ -512,6 +527,12 @@ export function CashOnHandPanel({
               </label>
             );
           })}
+        </div>
+      )}
+
+      {!store.canRecord && store.payments.length > 0 && (
+        <div className="coh-empty" data-testid="coh-locked" data-noprint="true">
+          {lockedText(store.lockedReason, cp.queue?.viewer.roleName)}
         </div>
       )}
 

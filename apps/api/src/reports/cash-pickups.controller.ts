@@ -151,12 +151,19 @@ export interface CashPickupStore {
   payments: PendingCashRow[];
   /** The caller may record a pickup for this store. */
   canRecord: boolean;
+  /**
+   * Why the ticks are locked for this caller (owner 2026-10-02: "Ayron
+   * still can't tick the cash box" — the card said nothing).
+   * `no_permission`: their role lacks `pos.cash.pickup_record`;
+   * `not_your_store`: a manager, and this store is not one of theirs.
+   */
+  lockedReason: 'no_permission' | 'not_your_store' | null;
 }
 
 export interface CashPickupQueue {
   date: string;
   rule: { dueCents: number; dueDays: number };
-  viewer: { membershipId: string | null; canRecord: boolean };
+  viewer: { membershipId: string | null; canRecord: boolean; roleName: string | null };
   stores: CashPickupStore[];
   totals: { storeCount: number; pendingCents: number; dueCount: number; holdingCount: number };
 }
@@ -339,7 +346,9 @@ export class CashPickupsController {
   /**
    * Stores this member may record a pickup for. Owner / Operations /
    * anyone unscoped: every store they can see. A Manager: only the
-   * stores their membership is scoped to — "their own store".
+   * stores their membership is scoped to — "their own store"; a manager
+   * scoped to no store at all is unscoped, so every store (before
+   * 2026-10-02 they could tick nowhere).
    */
   private async recordableStores(
     tenant: RequestTenantContext,
@@ -353,6 +362,7 @@ export class CashPickupsController {
       .from(schema.membershipLocationScopes)
       .where(eq(schema.membershipLocationScopes.membershipId, tenant.membershipId));
     void businessId;
+    if (rows.length === 0) return 'all';
     return new Set(rows.map((r) => r.locationId));
   }
 
@@ -590,12 +600,22 @@ export class CashPickupsController {
         lastPickup: last.get(s.id) ?? null,
         payments,
         canRecord: recordable === 'all' || (recordable !== 'none' && recordable.has(s.id)),
+        lockedReason:
+          recordable === 'all' || (recordable !== 'none' && recordable.has(s.id))
+            ? null
+            : recordable === 'none'
+              ? 'no_permission'
+              : 'not_your_store',
       };
     });
     return {
       date: today,
       rule: { dueCents: PICKUP_DUE_CENTS, dueDays: PICKUP_DUE_DAYS },
-      viewer: { membershipId: tenant.membershipId, canRecord: recordable !== 'none' },
+      viewer: {
+        membershipId: tenant.membershipId,
+        canRecord: recordable !== 'none',
+        roleName: tenant.roleName ?? null,
+      },
       stores: cards,
       totals: {
         storeCount: cards.length,
