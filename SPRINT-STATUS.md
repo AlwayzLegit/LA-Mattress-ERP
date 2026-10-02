@@ -6571,3 +6571,21 @@ sentences; products by **name only**; the member's **name** (email on hover).
   the full order page and the order sheet use it, and their old per-page formatters are removed.
 - Tests: web `order-history.test.ts` (7), store-dashboard.int +1 (actorName, product names for
   line add and remove). Checked in Chromium on both surfaces.
+
+### Checkpoint — 2026-10-02 (Delivery cap: book over with a confirm, no note)
+
+Owner: "we should have the ability to overwrite delivery capacity. 15 is the max, but with
+Victor's approval we can schedule a few more than the 15 limit. Remove the requirement for a 1
+line note." Booking a new delivery over the cap already only needed the confirm. Moving an
+existing stop onto a full day (the Orders sheet's Reschedule, the Deliveries board drag) then
+failed with "A one-line note is required…".
+
+- `PATCH /v1/deliveries/:id`: the over-cap note is optional. Without one, the day-sheet line
+  reads "Over cap <date>: booked over the cap — <who confirmed>". With one, it reads
+  "<note> — <who>". The audit / exception / owner-feed records are unchanged and always name
+  the person who confirmed.
+- Deliveries board dialog: the note field is optional ("e.g. approved by Victor — second
+  truck"); "Move anyway" works without it. The dev stub matches.
+- deliveries.int +1 assertion block (a move onto a full day: 409 without the confirm, 200 with
+  it and no note, and the day-sheet line names the actor). Checked in Chromium: the Orders
+  sheet → Reschedule onto a full day → OK moves it.

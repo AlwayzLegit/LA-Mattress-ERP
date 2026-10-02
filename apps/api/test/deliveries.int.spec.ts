@@ -471,6 +471,29 @@ describe('Dispatch: capacity cap + zip routes (PLAN-POS-OPERATIONS P5)', () => {
     expect(hit.changesJson?.metadata?.cap).toBe(2);
     expect(hit.changesJson?.metadata?.scheduledDate).toBe(capDay);
 
+    // Owner 2026-10-02: moving a stop onto the full day needs only the
+    // confirm — no note — and the day sheet line names who approved it.
+    const fourthOrder = await makeDeliveryOrder();
+    const otherDay = new Date(Date.parse(`${capDay}T12:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const elsewhere = await ownerReq()
+      .post(`/v1/orders/${fourthOrder}/deliveries`)
+      .send({ scheduledDate: otherDay, confirmOverCapacity: true });
+    expect(elsewhere.status).toBe(201);
+    const blocked = await ownerReq()
+      .patch(`/v1/deliveries/${elsewhere.body.id}`)
+      .send({ scheduledDate: capDay });
+    expect(blocked.status).toBe(409);
+    const moved = await ownerReq()
+      .patch(`/v1/deliveries/${elsewhere.body.id}`)
+      .send({ scheduledDate: capDay, confirmOverCapacity: true });
+    expect(moved.status).toBe(200);
+    expect(moved.body.scheduledDate).toBe(capDay);
+    expect(moved.body.notes).toMatch(
+      new RegExp(`^Over cap ${capDay}: booked over the cap — .+`, 'm'),
+    );
+
     // Restore the default cap for anything running after this suite.
     await ownerReq()
       .patch('/v1/business/settings')
