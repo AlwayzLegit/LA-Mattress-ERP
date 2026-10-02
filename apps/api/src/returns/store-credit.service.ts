@@ -12,6 +12,20 @@ import { schema } from '@jetnine/db';
  */
 @Injectable()
 export class StoreCreditService {
+  /**
+   * Serializes ledger debits per customer: every check-then-debit
+   * (redeem, voiding a no-original return) takes this row lock first, so
+   * two debits can't both see the same balance. Held until the request's
+   * transaction commits.
+   */
+  async lockCustomer(db: PostgresJsDatabase, customerId: string): Promise<void> {
+    await db
+      .select({ id: schema.customers.id })
+      .from(schema.customers)
+      .where(eq(schema.customers.id, customerId))
+      .for('update');
+  }
+
   async balanceCents(db: PostgresJsDatabase, customerId: string): Promise<number> {
     const [row] = await db
       .select({
@@ -64,6 +78,7 @@ export class StoreCreditService {
     if (!Number.isInteger(args.amountCents) || args.amountCents <= 0) {
       throw new BadRequestException('store credit amount must be a positive integer');
     }
+    await this.lockCustomer(db, args.customerId);
     const balance = await this.balanceCents(db, args.customerId);
     if (balance < args.amountCents) {
       throw new BadRequestException(

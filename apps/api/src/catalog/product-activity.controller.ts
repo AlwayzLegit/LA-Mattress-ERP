@@ -938,6 +938,9 @@ export class ProductActivityController {
           and(
             eq(schema.orderReturns.businessId, biz),
             inArray(schema.orderReturnLines.variantId, ids),
+            // A voided no-original return keeps its completedAt — status
+            // is what says the goods really came back.
+            eq(schema.orderReturns.status, 'completed'),
             sql`${schema.orderReturns.completedAt} IS NOT NULL`,
             gte(schema.orderReturns.completedAt, first),
             locationId ? eq(schema.orders.locationId, locationId) : undefined,

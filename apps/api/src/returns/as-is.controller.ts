@@ -577,11 +577,14 @@ export class AsIsController {
     @Param('id') id: string,
     @Body() body: VoidBody,
   ): Promise<AsIsRow> {
+    // Row lock: a concurrent review / void (or a no-original return
+    // void) re-reads the settled status instead of acting on a stale one.
     const [item] = await this.db
       .select()
       .from(schema.asIsItems)
       .where(eq(schema.asIsItems.id, id))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!item) throw new NotFoundException('As-Is item not found');
     if (item.status !== 'pending_review') {
       throw new BadRequestException(`Item is already ${item.status}`);
@@ -741,11 +744,14 @@ export class AsIsController {
     if (!body.action || !REVIEW_ACTIONS.includes(body.action)) {
       throw new BadRequestException(`action must be one of ${REVIEW_ACTIONS.join(', ')}`);
     }
+    // Row lock: a concurrent review / void (or a no-original return
+    // void) re-reads the settled status instead of acting on a stale one.
     const [item] = await this.db
       .select()
       .from(schema.asIsItems)
       .where(eq(schema.asIsItems.id, id))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!item) throw new NotFoundException('As-Is item not found');
     if (item.status !== 'pending_review') {
       throw new BadRequestException(`Item is already ${item.status}`);
