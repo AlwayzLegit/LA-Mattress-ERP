@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -139,6 +140,7 @@ export default function ReturnsPage() {
     <div>
       <PageHeader title="Returns" />
       <Stack>
+        <InvoiceReturnCard />
         <NoOriginalCard onChanged={() => list.load()} />
         {error && <Alert tone="error">{error}</Alert>}
         {rows == null ? (
@@ -172,12 +174,93 @@ export default function ReturnsPage() {
   );
 }
 
+interface OrderHit {
+  id: string;
+  number: string;
+}
+
+/** The order with exactly this number (case-insensitive), or null. */
+async function findOrder(number: string): Promise<OrderHit | null> {
+  const n = number.trim();
+  if (!n) return null;
+  const page = await api<{ data: OrderHit[] }>(
+    `/v1/orders?number=${encodeURIComponent(n)}&limit=1`,
+  );
+  return page.data[0] ?? null;
+}
+
+/**
+ * Return from an invoice (owner 2026-10-02: a return for WE-10021 went
+ * through the no-invoice form, which has no restocking fee, pickup fee
+ * or driver pickup date). The order's own return form has all three —
+ * this box finds the order by number and opens it at its Returns card.
+ */
+function InvoiceReturnCard() {
+  const router = useRouter();
+  const [number, setNumber] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function open() {
+    if (!number.trim() || busy) return;
+    setBusy(true);
+    try {
+      const hit = await findOrder(number);
+      if (!hit) {
+        toast.error(
+          `No order ${number.trim().toUpperCase()} — check the number, or use "Return without an original invoice" below.`,
+        );
+        return;
+      }
+      router.push(`/orders/${hit.id}/full#returns`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Return from an invoice"
+      description="Type the invoice / order number. It opens that order's return form: pick the items, the refund, a restocking fee, a pickup fee, and the pickup date that puts the stop on the drivers' calendar."
+      data-testid="invoice-return"
+    >
+      <Toolbar>
+        <Input
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void open();
+            }
+          }}
+          placeholder="Invoice # — e.g. WE-10021"
+          aria-label="Invoice or order number"
+          data-testid="invoice-return-number"
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => void open()}
+          disabled={busy || !number.trim()}
+          data-testid="invoice-return-open"
+        >
+          {busy ? 'Finding…' : 'Start return'}
+        </Button>
+      </Toolbar>
+    </Card>
+  );
+}
+
 function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }) {
   const [customer, setCustomer] = useState<CustomerRow | null>(null);
   const [pickingCustomer, setPickingCustomer] = useState(false);
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [locationId, setLocationId] = useState('');
   const [referenced, setReferenced] = useState('');
+  /** The claimed number is a real order — this is not a no-invoice return. */
+  const [claimedHit, setClaimedHit] = useState<OrderHit | null>(null);
   const [reasonCodes, setReasonCodes] = useState<ReasonCode[]>([]);
   const [reasonCodeId, setReasonCodeId] = useState('');
   const [reason, setReason] = useState('');
@@ -266,6 +349,7 @@ function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }
   function reset() {
     setCustomer(null);
     setReferenced('');
+    setClaimedHit(null);
     setReason('');
     setLines([]);
   }
@@ -305,10 +389,10 @@ function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }
       title="Return without an original invoice"
       description={
         <>
-          For a customer whose invoice can&apos;t be found (pre-cutover sale, lost paperwork). Try
-          the invoice lookup on <Link href="/sales">Sales</Link> first — every imported STORIS
-          invoice is refundable normally. This path refunds as <strong>store credit only</strong>,
-          stages the goods in As-Is review, and is logged for loss prevention.
+          For a customer whose invoice can&apos;t be found (pre-cutover sale, lost paperwork). If
+          there is an invoice number, use <strong>Return from an invoice</strong> above. This path
+          refunds as <strong>store credit only</strong>, stages the goods in As-Is review, and is
+          logged for loss prevention.
         </>
       }
     >
@@ -355,7 +439,19 @@ function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }
           </Select>
         </Field>
         <Field label="Order # the customer claims (optional)" hint="Recorded verbatim">
-          <Input value={referenced} onChange={(e) => setReferenced(e.target.value)} />
+          <Input
+            value={referenced}
+            onChange={(e) => {
+              setReferenced(e.target.value);
+              setClaimedHit(null);
+            }}
+            onBlur={() => {
+              findOrder(referenced)
+                .then(setClaimedHit)
+                .catch(() => setClaimedHit(null));
+            }}
+            data-testid="noorig-claimed"
+          />
         </Field>
         {reasonCodes.length > 0 ? (
           <Field label="Return reason" required>
@@ -374,6 +470,14 @@ function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }
           </Field>
         )}
       </FormGrid>
+
+      {claimedHit && (
+        <Alert tone="warning" data-testid="noorig-invoice-found">
+          {claimedHit.number} is in the ERP — return it from{' '}
+          <Link href={`/orders/${claimedHit.id}/full#returns`}>the order</Link> instead. That form
+          refunds against the invoice and has the restocking fee, pickup fee and driver pickup date.
+        </Alert>
+      )}
 
       <SectionHeading as="h3" title="Items coming back" />
       <Toolbar>

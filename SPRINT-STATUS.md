@@ -6535,3 +6535,21 @@ before the built-in role existed included) never gets the permission.
 - store-dashboard.int +1 (Operations all, Cashier no_permission, Manager own store vs
   not_your_store, unscoped Manager all). Checked in Chromium with the permission removed from
   Operations: the line names the role.
+
+### Checkpoint — 2026-10-02 (Returns page: return from an invoice)
+
+Owner: "The return invoice should have a delivery fee section and a restocking fee section and
+pick up date for the drivers". The screenshot was the Returns page's _no-invoice_ form (store
+credit only). The return in question had an invoice, WE-10021. The order's own return form
+already has a restocking fee, a pickup fee and a pickup date that puts the stop on the delivery
+calendar. The Returns page just never offered it, so staff used the no-invoice path.
+
+- Returns page: a new **Return from an invoice** card at the top. Type the invoice / order #
+  (case-insensitive, `GET /v1/orders?number=`) and it opens `/orders/:id/full#returns`, scrolled
+  to the order's Returns card. An unknown number gets a toast pointing to the no-invoice form.
+- No-invoice form: when the "order # the customer claims" is a real order, a warning links to
+  that order's return instead. The description points at the new card rather than Sales.
+- Not done (owner to decide if needed): a driver pickup on a true no-invoice return. Deliveries
+  require an order (`deliveries.order_id` NOT NULL, about 46 joins).
+- Checked in Chromium (local stack): an unknown number shows the toast, `ko-10060` opens
+  KO-10060 with the Returns card in view, and the claimed-number warning shows.

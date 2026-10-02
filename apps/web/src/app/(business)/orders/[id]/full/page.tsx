@@ -2602,6 +2602,17 @@ function ReturnsCard({
     void loadReturns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id]);
+  // Returns page "Return from an invoice" lands here with #returns
+  // (owner 2026-10-02): bring this card into view.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.hash !== '#returns') return;
+    const t = window.setTimeout(() => {
+      document
+        .querySelector('[data-testid="returns-card"], [data-testid="returns-collapsed"]')
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [order.id]);
   // Coded adjustment reasons (gap sprint G2). While the business has no
   // codes of class `adjustment`, the shared free-text reason is sent.
   const [adjustCodes, setAdjustCodes] = useState<
