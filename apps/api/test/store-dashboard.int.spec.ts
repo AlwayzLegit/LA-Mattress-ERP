@@ -803,6 +803,25 @@ describe('GET /v1/dashboard/changes', () => {
     expect(res.body.counts.unseen).toBe(res.body.counts.money);
   });
 
+  it('names the product and the member behind each history entry (owner 2026-10-02)', async () => {
+    const res = await as('owner')
+      .get(`/v1/audit-logs?targetType=order&targetId=${fx.o1}`)
+      .expect(200);
+    type H = {
+      action: string;
+      actorName: string | null;
+      names: Record<string, string>;
+      changesJson: { before?: Record<string, unknown>; after?: Record<string, unknown> } | null;
+    };
+    const rows = res.body.data as H[];
+    const added = rows.find((r) => r.action === 'order.line.add')!;
+    const removed = rows.find((r) => r.action === 'order.line.remove')!;
+    expect(added.actorName).toBe('Olive Owner');
+    expect(added.names[variantId]).toBe('Store Card Mattress');
+    // The removed line is gone, but its variant still names the product.
+    expect(removed.changesJson?.before?.variantId).toBe(variantId);
+    expect(removed.names[variantId]).toBe('Store Card Mattress');
+  });
   it('filters to money and to unseen, and by store', async () => {
     const money = await as('owner').get('/v1/dashboard/changes?filter=money').expect(200);
     expect((money.body.rows as Row[]).every((r) => r.moneyRelated)).toBe(true);

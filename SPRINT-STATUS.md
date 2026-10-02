@@ -6535,3 +6535,57 @@ before the built-in role existed included) never gets the permission.
 - store-dashboard.int +1 (Operations all, Cashier no_permission, Manager own store vs
   not_your_store, unscoped Manager all). Checked in Chromium with the permission removed from
   Operations: the line names the role.
+
+### Checkpoint — 2026-10-02 (Returns page: return from an invoice)
+
+Owner: "The return invoice should have a delivery fee section and a restocking fee section and
+pick up date for the drivers". The screenshot was the Returns page's _no-invoice_ form (store
+credit only). The return in question had an invoice, WE-10021. The order's own return form
+already has a restocking fee, a pickup fee and a pickup date that puts the stop on the delivery
+calendar. The Returns page just never offered it, so staff used the no-invoice path.
+
+- Returns page: a new **Return from an invoice** card at the top. Type the invoice / order #
+  (case-insensitive, `GET /v1/orders?number=`) and it opens `/orders/:id/full#returns`, scrolled
+  to the order's Returns card. An unknown number gets a toast pointing to the no-invoice form.
+- No-invoice form: when the "order # the customer claims" is a real order, a warning links to
+  that order's return instead. The description points at the new card rather than Sales.
+- Not done (owner to decide if needed): a driver pickup on a true no-invoice return. Deliveries
+  require an order (`deliveries.order_id` NOT NULL, about 46 joins).
+- Checked in Chromium (local stack): an unknown number shows the toast, `ko-10060` opens
+  KO-10060 with the Returns card in view, and the claimed-number warning shows.
+
+### Checkpoint — 2026-10-02 (Order change history in plain sentences)
+
+Owner: "make the Change history easier to understand". Answers to three questions: plain
+sentences; products by **name only**; the member's **name** (email on hover).
+
+- `GET /v1/audit-logs` rows now carry `actorName` (users.name) and `names`. `names` maps every
+  uuid inside `changesJson` to a readable name: order lines and variants give the product name
+  (a line with no product gives its own description), locations their name, memberships the
+  member's name. All ids resolve in one batch per kind under RLS. A removed line is gone, but
+  its `variantId` still names the product.
+- `lib/order-history.ts` `describeOrderEvent()` covers every `order.*` audit action, e.g.
+  "Ronnie created WE-10021 · 4 items · $1,828.00 · deposit due $457.00", "Ronnie took a
+  $1,828.00 card deposit", "Henry added 2 × QUEEN TWILIGHT FIRM", "… changed X: price $1,049.00 →
+  $999.00, quantity 1 → 2". Unknown actions fall back to a readable field list with no ids. Both
+  the full order page and the order sheet use it, and their old per-page formatters are removed.
+- Tests: web `order-history.test.ts` (7), store-dashboard.int +1 (actorName, product names for
+  line add and remove). Checked in Chromium on both surfaces.
+
+### Checkpoint — 2026-10-02 (Delivery cap: book over with a confirm, no note)
+
+Owner: "we should have the ability to overwrite delivery capacity. 15 is the max, but with
+Victor's approval we can schedule a few more than the 15 limit. Remove the requirement for a 1
+line note." Booking a new delivery over the cap already only needed the confirm. Moving an
+existing stop onto a full day (the Orders sheet's Reschedule, the Deliveries board drag) then
+failed with "A one-line note is required…".
+
+- `PATCH /v1/deliveries/:id`: the over-cap note is optional. Without one, the day-sheet line
+  reads "Over cap <date>: booked over the cap — <who confirmed>". With one, it reads
+  "<note> — <who>". The audit / exception / owner-feed records are unchanged and always name
+  the person who confirmed.
+- Deliveries board dialog: the note field is optional ("e.g. approved by Victor — second
+  truck"); "Move anyway" works without it. The dev stub matches.
+- deliveries.int +1 assertion block (a move onto a full day: 409 without the confirm, 200 with
+  it and no note, and the day-sheet line names the actor). Checked in Chromium: the Orders
+  sheet → Reschedule onto a full day → OK moves it.

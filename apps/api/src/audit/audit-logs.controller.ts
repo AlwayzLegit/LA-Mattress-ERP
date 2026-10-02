@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query, Res } from '@nestjs/common';
-import { and, desc, eq, gte, lt } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Response } from 'express';
 import { schema } from '@jetnine/db';
@@ -20,6 +20,8 @@ interface AuditLogRow {
   action: string;
   actorUserId: string | null;
   actorEmail: string | null;
+  /** The member's name (users.name), for "Henry added …" timelines. */
+  actorName: string | null;
   actorType: string;
   targetType: string | null;
   targetId: string | null;
@@ -27,6 +29,31 @@ interface AuditLogRow {
   ip: string | null;
   userAgent: string | null;
   createdAt: Date;
+  /**
+   * Readable names for the ids inside changesJson — order lines and
+   * variants (product name), locations, memberships — so a timeline can
+   * say "added 2 × QUEEN TWILIGHT FIRM" instead of printing uuids
+   * (owner 2026-10-02: "make the Change history easier to understand").
+   */
+  names: Record<string, string>;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Every uuid-looking string anywhere in a changes payload. */
+function collectIds(value: unknown, out: Set<string>, depth = 0): void {
+  if (depth > 6 || value == null) return;
+  if (typeof value === 'string') {
+    if (UUID.test(value)) out.add(value.toLowerCase());
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectIds(v, out, depth + 1);
+    return;
+  }
+  if (typeof value === 'object') {
+    for (const v of Object.values(value as Record<string, unknown>)) collectIds(v, out, depth + 1);
+  }
 }
 
 /**
@@ -87,6 +114,7 @@ export class AuditLogsController {
         action: schema.auditLogs.action,
         actorUserId: schema.auditLogs.actorUserId,
         actorEmail: schema.users.email,
+        actorName: schema.users.name,
         actorType: schema.auditLogs.actorType,
         targetType: schema.auditLogs.targetType,
         targetId: schema.auditLogs.targetId,
@@ -101,8 +129,84 @@ export class AuditLogsController {
       .orderBy(...timestampCursorOrder(schema.auditLogs.createdAt, schema.auditLogs.id))
       .limit(limit + 1);
 
-    const enriched = rows.map((r) => ({ ...r, actorEmail: r.actorEmail ?? null }));
+    const names = await this.resolveNames(
+      db,
+      rows.map((r) => r.changesJson),
+    );
+    const enriched = rows.map((r) => {
+      const ids = new Set<string>();
+      collectIds(r.changesJson, ids);
+      const own: Record<string, string> = {};
+      for (const id of ids) {
+        const n = names.get(id);
+        if (n) own[id] = n;
+      }
+      return {
+        ...r,
+        actorEmail: r.actorEmail ?? null,
+        actorName: r.actorName?.trim() || null,
+        names: own,
+      };
+    });
     return buildPage(enriched, limit, (r) => r.createdAt);
+  }
+
+  /**
+   * One lookup per kind for every id the page's payloads mention. The
+   * request db is tenant-scoped (RLS), so another business's ids never
+   * resolve. A line resolves to its product's name (falling back to the
+   * line's own description — fees, custom lines); a removed line is
+   * gone, but its variantId still names the product.
+   */
+  private async resolveNames(
+    db: ReturnType<typeof getRequestDb>,
+    payloads: unknown[],
+  ): Promise<Map<string, string>> {
+    const ids = new Set<string>();
+    for (const p of payloads) collectIds(p, ids);
+    const out = new Map<string, string>();
+    if (ids.size === 0) return out;
+    const list = [...ids].slice(0, 1000);
+    const [lines, variants, locations, members] = await Promise.all([
+      db
+        .select({
+          id: schema.orderLines.id,
+          description: schema.orderLines.description,
+          productName: schema.products.name,
+        })
+        .from(schema.orderLines)
+        .leftJoin(
+          schema.productVariants,
+          eq(schema.productVariants.id, schema.orderLines.variantId),
+        )
+        .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .where(inArray(schema.orderLines.id, list)),
+      db
+        .select({ id: schema.productVariants.id, productName: schema.products.name })
+        .from(schema.productVariants)
+        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .where(inArray(schema.productVariants.id, list)),
+      db
+        .select({ id: schema.locations.id, name: schema.locations.name })
+        .from(schema.locations)
+        .where(inArray(schema.locations.id, list)),
+      db
+        .select({ id: schema.memberships.id, name: schema.users.name, email: schema.users.email })
+        .from(schema.memberships)
+        .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+        .where(inArray(schema.memberships.id, list)),
+    ]);
+    for (const l of lines) {
+      const n = (l.productName ?? l.description ?? '').trim();
+      if (n) out.set(l.id, n);
+    }
+    for (const v of variants) if (v.productName?.trim()) out.set(v.id, v.productName.trim());
+    for (const l of locations) if (l.name?.trim()) out.set(l.id, l.name.trim());
+    for (const m of members) {
+      const n = (m.name ?? m.email ?? '').trim();
+      if (n) out.set(m.id, n);
+    }
+    return out;
   }
 
   /**

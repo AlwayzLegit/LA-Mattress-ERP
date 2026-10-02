@@ -16,6 +16,7 @@ import { orderNextSteps } from '@/lib/order-next-steps';
 import { api, ApiError } from '@/lib/api';
 import { actingStoreId } from '@/lib/acting-store';
 import { lineHasAddons } from '@/lib/pos-addons';
+import { describeOrderEvent, type OrderAuditRow } from '@/lib/order-history';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -240,45 +241,7 @@ interface ReturnableLine {
   qtyReturned: number;
 }
 
-interface AuditRow {
-  id: string;
-  action: string;
-  createdAt: string;
-  actorUserId: string | null;
-  actorEmail: string | null;
-  changesJson: {
-    before?: Record<string, unknown>;
-    after?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-  } | null;
-}
-
-/** "$1,234.56" for *_cents fields, plain stringification otherwise. */
-function formatAuditValue(field: string, value: unknown): string {
-  if (value == null || value === '') return '—';
-  if (/cents$/i.test(field) && typeof value === 'number') {
-    return `$${(value / 100).toFixed(2)}`;
-  }
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
-}
-
-/**
- * The change-history line for one audit entry: each changed field with
- * its before → after values (PLAN-POS-OPERATIONS §8 — "every field
- * change attributed"). The audit service stores a minimal diff, so
- * every key present actually changed.
- */
-function auditChanges(row: AuditRow): { field: string; from: string; to: string }[] {
-  const before = row.changesJson?.before ?? {};
-  const after = row.changesJson?.after ?? {};
-  const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])];
-  return fields.map((field) => ({
-    field,
-    from: formatAuditValue(field, before[field]),
-    to: formatAuditValue(field, after[field]),
-  }));
-}
+type AuditRow = OrderAuditRow & { actorUserId: string | null };
 
 /** Same tender list (and labels) as the New Sale register. */
 const TENDERS = [
@@ -1871,23 +1834,18 @@ export default function OrderDetailPage() {
             ) : (
               <ul className="grid gap-1.5" data-testid="order-timeline">
                 {timeline.map((t) => {
-                  const changes = auditChanges(t);
+                  const e = describeOrderEvent(t);
                   return (
-                    <li key={t.id}>
-                      <span className="text-secondary">
-                        {new Date(t.createdAt).toLocaleString()}
-                      </span>{' '}
-                      — {t.action.replace('order.', '').replace(/[._]/g, ' ')}
-                      {t.actorEmail && <span className="muted"> by {t.actorEmail}</span>}
-                      {changes.length > 0 && (
-                        <ul className="text-secondary mt-0.5 pl-3.5 text-xs">
-                          {changes.map((c) => (
-                            <li key={c.field}>
-                              {c.field}: {c.from} → {c.to}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                    <li key={t.id} className="flex gap-3">
+                      <span className="text-secondary shrink-0 whitespace-nowrap tabular-nums">
+                        {new Date(t.createdAt).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <span title={t.actorEmail ?? undefined}>{e.text}</span>
                     </li>
                   );
                 })}
@@ -2601,6 +2559,17 @@ function ReturnsCard({
   useEffect(() => {
     void loadReturns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id]);
+  // Returns page "Return from an invoice" lands here with #returns
+  // (owner 2026-10-02): bring this card into view.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.hash !== '#returns') return;
+    const t = window.setTimeout(() => {
+      document
+        .querySelector('[data-testid="returns-card"], [data-testid="returns-collapsed"]')
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 150);
+    return () => window.clearTimeout(t);
   }, [order.id]);
   // Coded adjustment reasons (gap sprint G2). While the business has no
   // codes of class `adjustment`, the shared free-text reason is sent.

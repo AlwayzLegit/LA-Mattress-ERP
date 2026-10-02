@@ -102,9 +102,10 @@ interface UpdateDeliveryBody {
   notes?: string | null;
   /**
    * Redesign Phase 8 (README §3.4): moving a stop onto a full day is
-   * allowed, but only deliberately — confirm the cap and say why in one
-   * line. The note is kept on the delivery (it prints on the day sheet)
-   * and on the audit row.
+   * allowed, but only deliberately — confirm the cap (owner 2026-10-02:
+   * the note is optional; who confirmed is always recorded). The line is
+   * kept on the delivery (it prints on the day sheet) and on the audit
+   * row.
    */
   confirmOverCapacity?: boolean;
   overCapacityNote?: string | null;
@@ -598,18 +599,18 @@ export class DeliveriesController {
             message: `${body.scheduledDate} is over capacity on ${over.join(' and ')}. Confirm to book beyond the cap.`,
           });
         }
+        // Owner 2026-10-02: the confirm is the approval ("with Victor's
+        // approval we can schedule a few more than the 15") — a note is
+        // welcome but no longer required. Whoever confirmed is always
+        // named on the day sheet and in the override log.
         const note = body.overCapacityNote?.trim() ?? '';
-        if (!note) {
-          throw new BadRequestException(
-            'A one-line note is required to move a stop over the cap — it prints on the day sheet',
-          );
-        }
         const by = actor?.name?.trim() || actor?.email || null;
+        const text = note || 'booked over the cap';
         capOverride = {
           booked: load.stops + 1,
           cap: config.stopCap,
           dimensions: over,
-          note: by ? `${note} — ${by}` : note,
+          note: by ? `${text} — ${by}` : text,
         };
       }
     }

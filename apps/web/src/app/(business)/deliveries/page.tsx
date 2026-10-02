@@ -239,7 +239,11 @@ function DeliveriesBoard() {
   const overDays = days.filter((d) => bookedOn(d) > cap);
 
   const move = useCallback(
-    async (id: string, date: string, opts?: { note?: string; silent?: boolean }) => {
+    async (
+      id: string,
+      date: string,
+      opts?: { overCap?: boolean; note?: string; silent?: boolean },
+    ) => {
       const row = rows?.find((r) => r.id === id);
       if (!row || row.scheduledDate === date) return;
       if (!MOVABLE.has(row.status)) {
@@ -251,8 +255,12 @@ function DeliveriesBoard() {
         await api(`/v1/deliveries/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(
-            opts?.note
-              ? { scheduledDate: date, confirmOverCapacity: true, overCapacityNote: opts.note }
+            opts?.overCap
+              ? {
+                  scheduledDate: date,
+                  confirmOverCapacity: true,
+                  ...(opts.note ? { overCapacityNote: opts.note } : {}),
+                }
               : { scheduledDate: date },
           ),
         });
@@ -657,7 +665,7 @@ function DeliveriesBoard() {
         <Dialog
           size="sm"
           title={`${fmtShort(capAsk.date)} is over the cap`}
-          description={`${fmtShort(capAsk.date)} already has ${bookedOn(capAsk.date)} stops against a cap of ${cap}; this move makes it ${bookedOn(capAsk.date) + 1}. Say why in one line — it prints on the day sheet.`}
+          description={`${fmtShort(capAsk.date)} already has ${bookedOn(capAsk.date)} stops against a cap of ${cap}; this move makes it ${bookedOn(capAsk.date) + 1}. Book it over the cap only with approval — your name prints on the day sheet, with the note if you add one.`}
           onClose={() => {
             setCapAsk(null);
             setCapNote('');
@@ -675,8 +683,13 @@ function DeliveriesBoard() {
               </Button>
               <Button
                 variant="primary"
-                disabled={busy || !capNote.trim()}
-                onClick={() => void move(capAsk.id, capAsk.date, { note: capNote.trim() })}
+                disabled={busy}
+                onClick={() =>
+                  void move(capAsk.id, capAsk.date, {
+                    overCap: true,
+                    note: capNote.trim() || undefined,
+                  })
+                }
                 data-testid="db-cap-confirm"
               >
                 Move anyway
@@ -684,11 +697,11 @@ function DeliveriesBoard() {
             </>
           }
         >
-          <Field label="Why the day goes over" required>
+          <Field label="Note (optional)">
             <Input
               value={capNote}
               onChange={(e) => setCapNote(e.target.value)}
-              placeholder="e.g. second truck requested for the afternoon"
+              placeholder="e.g. approved by Victor — second truck"
               maxLength={140}
               autoFocus
               data-testid="db-cap-note"

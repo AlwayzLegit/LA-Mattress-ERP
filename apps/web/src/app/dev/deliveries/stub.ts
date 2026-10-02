@@ -286,17 +286,9 @@ export function installDeliveriesStub() {
             );
           }
           if (target >= CAP) {
-            if (!b.overCapacityNote?.trim())
-              return json(
-                {
-                  message:
-                    'A one-line note is required to move a stop over the cap — it prints on the day sheet',
-                },
-                400,
-              );
             r.notes = [
               r.notes,
-              `Over cap ${b.scheduledDate}: ${b.overCapacityNote.trim()} — R. Mendoza`,
+              `Over cap ${b.scheduledDate}: ${b.overCapacityNote?.trim() || 'booked over the cap'} — R. Mendoza`,
             ]
               .filter(Boolean)
               .join('\n');
