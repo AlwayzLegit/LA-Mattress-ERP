@@ -2367,7 +2367,7 @@ export class ReportsController {
       ...saleRows.map((r) => ({
         documentType: 'sale' as const,
         documentNumber: r.documentNumber,
-        documentDate: r.documentDate ? r.documentDate.toISOString().slice(0, 10) : '',
+        documentDate: r.documentDate ? ymdInTimeZone(r.documentDate, tz) : '',
         customerName: r.customerName,
         productName: r.productName,
         sku: r.sku,
@@ -2378,7 +2378,7 @@ export class ReportsController {
       ...orderRows.map((r) => ({
         documentType: 'order' as const,
         documentNumber: r.documentNumber,
-        documentDate: r.documentDate ? r.documentDate.toISOString().slice(0, 10) : '',
+        documentDate: r.documentDate ? ymdInTimeZone(r.documentDate, tz) : '',
         customerName: r.customerName,
         productName: r.productName,
         sku: r.sku,
