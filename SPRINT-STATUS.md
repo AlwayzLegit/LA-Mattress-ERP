@@ -6644,3 +6644,49 @@ sale, so it appears on Sales, not Orders.)
     zone, `tzLiteral` injection guard);
   - reports.int +2 (a 22:30 EST sale lands on its own Z and Sales-list day, not the next);
   - the orders.int date-window test now uses the store date (it assumed UTC today).
+
+### Checkpoint — 2026-10-02 (Sidebar search: one box for everything)
+
+Owner: "an ultimate search in the ERP on the sidebar above the dashboard under the logo." The
+owner's answers:
+
+- find everything (customers, orders, sales, products and SKUs, POs and vendors, deliveries,
+  returns, service);
+- the box opens the big search window;
+- everyone may use it, and results follow their access;
+- "easier to find with the least amount of information";
+- recently opened records before anything is typed;
+- products show price plus stock at every location that has stock, with the warehouse first and
+  never a 0.
+
+- `GET /v1/search`, widened. It still requires a member, but the endpoint no longer needs
+  `orders.view`; each group needs its own view permission. Every typed word must match the
+  record somewhere; mostly-digit words also match any phone digit-to-digit, with phones kept
+  apart so two numbers never run together. Matching covers:
+  - customers: name, business, email, customer number, phones, saved addresses (values only,
+    never the JSON keys);
+  - orders: number, legacy number, ship-to street / city / zip / phone, plus the customer;
+  - receipts;
+  - products by name, SKU, variant, barcode, vendor SKU or brand, an exact SKU ranked first,
+    with price and available stock per active location (warehouse first, rows above 0 only);
+  - POs by number or vendor; vendors;
+  - returns by RMA, claimed number or order;
+  - service tickets;
+  - delivery stops.
+    Orders, receipts, returns and deliveries keep the store data scope.
+- `GET /v1/search/recent?refs=kind:id,…` resolves the member's recently opened records, in
+  order, and drops anything gone or outside their access.
+- Web:
+  - the sidebar box under the brand (`data-testid="sidebar-search"`);
+  - the app shell remembers each record page opened (`lib/recent-records.ts`, per user in the
+    browser, last 8);
+  - the palette opens on Recent and groups results as Orders / Customers / Products /
+    Purchasing / Returns & service / Deliveries / Go to;
+  - product rows carry the stock line on its own line.
+- design README §2 amended.
+- Tests:
+  - orders.int +4 (products with warehouse-first stock and no zeros, exact SKU first; address
+    scraps without JSON keys; POs and vendors gated by role; recent refs resolved and gated);
+  - web `recent-records.test.ts`.
+    Checked in Chromium: the sidebar box opens the window on Recent; "linen so" shows "Commerce
+    Warehouse 7 · Main Store 10".

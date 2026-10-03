@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatMoney, formatPhone } from '@jetnine/shared';
 import { api } from '@/lib/api';
+import { readRecent } from '@/lib/recent-records';
 import { Kbd, useFocusTrap } from '@/components/ui';
 import { GO_KEYS, HOME, MORE_PAGES, NAV } from './nav';
 
@@ -25,17 +26,87 @@ interface SearchResults {
     customerName: string | null;
   }[];
   sales: { id: string; number: string; totalCents: number; customerName: string | null }[];
+  products?: {
+    productId: string;
+    variantId: string;
+    name: string;
+    variantName: string | null;
+    sku: string | null;
+    priceCents: number;
+    stock: { locationId: string; locationName: string; warehouse: boolean; available: number }[];
+  }[];
+  purchaseOrders?: {
+    id: string;
+    number: string;
+    status: string;
+    vendorName: string | null;
+    totalCents: number;
+  }[];
+  vendors?: { id: string; name: string; phone: string | null; email: string | null }[];
+  returns?: {
+    id: string;
+    rmaNumber: string;
+    status: string;
+    orderId: string | null;
+    customerName: string | null;
+    amountCents: number;
+  }[];
+  serviceOrders?: {
+    id: string;
+    number: string;
+    status: string;
+    itemDescription: string | null;
+    customerName: string | null;
+  }[];
+  deliveries?: {
+    id: string;
+    scheduledDate: string;
+    status: string;
+    kind: string;
+    orderNumber: string;
+    customerName: string | null;
+    city: string | null;
+  }[];
 }
+
+interface RecentRecord {
+  kind: string;
+  id: string;
+  code: string;
+  title: string;
+  sub: string;
+  href: string;
+}
+
+const GROUPS = [
+  'Recent',
+  'Orders',
+  'Customers',
+  'Products',
+  'Purchasing',
+  'Returns & service',
+  'Deliveries',
+  'Go to',
+] as const;
+type Group = (typeof GROUPS)[number];
 
 interface Hit {
   key: string;
-  group: 'Orders' | 'Customers' | 'Go to';
-  /** Mono identifier in the first column: order number, phone, chord. */
+  group: Group;
+  /** Mono identifier in the first column: order number, phone, SKU, chord. */
   id: string;
   title: string;
   sub: string;
   meta: string;
   href: string;
+}
+
+/** "Main Warehouse 5 · Valley 2" — warehouse first, stores with stock only (owner). */
+export function stockLine(
+  stock: { locationName: string; available: number }[] | undefined,
+): string {
+  if (!stock || stock.length === 0) return 'no stock';
+  return stock.map((s) => `${s.locationName} ${s.available}`).join(' · ');
 }
 
 export const PAGES: { label: string; href: string }[] = [
@@ -50,14 +121,30 @@ function humanStatus(s: string): string {
   return s.replace(/_/g, ' ');
 }
 
-export function CommandPalette({ onClose }: { onClose: () => void }) {
+export function CommandPalette({
+  onClose,
+  userId,
+}: {
+  onClose: () => void;
+  /** Whose recently opened records to show before anything is typed. */
+  userId?: string;
+}) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SearchResults | null>(null);
+  const [recent, setRecent] = useState<RecentRecord[]>([]);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useFocusTrap(panel, { onClose, initialFocus: inputRef });
+
+  useEffect(() => {
+    const refs = readRecent(userId);
+    if (refs.length === 0) return;
+    void api<RecentRecord[]>(`/v1/search/recent?refs=${encodeURIComponent(refs.join(','))}`)
+      .then(setRecent)
+      .catch(() => setRecent([]));
+  }, [userId]);
 
   useEffect(() => {
     const query = q.trim();
@@ -76,6 +163,19 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const hits = useMemo<Hit[]>(() => {
     const cq = q.trim().toLowerCase();
     const out: Hit[] = [];
+    if (!cq) {
+      for (const r of recent) {
+        out.push({
+          key: `r-${r.kind}-${r.id}`,
+          group: 'Recent',
+          id: r.kind === 'customer' && r.code ? formatPhone(r.code) : r.code,
+          title: r.title,
+          sub: r.sub,
+          meta: r.kind === 'po' ? 'PO' : r.kind,
+          href: r.href,
+        });
+      }
+    }
     if (results) {
       for (const o of results.orders.slice(0, 5)) {
         out.push({
@@ -112,11 +212,81 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           href: `/customers/${c.id}`,
         });
       }
+      for (const p of results.products ?? []) {
+        out.push({
+          key: `pr-${p.variantId}`,
+          group: 'Products',
+          id: p.sku ?? '—',
+          title: [p.name, p.variantName].filter(Boolean).join(' — '),
+          sub: stockLine(p.stock),
+          meta: formatMoney(p.priceCents),
+          href: `/products/${p.productId}`,
+        });
+      }
+      for (const po of (results.purchaseOrders ?? []).slice(0, 3)) {
+        out.push({
+          key: `po-${po.id}`,
+          group: 'Purchasing',
+          id: po.number,
+          title: po.vendorName ?? 'purchase order',
+          sub: humanStatus(po.status),
+          meta: formatMoney(po.totalCents),
+          href: `/purchase-orders/${po.id}`,
+        });
+      }
+      for (const v of (results.vendors ?? []).slice(0, 3)) {
+        out.push({
+          key: `v-${v.id}`,
+          group: 'Purchasing',
+          id: v.phone ? formatPhone(v.phone) : '—',
+          title: v.name,
+          sub: v.email ?? 'vendor',
+          meta: 'vendor',
+          href: `/vendors/${v.id}`,
+        });
+      }
+      for (const r of (results.returns ?? []).slice(0, 3)) {
+        out.push({
+          key: `rt-${r.id}`,
+          group: 'Returns & service',
+          id: r.rmaNumber,
+          title: r.customerName ?? '—',
+          sub: `return · ${humanStatus(r.status)}`,
+          meta: formatMoney(r.amountCents),
+          href: r.orderId ? `/orders/${r.orderId}/full#returns` : '/returns',
+        });
+      }
+      for (const t of (results.serviceOrders ?? []).slice(0, 3)) {
+        out.push({
+          key: `sv-${t.id}`,
+          group: 'Returns & service',
+          id: t.number,
+          title: t.customerName ?? '—',
+          sub: ['service', humanStatus(t.status), t.itemDescription].filter(Boolean).join(' · '),
+          meta: 'open',
+          href: `/service/${t.id}`,
+        });
+      }
+      for (const d of (results.deliveries ?? []).slice(0, 3)) {
+        out.push({
+          key: `d-${d.id}`,
+          group: 'Deliveries',
+          id: d.orderNumber,
+          title: d.customerName ?? '—',
+          sub: [d.kind === 'return_pickup' ? 'pickup' : 'delivery', humanStatus(d.status), d.city]
+            .filter(Boolean)
+            .join(' · '),
+          meta: d.scheduledDate,
+          href: `/deliveries/${d.id}`,
+        });
+      }
     }
-    const pages = PAGES.filter((p) => !cq || p.label.toLowerCase().includes(cq)).slice(
-      0,
-      cq ? 4 : 8,
-    );
+    // Before anything is typed the window opens on recent records; the
+    // page list fills in only when there are none yet.
+    const pages =
+      cq || recent.length === 0
+        ? PAGES.filter((p) => !cq || p.label.toLowerCase().includes(cq)).slice(0, cq ? 4 : 8)
+        : [];
     for (const p of pages) {
       out.push({
         key: `p-${p.href}`,
@@ -128,7 +298,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         href: p.href,
       });
     }
-    if (!cq || 'new sale'.includes(cq)) {
+    if (cq ? 'new sale'.includes(cq) : recent.length === 0) {
       out.push({
         key: 'a-pos',
         group: 'Go to',
@@ -140,7 +310,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       });
     }
     return out;
-  }, [q, results]);
+  }, [q, results, recent]);
 
   useEffect(() => {
     setActive(0);
@@ -151,9 +321,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     router.push(h.href);
   };
 
-  const groups = (['Orders', 'Customers', 'Go to'] as const)
-    .map((g) => ({ label: g, items: hits.filter((h) => h.group === g) }))
-    .filter((g) => g.items.length > 0);
+  const groups = GROUPS.map((g) => ({ label: g, items: hits.filter((h) => h.group === g) })).filter(
+    (g) => g.items.length > 0,
+  );
   const nothing = q.trim().length >= 2 && results && hits.every((h) => h.group === 'Go to');
 
   return (
@@ -187,8 +357,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                 if (h) go(h);
               }
             }}
-            placeholder="Search orders, customers, phone numbers, SKUs, or a page name…"
-            aria-label="Search orders, customers and pages"
+            placeholder="Name, phone, address, invoice, SKU, PO, RMA… or a page name"
+            aria-label="Search everything"
             aria-activedescendant={hits[active] ? `palette-${hits[active].key}` : undefined}
             aria-controls="palette-results"
             role="combobox"
@@ -215,10 +385,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     onClick={() => go(h)}
                   >
                     <span className="palette-id">{h.id}</span>
-                    <span className="palette-main">
-                      <span className="palette-title">{h.title}</span>
-                      {h.sub && <span className="palette-sub"> · {h.sub}</span>}
-                    </span>
+                    {h.group === 'Products' ? (
+                      // Stock by store gets its own line so no store is cut off.
+                      <span className="palette-main palette-main-wrap">
+                        <span className="palette-title">{h.title}</span>
+                        <span className="palette-stock" data-testid="palette-stock">
+                          {h.sub}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="palette-main">
+                        <span className="palette-title">{h.title}</span>
+                        {h.sub && <span className="palette-sub"> · {h.sub}</span>}
+                      </span>
+                    )}
                     <span className="palette-meta">{h.meta}</span>
                   </div>
                 );
@@ -227,7 +407,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ))}
           {nothing && (
             <div className="palette-empty">
-              No orders or customers match “{q.trim()}”. Try a phone number or an order number.
+              Nothing matches “{q.trim()}”. Try fewer letters — part of a name, the last 4 of a
+              phone, a zip, or part of an invoice number.
             </div>
           )}
         </div>
@@ -247,7 +428,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               </span>
             ))}
           </span>
-          <span className="palette-foot-note">phone digits match customers</span>
+          <span className="palette-foot-note">every word must match · phone digits work</span>
         </div>
       </div>
     </div>
