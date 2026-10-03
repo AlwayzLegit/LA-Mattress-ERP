@@ -8,6 +8,7 @@ import { ActiveBusinessBadge } from '@/components/active-business-badge';
 import { DynamicFavicon } from '@/components/dynamic-favicon';
 import { Kbd } from '@/components/ui';
 import { api } from '@/lib/api';
+import { refFromPath, rememberRecent } from '@/lib/recent-records';
 import { useActingStore } from '@/lib/acting-store';
 import { useSession } from '@/lib/auth-client';
 import { ActingStoreChip } from '@/components/shell/acting-store-chip';
@@ -83,6 +84,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.clearInterval(id);
     };
   }, [pathname]);
+
+  // Recently opened records for the search window (owner 2026-10-02).
+  const userId = session.data?.user.id;
+  useEffect(() => {
+    const ref = refFromPath(pathname);
+    if (ref) rememberRecent(userId, ref);
+  }, [pathname, userId]);
 
   const closeAll = useCallback(() => {
     setCmd(false);
@@ -165,6 +173,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           counts={countFor}
           onNavigate={() => setOpen(false)}
           onShortcuts={() => setHelp(true)}
+          onSearch={() => {
+            setOpen(false);
+            setCmd(true);
+          }}
         />
       </aside>
 
@@ -234,7 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
 
-      {cmd && <CommandPalette onClose={() => setCmd(false)} />}
+      {cmd && <CommandPalette userId={userId} onClose={() => setCmd(false)} />}
       {drawer && (
         <PersonalInbox
           inbox={inbox}

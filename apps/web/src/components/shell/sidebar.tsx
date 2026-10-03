@@ -21,17 +21,35 @@ export function Sidebar({
   counts,
   onNavigate,
   onShortcuts,
+  onSearch,
 }: {
   groups: NavGroup[];
   counts: (href: string) => number | null;
   onNavigate?: () => void;
   onShortcuts: () => void;
+  /** Opens the search window (owner 2026-10-02: a search box under the logo). */
+  onSearch?: () => void;
 }) {
   const pathname = usePathname() ?? '';
 
   return (
     <>
       <BrandHeader />
+      {onSearch && (
+        <button
+          type="button"
+          onClick={onSearch}
+          data-testid="sidebar-search"
+          className="sidebar-search"
+          aria-label="Search everything"
+        >
+          <span aria-hidden className="sidebar-search-glyph">
+            ⌕
+          </span>
+          <span className="sidebar-search-text">Search…</span>
+          <Kbd keys="mod+k" />
+        </button>
+      )}
       <nav className="nav" aria-label="Main">
         <Link
           href={HOME.href}

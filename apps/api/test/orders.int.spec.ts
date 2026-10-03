@@ -4200,6 +4200,148 @@ describe('Global omnibox search (handoff G1)', () => {
     expect(res.body.orders).toEqual([]);
     expect(res.body.sales).toEqual([]);
   });
+
+  describe('sidebar search widened (owner 2026-10-02)', () => {
+    let twVariantId = '';
+    let addrCustomerId = '';
+    beforeAll(async () => {
+      const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+      const db = drizzle(sql);
+      try {
+        const [wh] = await db
+          .insert(schema.locations)
+          .values({
+            businessId,
+            name: 'Main Warehouse',
+            timezone: 'America/New_York',
+            locationType: 'warehouse',
+          })
+          .returning();
+        const [valley] = await db
+          .insert(schema.locations)
+          .values({ businessId, name: 'Valley', timezone: 'America/New_York' })
+          .returning();
+        const [p] = await db
+          .insert(schema.products)
+          .values({ businessId, sku: 'TWF-Q', name: 'Twilight Firm Queen' })
+          .returning();
+        const [v] = await db
+          .insert(schema.productVariants)
+          .values({ businessId, productId: p!.id, sku: 'TWF-Q-1', priceCents: 104_900 })
+          .returning();
+        twVariantId = v!.id;
+        await db.insert(schema.inventoryLevels).values([
+          { businessId, variantId: twVariantId, locationId: valley!.id, onHand: 2 },
+          { businessId, variantId: twVariantId, locationId: wh!.id, onHand: 6, reserved: 1 },
+          // Nothing sellable at the showroom: on hand 1, but it's the floor sample.
+          { businessId, variantId: twVariantId, locationId, onHand: 1, floorSample: 1 },
+        ]);
+        const [vendor] = await db
+          .insert(schema.vendors)
+          .values({ businessId, name: 'Brooklyn Bedding Search' })
+          .returning();
+        await db.insert(schema.purchaseOrders).values({
+          businessId,
+          vendorId: vendor!.id,
+          locationId: wh!.id,
+          number: 'PO-SRCH-77',
+          status: 'draft',
+        });
+        const [c] = await db
+          .insert(schema.customers)
+          .values({
+            businessId,
+            firstName: 'Addie',
+            lastName: 'Street',
+            addressesJson: [{ line1: '1234 Maple Ave', city: 'Burbank', postalCode: '91502' }],
+          })
+          .returning();
+        addrCustomerId = c!.id;
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+    });
+
+    const find = (cookie: string, q: string) =>
+      request(app.getHttpServer())
+        .get(`/v1/search?q=${encodeURIComponent(q)}`)
+        .set('Cookie', cookie)
+        .set('X-Business-Id', businessId)
+        .expect(200);
+
+    it('products: partial words, price, stock with the warehouse first and no zeros', async () => {
+      const res = await find(cashierCookie, 'twil que');
+      const hit = res.body.products.find((p: { variantId: string }) => p.variantId === twVariantId);
+      expect(hit).toMatchObject({
+        name: 'Twilight Firm Queen',
+        sku: 'TWF-Q-1',
+        priceCents: 104_900,
+      });
+      expect(hit.stock).toEqual([
+        expect.objectContaining({ locationName: 'Main Warehouse', warehouse: true, available: 5 }),
+        expect.objectContaining({ locationName: 'Valley', warehouse: false, available: 2 }),
+      ]);
+      // An exact SKU ranks first.
+      const bySku = await find(cashierCookie, 'twf-q-1');
+      expect(bySku.body.products[0].variantId).toBe(twVariantId);
+    });
+
+    it('customers by a scrap of their address — values only, never the JSON keys', async () => {
+      const res = await find(cashierCookie, '1234 map');
+      expect(res.body.customers.map((c: { id: string }) => c.id)).toContain(addrCustomerId);
+      const byZip = await find(cashierCookie, 'addie 91502');
+      expect(byZip.body.customers.map((c: { id: string }) => c.id)).toContain(addrCustomerId);
+      const byKey = await find(cashierCookie, 'line1');
+      expect(byKey.body.customers.map((c: { id: string }) => c.id)).not.toContain(addrCustomerId);
+    });
+
+    it('purchase orders and vendors, only for roles that may see them', async () => {
+      const owner = await find(ownerCookie, 'brooklyn search');
+      expect(owner.body.vendors.map((v: { name: string }) => v.name)).toContain(
+        'Brooklyn Bedding Search',
+      );
+      expect(owner.body.purchaseOrders.map((p: { number: string }) => p.number)).toContain(
+        'PO-SRCH-77',
+      );
+      const byNumber = await find(ownerCookie, 'srch-77');
+      expect(byNumber.body.purchaseOrders[0].vendorName).toBe('Brooklyn Bedding Search');
+      const cashier = await find(cashierCookie, 'brooklyn search');
+      expect(cashier.body.purchaseOrders).toEqual([]);
+      expect(cashier.body.vendors).toEqual([]);
+    });
+
+    it("recently opened records resolve to names, in order, within the member's access", async () => {
+      const po = await find(ownerCookie, 'srch-77');
+      const poId = po.body.purchaseOrders[0].id as string;
+      const product = await find(ownerCookie, 'twf-q-1');
+      const productId = product.body.products[0].productId as string;
+      const refs = [
+        `customer:${addrCustomerId}`,
+        `po:${poId}`,
+        `product:${productId}`,
+        'order:00000000-0000-0000-0000-000000000000',
+        'bogus:x',
+      ].join(',');
+      const owner = await request(app.getHttpServer())
+        .get(`/v1/search/recent?refs=${encodeURIComponent(refs)}`)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .expect(200);
+      expect(owner.body.map((r: { kind: string; title: string }) => [r.kind, r.title])).toEqual([
+        ['customer', 'Addie Street'],
+        ['po', 'Brooklyn Bedding Search'],
+        ['product', 'Twilight Firm Queen'],
+      ]);
+      expect(owner.body[1].href).toBe(`/purchase-orders/${poId}`);
+      // A cashier can't see purchase orders: that ref simply drops out.
+      const cashier = await request(app.getHttpServer())
+        .get(`/v1/search/recent?refs=${encodeURIComponent(refs)}`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId)
+        .expect(200);
+      expect(cashier.body.map((r: { kind: string }) => r.kind)).toEqual(['customer', 'product']);
+    });
+  });
 });
 
 describe('Add item to an existing order at a set price (owner ask 2026-08-30)', () => {
