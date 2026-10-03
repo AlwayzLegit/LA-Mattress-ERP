@@ -13,6 +13,8 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { CurrentTenant } from '../auth/current-user.decorator';
+import { businessTimeZone, locationTimeZone, ymdInTimeZone } from '../common/business-today';
+import { tzLiteral, zonedBounds } from '../common/date-range';
 import { salesScopeCond, sellingScopeCond } from '../common/sales-scope';
 import { brandMatchFor } from '../common/vendor-match';
 import { CostingService } from '../costing/costing.service';
@@ -321,7 +323,7 @@ export class ReportsController {
   /**
    * Daily sales totals across the requested window. Returns three slices
    * of the same data: per-day, per-associate, and per-payment-method.
-   * The window defaults to the last 7 days inclusive of today (UTC).
+   * The window defaults to the last 7 store-local days inclusive of today.
    */
   @Get('sales/daily')
   @RequirePermission('reports.sales.view')
@@ -332,10 +334,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<DailyReport | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     // We only count completed sales (and partial refunds keep their sale
     // row in 'partially_refunded' but the originating revenue still
@@ -346,7 +351,7 @@ export class ReportsController {
       lt(schema.sales.completedAt, endTsExclusive),
     );
 
-    const dayExpr = sql<string>`to_char(${schema.sales.completedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+    const dayExpr = sql<string>`to_char(${schema.sales.completedAt} AT TIME ZONE ${tzLiteral(tz)}, 'YYYY-MM-DD')`;
     const byDay = await this.db
       .select({
         day: dayExpr,
@@ -428,7 +433,7 @@ export class ReportsController {
       .map(([method, v]) => ({ method, ...v }))
       .sort((a, b) => b.amountCents - a.amountCents);
 
-    const orderPayDayExpr = sql<string>`to_char(${schema.payments.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+    const orderPayDayExpr = sql<string>`to_char(${schema.payments.createdAt} AT TIME ZONE ${tzLiteral(tz)}, 'YYYY-MM-DD')`;
     const orderPaymentsByDay = await this.db
       .select({
         day: orderPayDayExpr,
@@ -482,10 +487,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<ProductRow[] | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     const canSeeFinancial = hasPermission(tenant, 'reports.financial.view');
 
@@ -622,7 +630,7 @@ export class ReportsController {
 
   /**
    * Z-report — the daily close-out sheet, built to sit next to the STORIS
-   * Z-report on parallel-run day. One UTC day (default: today), optional
+   * Z-report on parallel-run day. One store-local day (default: today), optional
    * location filter. Imported legacy documents are excluded (D8): this is
    * a drawer-day view, not a history view.
    */
@@ -633,10 +641,13 @@ export class ReportsController {
     @Query('date') dateStr?: string,
     @Query('locationId') locationId?: string,
   ): Promise<ZReport> {
-    const date = matchesDate(dateStr) ? dateStr! : new Date().toISOString().slice(0, 10);
-    const dayStart = new Date(`${date}T00:00:00.000Z`);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+    // The store's own day (owner 2026-10-02): cut at UTC midnight, a Los
+    // Angeles Z lost every sale after 5 PM to tomorrow's sheet.
+    const tz = locationId
+      ? await locationTimeZone(this.db, tenant.businessId!, locationId)
+      : await businessTimeZone(this.db, tenant.businessId!);
+    const date = matchesDate(dateStr) ? dateStr! : ymdInTimeZone(new Date(), tz);
+    const { from: dayStart, toExclusive: dayEnd } = zonedBounds({ start: date, end: date }, tz);
 
     const saleDay = and(
       gte(schema.sales.completedAt, dayStart),
@@ -794,10 +805,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<CategoryRow[] | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     const grouped = await this.db
       .select({
@@ -965,10 +979,13 @@ export class ReportsController {
     start: string;
     end: string;
   } | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     const rows = await this.db
       .select({
@@ -1208,10 +1225,13 @@ export class ReportsController {
     const basis: 'written' | 'delivered' = basisStr === 'delivered' ? 'delivered' : 'written';
     const groupBy: 'day' | 'location' | 'salesperson' =
       groupByStr === 'location' || groupByStr === 'salesperson' ? groupByStr : 'day';
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     const saleDate = basis === 'written' ? schema.sales.createdAt : schema.sales.completedAt;
     const orderDate = basis === 'written' ? schema.orders.createdAt : schema.orders.completedAt;
@@ -1235,13 +1255,13 @@ export class ReportsController {
 
     const saleKey =
       groupBy === 'day'
-        ? sql<string>`to_char(${saleDate} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`
+        ? sql<string>`to_char(${saleDate} AT TIME ZONE ${tzLiteral(tz)}, 'YYYY-MM-DD')`
         : groupBy === 'location'
           ? sql<string>`${schema.sales.locationId}::text`
           : sql<string>`COALESCE(${schema.sales.associateUserId}::text, '')`;
     const orderKey =
       groupBy === 'day'
-        ? sql<string>`to_char(${orderDate} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`
+        ? sql<string>`to_char(${orderDate} AT TIME ZONE ${tzLiteral(tz)}, 'YYYY-MM-DD')`
         : groupBy === 'location'
           ? sql<string>`${schema.orders.locationId}::text`
           : sql<string>`COALESCE(${schema.memberships.userId}::text, '')`;
@@ -1827,10 +1847,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<ReceiptsReport | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
 
     const locExpr = sql<
       string | null
@@ -2166,10 +2189,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<AdjustmentsReport | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
     const CAP = 1000;
 
     const raw = await this.db
@@ -2272,10 +2298,13 @@ export class ReportsController {
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ): Promise<{ rows: CustomerPurchaseRow[]; truncated: boolean } | void> {
-    const { startDate, endDate } = parseRange(startStr, endStr);
-    const startTs = new Date(`${startDate}T00:00:00.000Z`);
-    const endTsExclusive = new Date(`${endDate}T00:00:00.000Z`);
-    endTsExclusive.setUTCDate(endTsExclusive.getUTCDate() + 1);
+    // Store-local days (owner 2026-10-02) — a UTC cut drops the evening.
+    const tz = await businessTimeZone(this.db, tenant.businessId!);
+    const { startDate, endDate } = parseRange(startStr, endStr, tz);
+    const { from: startTs, toExclusive: endTsExclusive } = zonedBounds(
+      { start: startDate, end: endDate },
+      tz,
+    );
     const CAP = 5000;
 
     const nameExpr = sql<
@@ -2399,10 +2428,14 @@ function requireExport(tenant: RequestTenantContext): void {
   }
 }
 
-function parseRange(start?: string, end?: string): { startDate: string; endDate: string } {
-  const today = new Date();
-  const isoToday = today.toISOString().slice(0, 10);
-  const defaultStart = new Date(today);
+function parseRange(
+  start: string | undefined,
+  end: string | undefined,
+  timeZone: string,
+): { startDate: string; endDate: string } {
+  // Default window: the last 7 store-local days, today inclusive.
+  const isoToday = ymdInTimeZone(new Date(), timeZone);
+  const defaultStart = new Date(`${isoToday}T00:00:00.000Z`);
   defaultStart.setUTCDate(defaultStart.getUTCDate() - 6);
   const isoStart = defaultStart.toISOString().slice(0, 10);
   return {

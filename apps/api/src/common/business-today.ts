@@ -27,11 +27,37 @@ export async function businessToday(
   businessId: string,
   at: Date = new Date(),
 ): Promise<string> {
+  return ymdInTimeZone(at, await businessTimeZone(db, businessId));
+}
+
+/**
+ * The business's day clock: the timezone of its first active store
+ * (warehouses last). Every report and list day window is cut on it —
+ * a business with no location reads UTC.
+ */
+export async function businessTimeZone(
+  db: PostgresJsDatabase,
+  businessId: string,
+): Promise<string> {
   const [loc] = await db
     .select({ timezone: schema.locations.timezone })
     .from(schema.locations)
     .where(and(eq(schema.locations.businessId, businessId), eq(schema.locations.isActive, true)))
     .orderBy(asc(schema.locations.locationType), asc(schema.locations.createdAt))
     .limit(1);
-  return ymdInTimeZone(at, loc?.timezone ?? 'UTC');
+  return loc?.timezone ?? 'UTC';
+}
+
+/** One store's timezone, falling back to the business clock. */
+export async function locationTimeZone(
+  db: PostgresJsDatabase,
+  businessId: string,
+  locationId: string,
+): Promise<string> {
+  const [loc] = await db
+    .select({ timezone: schema.locations.timezone })
+    .from(schema.locations)
+    .where(and(eq(schema.locations.id, locationId), eq(schema.locations.businessId, businessId)))
+    .limit(1);
+  return loc?.timezone ?? businessTimeZone(db, businessId);
 }

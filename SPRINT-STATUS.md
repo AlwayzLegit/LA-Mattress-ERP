@@ -6615,3 +6615,32 @@ return.
 - **Ops (owner):** on Returns, click **Void** on RMA-NOORIG-1. Then redo the return through
   **Return from an invoice** → WE-10021, which carries the restocking fee, pickup fee and driver
   pickup date.
+
+### Checkpoint — 2026-10-02 (Store-local days: the Z-report missed evening cash sales)
+
+Owner: two take-with cash sales ($109.15 each) "not showing up any place" on the Z printed at
+6:10 PM. The Render logs show both `POST /v1/sales` calls succeeded at 6:01 and 6:08 PM PDT,
+which is 01:01 and 01:08 UTC on Oct 3. The Z cut its day at UTC midnight (5 PM Pacific), and so
+did every range report, the Orders / Sales list windows, the exceptions digest and the
+salespeople card. The sales landed on tomorrow's sheet. (A fully paid take-with is a register
+sale, so it appears on Sales, not Orders.)
+
+- `common/date-range.ts`:
+  - `zonedMidnight()` / `zonedBounds()` give the store-local day as instants, DST-safe.
+  - `tzLiteral()` inlines a validated zone for day buckets used in both SELECT and GROUP BY.
+  - `utcBounds()` is removed.
+- `common/business-today.ts`: `businessTimeZone()` (the first active store's zone) and
+  `locationTimeZone()`.
+- Z-report: the selected store's zone (business zone when unfiltered); "today" defaults to the
+  store date.
+- Range reports (`daily`, `by-product`, `by-category`, `tax`, `summary`, `receipts`,
+  `inventory-adjustments`, `customer-purchases`) cut and bucket on the business zone; the
+  default window is the last 7 store-local days.
+- Orders list + list view, Sales list, exceptions digest and ops salespeople windows use
+  `zonedBounds()`.
+- PLAN-POS-OPERATIONS §12 amended (it said lists use UTC days).
+- Tests:
+  - `date-range.spec` (Los Angeles summer/winter, a 6 PM sale, DST 23/25-hour days, unknown
+    zone, `tzLiteral` injection guard);
+  - reports.int +2 (a 22:30 EST sale lands on its own Z and Sales-list day, not the next);
+  - the orders.int date-window test now uses the store date (it assumed UTC today).
