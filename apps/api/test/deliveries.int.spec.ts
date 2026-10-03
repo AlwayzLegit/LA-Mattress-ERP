@@ -332,12 +332,16 @@ describe('Day 3 — deliveries: schedule, deliver, collect, complete', () => {
   });
 
   it('the daily report counts the order money in the tender mix', async () => {
-    const res = await ownerReq().get(`/v1/reports/sales/daily?start=${today}&end=${today}`);
+    // Report days are store-local (Warehouse, Los Angeles), not UTC.
+    const storeDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(
+      new Date(),
+    );
+    const res = await ownerReq().get(`/v1/reports/sales/daily?start=${storeDay}&end=${storeDay}`);
     expect(res.status).toBe(200);
     const cash = res.body.byPaymentMethod.find((m: { method: string }) => m.method === 'cash');
     // $500 deposit + $1,500 balance, no POS sales in this suite.
     expect(cash?.amountCents).toBe(200_000);
-    const day = res.body.orderPaymentsByDay.find((d: { day: string }) => d.day === today);
+    const day = res.body.orderPaymentsByDay.find((d: { day: string }) => d.day === storeDay);
     expect(day?.amountCents).toBe(200_000);
   });
 
