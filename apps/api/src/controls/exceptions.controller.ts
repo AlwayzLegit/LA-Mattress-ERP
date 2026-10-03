@@ -26,7 +26,8 @@ import {
 import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
-import { parseDayRange, utcBounds } from '../common/date-range';
+import { businessTimeZone } from '../common/business-today';
+import { parseDayRange, zonedBounds } from '../common/date-range';
 
 interface ExceptionRow {
   id: string;
@@ -183,10 +184,11 @@ export class ExceptionsController {
     // `start`/`end` (picker window) win over the legacy trailing `days`.
     const window = parseDayRange(startQ, endQ);
     const days = Math.min(90, Math.max(1, Number(daysStr) || 7));
-    const since = window
-      ? utcBounds(window).from
-      : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const until = window ? utcBounds(window).toExclusive : null;
+    const bounds = window
+      ? zonedBounds(window, await businessTimeZone(this.db, tenant.businessId!))
+      : null;
+    const since = bounds ? bounds.from : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const until = bounds ? bounds.toExclusive : null;
     const rows = await this.db
       .select({
         actorUserId: schema.exceptionEvents.actorUserId,

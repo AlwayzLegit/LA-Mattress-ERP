@@ -62,7 +62,8 @@ import {
   type OrderStatus,
 } from './order-math';
 import { OrdersService } from './orders.service';
-import { parseDayRange, utcBounds } from '../common/date-range';
+import { businessTimeZone } from '../common/business-today';
+import { parseDayRange, zonedBounds } from '../common/date-range';
 import { resolveTakenAt } from '../common/payment-taken-at';
 
 /**
@@ -714,7 +715,7 @@ export class OrdersController {
     if (scope) filters.push(scope);
     const window = parseDayRange(startQ, endQ);
     if (window) {
-      const b = utcBounds(window);
+      const b = zonedBounds(window, await businessTimeZone(this.db, tenant.businessId!));
       filters.push(
         gte(schema.orders.createdAt, b.from),
         lt(schema.orders.createdAt, b.toExclusive),
@@ -887,7 +888,7 @@ export class OrdersController {
     if (status) filters.push(eq(schema.orders.status, status));
     const window = parseDayRange(startQ, endQ);
     if (window) {
-      const b = utcBounds(window);
+      const b = zonedBounds(window, await businessTimeZone(this.db, tenant.businessId!));
       filters.push(
         gte(schema.orders.createdAt, b.from),
         lt(schema.orders.createdAt, b.toExclusive),

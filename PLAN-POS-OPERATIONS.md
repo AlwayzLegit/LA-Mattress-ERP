@@ -694,8 +694,11 @@ and Sales lists ("All time" default, created date). API: `start` / `end`
 on `/v1/dashboard/operations`, `/operations/salespeople`,
 `/v1/exceptions/digest`, `/v1/orders`, `/v1/orders/list-view`, `/v1/sales`
 (`apps/api/src/common/date-range.ts`; a malformed window is ignored, never
-a 400). Ops summary day bounds are store-local; lists use UTC days like the
-reports.
+a 400). Every day window is store-local (amended 2026-10-02): the Z-report
+(the selected store's zone), range reports and their day buckets, and the
+Orders / Sales / exceptions / salespeople windows cut on the business's
+timezone (its first active store), via `zonedBounds()`. UTC days are gone:
+in Los Angeles they moved every sale after 5 PM onto tomorrow's Z.
 
 ## 13. Explicit v1 Exclusions (do not build)
 

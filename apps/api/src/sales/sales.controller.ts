@@ -49,7 +49,8 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 import { computeTotals, reconstructOrderDiscountShares, refundUnitCents } from './totals';
 import { PriceVarianceService } from '../controls/price-variance.service';
 import type { OverrideCredentials } from '../controls/security-override.service';
-import { parseDayRange, utcBounds } from '../common/date-range';
+import { businessTimeZone } from '../common/business-today';
+import { parseDayRange, zonedBounds } from '../common/date-range';
 
 interface LookupRow {
   variantId: string;
@@ -624,7 +625,9 @@ export class SalesController {
     const limit = clampPageLimit(limitStr);
     const cursor = decodeCursor(cursorStr);
     const window = parseDayRange(startQ, endQ);
-    const bounds = window ? utcBounds(window) : null;
+    const bounds = window
+      ? zonedBounds(window, await businessTimeZone(this.db, tenant.businessId!))
+      : null;
     const filters: (ReturnType<typeof and> | undefined)[] = [
       cursor ? timestampCursorWhere(schema.sales.createdAt, schema.sales.id, cursor) : undefined,
       salesScopeCond(tenant, schema.sales.locationId),

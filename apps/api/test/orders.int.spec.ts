@@ -4622,7 +4622,10 @@ describe('Orders list date window (owner 2026-09-02, Shopify-style picker)', () 
       .set('X-Business-Id', businessId);
 
   it('start/end scope the list and the list view by created date; malformed is ignored', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // The store's day (Showroom, New York) — the window is store-local.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(
+      new Date(),
+    );
     const all = await get('/v1/orders?limit=100').expect(200);
     expect(all.body.data.length).toBeGreaterThan(0);
     const past = await get('/v1/orders?limit=100&start=2000-01-01&end=2000-01-02').expect(200);

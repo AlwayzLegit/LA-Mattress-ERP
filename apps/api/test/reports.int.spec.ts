@@ -1769,3 +1769,77 @@ describe('Manager dashboard (owner ask 2026-08-30)', () => {
     expect(Array.isArray(d.activity)).toBe(true);
   });
 });
+
+describe('Store-local days (owner 2026-10-02: evening sales missing from the Z)', () => {
+  // Main runs on America/New_York. 22:30 EST on Mar 2 is 03:30 UTC on
+  // Mar 3: a UTC cut put the sale on the wrong day's Z.
+  const AT = new Date('2026-03-03T03:30:00Z');
+
+  beforeAll(async () => {
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql);
+    try {
+      const [sale] = await db
+        .insert(schema.sales)
+        .values({
+          businessId,
+          locationId,
+          number: 'SC-EVENING-1',
+          status: 'completed',
+          completedAt: AT,
+          createdAt: AT,
+          subtotalCents: 10915,
+          totalCents: 10915,
+        })
+        .returning();
+      await db.insert(schema.payments).values({
+        businessId,
+        saleId: sale!.id,
+        method: 'cash',
+        amountCents: 10915,
+        status: 'succeeded',
+        createdAt: AT,
+      });
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+  });
+
+  function z(date: string) {
+    return request(app.getHttpServer())
+      .get(`/v1/reports/z?date=${date}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+  }
+
+  it('an evening sale lands on its own store day, not tomorrow (UTC)', async () => {
+    const day = await z('2026-03-02');
+    expect(day.status).toBe(200);
+    expect(day.body.saleCount).toBe(1);
+    expect(day.body.grossCents).toBe(10915);
+    expect(day.body.tenders).toEqual([{ method: 'cash', amountCents: 10915, count: 1 }]);
+
+    const next = await z('2026-03-03');
+    expect(next.status).toBe(200);
+    expect(next.body.saleCount).toBe(0);
+    expect(next.body.tenders).toEqual([]);
+  });
+
+  it('range reports and the Sales list cut on the same store day', async () => {
+    const daily = await request(app.getHttpServer())
+      .get('/v1/reports/sales/daily?start=2026-03-02&end=2026-03-02')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(daily.status).toBe(200);
+    expect(daily.body.byDay).toEqual([
+      expect.objectContaining({ day: '2026-03-02', saleCount: 1 }),
+    ]);
+
+    const list = await request(app.getHttpServer())
+      .get('/v1/sales?start=2026-03-02&end=2026-03-02')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(list.status).toBe(200);
+    expect(list.body.data.map((s: { number: string }) => s.number)).toEqual(['SC-EVENING-1']);
+  });
+});
