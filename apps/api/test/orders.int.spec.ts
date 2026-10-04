@@ -5051,3 +5051,69 @@ describe('Add-on fee lines follow their product line', () => {
     expect(done.body.lines[0].qtyFulfilled).toBe(1);
   });
 });
+
+describe('Orders list: tick several stores and salespeople (owner 2026-10-03)', () => {
+  it('locationId and salespersonMembershipId take comma-separated lists', async () => {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sqlc);
+    const ids: Record<string, string> = {};
+    try {
+      for (const name of ['Filter A', 'Filter B', 'Filter C']) {
+        const [l] = await db
+          .insert(schema.locations)
+          .values({ businessId, name, timezone: 'America/New_York' })
+          .returning();
+        ids[name] = l!.id;
+      }
+      const ms = await db
+        .select({ id: schema.memberships.id, email: schema.users.email })
+        .from(schema.memberships)
+        .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+        .where(eq(schema.memberships.businessId, businessId));
+      for (const m of ms) ids[m.email] = m.id;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+    const make = async (store: string, rep: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/v1/orders')
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .send({
+          locationId: ids[store],
+          customerId,
+          salespersonMembershipId: ids[rep],
+          lines: [
+            {
+              lineType: 'custom',
+              description: 'Filter fixture',
+              quantity: 1,
+              unitPriceCents: 1000,
+            },
+          ],
+        });
+      expect(res.status).toBe(201);
+      return res.body.number as string;
+    };
+    const a = await make('Filter A', 'owner@orders-test.local');
+    const b = await make('Filter B', 'cashier@orders-test.local');
+    const c = await make('Filter C', 'clerk@orders-test.local');
+    const list = async (qs: string) => {
+      const res = await request(app.getHttpServer())
+        .get(`/v1/orders/list-view?limit=100&${qs}`)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .expect(200);
+      return (res.body.data as { number: string }[]).map((r) => r.number);
+    };
+    const byStores = await list(`locationId=${ids['Filter A']},${ids['Filter B']}`);
+    expect(byStores).toEqual(expect.arrayContaining([a, b]));
+    expect(byStores).not.toContain(c);
+    const byReps = await list(
+      `locationId=${ids['Filter A']},${ids['Filter B']},${ids['Filter C']}&salespersonMembershipId=${ids['cashier@orders-test.local']},${ids['clerk@orders-test.local']}`,
+    );
+    expect(byReps.sort()).toEqual([b, c].sort());
+    // A single id still works, and junk in the list is ignored.
+    expect(await list(`locationId=${ids['Filter C']},nope`)).toEqual([c]);
+  });
+});

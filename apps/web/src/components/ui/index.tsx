@@ -8,6 +8,7 @@ export { Button, LinkButton } from './button';
 export { Kbd, formatKeys, usePlatform } from './kbd';
 export { StatusChip, StatusBadge, DisplayStatusBadge } from './status-chip';
 export { Dialog } from './dialog';
+export { MultiSelect, type MultiOption } from './multi-select';
 export { SlideOver } from './slide-over';
 export { useFocusTrap } from './focus-trap';
 export { Skeleton, LoadingRows, ErrorState, EmptyState } from './states';

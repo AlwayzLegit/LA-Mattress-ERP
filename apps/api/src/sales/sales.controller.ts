@@ -122,6 +122,13 @@ interface CreateSaleBody {
   priceReasonCodeId?: string;
   priceReason?: string;
   override?: OverrideCredentials;
+  /**
+   * Owner 2026-10-03: ring the sale for someone else ("enter it as
+   * Brandon's"). The salesperson credited on the receipt, in reports and
+   * in commissions; defaults to the signed-in member. The money is still
+   * taken by the signed-in member.
+   */
+  salespersonMembershipId?: string | null;
 }
 
 interface RefundLine {
@@ -766,6 +773,21 @@ export class SalesController {
   ): Promise<SaleDetail> {
     if (!body.locationId) throw new BadRequestException('locationId is required');
     assertSellingScope(tenant, body.locationId);
+    let associateUserId: string | null = actor?.id ?? null;
+    if (body.salespersonMembershipId) {
+      const [sp] = await this.db
+        .select({ userId: schema.memberships.userId, status: schema.memberships.status })
+        .from(schema.memberships)
+        .where(
+          and(
+            eq(schema.memberships.id, body.salespersonMembershipId),
+            eq(schema.memberships.businessId, tenant.businessId!),
+          ),
+        )
+        .limit(1);
+      if (!sp) throw new NotFoundException('Salesperson not found');
+      associateUserId = sp.userId;
+    }
     if (!body.lines || body.lines.length === 0) {
       throw new BadRequestException('lines must contain at least one entry');
     }
@@ -1127,9 +1149,9 @@ export class SalesController {
         number,
         status: 'completed',
         customerId: body.customerId ?? null,
-        // Null when the request was authenticated by an API key — no
-        // human cashier is on the receipt.
-        associateUserId: actor?.id ?? null,
+        // The salesperson credited: the one picked at the register, else
+        // the signed-in member. Null for an API-key request with no pick.
+        associateUserId,
         subtotalCents: totals.subtotalCents,
         discountCents: totals.discountCents,
         taxCents: totals.taxCents,

@@ -642,3 +642,45 @@ describe('Invoice lookup — GET /v1/sales?q=', () => {
     expect(res.body.data).toHaveLength(0);
   });
 });
+
+describe('Ring a sale for someone else (owner 2026-10-03)', () => {
+  it('the picked salesperson is credited; the signed-in member still takes the money', async () => {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sqlc);
+    let cashier: { membershipId: string; userId: string };
+    try {
+      const [row] = await db
+        .select({ membershipId: schema.memberships.id, userId: schema.users.id })
+        .from(schema.memberships)
+        .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+        .where(eq(schema.users.email, 'cashier@sales-test.local'));
+      cashier = row!;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+    const res = await request(app.getHttpServer())
+      .post('/v1/sales')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        salespersonMembershipId: cashier.membershipId,
+        lines: [{ variantId: variantAId, quantity: 1 }],
+        payments: [{ method: 'cash', amountCents: 220 }],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.associateUserId).toBe(cashier.userId);
+
+    const bogus = await request(app.getHttpServer())
+      .post('/v1/sales')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        salespersonMembershipId: '00000000-0000-0000-0000-000000000000',
+        lines: [{ variantId: variantAId, quantity: 1 }],
+        payments: [{ method: 'cash', amountCents: 220 }],
+      });
+    expect(bogus.status).toBe(404);
+  });
+});

@@ -20,6 +20,7 @@ import {
   Kbd,
   LinkButton,
   LoadingRows,
+  MultiSelect,
   ResetColumns,
   Select,
   StatusChip,
@@ -99,10 +100,14 @@ const COLUMNS: { key: string; label: string; align?: 'right' }[] = [
 const DESC_FIRST = new Set(['balanceDue', 'total', 'deliveryDate']);
 
 interface Filters {
-  /** '' = signed-in store (the default), 'all', or a location id. */
+  /**
+   * '' = signed-in store (the default), 'all', or one or more location
+   * ids, comma-separated (owner 2026-10-03: tick several stores).
+   */
   store: string;
   status: string;
   written: string;
+  /** '' = anyone, else one or more membership ids, comma-separated. */
   rep: string;
   q: string;
   due: boolean;
@@ -111,11 +116,52 @@ interface Filters {
   dir: 'asc' | 'desc';
 }
 
-function readFilters(): Filters {
+const FILTER_KEYS = [
+  'store',
+  'status',
+  'display',
+  'view',
+  'written',
+  'rep',
+  'q',
+  'due',
+  'mine',
+  'sort',
+];
+
+/** Per person, per browser: the Orders filters last chosen (owner 2026-10-03). */
+const savedKey = (userId: string) => `jetnine.orders.filters.${userId}`;
+
+function readSaved(userId: string): Filters | null {
+  try {
+    const raw = window.localStorage.getItem(savedKey(userId));
+    return raw ? readFilters(new URLSearchParams(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSaved(userId: string, f: Filters): void {
+  try {
+    // The typed search is a one-off — everything else sticks.
+    window.localStorage.setItem(savedKey(userId), writeFilters({ ...f, q: '' }).replace(/^\?/, ''));
+  } catch {
+    // storage blocked — filters still work for this visit
+  }
+}
+
+function hasUrlFilters(): boolean {
+  if (typeof window === 'undefined') return false;
+  const p = new URLSearchParams(window.location.search);
+  return FILTER_KEYS.some((k) => p.has(k));
+}
+
+function readFilters(from?: URLSearchParams): Filters {
   const p =
-    typeof window === 'undefined'
+    from ??
+    (typeof window === 'undefined'
       ? new URLSearchParams()
-      : new URLSearchParams(window.location.search);
+      : new URLSearchParams(window.location.search));
   const status =
     p.get('status') ?? p.get('display') ?? (p.get('view') === 'past_due' ? 'past_due' : '');
   const written = p.get('written') ?? DEFAULT_WRITTEN;
@@ -157,6 +203,20 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
   const myStore = acting?.store ?? null;
 
   const [f, setF] = useState<Filters>(() => readFilters());
+  // Owner 2026-10-03: the filters stay until changed. A link that names
+  // its filters wins; otherwise the person's last choice comes back.
+  const userId = acting?.me?.membershipId ?? null;
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !userId) return;
+    restored.current = true;
+    if (hasUrlFilters()) return;
+    const saved = readSaved(userId);
+    if (saved) setF(saved);
+  }, [userId]);
+  useEffect(() => {
+    if (restored.current && userId) writeSaved(userId, f);
+  }, [f, userId]);
   const [rows, setRows] = useState<OrderListRow[] | null>(null);
   const [summary, setSummary] = useState<{ count: number; balanceDueCents: number } | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -170,13 +230,25 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
   const tableRef = useRef<HTMLTableElement>(null);
   const sheetOpen = /^\/orders\/[^/]+$/.test(pathname) && !pathname.endsWith('/new');
 
-  // The effective store filter: an explicit choice, else the signed-in store.
-  const storeId = f.store === 'all' ? null : f.store || myStore?.id || null;
+  // The effective store filter: explicit choices, else the signed-in store.
+  const storeIds: string[] =
+    f.store === 'all'
+      ? []
+      : f.store
+        ? f.store.split(',').filter(Boolean)
+        : myStore?.id
+          ? [myStore.id]
+          : [];
+  const storeId = storeIds.length === 1 ? storeIds[0]! : null;
+  const nameOfStore = (id: string) =>
+    locations.find((l) => l.id === id)?.name ?? (myStore?.id === id ? myStore.name : null);
   const storeName =
-    storeId == null
+    storeIds.length === 0
       ? null
-      : (locations.find((l) => l.id === storeId)?.name ??
-        (myStore?.id === storeId ? myStore.name : null));
+      : storeIds.length <= 2
+        ? storeIds.map((id) => nameOfStore(id) ?? 'Store').join(', ')
+        : `${storeIds.length} stores`;
+  const repIds = f.rep ? f.rep.split(',').filter(Boolean) : [];
 
   useEffect(() => {
     void api<LocationRow[]>('/v1/business/locations')
@@ -193,10 +265,10 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
       if (f.q.trim()) p.set('q', f.q.trim());
       if (f.status === 'past_due') p.set('view', 'past_due');
       else if (f.status) p.set('display', f.status);
-      if (f.rep) p.set('salespersonMembershipId', f.rep);
+      if (repIds.length > 0) p.set('salespersonMembershipId', repIds.join(','));
       if (f.mine) p.set('mine', '1');
       if (f.due) p.set('balanceDue', '1');
-      if (storeId) p.set('locationId', storeId);
+      if (storeIds.length > 0) p.set('locationId', storeIds.join(','));
       const w = WRITTEN.find((x) => x.value === f.written);
       if (w && w.preset !== 'all') {
         const r = rangeFor(w.preset);
@@ -210,7 +282,8 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
       if (cursor) p.set('cursor', cursor);
       return api<ListPage>(`/v1/orders/list-view?${p.toString()}`);
     },
-    [f, storeId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [f, storeIds.join(',')],
   );
 
   // Filters live in the URL (replace, no history spam); a sequence counter
@@ -242,7 +315,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
     );
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f, storeId, storeReady, tick]);
+  }, [f, storeIds.join(','), storeReady, tick]);
 
   // The slide-over reports mutations (payment, cancel, unlock) here.
   useEffect(() => {
@@ -351,7 +424,12 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
   if (f.rep) {
     chips.push({
       key: 'rep',
-      label: members.find((m) => m.membershipId === f.rep)?.name ?? 'Salesperson',
+      label:
+        repIds.length > 2
+          ? `${repIds.length} salespeople`
+          : repIds
+              .map((id) => members.find((m) => m.membershipId === id)?.name ?? 'Salesperson')
+              .join(', '),
       remove: () => set('rep', ''),
     });
   }
@@ -516,20 +594,27 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
 
       <section className="ob-card" aria-label="Orders">
         <div className="ob-toolbar">
-          <Field label="Store">
-            <Select
-              value={f.store || (myStore ? myStore.id : 'all')}
-              onChange={(e) => set('store', e.target.value === myStore?.id ? '' : e.target.value)}
-              data-testid="orders-store-filter"
-            >
-              <option value="all">All stores</option>
-              {(locations.length > 0 ? locations : myStore ? [myStore] : []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                  {l.id === myStore?.id ? ' — your store' : ''}
-                </option>
-              ))}
-            </Select>
+          <Field label="Store" as="div">
+            <MultiSelect
+              testId="orders-store-filter"
+              allLabel="All stores"
+              noun="stores"
+              value={storeIds}
+              options={(locations.length > 0 ? locations : myStore ? [myStore] : []).map((l) => ({
+                value: l.id,
+                label: `${l.name}${l.id === myStore?.id ? ' — your store' : ''}`,
+              }))}
+              onChange={(ids) =>
+                set(
+                  'store',
+                  ids.length === 0
+                    ? 'all'
+                    : ids.length === 1 && ids[0] === myStore?.id
+                      ? ''
+                      : ids.join(','),
+                )
+              }
+            />
           </Field>
           <Field label="Status">
             <Select
@@ -557,19 +642,15 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
               ))}
             </Select>
           </Field>
-          <Field label="Salesperson">
-            <Select
-              value={f.rep}
-              onChange={(e) => set('rep', e.target.value)}
-              data-testid="orders-rep-filter"
-            >
-              <option value="">Anyone</option>
-              {members.map((m) => (
-                <option key={m.membershipId} value={m.membershipId}>
-                  {m.name}
-                </option>
-              ))}
-            </Select>
+          <Field label="Salesperson" as="div">
+            <MultiSelect
+              testId="orders-rep-filter"
+              allLabel="Anyone"
+              noun="salespeople"
+              value={repIds}
+              options={members.map((m) => ({ value: m.membershipId, label: m.name ?? '' }))}
+              onChange={(ids) => set('rep', ids.join(','))}
+            />
           </Field>
           <Field label="Find" className="ob-find">
             <Input
@@ -685,7 +766,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
         <div className="ob-foot">
           <span data-testid="orders-footer">
             {summary ? `${summary.count} orders` : '…'} · sorted by {sortLabel}
-            {myStore && storeId === myStore.id
+            {myStore && storeId === myStore.id && !f.store
               ? ` · ${myStore.name} is your store, so it is the default filter`
               : ''}
           </span>
