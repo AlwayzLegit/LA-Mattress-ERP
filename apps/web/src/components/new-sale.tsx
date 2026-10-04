@@ -1280,6 +1280,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       linePayload.every((l) => l.lineType !== 'custom') &&
       lines.every((l) => !l.sourceLocationId || l.sourceLocationId === locationId) &&
       allSellable &&
+      // A split sale needs the order's two-salesperson split.
+      !salespeople[1] &&
       totals.paidCents >= totals.totalCents &&
       totals.totalCents > 0
     ) {
@@ -1297,6 +1299,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               lineDiscountCents: l.lineDiscountCents || undefined,
             })),
           orderDiscountCents: parseDollars(orderDiscount) || undefined,
+          // Owner 2026-10-03: the sale is credited to the salesperson
+          // picked at the top, not whoever is signed in.
+          salespersonMembershipId: salespeople[0] || undefined,
           payments: [
             {
               method: payments[0]?.method === 'cash' ? 'cash' : 'card',
@@ -1891,6 +1896,25 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           </div>
         </div>
         <div className="reg-head-end">
+          {/* Owner 2026-10-03: pick who the sale is for before ringing it,
+              so it never lands under the signed-in member first. */}
+          <label className="reg-salefor">
+            <span className="t-label">Sale for</span>
+            <Select
+              value={salespeople[0] ?? ''}
+              onChange={(e) => setSalespeople([e.target.value, salespeople[1] ?? ''])}
+              disabled={locked}
+              data-testid="sale-for"
+              aria-label="Salesperson for this sale"
+            >
+              <option value="">Me (signed in)</option>
+              {members.map((m) => (
+                <option key={m.membershipId} value={m.membershipId}>
+                  {m.name?.trim() || m.email}
+                </option>
+              ))}
+            </Select>
+          </label>
           <span className="reg-save-note">
             {isExchange
               ? exchangeOriginal
@@ -2558,20 +2582,6 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   disabled={locked || fulfillment === 'take_with' || fulfillment === 'will_call'}
                   className="input-mono"
                 />
-              </Field>
-              <Field label="Salesperson">
-                <Select
-                  value={salespeople[0] ?? ''}
-                  onChange={(e) => setSalespeople([e.target.value, salespeople[1] ?? ''])}
-                  disabled={locked}
-                >
-                  <option value="">Me (signed in)</option>
-                  {members.map((m) => (
-                    <option key={m.membershipId} value={m.membershipId}>
-                      {m.name?.trim() || m.email}
-                    </option>
-                  ))}
-                </Select>
               </Field>
             </div>
             <button

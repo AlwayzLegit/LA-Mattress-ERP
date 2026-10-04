@@ -6690,3 +6690,34 @@ owner's answers:
   - web `recent-records.test.ts`.
     Checked in Chromium: the sidebar box opens the window on Recent; "linen so" shows "Commerce
     Warehouse 7 · Main Store 10".
+
+### Checkpoint — 2026-10-03 (Orders: tick several stores and salespeople; filters stick; ring a sale for someone else)
+
+Owner:
+
+- "add boxes … to check / select certain sales people and or stores only";
+- "a way to enter sale for someone else that does not come up under my name first";
+- "those selections should stay until I change them".
+
+What shipped:
+
+- `GET /v1/orders/list-view`: `locationId` and `salespersonMembershipId` take one id or a
+  comma-separated list. Non-uuids are dropped.
+- Web Orders book:
+  - Store and Salesperson are checkbox multi-selects (new `ui/MultiSelect`);
+  - chips and the title name the picks;
+  - the filters are saved per membership in the browser and restored on the next visit when
+    the URL names none. The typed search isn't kept.
+- Sale for:
+  - `POST /v1/sales` takes `salespersonMembershipId` (validated against the business). The
+    sale's associate — credited in reports and commissions — is that member; the signed-in
+    member still takes the money.
+  - The register's take-with path sends it. Before this, a fully paid take-with always credited
+    whoever was signed in, so the Salesperson pick was lost.
+  - The picker moved to the top of the register ("Sale for"). A two-salesperson split goes
+    through an order (it keeps the split).
+- Design README §3.2 amended.
+- Tests: orders.int +1 (multi store / salesperson lists, junk ignored), sales.int +1
+  (credited salesperson, unknown member 404). Checked in Chromium: tick 3 stores + 1
+  salesperson → URL and chips; leave and come back → restored; Sale for at the top of the
+  register.

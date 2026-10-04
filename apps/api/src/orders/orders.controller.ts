@@ -948,12 +948,16 @@ export class OrdersController {
         )!,
       );
     }
-    if (locationIdFilter) filters.push(eq(schema.orders.locationId, locationIdFilter));
-    if (salespersonFilter) {
+    // Owner 2026-10-03: tick several stores and/or salespeople — both
+    // filters take one id or a comma-separated list.
+    const storeIds = idList(locationIdFilter);
+    if (storeIds.length > 0) filters.push(inArray(schema.orders.locationId, storeIds));
+    const repIds = idList(salespersonFilter);
+    if (repIds.length > 0) {
       filters.push(
         or(
-          eq(schema.orders.salespersonMembershipId, salespersonFilter),
-          eq(schema.orders.secondSalespersonMembershipId, salespersonFilter),
+          inArray(schema.orders.salespersonMembershipId, repIds),
+          inArray(schema.orders.secondSalespersonMembershipId, repIds),
         )!,
       );
     }
@@ -5863,4 +5867,12 @@ export class OrdersController {
       },
     });
   }
+}
+
+/** One uuid or a comma-separated list of them; anything else is dropped. */
+function idList(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x));
 }
