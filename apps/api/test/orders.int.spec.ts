@@ -4126,7 +4126,7 @@ describe('Global omnibox search (handoff G1)', () => {
       .set('X-Business-Id', businessId)
       .expect(200);
     expect(byName.body.customers.map((c: { id: string }) => c.id)).toContain(callerId);
-    expect(byName.body.customers[0].phone).toBe('(818) 555-0142');
+    expect(byName.body.customers[0].phone).toBe('818-555-0142');
   });
 
   it('finds documents by number — current, legacy STORIS, and receipts', async () => {

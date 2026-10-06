@@ -10,6 +10,7 @@ import {
   cardBrandLabel,
   formatMoney,
   formatPhone,
+  formatPhoneAsTyped,
   isCardMethod,
   isFinancingMethod,
 } from '@jetnine/shared';
@@ -2366,7 +2367,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   <Input
                     ref={customerInput}
                     value={custQuery}
-                    onChange={(e) => setCustQuery(e.target.value)}
+                    // Owner 2026-10-04: a phone gets its dashes as it is
+                    // typed ("2135551" → "213-555-1"); names are left alone.
+                    onChange={(e) => setCustQuery(formatPhoneAsTyped(e.target.value))}
                     placeholder="818-555-…"
                     data-testid="customer-search"
                     autoFocus

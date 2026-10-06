@@ -14,6 +14,7 @@ import {
 import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { formatPhone } from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import {
@@ -330,9 +331,9 @@ export class CustomersController {
       .values({
         businessId: tenant.businessId!,
         email: normalize(body.email),
-        phone: normalize(body.phone),
-        phone2: normalize(body.phone2),
-        workPhone: normalize(body.workPhone),
+        phone: normalizePhone(body.phone),
+        phone2: normalizePhone(body.phone2),
+        workPhone: normalizePhone(body.workPhone),
         workPhoneExt: normalize(body.workPhoneExt),
         firstName: normalize(body.firstName),
         lastName: normalize(body.lastName),
@@ -397,7 +398,9 @@ export class CustomersController {
     for (const key of TEXT_FIELDS) {
       const v = body[key as keyof UpdateBody];
       if (v !== undefined) {
-        const next = normalize(v as string | null | undefined);
+        const next = (PHONE_FIELDS.has(key) ? normalizePhone : normalize)(
+          v as string | null | undefined,
+        );
         if (next !== existing[key]) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (update as any)[key] = next;
@@ -747,6 +750,19 @@ const SELECT_COLS = {
   createdAt: schema.customers.createdAt,
   updatedAt: schema.customers.updatedAt,
 } as const;
+
+const PHONE_FIELDS = new Set<string>(['phone', 'phone2', 'workPhone']);
+
+/**
+ * Owner 2026-10-04: every phone is kept the same way — a 10-digit US
+ * number saves as "213-555-1234" however it was typed; anything else
+ * (international, an extension) is kept as typed. Searches match on
+ * digits, so older rows saved as typed still turn up.
+ */
+function normalizePhone(v: string | null | undefined): string | null {
+  const t = normalize(v);
+  return t == null ? null : formatPhone(t);
+}
 
 function normalize(v: string | null | undefined): string | null {
   if (v == null) return null;

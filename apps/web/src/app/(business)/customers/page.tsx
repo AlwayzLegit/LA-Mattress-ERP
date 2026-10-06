@@ -2,7 +2,7 @@
 
 import { Search, UserPlus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { formatPhone } from '@jetnine/shared';
+import { formatPhone, formatPhoneAsTyped } from '@jetnine/shared';
 import {
   Alert,
   Button,
@@ -140,7 +140,8 @@ export default function CustomersPage() {
             placeholder="Search by name, email, or phone"
             aria-label="Search customers"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            // A phone gets its dashes as it is typed (owner 2026-10-04).
+            onChange={(e) => setQ(formatPhoneAsTyped(e.target.value))}
           />
           <Button type="submit" variant="primary" size="sm">
             <Search size={14} aria-hidden />
