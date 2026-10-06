@@ -646,11 +646,12 @@ describe('A20 — Enter a Sales Order actions', () => {
         .send({ workPhone: '3105550199', workPhoneExt: '204' })
         .expect(200)
     ).body as { workPhone: string | null; workPhoneExt: string | null };
-    expect(c).toMatchObject({ workPhone: '3105550199', workPhoneExt: '204' });
+    // Saved dashed however typed (owner 2026-10-04).
+    expect(c).toMatchObject({ workPhone: '310-555-0199', workPhoneExt: '204' });
     const again = (await as(ownerCookie).get(`/v1/customers/${customerId}`).expect(200)).body as {
       workPhone: string | null;
     };
-    expect(again.workPhone).toBe('3105550199');
+    expect(again.workPhone).toBe('310-555-0199');
     const row = await withDb((db) =>
       db
         .select({ ext: schema.customers.workPhoneExt })
