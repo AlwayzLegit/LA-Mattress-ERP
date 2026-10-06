@@ -6721,3 +6721,24 @@ What shipped:
   (credited salesperson, unknown member 404). Checked in Chromium: tick 3 stores + 1
   salesperson → URL and chips; leave and come back → restored; Sale for at the top of the
   register.
+
+### Checkpoint — 2026-10-04 (Phones: dashes as you type everywhere; one saved shape)
+
+Owner: like New sale, "everywhere set the phone number to default to include dashes … 213-555-
+when entering just the numbers", and a search should find the customer however the number was
+first entered.
+
+- Phone entry fields already formatted as typed (`PhoneInput`). The customer **search** boxes
+  now do too, through `formatPhoneAsTyped`: New sale "Phone or name", the customer picker and
+  the Customers list. A name or email is left exactly as typed. Mixed boxes (Orders Find, the
+  global search) stay as typed, so an invoice number like 10094 isn't dashed.
+- Customers API: `phone`, `phone2` and `workPhone` save as `213-555-1234` on create and edit,
+  however typed (a leading 1 or +1 is dropped). International numbers and extensions are kept as
+  typed. Searches still match digit-to-digit, so older rows saved digits-only or "(213) …" are
+  found.
+- Orders list Find also matches the order number's digits, so a dashed or partial number works.
+- Tests:
+  - customers.int: a new phone test, and the existing expectations moved to the dashed shape;
+  - orders.int: the omnibox expectation updated.
+    Checked in Chromium: "21355501" shows "213-555-01" and finds the customer; a name stays as
+    typed.

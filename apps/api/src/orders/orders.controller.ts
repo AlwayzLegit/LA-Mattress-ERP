@@ -934,6 +934,7 @@ export class OrdersController {
       filters.push(
         digits.length >= 3
           ? sql`(${schema.orders.number} ILIKE ${like} OR ${schema.customers.firstName} ILIKE ${like} OR ${schema.customers.lastName} ILIKE ${like}
+              OR regexp_replace(${schema.orders.number}, '\D', '', 'g') LIKE ${phoneLike}
               OR regexp_replace(coalesce(${schema.customers.phone}, ''), '\D', '', 'g') LIKE ${phoneLike}
               OR regexp_replace(coalesce(${schema.customers.phone2}, ''), '\D', '', 'g') LIKE ${phoneLike})`
           : sql`(${schema.orders.number} ILIKE ${like} OR ${schema.customers.firstName} ILIKE ${like} OR ${schema.customers.lastName} ILIKE ${like})`,

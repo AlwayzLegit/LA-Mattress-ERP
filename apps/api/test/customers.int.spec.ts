@@ -260,7 +260,8 @@ describe('Epic 1.9 — Customer records', () => {
       .set('X-Business-Id', businessId)
       .send({ phone: '+15550000111' });
     expect(res.status).toBe(200);
-    expect(res.body.phone).toBe('+15550000111');
+    // Owner 2026-10-04: a US number is kept as 555-000-0111 however typed.
+    expect(res.body.phone).toBe('555-000-0111');
 
     const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
     const db = drizzle(sql);
@@ -272,8 +273,8 @@ describe('Epic 1.9 — Customer records', () => {
       expect(rows.length).toBeGreaterThanOrEqual(1);
       const last = rows.at(-1)!;
       expect(last.changesJson).toMatchObject({
-        before: { phone: '+15551234567' },
-        after: { phone: '+15550000111' },
+        before: { phone: '555-123-4567' },
+        after: { phone: '555-000-0111' },
       });
     } finally {
       await sql.end({ timeout: 5 });
@@ -458,7 +459,7 @@ describe('Duplicates + merge (handoff G4, owner-picked warn-and-merge)', () => {
     // Blank fields on the keeper backfilled from the duplicate.
     expect(merged.body.email).toBe('arman.d@example.test');
     // The keeper's own phone was NOT overwritten.
-    expect(merged.body.phone).toBe('(310) 555-2001');
+    expect(merged.body.phone).toBe('310-555-2001');
 
     const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
     try {
@@ -524,7 +525,7 @@ describe('Secondary phone (phone2)', () => {
         phone2: '(213) 555-9002',
       })
       .expect(201);
-    expect(created.body.phone2).toBe('(213) 555-9002');
+    expect(created.body.phone2).toBe('213-555-9002');
 
     const patched = await request(app.getHttpServer())
       .patch(`/v1/customers/${created.body.id}`)
@@ -562,5 +563,35 @@ describe('Secondary phone (phone2)', () => {
     const hit = res.body.find((d: { id: string }) => d.id === other.body.id);
     expect(hit).toBeTruthy();
     expect(hit.matchedBy).toBe('phone');
+  });
+});
+
+describe('Phones save the same way however they are typed (owner 2026-10-04)', () => {
+  it('a 10-digit US number saves dashed on create and edit; international stays as typed', async () => {
+    const made = await request(app.getHttpServer())
+      .post('/v1/customers')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ firstName: 'Dash', lastName: 'Test', phone: '2135550177', phone2: '(818) 555 0178' })
+      .expect(201);
+    expect(made.body.phone).toBe('213-555-0177');
+    expect(made.body.phone2).toBe('818-555-0178');
+    const edited = await request(app.getHttpServer())
+      .patch(`/v1/customers/${made.body.id}`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ phone: '1 (310) 555-0179', workPhone: '+44 20 7946 0958' })
+      .expect(200);
+    expect(edited.body.phone).toBe('310-555-0179');
+    expect(edited.body.workPhone).toBe('+44 20 7946 0958');
+    // Found by any shape of the same digits.
+    for (const q of ['3105550179', '310-555-01', '(310) 555']) {
+      const res = await request(app.getHttpServer())
+        .get(`/v1/customers?q=${encodeURIComponent(q)}`)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId)
+        .expect(200);
+      expect(res.body.data.map((c: { id: string }) => c.id)).toContain(made.body.id);
+    }
   });
 });

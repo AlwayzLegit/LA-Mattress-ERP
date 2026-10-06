@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent, useRef } from 'react';
 import { api } from '@/lib/api';
-import { formatPhone } from '@jetnine/shared';
+import { formatPhone, formatPhoneAsTyped } from '@jetnine/shared';
 import {
   Alert,
   Button,
@@ -151,7 +151,9 @@ export function CustomerPicker({
                 <Input
                   autoFocus
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  // A phone gets its dashes as it is typed (owner 2026-10-04);
+                  // names and emails are left alone.
+                  onChange={(e) => setQ(formatPhoneAsTyped(e.target.value))}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void search();
                   }}
