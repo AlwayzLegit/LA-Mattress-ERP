@@ -6742,3 +6742,24 @@ first entered.
   - orders.int: the omnibox expectation updated.
     Checked in Chromium: "21355501" shows "213-555-01" and finds the customer; a name stays as
     typed.
+
+### Checkpoint — 2026-10-07 (Register payments: any amount, split cards, COD)
+
+Owner: the payment box looked like it only took "Pay in full" or "50% deposit". Customers put
+$100 down and make payments, pay COD, or split between 2–3 cards.
+
+- The Amount box always took any amount; the two buttons only fill it in. Now it says so:
+  - the placeholder reads "Any $";
+  - a **$100 down** button sits beside Pay in full and 50% deposit;
+  - a tip explains splitting ("record each card on its own — the box stays open until the
+    balance is $0").
+- **COD**:
+  - A delivery sales order with nothing recorded shows "COD — nothing down, the driver collects
+    at the door". Ticking it lifts the no-money-no-completion rule for that sale only; the
+    button reads "Complete — COD".
+  - The order gets the internal note "COD — collect $X on delivery". Its open balance already
+    rolls into the delivery run's COD due at close-out.
+  - Quotes, layaways, take-with and pickup still need money down.
+- Checked in Chromium:
+  - COD completes a $999 delivery order with $0 down and the note;
+  - $100 cash plus a $300 card on one order are recorded as two payments, $599 due.
