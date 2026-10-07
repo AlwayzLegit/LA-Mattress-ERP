@@ -8768,3 +8768,10 @@ select.picker-from {
   border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
 }
+
+/* Owner 2026-10-07: the payment box takes any amount — say so. */
+.reg-pay-tip {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}

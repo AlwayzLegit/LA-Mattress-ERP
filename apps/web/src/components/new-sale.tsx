@@ -319,6 +319,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [payments, setPayments] = useState<PaymentLine[]>([]);
   const [payMethod, setPayMethod] = useState<Tender>('card');
   const [payAmount, setPayAmount] = useState('');
+  // Owner 2026-10-07: a delivery may go out with nothing down — the
+  // driver collects the balance at the door (COD on the run's close-out).
+  const [cod, setCod] = useState(false);
   const [payRef, setPayRef] = useState('');
   /** Card tenders: brand subcategory — required before Record. */
   const [payCardBrand, setPayCardBrand] = useState('');
@@ -792,8 +795,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   // only be parked as a draft (quotes and exchanges are exempt — quotes
   // hold no money by design, exchanges may be covered by the original
   // order's tenders).
+  const codActive = cod && fulfillment === 'delivery' && orderType === 'sales_order';
   const needsMoney =
-    orderType !== 'quote' && !exchangeOriginal && totals.totalCents > 0 && totals.paidCents === 0;
+    orderType !== 'quote' &&
+    !exchangeOriginal &&
+    totals.totalCents > 0 &&
+    totals.paidCents === 0 &&
+    !codActive;
   const status: 'draft' | 'waiting' | 'scheduled' = locked
     ? 'scheduled'
     : anyShort
@@ -1340,6 +1348,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         requestedDate: requestedDate || null,
         deliveryInstructions: deliveryInstructions || null,
         notes: notes || null,
+        ...(codActive && totals.paidCents === 0
+          ? { internalNotes: `COD — collect ${formatMoney(totals.totalCents)} on delivery` }
+          : {}),
         address: shipDiffers
           ? {
               line1: ship.line1 || null,
@@ -1687,6 +1698,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     setLines([]);
     setPayments([]);
     setPayAmount('');
+    setCod(false);
     setPayRef('');
     setPaying(false);
     setOrderDiscount('');
@@ -1784,7 +1796,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       ? 'Save quote'
       : totals.balanceCents === 0 && lines.length > 0
         ? 'Complete sale'
-        : 'Complete with balance';
+        : codActive && totals.paidCents === 0
+          ? 'Complete — COD'
+          : 'Complete with balance';
   const completeHint = isExchange
     ? !exchangeOriginal
       ? 'Loading the original order…'
@@ -1802,10 +1816,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       : lines.length === 0
         ? ' '
         : needsMoney
-          ? 'Record a payment to complete — Save draft keeps it without money down'
-          : totals.balanceCents > 0
-            ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
-            : "Reserves stock at each line's source";
+          ? fulfillment === 'delivery' && orderType === 'sales_order'
+            ? 'Record a payment, or tick COD below for nothing down — Save draft keeps it as is'
+            : 'Record a payment to complete — Save draft keeps it without money down'
+          : codActive && totals.paidCents === 0
+            ? `COD — the driver collects ${formatMoney(totals.balanceCents)} at the door`
+            : totals.balanceCents > 0
+              ? `${formatMoney(totals.balanceCents)} collected at ${fulfillment === 'delivery' ? 'the door' : 'pickup'}`
+              : "Reserves stock at each line's source";
   const draftNumber = done?.number ?? resumedDraft?.number ?? null;
 
   /** Brand + last 4 for cards, months for financing, a reference for the rest. */
@@ -2910,7 +2928,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                         type="number"
                         step="0.01"
                         min={0}
-                        placeholder={(totals.balanceCents / 100).toFixed(2)}
+                        placeholder="Any $"
                         value={payAmount}
                         onChange={(e) => setPayAmount(e.target.value)}
                         onKeyDown={(e) => {
@@ -2927,6 +2945,18 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   </div>
                   {tenderDetails(zeroBlock)}
                   <div className="reg-pay-quick">
+                    {/* Owner 2026-10-07: any amount goes — $100 down is the
+                        usual start; split cards by recording each one. */}
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        setPayAmount((Math.min(10000, totals.balanceCents) / 100).toFixed(2))
+                      }
+                      disabled={zeroBlock || totals.balanceCents === 0}
+                      data-testid="pay-100"
+                    >
+                      $100 down
+                    </Button>
                     <Button
                       size="sm"
                       onClick={() => setPayAmount((totals.balanceCents / 100).toFixed(2))}
@@ -2946,6 +2976,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       50% deposit
                     </Button>
                   </div>
+                  <p className="reg-pay-tip" data-testid="pay-tip">
+                    Type any amount. Splitting between cards? Record each card on its own — the box
+                    stays open until the balance is $0.
+                  </p>
                   <div className="reg-pay-actions">
                     <Button
                       variant="primary"
@@ -2990,30 +3024,45 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   {busy ? 'Writing…' : 'Write exchange'}
                 </Button>
               ) : (
-                <div className="reg-two">
-                  <Button
-                    className="reg-complete"
-                    disabled={busy || zeroBlock || !customer || lines.length === 0 || needsMoney}
-                    onClick={() => void submit('complete')}
-                    data-testid="complete-sale"
-                  >
-                    {busy ? 'Working…' : completeLabel}
-                  </Button>
-                  <Button
-                    onClick={() => void submit('draft')}
-                    disabled={busy}
-                    data-testid="save-draft"
-                    title={
-                      resumedDraft
-                        ? draftChanged
-                          ? `Save your changes; the draft replaces ${resumedDraft.number}`
-                          : `Nothing changed — ${resumedDraft.number} stays as it is`
-                        : undefined
-                    }
-                  >
-                    {resumedDraft ? 'Save changes' : 'Save draft'}
-                  </Button>
-                </div>
+                <>
+                  {fulfillment === 'delivery' &&
+                    orderType === 'sales_order' &&
+                    totals.paidCents === 0 &&
+                    !locked && (
+                      <label className="reg-check" data-testid="cod-toggle">
+                        <input
+                          type="checkbox"
+                          checked={cod}
+                          onChange={(e) => setCod(e.target.checked)}
+                        />
+                        COD — nothing down, the driver collects at the door
+                      </label>
+                    )}
+                  <div className="reg-two">
+                    <Button
+                      className="reg-complete"
+                      disabled={busy || zeroBlock || !customer || lines.length === 0 || needsMoney}
+                      onClick={() => void submit('complete')}
+                      data-testid="complete-sale"
+                    >
+                      {busy ? 'Working…' : completeLabel}
+                    </Button>
+                    <Button
+                      onClick={() => void submit('draft')}
+                      disabled={busy}
+                      data-testid="save-draft"
+                      title={
+                        resumedDraft
+                          ? draftChanged
+                            ? `Save your changes; the draft replaces ${resumedDraft.number}`
+                            : `Nothing changed — ${resumedDraft.number} stays as it is`
+                          : undefined
+                      }
+                    >
+                      {resumedDraft ? 'Save changes' : 'Save draft'}
+                    </Button>
+                  </div>
+                </>
               )}
               <div className="reg-hint">{completeHint}</div>
             </section>
