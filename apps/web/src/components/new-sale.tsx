@@ -1302,6 +1302,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       allSellable &&
       // A split sale needs the order's two-salesperson split.
       !salespeople[1] &&
+      // Split tenders (two or three cards) go through the order path, which
+      // records each card with its own brand and amount.
+      payments.length === 1 &&
       totals.paidCents >= totals.totalCents &&
       totals.totalCents > 0
     ) {
