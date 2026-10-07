@@ -795,7 +795,18 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   // only be parked as a draft (quotes and exchanges are exempt — quotes
   // hold no money by design, exchanges may be covered by the original
   // order's tenders).
-  const codActive = cod && fulfillment === 'delivery' && orderType === 'sales_order';
+  // COD: the driver collects at the door, so every goods line must go out
+  // on the truck (a pickup / take-with / will-call line leaves unpaid), and
+  // a payment-only draft from another store can only take money, never be
+  // confirmed with none.
+  const goodsLines = lines.filter((l) => l.lineType !== 'custom');
+  const codAllowed =
+    fulfillment === 'delivery' &&
+    orderType === 'sales_order' &&
+    payOnlyStore == null &&
+    goodsLines.length > 0 &&
+    goodsLines.every((l) => effectiveFulfillment(l, fulfillment) === 'delivery');
+  const codActive = cod && codAllowed;
   const needsMoney =
     orderType !== 'quote' &&
     !exchangeOriginal &&
@@ -3025,19 +3036,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 </Button>
               ) : (
                 <>
-                  {fulfillment === 'delivery' &&
-                    orderType === 'sales_order' &&
-                    totals.paidCents === 0 &&
-                    !locked && (
-                      <label className="reg-check" data-testid="cod-toggle">
-                        <input
-                          type="checkbox"
-                          checked={cod}
-                          onChange={(e) => setCod(e.target.checked)}
-                        />
-                        COD — nothing down, the driver collects at the door
-                      </label>
-                    )}
+                  {codAllowed && totals.paidCents === 0 && !locked && (
+                    <label className="reg-check" data-testid="cod-toggle">
+                      <input
+                        type="checkbox"
+                        checked={cod}
+                        onChange={(e) => setCod(e.target.checked)}
+                      />
+                      COD — nothing down, the driver collects at the door
+                    </label>
+                  )}
                   <div className="reg-two">
                     <Button
                       className="reg-complete"
