@@ -431,6 +431,17 @@ the same customer card (pinned to the original invoice's customer). Added on top
   and to any product named _install…_. The header Installation charge was already
   untaxed (§ "Step-3 charges"). New service products: set the class on the product
   page (Tax class) or the register taxes them.
+- **No sales tax — out-of-state delivery or by hand (owner 2026-10-08).** Resolves the
+  tax-exempt [DECIDE]. The register ticks **No sales tax** by itself when every goods
+  line is delivered or direct-shipped to a state other than the selling store's
+  (`locations.address_json.region`; a store without one borrows another store's), e.g.
+  a Missouri delivery from an LA store. Anyone who sells may also tick it by hand with a
+  required reason (resale certificate #…), or untick the automatic one. The order keeps
+  `orders.tax_exempt_reason`; every line on it — lines added later and split children
+  included — prices at 0%. The reason prints on the invoice tax row, is audited on
+  `order.create`, and logs an info exception `tax_exempt_order`. Fees stay untaxed as
+  before; the recycling fee is unchanged. New sales only — existing orders are not
+  restated. Exchanges keep the store's tax.
 - **Invoice header, payments and delivery block (§11).** The selling store prints
   with its **name, address and phone** (supersedes 2026-09-11 "address only"); the
   address/phone live in `locations.address_json` (Locations settings → Address &
@@ -1215,7 +1226,7 @@ tickets).
 | Audit Comments Log                                                                        | Change history + Notes cards (anchor)                                                                                                                                                                                                                     |
 | Miscellaneous Fees                                                                        | Fees dialog (above)                                                                                                                                                                                                                                       |
 | Order Source Entry                                                                        | `order_source` from `ops.orderSources` (Walk-in, Phone, Web, Referral, …) with free text                                                                                                                                                                  |
-| Order Tax Information                                                                     | Dialog: store rate, per-line tax class / rate / taxable amount / tax, order tax; the tax-exempt question stays an open [DECIDE]                                                                                                                           |
+| Order Tax Information                                                                     | Dialog: store rate, per-line tax class / rate / taxable amount / tax, order tax; orders written with No sales tax show 0% on every line (resolved 2026-10-08)                                                                                             |
 | Print Order / Print Cumulative Sales Order                                                | Invoice `?scope=order` (this piece alone) / `?scope=family` (the split family, today's default per the 2026-08-31 amendment)                                                                                                                              |
 | Add / Edit / View Attachments                                                             | `order_attachments` (order- or line-scoped; PDF, images, office docs; ≤ 5 MB each; bytes stored in Postgres, served through the API with auth); paperclip count in the header                                                                             |
 | Assign Payment Terminal                                                                   | `payment_terminal` label from `ops.paymentTerminals` (which reader took the card). Stripe Terminal readers stay the Day 1 Ops item                                                                                                                        |

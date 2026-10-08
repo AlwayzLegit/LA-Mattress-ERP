@@ -232,6 +232,12 @@ interface CreateOrderBody extends StepThreeFees {
   address?: AddressInput;
   notes?: string | null;
   internalNotes?: string | null;
+  /**
+   * No sales tax on this order, and why (owner 2026-10-08: out-of-state
+   * delivery, resale certificate …). Any member who can write the order
+   * may set it; it is audited and logged as an exception.
+   */
+  taxExemptReason?: string | null;
   salespersonMembershipId?: string | null;
   secondSalespersonMembershipId?: string | null;
   splitBps?: number | null;
@@ -433,6 +439,8 @@ interface OrderDetail extends OrderListRow {
   addressPhone: string | null;
   notes: string | null;
   internalNotes: string | null;
+  /** Why the order charges no sales tax; null = taxed normally. */
+  taxExemptReason: string | null;
   /** §10: the original order this exchange was written against. */
   originalOrderId: string | null;
   salespersonMembershipId: string | null;
@@ -1896,7 +1904,13 @@ export class OrdersController {
       }
     }
 
-    const priced = await this.priceLines(tenant, body.locationId, body.lines);
+    const taxExemptReason = a20Text('taxExemptReason', body.taxExemptReason, 200);
+    const priced = await this.priceLines(
+      tenant,
+      body.locationId,
+      body.lines,
+      taxExemptReason != null,
+    );
     // Drafts skip the variance gate; it re-runs when the draft is
     // completed through this endpoint again (drafts are superseded by a
     // fresh create, never confirmed in place).
@@ -1947,6 +1961,7 @@ export class OrdersController {
         requestedDate: body.requestedDate ?? null,
         notes: body.notes ?? null,
         internalNotes: body.internalNotes ?? null,
+        taxExemptReason,
       })
       .returning();
     if (!order) throw new BadRequestException('failed to create order');
@@ -2082,6 +2097,7 @@ export class OrdersController {
         depositRequiredCents,
         lineCount: priced.length,
         customerId: order.customerId,
+        taxExemptReason,
         // Allowed (a manager may sell take-with from another store) but
         // always on the record — HANDOFF_inventory_source_defaults §4.
         ...(takeWithOffStore > 0 ? { takeWithOffStore } : {}),
@@ -2125,6 +2141,19 @@ export class OrdersController {
           summary: `Order ${order.number} has qualifying units but no recycling fee`,
         });
       }
+    }
+
+    // No-tax orders are visible to managers (owner 2026-10-08: anyone who
+    // sells may switch tax off, so the record is the control). Drafts are
+    // superseded by a fresh create, which records it then.
+    if (taxExemptReason && !body.draft) {
+      await this.exceptions.record({
+        type: 'tax_exempt_order',
+        severity: 'info',
+        entityType: 'order',
+        entityId: order.id,
+        summary: `Order ${order.number} charges no sales tax — ${taxExemptReason}`,
+      });
     }
 
     let splitOrders: { id: string; number: string; requestedDate: string | null }[] = [];
@@ -2514,7 +2543,12 @@ export class OrdersController {
     const order = await this.requireLiveOrder(id);
     this.assertUnlocked(order);
     await this.assertNotOnOpenRun(id);
-    const [priced] = await this.priceLines(tenant, order.locationId, [body]);
+    const [priced] = await this.priceLines(
+      tenant,
+      order.locationId,
+      [body],
+      order.taxExemptReason != null,
+    );
     if (order.status !== 'draft') {
       await this.priceVariance.enforce(tenant.businessId!, [priced!], 0, body, {
         action: `Add discounted line to ${order.number}`,
@@ -2933,6 +2967,7 @@ export class OrdersController {
         addressPhone: order.addressPhone,
         requestedDate: requestedDate,
         notes: `Split from ${order.number}`,
+        taxExemptReason: order.taxExemptReason,
       })
       .returning();
     if (!target) throw new BadRequestException('failed to create the split order');
@@ -5395,6 +5430,8 @@ export class OrdersController {
     tenant: RequestTenantContext,
     locationId: string,
     inputs: readonly OrderLineInput[],
+    /** The order charges no sales tax (orders.tax_exempt_reason). */
+    taxExempt = false,
   ): Promise<
     {
       variantId: string;
@@ -5520,10 +5557,11 @@ export class OrdersController {
         unitPriceCents: l.unitPriceCents ?? v.priceCents,
         lineDiscountCents,
         lineType: l.lineType ?? 'stock',
-        taxRateBps:
-          (v.taxClassId ? overrideMap.get(v.taxClassId) : undefined) ??
-          v.taxClassFallbackRateBps ??
-          fallbackRateBps!,
+        taxRateBps: taxExempt
+          ? 0
+          : ((v.taxClassId ? overrideMap.get(v.taxClassId) : undefined) ??
+            v.taxClassFallbackRateBps ??
+            fallbackRateBps!),
         taxClassId: v.taxClassId,
         listPriceCents: v.priceCents,
         costCents: v.costCents ?? null,
@@ -5768,6 +5806,7 @@ export class OrdersController {
       addressPhone: order.addressPhone,
       notes: order.notes,
       internalNotes: order.internalNotes,
+      taxExemptReason: order.taxExemptReason ?? null,
       originalOrderId: order.originalOrderId,
       salespersonMembershipId: order.salespersonMembershipId,
       secondSalespersonMembershipId: order.secondSalespersonMembershipId,

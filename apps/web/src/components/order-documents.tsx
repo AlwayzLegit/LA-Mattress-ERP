@@ -69,6 +69,8 @@ export interface OrderDocumentPayload {
     /** The promised date when nothing is scheduled yet (the delivery card falls back to it). */
     requestedDate?: string | null;
     notes: string | null;
+    /** Why the order charges no sales tax; null = taxed normally. */
+    taxExemptReason?: string | null;
     lockedAt: string | null;
     createdAt: string;
     payments: {
@@ -914,7 +916,10 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
               {money.otherFeeCents > 0 && (
                 <TotalRow label={o.otherFeeLabel ?? 'Other'} value={usd(money.otherFeeCents)} />
               )}
-              <TotalRow label="Tax" value={usd(money.taxCents)} />
+              <TotalRow
+                label={o.taxExemptReason ? `Tax (none — ${o.taxExemptReason})` : 'Tax'}
+                value={usd(money.taxCents)}
+              />
               <TotalRow label={`Total ${title}`} value={usd(money.totalCents)} bold rule />
               <TotalRow label="Amount paid" value={usd(money.paidCents)} />
               {creditDue ? (

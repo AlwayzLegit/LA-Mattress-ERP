@@ -4083,6 +4083,90 @@ describe('Recycling fee is never taxed', () => {
   });
 });
 
+describe('No sales tax (owner 2026-10-08: out-of-state delivery, resale certificate)', () => {
+  async function withDb<T>(fn: (db: ReturnType<typeof drizzle>) => Promise<T>): Promise<T> {
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      return await fn(drizzle(sql2));
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+  }
+
+  it('an order written with a no-tax reason charges 0% on every line, now and later', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        address: { line1: '1 Main St', city: 'Kansas City', region: 'MO', postalCode: '64105' },
+        taxExemptReason: '  Out-of-state delivery (MO)  ',
+        deliveryFeeCents: 73_000,
+        confirm: true,
+        lines: [
+          { variantId: sofaVariantId, quantity: 1 },
+          { lineType: 'custom', description: 'Recycling Fee', quantity: 1, unitPriceCents: 1800 },
+        ],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.taxExemptReason).toBe('Out-of-state delivery (MO)');
+    expect(res.body.taxCents).toBe(0);
+    expect(res.body.totalCents).toBe(129_999 + 1800 + 73_000);
+    for (const l of res.body.lines) expect(l.taxRateBps).toBe(0);
+
+    // A line added later stays untaxed too.
+    const added = await request(app.getHttpServer())
+      .post(`/v1/orders/${res.body.id}/lines`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ variantId: sofaVariantId, quantity: 1 });
+    expect(added.status).toBe(201);
+    expect(added.body.taxCents).toBe(0);
+
+    // The invoice payload carries the reason.
+    const doc = await request(app.getHttpServer())
+      .get(`/v1/orders/${res.body.id}/document`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(doc.status).toBe(200);
+    expect(doc.body.order.taxExemptReason).toBe('Out-of-state delivery (MO)');
+
+    // Managers see it in Exceptions.
+    await withDb(async (db) => {
+      const events = await db
+        .select()
+        .from(schema.exceptionEvents)
+        .where(
+          and(
+            eq(schema.exceptionEvents.type, 'tax_exempt_order'),
+            eq(schema.exceptionEvents.entityId, res.body.id),
+          ),
+        );
+      expect(events).toHaveLength(1);
+      expect(events[0]!.summary).toMatch(/Out-of-state delivery \(MO\)/);
+    });
+  });
+
+  it('a blank reason taxes normally', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/v1/orders')
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        locationId,
+        customerId,
+        taxExemptReason: '   ',
+        lines: [{ variantId: sofaVariantId, quantity: 1 }],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.taxExemptReason).toBeNull();
+    expect(res.body.taxCents).toBe(Math.round((129_999 * 700) / 10000));
+  });
+});
+
 describe('Global omnibox search (handoff G1)', () => {
   let callerId = '';
   let callerOrderId = '';

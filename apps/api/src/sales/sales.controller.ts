@@ -578,10 +578,16 @@ export class SalesController {
    */
   @Get('pos/locations')
   @RequirePermission('pos.access')
-  async posLocations(
-    @CurrentTenant() tenant: RequestTenantContext,
-  ): Promise<
-    { id: string; name: string; taxRateBps: number; locationType: string; canSellHere: boolean }[]
+  async posLocations(@CurrentTenant() tenant: RequestTenantContext): Promise<
+    {
+      id: string;
+      name: string;
+      taxRateBps: number;
+      locationType: string;
+      canSellHere: boolean;
+      /** The store's state from its address (e.g. 'CA'); null when not entered. */
+      region: string | null;
+    }[]
   > {
     const [biz] = await this.db
       .select({ defaultTaxRateBps: schema.businesses.defaultTaxRateBps })
@@ -594,6 +600,7 @@ export class SalesController {
         name: schema.locations.name,
         taxRateBps: schema.locations.taxRateBps,
         locationType: schema.locations.locationType,
+        region: sql<string | null>`nullif(trim(${schema.locations.addressJson}->>'region'), '')`,
       })
       .from(schema.locations)
       .where(eq(schema.locations.isActive, true))
