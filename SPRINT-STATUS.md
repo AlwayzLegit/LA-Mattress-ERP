@@ -6763,3 +6763,32 @@ $100 down and make payments, pay COD, or split between 2–3 cards.
 - Checked in Chromium:
   - COD completes a $999 delivery order with $0 down and the note;
   - $100 cash plus a $300 card on one order are recorded as two payments, $599 due.
+
+### Checkpoint — 2026-10-08 (No sales tax: out-of-state delivery, or by hand)
+
+Owner: a Missouri delivery came to $2,290.40. The old system said $2,147: the ERP charged LA
+tax (10.25% on the $1,399 mattress = $143.40). There was no way to drop tax.
+
+- `orders.tax_exempt_reason` (migration 0111). When it is set, every line on the order prices
+  at 0%, including lines added later and split children.
+  - `POST /v1/orders` takes `taxExemptReason`; a blank one taxes normally.
+  - It is in the `order.create` audit, and logs info exception `tax_exempt_order` (not for
+    drafts).
+  - The invoice and order page show "Tax (none — reason)".
+- Register:
+  - **No sales tax** ticks itself when every goods line is delivered or shipped to a state
+    other than the store's (`pos/locations` now returns each store's `region`; "Missouri",
+    "MO" and "mo." all read as MO via `stateCode` in `packages/shared`).
+  - Anyone can tick it by hand; a reason is required. Anyone can also untick the automatic
+    one.
+  - A no-tax take-with sale goes through the order path, so the reason is kept.
+- New sales only (owner): existing orders are not restated. Exchanges keep the store's tax.
+- Tests:
+  - orders.int +2 (0% on every line including an added one; reason on the invoice payload;
+    exception logged; a blank reason taxes);
+  - shared `us-states` tests.
+- Checked in Chromium at a 10.25% store:
+  - a Missouri delivery ($1,399 + $18 recycling + $730 delivery) shows $2,147.00 and saves
+    "Out-of-state delivery (MO)";
+  - unticking it gives $2,290.40;
+  - a CA sale ticked by hand refuses to complete until a reason is typed, then saves it.

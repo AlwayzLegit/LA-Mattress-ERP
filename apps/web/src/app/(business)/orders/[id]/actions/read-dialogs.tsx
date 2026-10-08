@@ -94,7 +94,8 @@ export function TaxInfoDialog({ order, onClose }: { order: ActionOrder; onClose:
           </TableWrap>
           <p className="muted" style={{ marginTop: 8 }}>
             The order discount is spread across taxed lines pro rata before tax; fees are never
-            taxed. Tax-exempt customers are not modeled yet.
+            taxed. An order written with No sales tax (out-of-state delivery, resale certificate)
+            carries 0% on every line.
           </p>
         </>
       )}

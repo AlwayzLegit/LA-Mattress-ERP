@@ -13,6 +13,7 @@ import {
   formatPhoneAsTyped,
   isCardMethod,
   isFinancingMethod,
+  stateCode,
 } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { lineHasAddons } from '@/lib/pos-addons';
@@ -148,6 +149,8 @@ interface LocationRow {
   taxRateBps: number | null;
   locationType?: string;
   canSellHere?: boolean;
+  /** The store's state from its address ('CA'); null when not entered. */
+  region?: string | null;
 }
 interface MemberRow {
   membershipId: string;
@@ -322,6 +325,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   // Owner 2026-10-07: a delivery may go out with nothing down — the
   // driver collects the balance at the door (COD on the run's close-out).
   const [cod, setCod] = useState(false);
+  // Owner 2026-10-08: no sales tax on out-of-state deliveries (automatic)
+  // or when the salesperson switches it off with a reason (resale
+  // certificate …). null follows the automatic rule; true/false = by hand.
+  const [taxOff, setTaxOff] = useState<boolean | null>(null);
+  const [taxOffReason, setTaxOffReason] = useState('');
   const [payRef, setPayRef] = useState('');
   /** Card tenders: brand subcategory — required before Record. */
   const [payCardBrand, setPayCardBrand] = useState('');
@@ -615,6 +623,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         deliveryFee,
         shipDiffers ? ship : null,
         salespeople,
+        taxOff,
+        taxOffReason,
         lines.map((l) => [
           l.variantId,
           l.description,
@@ -642,6 +652,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       shipDiffers,
       ship,
       salespeople,
+      taxOff,
+      taxOffReason,
       lines,
     ],
   );
@@ -708,6 +720,36 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   // ---------------------------------------------------------------- totals
 
+  // Out-of-state delivery: every goods line goes out on the truck (or is
+  // shipped) to a state other than the store's → no sales tax. The
+  // store's state comes from its address on Locations; a store without
+  // one borrows the state of any other store that has one.
+  const deliveryState = stateCode(
+    shipDiffers ? ship.region : (customer?.addressesJson?.[0]?.region ?? null),
+  );
+  const storeState =
+    stateCode(locs.find((l) => l.id === locationId)?.region) ??
+    locs.map((l) => stateCode(l.region)).find(Boolean) ??
+    null;
+  const shipsOut = (f: Fulfillment) => f === 'delivery' || f === 'direct_ship';
+  const goodsShipOut =
+    lines.some((l) => l.lineType !== 'custom') &&
+    lines
+      .filter((l) => l.lineType !== 'custom')
+      .every((l) => shipsOut(effectiveFulfillment(l, fulfillment)));
+  const autoTaxOff =
+    !exchangeOriginal &&
+    goodsShipOut &&
+    deliveryState != null &&
+    storeState != null &&
+    deliveryState !== storeState;
+  const noTax = !exchangeOriginal && (taxOff ?? autoTaxOff);
+  const noTaxReason = !noTax
+    ? null
+    : taxOff === true
+      ? taxOffReason.trim()
+      : `Out-of-state delivery (${deliveryState})`;
+
   const totals = useMemo(() => {
     let merchandise = 0;
     let recycling = 0;
@@ -730,7 +772,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       .filter((l) => l.lineType !== 'custom')
       .map((l) => ({
         net: Math.max(0, l.quantity * l.unitPriceCents - l.lineDiscountCents),
-        rate: l.taxRateBps ?? taxRateBps,
+        rate: noTax ? 0 : (l.taxRateBps ?? taxRateBps),
       }));
     const taxableNet = taxableLines.reduce((sum, l) => sum + l.net, 0);
     const discountOnTaxable = Math.min(orderDisc, taxableNet);
@@ -763,7 +805,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       paidCents,
       balanceCents: Math.max(0, totalCents - paidCents),
     };
-  }, [lines, orderDiscount, installFee, deliveryFee, taxRateBps, payments, recyclingFeeCents]);
+  }, [
+    lines,
+    orderDiscount,
+    installFee,
+    deliveryFee,
+    taxRateBps,
+    payments,
+    recyclingFeeCents,
+    noTax,
+  ]);
 
   const availFor = useCallback(
     (l: Line): Avail | undefined =>
@@ -1069,6 +1120,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           categoryPath?: string | null;
           parentLineId?: string | null;
         }[];
+        taxExemptReason?: string | null;
       }>(`/v1/orders/${id}`);
       const cust = await api<CustomerHit>(`/v1/customers/${o.customerId}`);
       const f = (o.fulfillmentType as Fulfillment) ?? 'delivery';
@@ -1084,6 +1136,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setRequestedDate(o.requestedDate ?? '');
       setDeliveryInstructions(o.deliveryInstructions ?? '');
       setNotes(o.notes ?? '');
+      // A by-hand no-tax reason comes back; the out-of-state one re-derives.
+      if (o.taxExemptReason && !o.taxExemptReason.startsWith('Out-of-state delivery')) {
+        setTaxOff(true);
+        setTaxOffReason(o.taxExemptReason);
+      } else {
+        setTaxOff(null);
+        setTaxOffReason('');
+      }
       setOrderDiscount(o.orderDiscountCents ? (o.orderDiscountCents / 100).toFixed(2) : '');
       setInstallFee(o.installFeeCents ? (o.installFeeCents / 100).toFixed(2) : '');
       setDeliveryFee(o.deliveryFeeCents ? (o.deliveryFeeCents / 100).toFixed(2) : '');
@@ -1157,6 +1217,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       resetAll();
       loadDrafts();
       toast.success(`No changes — ${n} is still in Drafts as it was`);
+      return;
+    }
+    if (noTax && !noTaxReason) {
+      setError('Type why this sale has no sales tax (resale certificate #, out-of-state…).');
       return;
     }
     if (payOnlyStore && resumedDraft && draftEdited) {
@@ -1305,6 +1369,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       // Split tenders (two or three cards) go through the order path, which
       // records each card with its own brand and amount.
       payments.length === 1 &&
+      // A no-tax sale keeps its reason on the order.
+      !noTax &&
       totals.paidCents >= totals.totalCents &&
       totals.totalCents > 0
     ) {
@@ -1365,6 +1431,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         ...(codActive && totals.paidCents === 0
           ? { internalNotes: `COD — collect ${formatMoney(totals.totalCents)} on delivery` }
           : {}),
+        taxExemptReason: noTaxReason || undefined,
         address: shipDiffers
           ? {
               line1: ship.line1 || null,
@@ -1713,6 +1780,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     setPayments([]);
     setPayAmount('');
     setCod(false);
+    setTaxOff(null);
+    setTaxOffReason('');
     setPayRef('');
     setPaying(false);
     setOrderDiscount('');
@@ -2732,11 +2801,49 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             {totals.install > 0 && <TotalRow label="Installation" cents={totals.install} />}
             <TotalRow label="Delivery" cents={totals.delivery} />
             <TotalRow
-              label={`Tax ${(taxRateBps / 100).toFixed(taxRateBps % 100 === 0 ? 0 : 2)}%${
-                totals.untaxedLines ? ` · ${totals.untaxedLines} untaxed` : ''
-              }`}
+              label={
+                noTax
+                  ? 'Tax · none'
+                  : `Tax ${(taxRateBps / 100).toFixed(taxRateBps % 100 === 0 ? 0 : 2)}%${
+                      totals.untaxedLines ? ` · ${totals.untaxedLines} untaxed` : ''
+                    }`
+              }
               cents={totals.taxCents}
             />
+            {!isExchange && lines.length > 0 && (
+              <div className="reg-no-tax" data-testid="no-tax">
+                <label className="reg-check">
+                  <input
+                    type="checkbox"
+                    checked={noTax}
+                    disabled={locked || payOnlyStore != null}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      // Back to automatic when the box matches the rule again.
+                      setTaxOff(on === autoTaxOff && !taxOffReason.trim() ? null : on);
+                    }}
+                    data-testid="no-tax-toggle"
+                  />
+                  No sales tax
+                </label>
+                {noTax && taxOff !== true && (
+                  <span className="muted" data-testid="no-tax-why">
+                    Delivery to {deliveryState} — out of state
+                  </span>
+                )}
+                {taxOff === true && (
+                  <Input
+                    placeholder="Reason (resale certificate #, out-of-state…) — required"
+                    aria-label="No-tax reason"
+                    value={taxOffReason}
+                    onChange={(e) => setTaxOffReason(e.target.value)}
+                    disabled={locked || payOnlyStore != null}
+                    maxLength={200}
+                    data-testid="no-tax-reason"
+                  />
+                )}
+              </div>
+            )}
             <div className="reg-total">
               <span>Total</span>
               <span className="reg-total-value" data-testid="grand-total">

@@ -133,6 +133,8 @@ interface OrderDetail {
   paidCents: number;
   balanceDueCents: number;
   creditDueCents: number;
+  /** Why the order charges no sales tax; null = taxed normally. */
+  taxExemptReason?: string | null;
   family: {
     id: string;
     number: string;
@@ -2008,7 +2010,10 @@ export default function OrderDetailPage() {
                 rows={[
                   { label: 'Subtotal', value: <MoneyValue cents={order.subtotalCents} /> },
                   { label: 'Discount', value: <MoneyValue cents={-order.discountCents} /> },
-                  { label: 'Tax', value: <MoneyValue cents={order.taxCents} /> },
+                  {
+                    label: order.taxExemptReason ? `Tax (none — ${order.taxExemptReason})` : 'Tax',
+                    value: <MoneyValue cents={order.taxCents} />,
+                  },
                   {
                     label: <strong>Total</strong>,
                     value: <MoneyValue cents={order.totalCents} bold />,

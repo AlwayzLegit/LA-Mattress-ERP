@@ -155,6 +155,13 @@ export const orders = pgTable(
     notes: text('notes'),
     internalNotes: text('internal_notes'),
     /**
+     * Owner 2026-10-08: why this order charges no sales tax ("Out-of-state
+     * delivery (MO)", "Resale certificate 123"). NULL = taxed normally.
+     * Set when the order is written; every line on it — including lines
+     * added later and split children — prices at 0%.
+     */
+    taxExemptReason: text('tax_exempt_reason'),
+    /**
      * Opaque token for the customer-facing status page (/track/<token>).
      * NULL until staff share the order; the token is 48 hex chars of
      * crypto randomness, so possession of the link IS the authorization

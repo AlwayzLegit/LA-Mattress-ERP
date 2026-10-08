@@ -8775,3 +8775,10 @@ select.picker-from {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* Owner 2026-10-08: "No sales tax" under the tax row. */
+.reg-no-tax {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
