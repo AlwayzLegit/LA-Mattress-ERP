@@ -318,6 +318,20 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
       .send({ method: 'venmo', amountCents: 5000, kind: 'deposit' });
     expect(pay.status).toBe(201);
 
+    // Owner 2026-10-13: Shop Pay is its own tender, recorded as itself.
+    const shop = await request(app.getHttpServer())
+      .post(`/v1/orders/${o.id}/payments`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .send({ method: 'shop_pay', amountCents: 2500, processorRef: 'SP-9187' });
+    expect(shop.status).toBe(201);
+    expect(
+      shop.body.payments.some(
+        (p: { method: string; amountCents: number }) =>
+          p.method === 'shop_pay' && p.amountCents === 2500,
+      ),
+    ).toBe(true);
+
     const noDesc = await request(app.getHttpServer())
       .post('/v1/orders')
       .set('Cookie', cashierCookie)

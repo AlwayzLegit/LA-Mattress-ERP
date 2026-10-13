@@ -6836,3 +6836,16 @@ Lines table on the order page needed a sideways scroll.
   - order-history +3.
 - **Checked in Chromium**: Settings save; Charge a fee with a preset and a custom fee on a paid
   order; on a completed order the drawer moves to the new -FEE order.
+
+### Checkpoint — 2026-10-13 (Shop Pay tender)
+
+Owner: add Shop Pay as a form of payment.
+
+- `shop_pay` is now an order payment method. It is offered on the New sale register, the order
+  drawer and the full order page.
+- Invoices, order history and the drawer show it as "Shop Pay". Its box asks for a Reference,
+  not card last 4.
+- A take-with register sale goes the plain `/v1/sales` way only for cash or card. Before this,
+  every other tender (Venmo, Zelle, PayPal …) was saved there as "card"; now those go the order
+  way and keep their real method.
+- Test: orders.int records a `shop_pay` payment.

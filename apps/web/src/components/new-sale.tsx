@@ -86,6 +86,7 @@ const TENDERS = [
   { value: 'paypal', label: 'PayPal' },
   { value: 'venmo', label: 'Venmo' },
   { value: 'zelle', label: 'Zelle' },
+  { value: 'shop_pay', label: 'Shop Pay' },
   { value: 'synchrony', label: 'Synchrony' },
   { value: 'acima', label: 'Acima' },
   { value: 'store_credit', label: 'Store credit' },
@@ -1369,6 +1370,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       // Split tenders (two or three cards) go through the order path, which
       // records each card with its own brand and amount.
       payments.length === 1 &&
+      // The register sale takes cash or card only; Venmo, Zelle, Shop Pay …
+      // go the order way so the real method is recorded, not "card".
+      (payments[0]?.method === 'cash' || payments[0]?.method === 'card') &&
       // A no-tax sale keeps its reason on the order.
       !noTax &&
       totals.paidCents >= totals.totalCents &&

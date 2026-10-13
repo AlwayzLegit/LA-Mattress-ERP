@@ -84,6 +84,8 @@ const PAYMENT_METHODS = [
   'paypal',
   'venmo',
   'zelle',
+  // Owner 2026-10-13: Shopify's wallet, taken through the Shop Pay app.
+  'shop_pay',
   'synchrony',
   'acima',
 ] as const;
