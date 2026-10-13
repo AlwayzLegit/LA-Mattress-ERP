@@ -4280,6 +4280,24 @@ describe('Charge a fee (owner 2026-10-13: redelivery after the wrong size went o
     expect(again.body.feeOrder.number).toBe(`${o.number}-FEE2`);
   });
 
+  it('a fee never takes a share of the order discount (the total grows by the fee exactly)', async () => {
+    const q = await as()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        orderDiscountCents: 10_000,
+        lines: [{ variantId: sofaVariantId, quantity: 1 }],
+      });
+    expect(q.status).toBe(201);
+    const res = await as()
+      .post(`/v1/orders/${q.body.id}/fees`)
+      .send({ label: 'Redelivery fee', amountCents: 1000 });
+    expect(res.status).toBe(201);
+    expect(res.body.taxCents).toBe(q.body.taxCents);
+    expect(res.body.totalCents).toBe(q.body.totalCents + 1000);
+  });
+
   it('refuses a blank name and a $0 fee', async () => {
     const o = await paidOrder();
     expect(

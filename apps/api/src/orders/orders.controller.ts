@@ -2680,11 +2680,15 @@ export class OrdersController {
     ) {
       throw new BadRequestException('The fee must be more than $0 and at most $10,000');
     }
+    // Row lock: two fees charged on the same order at once run one after
+    // the other, so the second linked order sees the first's -FEE number
+    // and takes -FEE2 (Codex, PR #222) instead of tripping the unique index.
     const [order] = await this.db
       .select()
       .from(schema.orders)
       .where(and(eq(schema.orders.id, id), eq(schema.orders.businessId, tenant.businessId!)))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!order) throw new NotFoundException('Order not found');
     if (order.status === 'cancelled') {
       throw new BadRequestException('A cancelled order cannot be charged a fee');

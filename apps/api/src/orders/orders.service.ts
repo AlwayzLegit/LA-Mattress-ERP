@@ -468,6 +468,7 @@ export class OrdersService {
         unitPriceCents: schema.orderLines.unitPriceCents,
         discountCents: schema.orderLines.discountCents,
         taxRateBps: schema.orderLines.taxRateBps,
+        lineType: schema.orderLines.lineType,
       })
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, orderId))
@@ -487,18 +488,54 @@ export class OrdersService {
       return empty;
     }
 
-    const totals = computeTotals({
-      taxRateBps: 0,
-      orderDiscountCents: order?.orderDiscountCents ?? 0,
-      lines: lines.map((l) => ({
+    const asCart = (ls: typeof lines) =>
+      ls.map((l) => ({
         variantId: l.variantId ?? l.id,
         description: l.description,
         quantity: l.quantity,
         unitPriceCents: l.unitPriceCents,
         lineDiscountCents: l.discountCents,
         taxRateBps: l.taxRateBps,
-      })),
-    });
+      }));
+    // The order discount lands on the goods, never on fee lines (recycling,
+    // a charged redelivery fee …) — as the register prices it. Spread over
+    // a fee it moved discount off taxed goods and raised the tax (Codex,
+    // PR #222: a $10 fee on $100 with a $10 discount added $10.09). Only
+    // when the discount is bigger than the goods themselves does it fall
+    // back to the whole cart.
+    const orderDiscountCents = order?.orderDiscountCents ?? 0;
+    const goodsIdx = lines.flatMap((l, i) => (l.lineType === 'custom' ? [] : [i]));
+    const feeIdx = lines.flatMap((l, i) => (l.lineType === 'custom' ? [i] : []));
+    const goodsNet = goodsIdx.reduce((n, i) => {
+      const l = lines[i]!;
+      return n + Math.max(0, l.quantity * l.unitPriceCents - l.discountCents);
+    }, 0);
+    const separate =
+      orderDiscountCents > 0 &&
+      goodsIdx.length > 0 &&
+      feeIdx.length > 0 &&
+      orderDiscountCents <= goodsNet;
+    let totals: ReturnType<typeof computeTotals>;
+    if (separate) {
+      const goods = computeTotals({
+        taxRateBps: 0,
+        orderDiscountCents,
+        lines: asCart(goodsIdx.map((i) => lines[i]!)),
+      });
+      const fees = computeTotals({ taxRateBps: 0, lines: asCart(feeIdx.map((i) => lines[i]!)) });
+      const byLine: (typeof goods.lines)[number][] = [];
+      goodsIdx.forEach((i, k) => (byLine[i] = goods.lines[k]!));
+      feeIdx.forEach((i, k) => (byLine[i] = fees.lines[k]!));
+      totals = {
+        lines: byLine,
+        subtotalCents: goods.subtotalCents + fees.subtotalCents,
+        discountCents: goods.discountCents + fees.discountCents,
+        taxCents: goods.taxCents + fees.taxCents,
+        totalCents: goods.totalCents + fees.totalCents,
+      };
+    } else {
+      totals = computeTotals({ taxRateBps: 0, orderDiscountCents, lines: asCart(lines) });
+    }
 
     // Push each line's share of tax back down — the order-level discount
     // is allocated pro-rata inside computeTotals, so a line's tax is only

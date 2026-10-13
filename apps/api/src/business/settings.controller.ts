@@ -702,10 +702,9 @@ function validateOps(input: OpsSettings): OpsSettings {
         if (!label || label.length > 60) {
           throw new BadRequestException('ops.feePresets[].label must be 1–60 characters');
         }
-        if (!Number.isInteger(f.amountCents) || f.amountCents < 0) {
-          throw new BadRequestException(
-            'ops.feePresets[].amountCents must be a non-negative integer',
-          );
+        // Same ceiling as Charge a fee (POST /v1/orders/:id/fees).
+        if (!Number.isInteger(f.amountCents) || f.amountCents < 0 || f.amountCents > 1_000_000) {
+          throw new BadRequestException('ops.feePresets[].amountCents must be $0 to $10,000');
         }
         if (seen.has(label.toLowerCase())) {
           throw new BadRequestException(`ops.feePresets lists "${label}" twice`);
