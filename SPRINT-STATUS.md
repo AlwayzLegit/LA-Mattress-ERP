@@ -6792,3 +6792,47 @@ tax (10.25% on the $1,399 mattress = $143.40). There was no way to drop tax.
     "Out-of-state delivery (MO)";
   - unticking it gives $2,290.40;
   - a CA sale ticked by hand refuses to complete until a reason is typed, then saves it.
+
+### Checkpoint — 2026-10-13 (Charge a fee, Team tasks "Order not found", wider order lines)
+
+Owner: KO-10117's mattress went out in the wrong size, came back and goes out again. There was
+no way to charge the redelivery. Team tasks and Notes on the order said "Order not found". The
+Lines table on the order page needed a sideways scroll.
+
+- **Stress test** (local API):
+  - Miscellaneous Fees lives only on the full page, behind Actions.
+  - It holds one "other" amount, so a second fee overwrote the first.
+  - It is refused on a locked order or one on an open run (KO-10117 was scheduled).
+  - It is refused on a completed order ("Order is completed and cannot be changed").
+- **Charge a fee** (owner's choices: a button; preset list plus custom; a linked fee order when
+  completed):
+  - `POST /v1/orders/:id/fees` adds an untaxed custom line. It works while locked or on a run;
+    on a delivered order the fee counts as handed over.
+  - A completed order gets `<number>-FEE` (status fulfilled, fee only, "Fee for order" in its
+    custom info).
+  - Settings → Order fees holds `ops.feePresets`; pos settings exposes it to every member.
+  - The order drawer has a Charge a fee panel: a preset or Custom…, with the amount filled in
+    and editable.
+- **Team tasks / Notes / Team / Attachments 404**:
+  - Render logs showed those calls failing only from one browser. It was a platform-admin
+    login whose active-business cookie had lapsed, so it ran with no business: the order read
+    worked (RLS bypass) while the business-filtered panels 404'd.
+  - The tenancy guard now auto-picks the single business for platform admins too, and renews
+    the active-business cookie on every use.
+- **Order page layout**:
+  - The main column is fluid and the right column is 316px (as on New sale).
+  - The Lines table is compact: sized qty/price/disc inputs, capped selects, tight actions.
+  - Measured in Chromium: no sideways scroll at 1600px and 1920px.
+- **History**:
+  - `order.update` audits now name the same fields before and after, and only the ones that
+    moved.
+  - The order history reads legacy rows as "delivery date 2026-10-14" instead of "order kind
+    none → sales order, updated at none → …, total $500.00 → none".
+  - Fees read "charged Redelivery fee $75.00".
+- **Tests**:
+  - orders.int +4 (stacking on a locked order where Misc Fees is refused; completed →
+    -FEE/-FEE2, paid and completed; validation; settings);
+  - tenancy.int +2 (platform admin auto-pick; cookie renewal);
+  - order-history +3.
+- **Checked in Chromium**: Settings save; Charge a fee with a preset and a custom fee on a paid
+  order; on a completed order the drawer moves to the new -FEE order.

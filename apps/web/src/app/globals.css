@@ -8782,3 +8782,68 @@ select.picker-from {
   gap: 6px;
   margin: 4px 0 8px;
 }
+
+/* Owner 2026-10-13: the order page's Lines table should fit without a
+   sideways scroll. Tighter cells and capped selects; the item name keeps
+   room to read. */
+.order-lines th,
+.order-lines td {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.order-lines td:first-child {
+  min-width: 150px;
+}
+.order-lines td.actions {
+  white-space: nowrap;
+}
+.order-lines td.actions button {
+  padding-left: 6px;
+  padding-right: 6px;
+  min-width: 0;
+}
+.order-lines input[type='number'] {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+/* Qty · Price · Disc — sized to what they hold. */
+.order-lines td:nth-child(3) input {
+  width: 52px;
+}
+.order-lines td:nth-child(4) input {
+  width: 80px;
+}
+.order-lines td:nth-child(5) input {
+  width: 64px;
+}
+/* Type · Fulfillment · Inventory from. */
+.order-lines td:nth-child(2) select {
+  width: 92px;
+}
+.order-lines td:nth-child(6) select {
+  width: 110px;
+}
+.order-lines td:nth-child(7) select {
+  width: 112px;
+}
+
+/* Settings → Order fees and the Charge a fee dialog (owner 2026-10-13). */
+.fee-presets {
+  display: grid;
+  gap: 8px;
+}
+.fee-preset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px auto;
+  gap: 8px;
+  align-items: center;
+}
+.fee-preset-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.osh-fee-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}

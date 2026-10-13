@@ -107,11 +107,17 @@ export class TenancyGuard implements CanActivate {
     }
 
     let businessId = pickActiveBusinessId(req);
+    // Picked by cookie (not an explicit header): renewed below once the
+    // membership checks out, so it never lapses under a live session.
+    const fromCookie = businessId != null && !headerBusinessId(req);
     let membershipCount = 0;
-    if (!businessId && !user.isSuperAdmin) {
+    if (!businessId) {
       // The active-business cookie expires (30 days) while the session
       // keeps renewing, which left signed-in staff on "No active business
       // selected" everywhere (owner 2026-09-28). One business → use it.
+      // Platform admins too (owner 2026-10-13): one who also runs a store
+      // otherwise fell through to the empty context below — the order
+      // itself loaded, but its notes, tasks and team said "Order not found".
       const ids = await this.activeBusinessIds(user.id);
       membershipCount = ids.length;
       const only = ids.length === 1 ? ids[0]! : null;
@@ -171,6 +177,17 @@ export class TenancyGuard implements CanActivate {
         return true;
       }
       throw new ForbiddenException('You are not a member of that business');
+    }
+
+    if (fromCookie) {
+      ctx
+        .switchToHttp()
+        .getResponse<Response>()
+        .cookie?.(
+          ACTIVE_BUSINESS_COOKIE,
+          businessId,
+          activeBusinessCookieOptions(process.env.NODE_ENV === 'production'),
+        );
     }
 
     const permissions = await this.loadPermissions(membership.roleId);
@@ -274,9 +291,14 @@ export class TenancyGuard implements CanActivate {
   }
 }
 
-function pickActiveBusinessId(req: Request): string | null {
+function headerBusinessId(req: Request): string | null {
   const fromHeader = req.headers[ACTIVE_BUSINESS_HEADER];
-  if (typeof fromHeader === 'string' && fromHeader.length > 0) return fromHeader;
+  return typeof fromHeader === 'string' && fromHeader.length > 0 ? fromHeader : null;
+}
+
+function pickActiveBusinessId(req: Request): string | null {
+  const fromHeader = headerBusinessId(req);
+  if (fromHeader) return fromHeader;
   const fromCookie = (req as Request & { cookies?: Record<string, string> }).cookies?.[
     ACTIVE_BUSINESS_COOKIE
   ];

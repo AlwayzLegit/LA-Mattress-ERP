@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import request from 'supertest';
@@ -38,6 +39,7 @@ let businessId: string;
 let owner: TestUser;
 let bookkeeper: TestUser;
 let twoBiz: TestUser;
+let platformOwner: TestUser;
 
 async function resetTestDb() {
   const env = { ...process.env, DATABASE_URL: TEST_DB_URL };
@@ -114,6 +116,12 @@ async function seedFixtures() {
 
     owner = await makeUser('owner@tenancy-test.local', 'Owner', 'Owner');
     bookkeeper = await makeUser('bookkeeper@tenancy-test.local', 'Bookkeeper', 'Bookkeeper');
+    // A platform admin who also owns this one business.
+    platformOwner = await makeUser('platform@tenancy-test.local', 'Platform Owner', 'Owner');
+    await db
+      .update(schema.users)
+      .set({ isSuperAdmin: true })
+      .where(eq(schema.users.id, platformOwner.id));
     // A member of two businesses still has to pick one.
     twoBiz = await makeUser('two@tenancy-test.local', 'Two Biz', 'Owner');
     const [other] = await db
@@ -170,6 +178,7 @@ beforeAll(async () => {
   owner.cookie = await captureCookie(owner);
   bookkeeper.cookie = await captureCookie(bookkeeper);
   twoBiz.cookie = await captureCookie(twoBiz);
+  platformOwner.cookie = await captureCookie(platformOwner);
 });
 
 afterAll(async () => {
@@ -203,6 +212,31 @@ describe('Epic 1.3 — @RequirePermission gating', () => {
       c.startsWith('jetnine.active_business_id='),
     );
     expect(set).toContain(businessId);
+  });
+
+  it('A platform admin in one business gets it too (order notes/tasks said "Order not found")', async () => {
+    // Owner 2026-10-13: the super-admin fell through to an empty context —
+    // order reads (RLS bypassed) worked, business-filtered ones 404'd.
+    const res = await request(app.getHttpServer())
+      .get('/v1/products')
+      .set('Cookie', platformOwner.cookie);
+    expect(res.status).toBe(200);
+    const set = (res.get('Set-Cookie') ?? []).find((c) =>
+      c.startsWith('jetnine.active_business_id='),
+    );
+    expect(set).toContain(businessId);
+  });
+
+  it('A chosen business is renewed on use, so the 30-day cookie never lapses mid-session', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/products')
+      .set('Cookie', `${owner.cookie}; jetnine.active_business_id=${businessId}`);
+    expect(res.status).toBe(200);
+    const set = (res.get('Set-Cookie') ?? []).find((c) =>
+      c.startsWith('jetnine.active_business_id='),
+    );
+    expect(set).toContain(businessId);
+    expect(set).toMatch(/Max-Age=2592000/);
   });
 
   it('No active business, several memberships → 412 so the client shows the picker', async () => {

@@ -28,6 +28,8 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { CompetitionsCard, type CompetitionSettings } from './competitions-card';
+import { FeePresetsCard } from './fee-presets-card';
+import type { FeePreset } from '@/lib/fee-presets';
 
 interface Branding {
   accentColor?: string | null;
@@ -37,6 +39,7 @@ interface Branding {
 
 interface OpsSettings {
   recyclingFeeCents?: number | null;
+  feePresets?: FeePreset[] | null;
   defaultSourceLocationId?: string | null;
   invoiceHeaderNote?: string | null;
   invoiceFooterNote?: string | null;
@@ -243,6 +246,7 @@ export default function SettingsPage() {
 
         <OpsCard settings={settings} onSaved={setSettings} />
         <CompetitionsCard settings={settings} onSaved={setSettings} />
+        <FeePresetsCard settings={settings} onSaved={setSettings} />
 
         <ReasonCodesCard />
 

@@ -1053,7 +1053,7 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_316px]">
         <Stack className="min-w-0">
           <Card
             title="Lines"
@@ -1125,7 +1125,7 @@ export default function OrderDetailPage() {
               </Toolbar>
             )}
             <TableWrap>
-              <table className="table">
+              <table className="table order-lines">
                 <thead>
                   <tr>
                     <th>Item</th>
@@ -3342,7 +3342,7 @@ function OrderSkeleton() {
         <Skeleton style={{ height: 28, width: 260 }} />
         <Skeleton style={{ height: 14, width: 340 }} />
       </Stack>
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_316px]">
         <Stack className="min-w-0">
           <Skeleton style={{ height: 220 }} />
           <Skeleton style={{ height: 140 }} />

@@ -2515,12 +2515,37 @@ export class OrdersController {
         .where(eq(schema.orders.id, id));
     }
 
+    // Before and after name the same fields, and only the ones that moved
+    // (owner 2026-10-13: the history read "order kind none → sales order,
+    // updated at none → …, total $500.00 → none" for a date change).
+    const prev = order as unknown as Record<string, unknown>;
+    const same = (a: unknown, b: unknown) =>
+      JSON.stringify(a instanceof Date ? a.toISOString() : (a ?? null)) ===
+      JSON.stringify(b instanceof Date ? b.toISOString() : (b ?? null));
+    const moved = Object.keys(patch).filter((k) => k !== 'updatedAt' && !same(prev[k], patch[k]));
+    const totalAfter = repriced
+      ? (
+          await this.db
+            .select({ totalCents: schema.orders.totalCents })
+            .from(schema.orders)
+            .where(eq(schema.orders.id, id))
+            .limit(1)
+        )[0]?.totalCents
+      : order.totalCents;
     await this.audit.log({
       action: 'order.update',
       targetType: 'order',
       targetId: id,
-      before: { status: order.status, totalCents: order.totalCents },
-      after: { ...patch, status: body.status ?? order.status },
+      before: {
+        status: order.status,
+        totalCents: order.totalCents,
+        ...Object.fromEntries(moved.map((k) => [k, prev[k] ?? null])),
+      },
+      after: {
+        status: body.status ?? order.status,
+        totalCents: totalAfter ?? order.totalCents,
+        ...Object.fromEntries(moved.map((k) => [k, patch[k] ?? null])),
+      },
     });
 
     return this.loadDetail(id);
@@ -2624,6 +2649,153 @@ export class OrdersController {
       after: { lineId: line!.id, variantId: line!.variantId, quantity: line!.quantity },
     });
     return this.loadDetail(id);
+  }
+
+  /**
+   * Charge a fee (owner 2026-10-13): a redelivery after the wrong size went
+   * out, a restocking fee, a trip charge. The fee is an untaxed custom line,
+   * so several can stack. It never touches stock or the truck, so it is
+   * allowed while the order is locked (ticket printed) or on an open
+   * delivery run — exactly when a redelivery gets charged. A completed
+   * order is closed books: the fee goes on a new linked order
+   * (<number>-FEE) holding only the fee, ready to take payment and close.
+   */
+  @Post('orders/:id/fees')
+  @RequirePermission('orders.update')
+  async chargeFee(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() body: { label?: string; amountCents?: number },
+  ): Promise<OrderDetail & { feeOrder: { id: string; number: string } | null }> {
+    const label = typeof body.label === 'string' ? body.label.trim() : '';
+    if (!label || label.length > 60) {
+      throw new BadRequestException('Name the fee (1–60 characters)');
+    }
+    const amountCents = body.amountCents;
+    if (
+      typeof amountCents !== 'number' ||
+      !Number.isInteger(amountCents) ||
+      amountCents <= 0 ||
+      amountCents > 1_000_000
+    ) {
+      throw new BadRequestException('The fee must be more than $0 and at most $10,000');
+    }
+    // Row lock: two fees charged on the same order at once run one after
+    // the other, so the second linked order sees the first's -FEE number
+    // and takes -FEE2 (Codex, PR #222) instead of tripping the unique index.
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, id), eq(schema.orders.businessId, tenant.businessId!)))
+      .limit(1)
+      .for('update');
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.status === 'cancelled') {
+      throw new BadRequestException('A cancelled order cannot be charged a fee');
+    }
+
+    if (order.status !== 'completed') {
+      // Delivered but not closed: the fee counts as handed over too, so it
+      // never holds the order open.
+      const done = order.status === 'fulfilled';
+      const [line] = await this.db
+        .insert(schema.orderLines)
+        .values({
+          businessId: tenant.businessId!,
+          orderId: id,
+          variantId: null,
+          description: label,
+          quantity: 1,
+          lineType: 'custom',
+          unitPriceCents: amountCents,
+          discountCents: 0,
+          taxRateBps: 0,
+          taxClassId: null,
+          qtyFulfilled: done ? 1 : 0,
+          taxCents: 0,
+          totalCents: 0,
+        })
+        .returning({ id: schema.orderLines.id });
+      await this.orders.recomputeTotals(this.db, id);
+      await this.audit.log({
+        action: 'order.fee_charged',
+        targetType: 'order',
+        targetId: id,
+        after: { lineId: line!.id, label, amountCents },
+      });
+      return { ...(await this.loadDetail(id)), feeOrder: null };
+    }
+
+    // Completed: a linked fee order — KO-10117-FEE, then -FEE2, -FEE3 …
+    const taken = await this.db
+      .select({ number: schema.orders.number })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.businessId, tenant.businessId!),
+          sql`${schema.orders.number} LIKE ${`${order.number}-FEE%`}`,
+        ),
+      );
+    const used = new Set(taken.map((r) => r.number));
+    let number = `${order.number}-FEE`;
+    for (let n = 2; used.has(number); n++) number = `${order.number}-FEE${n}`;
+    const [feeOrder] = await this.db
+      .insert(schema.orders)
+      .values({
+        businessId: tenant.businessId!,
+        locationId: order.locationId,
+        number,
+        // Nothing to deliver: it waits only on payment, then Complete.
+        status: 'fulfilled',
+        customerId: order.customerId,
+        salespersonMembershipId: order.salespersonMembershipId,
+        secondSalespersonMembershipId: order.secondSalespersonMembershipId,
+        splitBps: order.splitBps,
+        orderKind: 'sales_order',
+        fulfillmentType: order.fulfillmentType === 'take_with' ? 'pickup' : order.fulfillmentType,
+        addressLine1: order.addressLine1,
+        addressLine2: order.addressLine2,
+        addressCity: order.addressCity,
+        addressRegion: order.addressRegion,
+        addressPostalCode: order.addressPostalCode,
+        addressPhone: order.addressPhone,
+        notes: `${label} for ${order.number}`,
+        customInfoJson: [{ label: 'Fee for order', value: order.number }] as never,
+        taxExemptReason: order.taxExemptReason,
+      })
+      .returning();
+    if (!feeOrder) throw new BadRequestException('Could not write the fee order');
+    await this.db.insert(schema.orderLines).values({
+      businessId: tenant.businessId!,
+      orderId: feeOrder.id,
+      variantId: null,
+      description: label,
+      quantity: 1,
+      lineType: 'custom',
+      unitPriceCents: amountCents,
+      discountCents: 0,
+      taxRateBps: 0,
+      taxClassId: null,
+      qtyFulfilled: 1,
+      taxCents: 0,
+      totalCents: 0,
+    });
+    await this.orders.recomputeTotals(this.db, feeOrder.id);
+    await this.audit.log({
+      action: 'order.fee_charged',
+      targetType: 'order',
+      targetId: id,
+      after: { feeOrderId: feeOrder.id, feeOrderNumber: number, label, amountCents },
+    });
+    await this.audit.log({
+      action: 'order.create',
+      targetType: 'order',
+      targetId: feeOrder.id,
+      after: { number, status: 'fulfilled', feeFor: order.number, label, amountCents },
+    });
+    const feeDetail = await this.loadDetail(feeOrder.id);
+    this.fireOrderEvent('order.created', tenant.businessId!, feeDetail);
+    return { ...(await this.loadDetail(id)), feeOrder: { id: feeOrder.id, number } };
   }
 
   /**
