@@ -33,6 +33,18 @@ interface BusinessSettings {
   ops: OpsSettings | null;
 }
 
+export interface FeePreset {
+  label: string;
+  amountCents: number;
+}
+
+/** The fees offered when none are configured (amounts typed each time). */
+export const DEFAULT_FEE_PRESETS: FeePreset[] = [
+  { label: 'Redelivery fee', amountCents: 0 },
+  { label: 'Restocking fee', amountCents: 0 },
+  { label: 'Trip charge', amountCents: 0 },
+];
+
 /** PLAN-POS-OPERATIONS operational knobs; all optional, admin-edited. */
 interface OpsSettings {
   recyclingFeeCents?: number | null;
@@ -69,6 +81,12 @@ interface OpsSettings {
    * on exchanges (null/0 = none). Overridable per exchange with its own
    * permission. */
   restockingFeePercent?: number | null;
+  /**
+   * Owner 2026-10-13: the fees staff pick from under "Charge a fee" on an
+   * order (Redelivery, Restocking, Trip charge…), each with its default
+   * amount; the amount stays editable and a custom fee is always offered.
+   */
+  feePresets?: FeePreset[] | null;
   /** Exchange pack (E1): hold every new exchange for approval. */
   exchangeHoldAtEntry?: boolean | null;
   /** J4 (XFR-052 / CFG-POS-AUTOSCHED): blank disables auto transfers;
@@ -313,6 +331,14 @@ const OPS_SETTINGS_REGISTRY = [
     nullMeans: 'No window — returns always allowed without override',
     classTags: ['TRISTATE'],
     readBy: 'Return authorization (I4)',
+  },
+  {
+    key: 'feePresets',
+    label: 'Order fees (Charge a fee)',
+    type: 'object',
+    nullMeans: 'Redelivery fee, Restocking fee and Trip charge, amount typed each time',
+    classTags: [],
+    readBy: 'Order drawer → Charge a fee',
   },
   {
     key: 'restockingFeePercent',
@@ -664,6 +690,35 @@ function validateOps(input: OpsSettings): OpsSettings {
       throw new BadRequestException('ops.returnWindowDays must be a positive integer or null');
     }
     out.returnWindowDays = input.returnWindowDays;
+  }
+  if (input.feePresets !== undefined) {
+    if (input.feePresets !== null) {
+      if (!Array.isArray(input.feePresets) || input.feePresets.length > 20) {
+        throw new BadRequestException('ops.feePresets must be a list of at most 20 fees');
+      }
+      const seen = new Set<string>();
+      for (const f of input.feePresets) {
+        const label = typeof f?.label === 'string' ? f.label.trim() : '';
+        if (!label || label.length > 60) {
+          throw new BadRequestException('ops.feePresets[].label must be 1–60 characters');
+        }
+        if (!Number.isInteger(f.amountCents) || f.amountCents < 0) {
+          throw new BadRequestException(
+            'ops.feePresets[].amountCents must be a non-negative integer',
+          );
+        }
+        if (seen.has(label.toLowerCase())) {
+          throw new BadRequestException(`ops.feePresets lists "${label}" twice`);
+        }
+        seen.add(label.toLowerCase());
+      }
+      out.feePresets = input.feePresets.map((f) => ({
+        label: f.label.trim(),
+        amountCents: f.amountCents,
+      }));
+    } else {
+      out.feePresets = null;
+    }
   }
   if (input.restockingFeePercent !== undefined) {
     if (
@@ -1021,6 +1076,7 @@ export class SettingsController {
 /** Ops keys safe for every member to read (everything except contact/role plumbing). */
 const POS_VISIBLE_OPS_KEYS = [
   'recyclingFeeCents',
+  'feePresets',
   'defaultSourceLocationId',
   // A20 order-page pick lists.
   'marketingCodes',

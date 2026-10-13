@@ -23,6 +23,7 @@ import { Money } from '@/components/money';
 import { describeOrderEvent, type OrderAuditRow } from '@/lib/order-history';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { CancelOrderDialog } from './cancel-order-dialog';
+import { feePresetsOf, type FeePreset } from '@/lib/fee-presets';
 import {
   FULFILLMENT_LABEL,
   METHOD_LABEL,
@@ -136,6 +137,12 @@ export function OrderSheet({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
+  // Owner 2026-10-13: Charge a fee (redelivery, restocking …) at any stage.
+  const [charging, setCharging] = useState(false);
+  const [feePresets, setFeePresets] = useState<FeePreset[]>(feePresetsOf(null));
+  const [feeChoice, setFeeChoice] = useState('0');
+  const [feeLabel, setFeeLabel] = useState('');
+  const [feeAmount, setFeeAmount] = useState('');
   const [payMethod, setPayMethod] = useState('card');
   const [payAmount, setPayAmount] = useState('');
   const [payRef, setPayRef] = useState('');
@@ -176,6 +183,7 @@ export function OrderSheet({ id }: { id: string }) {
     setCorrectingStore(false);
     setHistory(null);
     setPaying(false);
+    setCharging(false);
     setScheduling(false);
     setActionError(null);
     void load();
@@ -188,6 +196,9 @@ export function OrderSheet({ id }: { id: string }) {
     void api<MemberRow[]>('/v1/business/members')
       .then(setMembers)
       .catch(() => setMembers([]));
+    void api<{ ops: { feePresets?: FeePreset[] | null } | null }>('/v1/business/settings/pos')
+      .then((s) => setFeePresets(feePresetsOf(s.ops?.feePresets)))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -209,6 +220,52 @@ export function OrderSheet({ id }: { id: string }) {
   const changed = () => {
     window.dispatchEvent(new CustomEvent('erp:orders-changed'));
   };
+
+  function pickFee(choice: string) {
+    setFeeChoice(choice);
+    const preset = choice === 'custom' ? null : feePresets[Number(choice)];
+    setFeeLabel(preset?.label ?? '');
+    setFeeAmount(preset?.amountCents ? (preset.amountCents / 100).toFixed(2) : '');
+  }
+
+  async function chargeFee() {
+    if (!order) return;
+    const label = feeLabel.trim();
+    const cents = Math.round(Number(feeAmount.replace(/[$,\s]/g, '')) * 100);
+    if (!label) {
+      setActionError('Name the fee.');
+      return;
+    }
+    if (!Number.isFinite(cents) || cents <= 0) {
+      setActionError('Enter the fee amount.');
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      const next = await api<OrderDetail & { feeOrder: { id: string; number: string } | null }>(
+        `/v1/orders/${order.id}/fees`,
+        { method: 'POST', body: JSON.stringify({ label, amountCents: cents }) },
+      );
+      setCharging(false);
+      changed();
+      if (next.feeOrder) {
+        // A completed order stays closed; the fee is its own order.
+        toast.success(
+          `${label} ${formatMoney(cents)} — on ${next.feeOrder.number}, ready for payment`,
+        );
+        router.push(`/orders/${next.feeOrder.id}${window.location.search}`);
+        return;
+      }
+      setOrder(next);
+      toast.success(`${label} ${formatMoney(cents)} added to ${order.number}`);
+      void load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function recordPayment() {
     if (!order) return;
@@ -411,6 +468,24 @@ export function OrderSheet({ id }: { id: string }) {
           aria-expanded={paying}
         >
           Take payment
+        </Button>
+        <Button
+          size="sm"
+          disabled={order.status === 'cancelled'}
+          onClick={() => {
+            setCharging((v) => !v);
+            setPaying(false);
+            if (!charging) pickFee('0');
+          }}
+          data-testid="sheet-charge-fee"
+          aria-expanded={charging}
+          title={
+            order.status === 'completed'
+              ? 'The order is closed — the fee goes on a new linked order'
+              : 'Redelivery, restocking, trip charge … added to this order'
+          }
+        >
+          Charge a fee
         </Button>
         {live && !locked ? (
           <LinkButton href={`/orders/${id}/full`} size="sm" data-testid="edit-lines">
@@ -686,6 +761,80 @@ export function OrderSheet({ id }: { id: string }) {
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setPaying(false)}>
               Done
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {charging && order.status !== 'cancelled' && (
+        <form
+          className="osh-pay"
+          data-testid="sheet-fee-panel"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void chargeFee();
+          }}
+        >
+          <div className="osh-pay-grid">
+            <Field label="Fee">
+              <Select
+                value={feeChoice}
+                onChange={(e) => pickFee(e.target.value)}
+                data-testid="sheet-fee-choice"
+              >
+                {feePresets.map((f, i) => (
+                  <option key={f.label} value={String(i)}>
+                    {f.label}
+                    {f.amountCents ? ` — ${formatMoney(f.amountCents)}` : ''}
+                  </option>
+                ))}
+                <option value="custom">Custom…</option>
+              </Select>
+            </Field>
+            {feeChoice === 'custom' && (
+              <Field label="Name">
+                <Input
+                  value={feeLabel}
+                  maxLength={60}
+                  placeholder="e.g. Second trip"
+                  onChange={(e) => setFeeLabel(e.target.value)}
+                  data-testid="sheet-fee-label"
+                />
+              </Field>
+            )}
+            <Field label="Amount">
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={feeAmount}
+                placeholder="0.00"
+                onChange={(e) => setFeeAmount(e.target.value)}
+                className="input-num reg-cell-input"
+                data-testid="sheet-fee-amount"
+              />
+            </Field>
+          </div>
+          <p className="muted osh-fee-note">
+            {order.status === 'completed'
+              ? `${order.number} is closed, so the fee goes on a new linked order (${order.number}-FEE) to take payment on.`
+              : 'Added to this order as its own line, never taxed. Works even after the ticket printed.'}
+          </p>
+          <div className="osh-pay-actions">
+            <Button
+              size="sm"
+              variant="primary"
+              type="submit"
+              disabled={busy}
+              data-testid="sheet-fee-submit"
+            >
+              Charge
+              {feeAmount.trim() && Number(feeAmount) > 0
+                ? ` ${formatMoney(Math.round(Number(feeAmount) * 100))}`
+                : ''}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setCharging(false)}>
+              Cancel
             </Button>
           </div>
         </form>

@@ -431,6 +431,17 @@ the same customer card (pinned to the original invoice's customer). Added on top
   and to any product named _install…_. The header Installation charge was already
   untaxed (§ "Step-3 charges"). New service products: set the class on the product
   page (Tax class) or the register taxes them.
+- **Charge a fee (owner 2026-10-13).** A redelivery after the wrong size went out had
+  no way to be charged: Miscellaneous Fees sat on the full page only, held one "other"
+  amount, and refused locked orders, orders on an open run and completed orders. The
+  order drawer now has **Charge a fee** (`POST /v1/orders/:id/fees`, `orders.update`):
+  pick a fee from Settings → Order fees (`ops.feePresets`; default Redelivery fee,
+  Restocking fee, Trip charge with the amount typed) or Custom…, amount editable. The fee
+  is an untaxed custom line, so fees stack; it is allowed while locked or on a run (it
+  touches neither stock nor the truck) and is counted handed-over on a delivered order.
+  A **completed** order stays closed: the fee goes on a new linked order
+  `<number>-FEE` (`-FEE2` …) holding only the fee, status fulfilled, "Fee for order"
+  in its custom info; take payment, then Complete. Audited `order.fee_charged`.
 - **No sales tax — out-of-state delivery or by hand (owner 2026-10-08).** Resolves the
   tax-exempt [DECIDE]. The register ticks **No sales tax** by itself when every goods
   line is delivered or direct-shipped to a state other than the selling store's

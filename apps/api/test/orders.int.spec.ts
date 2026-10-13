@@ -4167,6 +4167,153 @@ describe('No sales tax (owner 2026-10-08: out-of-state delivery, resale certific
   });
 });
 
+describe('Charge a fee (owner 2026-10-13: redelivery after the wrong size went out)', () => {
+  const as = () => ({
+    post: (path: string) =>
+      request(app.getHttpServer())
+        .post(path)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+    patch: (path: string) =>
+      request(app.getHttpServer())
+        .patch(path)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+    get: (path: string) =>
+      request(app.getHttpServer())
+        .get(path)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+  });
+  async function lockOrder(id: string) {
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      await drizzle(sql2)
+        .update(schema.orders)
+        .set({ lockedAt: new Date() })
+        .where(eq(schema.orders.id, id));
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+  }
+  /** A paid, delivery order holding one $100 untaxed item line (no stock needed). */
+  async function paidOrder() {
+    const o = await as()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        confirm: true,
+        lines: [
+          { lineType: 'custom', description: 'Mattress', quantity: 1, unitPriceCents: 10_000 },
+        ],
+      });
+    expect(o.status).toBe(201);
+    await as()
+      .post(`/v1/orders/${o.body.id}/payments`)
+      .send({ method: 'cash', amountCents: o.body.totalCents })
+      .expect(201);
+    return o.body as { id: string; number: string; totalCents: number };
+  }
+
+  it('fees stack as untaxed lines and open a balance due — even on a locked order', async () => {
+    const o = await paidOrder();
+    await lockOrder(o.id);
+    // The old route (Miscellaneous Fees) refuses a locked order…
+    const old = await as()
+      .patch(`/v1/orders/${o.id}`)
+      .send({ otherFeeCents: 7500, otherFeeLabel: 'Redelivery' });
+    expect(old.status).toBeGreaterThanOrEqual(400);
+    // …Charge a fee does not: it never touches stock or the truck.
+    const one = await as()
+      .post(`/v1/orders/${o.id}/fees`)
+      .send({ label: 'Redelivery fee', amountCents: 7500 });
+    expect(one.status).toBe(201);
+    expect(one.body.feeOrder).toBeNull();
+    const two = await as()
+      .post(`/v1/orders/${o.id}/fees`)
+      .send({ label: 'Trip charge', amountCents: 2500 });
+    expect(two.status).toBe(201);
+    const fees = two.body.lines.filter((l: { lineType: string }) => l.lineType === 'custom');
+    expect(fees.map((l: { description: string }) => l.description)).toEqual([
+      'Mattress',
+      'Redelivery fee',
+      'Trip charge',
+    ]);
+    expect(two.body.totalCents).toBe(o.totalCents + 7500 + 2500);
+    expect(two.body.taxCents).toBe(0);
+    expect(two.body.balanceDueCents).toBe(10_000);
+  });
+
+  it('a completed order gets a linked <number>-FEE order that takes payment and closes', async () => {
+    const o = await paidOrder();
+    await as().post(`/v1/orders/${o.id}/fulfill`).send({}).expect(201);
+    await as().post(`/v1/orders/${o.id}/complete`).send({}).expect(201);
+
+    const res = await as()
+      .post(`/v1/orders/${o.id}/fees`)
+      .send({ label: 'Redelivery fee', amountCents: 7500 });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('completed');
+    expect(res.body.totalCents).toBe(o.totalCents); // closed books untouched
+    expect(res.body.feeOrder.number).toBe(`${o.number}-FEE`);
+
+    const fee = await as().get(`/v1/orders/${res.body.feeOrder.id}`);
+    expect(fee.body.status).toBe('fulfilled');
+    expect(fee.body.customerId).toBe(customerId);
+    expect(fee.body.totalCents).toBe(7500);
+    expect(fee.body.balanceDueCents).toBe(7500);
+    expect(fee.body.customInfoJson).toEqual([{ label: 'Fee for order', value: o.number }]);
+
+    await as()
+      .post(`/v1/orders/${fee.body.id}/payments`)
+      .send({ method: 'card', cardBrand: 'visa', amountCents: 7500 })
+      .expect(201);
+    const closed = await as().post(`/v1/orders/${fee.body.id}/complete`).send({});
+    expect(closed.status).toBe(201);
+    expect(closed.body.status).toBe('completed');
+
+    const again = await as()
+      .post(`/v1/orders/${o.id}/fees`)
+      .send({ label: 'Restocking fee', amountCents: 4000 });
+    expect(again.body.feeOrder.number).toBe(`${o.number}-FEE2`);
+  });
+
+  it('refuses a blank name and a $0 fee', async () => {
+    const o = await paidOrder();
+    expect(
+      (await as().post(`/v1/orders/${o.id}/fees`).send({ label: ' ', amountCents: 100 })).status,
+    ).toBe(400);
+    expect(
+      (await as().post(`/v1/orders/${o.id}/fees`).send({ label: 'Fee', amountCents: 0 })).status,
+    ).toBe(400);
+  });
+
+  it('Settings keep the fee list; every member reads it from pos settings', async () => {
+    const bad = await as()
+      .patch('/v1/business/settings')
+      .send({ ops: { feePresets: [{ label: '', amountCents: 100 }] } });
+    expect(bad.status).toBe(400);
+    const ok = await as()
+      .patch('/v1/business/settings')
+      .send({
+        ops: {
+          feePresets: [
+            { label: 'Redelivery fee', amountCents: 7500 },
+            { label: 'Restocking fee', amountCents: 5000 },
+          ],
+        },
+      });
+    expect(ok.status).toBe(200);
+    const pos = await as().get('/v1/business/settings/pos');
+    expect(pos.body.ops.feePresets).toEqual([
+      { label: 'Redelivery fee', amountCents: 7500 },
+      { label: 'Restocking fee', amountCents: 5000 },
+    ]);
+  });
+});
+
 describe('Global omnibox search (handoff G1)', () => {
   let callerId = '';
   let callerOrderId = '';

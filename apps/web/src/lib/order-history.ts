@@ -226,8 +226,22 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
       return say(`restored list prices on ${plural(n, 'line')}`);
     }
     case 'order.update': {
-      const what = changes(b, a, names);
+      // Entries before 2026-10-13 saved only status/total as "before" and
+      // every field the screen sent as "after" — read those as "set X to Y"
+      // and drop what the screen always sends (order kind, updated at).
+      const legacy = Object.keys(b).every((k) => k === 'status' || k === 'totalCents');
+      const after = Object.fromEntries(Object.entries(a).filter(([k]) => k in b || legacy));
+      const before = Object.fromEntries(Object.entries(b).filter(([k]) => k in after));
+      const what = changes(before, after, names, ['updatedAt', ...(legacy ? ['orderKind'] : [])]);
       return say(what ? `updated the order: ${what}` : 'updated the order');
+    }
+    case 'order.fee_charged': {
+      const fee = `${String(a.label ?? 'a fee')} ${money(a.amountCents)}`.trim();
+      return say(
+        typeof a.feeOrderNumber === 'string'
+          ? `charged ${fee} on ${a.feeOrderNumber} (this order was closed)`
+          : `charged ${fee}`,
+      );
     }
     case 'order.selling_store.correct':
       return say(

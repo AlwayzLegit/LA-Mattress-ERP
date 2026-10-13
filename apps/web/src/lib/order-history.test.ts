@@ -116,3 +116,61 @@ describe('describeOrderEvent (the WE-10021 history, owner 2026-10-02)', () => {
     expect(e.text).toBe('Ronnie something new: status open → completed');
   });
 });
+
+describe('describeOrderEvent (the KO-10117 history, owner 2026-10-13)', () => {
+  it('reads an old-style update without the noise', () => {
+    const e = describeOrderEvent(
+      row({
+        action: 'order.update',
+        actorName: 'Elyse',
+        changesJson: {
+          before: { status: 'open', totalCents: 50_000 },
+          after: {
+            status: 'open',
+            orderKind: 'sales_order',
+            updatedAt: '2026-10-13T21:40:45.098Z',
+            requestedDate: '2026-10-14',
+          },
+        },
+      }),
+    );
+    expect(e.text).toBe('Elyse updated the order: delivery date 2026-10-14');
+  });
+
+  it('reads a new-style update as before → after', () => {
+    const e = describeOrderEvent(
+      row({
+        action: 'order.update',
+        actorName: 'Elyse',
+        changesJson: {
+          before: { status: 'open', totalCents: 50_000, requestedDate: '2026-10-13' },
+          after: { status: 'open', totalCents: 50_000, requestedDate: '2026-10-14' },
+        },
+      }),
+    );
+    expect(e.text).toBe('Elyse updated the order: delivery date 2026-10-13 → 2026-10-14');
+  });
+
+  it('reads a fee, and a fee on a linked order', () => {
+    expect(
+      describeOrderEvent(
+        row({
+          action: 'order.fee_charged',
+          actorName: 'Elyse',
+          changesJson: { after: { label: 'Redelivery fee', amountCents: 7500 } },
+        }),
+      ).text,
+    ).toBe('Elyse charged Redelivery fee $75.00');
+    expect(
+      describeOrderEvent(
+        row({
+          action: 'order.fee_charged',
+          actorName: 'Elyse',
+          changesJson: {
+            after: { label: 'Redelivery fee', amountCents: 7500, feeOrderNumber: 'KO-10117-FEE' },
+          },
+        }),
+      ).text,
+    ).toBe('Elyse charged Redelivery fee $75.00 on KO-10117-FEE (this order was closed)');
+  });
+});
