@@ -109,6 +109,8 @@ interface VariantDraft {
 interface Draft {
   name: string;
   secondDescription: string;
+  /** Owner 2026-10-14: the product group (QUEEN, CAKING …), now editable. */
+  group: string;
   categoryId: string;
   brandId: string;
   collectionId: string;
@@ -139,6 +141,7 @@ function toDraft(p: EditableProduct): Draft {
   return {
     name: p.name,
     secondDescription: p.secondDescription ?? '',
+    group: p.group ?? '',
     categoryId: p.categoryId ?? '',
     brandId: p.brandId ?? '',
     collectionId: p.collectionId ?? '',
@@ -265,6 +268,7 @@ export function EditProductForm({
 
   const [categories, setCategories] = useState<CategoryFlat[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
   useEffect(() => {
     void api<CategoryFlat[] | { flat: CategoryFlat[] }>('/v1/categories')
       .then((r) => setCategories(categoryList(r)))
@@ -272,6 +276,9 @@ export function EditProductForm({
     void api<Vendor[]>('/v1/vendors')
       .then(setVendors)
       .catch(() => setVendors([]));
+    void api<{ groups: { value: string }[] }>('/v1/products/facets')
+      .then((f) => setGroupOptions((f.groups ?? []).map((g) => g.value)))
+      .catch(() => setGroupOptions([]));
   }, []);
   const catOptions = useMemo(() => categoryOptions(categories), [categories]);
 
@@ -348,6 +355,8 @@ export function EditProductForm({
       if (draft.name.trim() !== b.name.trim()) patch.name = draft.name.trim();
       if (draft.secondDescription.trim() !== b.secondDescription.trim())
         patch.secondDescription = draft.secondDescription.trim() || null;
+      if (draft.group.trim().toUpperCase() !== b.group.trim().toUpperCase())
+        patch.group = draft.group.trim() || null;
       for (const key of ['categoryId', 'brandId', 'collectionId', 'taxClassId'] as const) {
         if (draft[key] !== b[key]) patch[key] = draft[key] || null;
       }
@@ -517,6 +526,24 @@ export function EditProductForm({
                 data-testid="second-description"
               />
             </Field>
+            <Field
+              label="Product group"
+              hint="STORIS-style code (QUEEN, CAKING, QUFND …). Pick one in use or type a new one."
+            >
+              <Input
+                value={draft.group}
+                list="product-group-options"
+                maxLength={40}
+                placeholder="e.g. QUEEN"
+                onChange={(e) => set('group', e.target.value.toUpperCase())}
+                data-testid="edit-group"
+              />
+              <datalist id="product-group-options">
+                {groupOptions.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
+            </Field>
             <Field label="Category">
               <Select
                 value={draft.categoryId}
@@ -634,15 +661,9 @@ export function EditProductForm({
               </Field>
             )}
           </FormGrid>
-          {(product.group || product.vendorModel) && (
+          {product.vendorModel && (
             <p className="pe-readonly" data-testid="edit-import-facts">
-              From the catalog import:{' '}
-              {[
-                product.group ? `Group ${product.group}` : null,
-                product.vendorModel ? `Vendor model ${product.vendorModel}` : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+              From the catalog import: Vendor model {product.vendorModel}
             </p>
           )}
         </Card>

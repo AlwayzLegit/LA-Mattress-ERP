@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Plus } from 'lucide-react';
 import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
@@ -44,6 +44,13 @@ export default function NewProductPage() {
   const [variants, setVariants] = useState<VariantInput[]>([{ ...blankVariant }]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Owner 2026-10-14: a new product can carry a product group too.
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  useEffect(() => {
+    void api<{ groups: { value: string }[] }>('/v1/products/facets')
+      .then((f) => setGroupOptions((f.groups ?? []).map((g) => g.value)))
+      .catch(() => setGroupOptions([]));
+  }, []);
 
   function setVariant(i: number, patch: Partial<VariantInput>) {
     setVariants((prev) => prev.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
@@ -60,6 +67,7 @@ export default function NewProductPage() {
         name: String(data.get('name') ?? ''),
         sku: productSku,
         description: String(data.get('description') ?? '') || null,
+        group: String(data.get('group') ?? '').trim() || null,
         // Owner 2026-09-28: a product saved with no priced row used to get
         // no item at all — unsellable, unstockable, no vendor, and nothing
         // on its page could fix it. Rows with a price, SKU or name are kept,
@@ -104,6 +112,24 @@ export default function NewProductPage() {
               </Field>
               <Field label="SKU (product-level, optional)">
                 <Input name="sku" />
+              </Field>
+              <Field
+                label="Product group"
+                hint="QUEEN, CAKING, QUFND … Pick one in use or type a new one."
+              >
+                <Input
+                  name="group"
+                  list="new-product-groups"
+                  maxLength={40}
+                  placeholder="e.g. QUEEN"
+                  style={{ textTransform: 'uppercase' }}
+                  data-testid="new-product-group"
+                />
+                <datalist id="new-product-groups">
+                  {groupOptions.map((g) => (
+                    <option key={g} value={g} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="Description" className="form-span">
                 <textarea className="textarea" name="description" rows={3} />

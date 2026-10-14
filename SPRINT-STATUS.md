@@ -6849,3 +6849,19 @@ Owner: add Shop Pay as a form of payment.
   every other tender (Venmo, Zelle, PayPal …) was saved there as "card"; now those go the order
   way and keep their real method.
 - Test: orders.int records a `shop_pay` payment.
+
+### Checkpoint — 2026-10-14 (Product group: dropdown filter, editable)
+
+Owner: where does Product group come from? Turn the filter into a dropdown of the groups we
+have, and make Group editable so new products can get one.
+
+- Product group is the STORIS Active Inventory "Group" column. The catalog import stores it on
+  each variant's `attributes.group`. Until now it was read-only, and products made in the ERP
+  had none.
+- Products → Advanced search → **Product group** is a dropdown of the groups in use, with
+  counts, from `/v1/products/facets`. A group from an old link still shows as chosen.
+- `PATCH /v1/products/:id` and `POST /v1/products` take `group`, stored trimmed and upper-case
+  on every variant. Blank clears it. It is audited on `product.update`.
+- The product page (General) has an editable **Product group**, offering the groups in use and
+  allowing a new code. New product has the same field.
+- Test: catalog.int (set → filter → facets; create with a group; clear). Checked in Chromium.

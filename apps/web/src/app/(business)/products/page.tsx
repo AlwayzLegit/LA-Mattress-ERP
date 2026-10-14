@@ -328,6 +328,8 @@ export default function ProductsPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [brands, setBrands] = useState<RefOption[]>([]);
   const [collections, setCollections] = useState<RefOption[]>([]);
+  // Owner 2026-10-14: Product group picks from the groups the catalog has.
+  const [groupFacets, setGroupFacets] = useState<{ value: string; count: number }[]>([]);
   const [categories, setCategories] = useState<RefOption[]>([]);
   /** Raw category rows so the Group filter can list a category's children. */
   const [catFlat, setCatFlat] = useState<CategoryFlat[]>([]);
@@ -424,6 +426,9 @@ export default function ProductsPage() {
     void api<RefOption[]>('/v1/collections')
       .then(setCollections)
       .catch(() => setCollections([]));
+    void api<{ groups: { value: string; count: number }[] }>('/v1/products/facets')
+      .then((f) => setGroupFacets(f.groups ?? []))
+      .catch(() => setGroupFacets([]));
     void api<ReasonCodeOption[]>('/v1/reason-codes?usageClass=as_is')
       .then(setAsIsReasons)
       .catch(() => setAsIsReasons([]));
@@ -742,12 +747,23 @@ export default function ProductsPage() {
               </Select>
             </Field>
             <Field label="Product group">
-              <Input
+              <Select
                 value={criteria.group}
                 onChange={(e) => setCrit('group', e.target.value)}
-                placeholder="e.g. QUEEN"
                 data-testid="criteria-group"
-              />
+              >
+                <option value="">Any</option>
+                {/* A group typed into an old link still shows as chosen. */}
+                {criteria.group &&
+                  !groupFacets.some(
+                    (g) => g.value.toLowerCase() === criteria.group.toLowerCase(),
+                  ) && <option value={criteria.group}>{criteria.group}</option>}
+                {groupFacets.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.value} ({g.count})
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field label="Purchase status">
               <Select
