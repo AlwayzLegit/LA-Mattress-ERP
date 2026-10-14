@@ -1010,6 +1010,52 @@ describe('Size and firmness (A22.2)', () => {
     );
   });
 
+  it('the product group is set on the product page and on a new product (owner 2026-10-14)', async () => {
+    // Set it on an existing product: stored upper-case on every variant.
+    const set = await request(app.getHttpServer())
+      .patch(`/v1/products/${sheetsId}`)
+      .set(h())
+      .send({ group: ' caking ' })
+      .expect(200);
+    expect(set.body.group).toBe('CAKING');
+    const byGroup = await request(app.getHttpServer())
+      .get('/v1/products?group=CAKING')
+      .set(h())
+      .expect(200);
+    expect((byGroup.body.data as { id: string }[]).map((r) => r.id)).toContain(sheetsId);
+    const facets = await request(app.getHttpServer())
+      .get('/v1/products/facets')
+      .set(h())
+      .expect(200);
+    expect(facets.body.groups).toEqual(expect.arrayContaining([{ value: 'CAKING', count: 1 }]));
+
+    // A new product can carry one from the start.
+    const created = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set(h())
+      .send({
+        sku: 'GRP-NEW',
+        name: 'Group test queen',
+        group: 'queen',
+        variants: [{ sku: 'GRP-NEW-1', priceCents: 100 }],
+      })
+      .expect(201);
+    expect(created.body.group).toBe('QUEEN');
+
+    // Clearing it removes it.
+    const cleared = await request(app.getHttpServer())
+      .patch(`/v1/products/${sheetsId}`)
+      .set(h())
+      .send({ group: '' })
+      .expect(200);
+    expect(cleared.body.group).toBeNull();
+    const gone = await request(app.getHttpServer())
+      .get('/v1/products?group=CAKING')
+      .set(h())
+      .expect(200);
+    expect((gone.body.data as { id: string }[]).map((r) => r.id)).not.toContain(sheetsId);
+  });
+
   it('a variant can be refiled or cleared from the product page', async () => {
     await request(app.getHttpServer())
       .patch(`/v1/products/variants/${sheetsVariantId}`)

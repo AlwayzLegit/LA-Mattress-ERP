@@ -117,6 +117,8 @@ interface CreateProductBody {
   brandId?: string | null;
   collectionId?: string | null;
   variants?: VariantInput[];
+  /** STORIS product group (QUEEN, CAKING …); stored on every variant. */
+  group?: string | null;
 }
 
 interface UpdateProductBody {
@@ -140,6 +142,24 @@ interface UpdateProductBody {
   // A21 General Information (D9).
   suggestedRetailCents?: number | null;
   shipping?: Partial<Record<keyof ProductShipping, number | null>> | null;
+  /**
+   * Owner 2026-10-14: the product group, editable here (it used to come
+   * only from the STORIS import). Stored on every variant's attributes;
+   * null or blank clears it.
+   */
+  group?: string | null;
+}
+
+/**
+ * A product group as stored: trimmed and upper-case like the STORIS codes
+ * (QUEEN, CAKING, QUFND), so "queen" and "QUEEN" stay one group.
+ */
+function normalizeGroup(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v !== 'string') throw new BadRequestException('group must be text');
+  const g = v.trim().toUpperCase();
+  if (g.length > 40) throw new BadRequestException('group must be 40 characters or fewer');
+  return g || null;
 }
 
 /** One row of the STORIS-shaped product list (A19). */
@@ -1055,6 +1075,7 @@ export class CatalogProductsController {
       });
     if (!p) throw new BadRequestException('failed to create product');
 
+    const createGroup = normalizeGroup(body.group);
     if (body.variants && body.variants.length > 0) {
       validateVariants(body.variants);
       await this.db.insert(schema.productVariants).values(
@@ -1066,7 +1087,12 @@ export class CatalogProductsController {
           priceCents: v.priceCents,
           costCents: v.costCents ?? null,
           barcode: v.barcode ?? null,
-          attributesJson: (v.attributesJson ?? null) as never,
+          attributesJson: (createGroup
+            ? {
+                ...((v.attributesJson as Record<string, unknown> | null) ?? {}),
+                group: createGroup,
+              }
+            : (v.attributesJson ?? null)) as never,
           ...deriveVariantSizing(v, p.name),
         })),
       );
@@ -1223,6 +1249,33 @@ export class CatalogProductsController {
         update.shippingJson = next;
         before.shipping = current;
         after.shipping = next;
+      }
+    }
+
+    if (body.group !== undefined) {
+      const next = normalizeGroup(body.group);
+      const variants = await this.db
+        .select({
+          id: schema.productVariants.id,
+          attributesJson: schema.productVariants.attributesJson,
+        })
+        .from(schema.productVariants)
+        .where(eq(schema.productVariants.productId, id));
+      const attrsOf = (a: unknown) =>
+        a && typeof a === 'object' && !Array.isArray(a) ? (a as Record<string, unknown>) : {};
+      const prior = variants.map((v) => attrsOf(v.attributesJson).group ?? null);
+      if (variants.some((_, i) => prior[i] !== next)) {
+        for (const v of variants) {
+          const attrs = { ...attrsOf(v.attributesJson) };
+          if (next) attrs.group = next;
+          else delete attrs.group;
+          await this.db
+            .update(schema.productVariants)
+            .set({ attributesJson: (Object.keys(attrs).length ? attrs : null) as never })
+            .where(eq(schema.productVariants.id, v.id));
+        }
+        before.group = prior[0] ?? null;
+        after.group = next;
       }
     }
 
