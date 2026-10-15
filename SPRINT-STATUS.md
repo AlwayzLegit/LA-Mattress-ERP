@@ -6865,3 +6865,14 @@ have, and make Group editable so new products can get one.
 - The product page (General) has an editable **Product group**, offering the groups in use and
   allowing a new code. New product has the same field.
 - Test: catalog.int (set → filter → facets; create with a group; clear). Checked in Chromium.
+
+### Checkpoint — 2026-10-15 (Print delivery ticket from the delivery page)
+
+Owner: the delivery page reached from the Deliveries calendar printed only what was on screen
+(no SKU, prices, amount due or signature). The official delivery ticket already has all of that
+(order drawer → More → Delivery ticket), but nothing linked to it from the calendar.
+
+- The delivery page header has **Print delivery ticket**. It opens the same
+  `/print/orders/:id/delivery-ticket` page, so the print lock and copy count still apply.
+  Return pickups don't show it.
+- Checked in Chromium: the button opens the ticket for the stop's order.

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { PackageCheck } from 'lucide-react';
+import { PackageCheck, Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatPhone } from '@jetnine/shared';
 import { Money } from '@/components/money';
@@ -135,9 +135,27 @@ export default function DeliveryDetailPage() {
           </>
         }
         actions={
-          <LinkButton href={`/orders/${d.orderId}`} variant="secondary" size="sm">
-            Open order
-          </LinkButton>
+          <>
+            {/* Owner 2026-10-15: the official delivery ticket (SKU, prices,
+                amount due, signature) — the same one the order's More menu
+                prints, and it counts the copy like that one does. */}
+            {d.kind !== 'return_pickup' && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() =>
+                  window.open(`/print/orders/${d.orderId}/delivery-ticket`, '_blank', 'noopener')
+                }
+                data-testid="print-delivery-ticket"
+              >
+                <Printer size={14} aria-hidden />
+                Print delivery ticket
+              </Button>
+            )}
+            <LinkButton href={`/orders/${d.orderId}`} variant="secondary" size="sm">
+              Open order
+            </LinkButton>
+          </>
         }
       />
       <Stack>
