@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { DeliveryTicketDoc, type OrderDocumentPayload } from '@/components/order-documents';
 import { PrintToolbar } from '../../../print-toolbar';
@@ -13,8 +13,21 @@ import { PrintToolbar } from '../../../print-toolbar';
  * /print/deliveries) never locks.
  */
 export default function DeliveryTicketPrintPage() {
+  // useSearchParams needs a Suspense boundary (as in /print/purchase-orders).
+  return (
+    <Suspense fallback={null}>
+      <DeliveryTicketPrint />
+    </Suspense>
+  );
+}
+
+function DeliveryTicketPrint() {
   const params = useParams<{ id: string }>();
   const id = (params?.id ?? '') as string;
+  // Owner 2026-10-15: opened from one delivery stop, the ticket is that
+  // stop's — its date on the ticket, and the print recorded against it.
+  const deliveryId = useSearchParams()?.get('deliveryId') ?? null;
+  const [routeDate, setRouteDate] = useState<string | null>(null);
   const [doc, setDoc] = useState<OrderDocumentPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
@@ -31,14 +44,19 @@ export default function DeliveryTicketPrintPage() {
         setLocked(Boolean(d.order.lockedAt));
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [id]);
+    if (deliveryId) {
+      api<{ scheduledDate: string }>(`/v1/deliveries/${deliveryId}`)
+        .then((d) => setRouteDate(d.scheduledDate))
+        .catch(() => setRouteDate(null));
+    }
+  }, [id, deliveryId]);
 
   async function printAndLock() {
     setChecks(null);
     try {
       const res = await api<{ lockedAt: string | null; copyNumber: number }>(
         `/v1/orders/${id}/delivery-ticket-print`,
-        { method: 'POST', body: JSON.stringify({}) },
+        { method: 'POST', body: JSON.stringify(deliveryId ? { deliveryId } : {}) },
       );
       setLocked(Boolean(res.lockedAt));
       setCopyNumber(res.copyNumber);
@@ -86,7 +104,7 @@ export default function DeliveryTicketPrintPage() {
       {copyNumber != null && copyNumber > 1 && (
         <p style={{ margin: 16, fontWeight: 700 }}>REPRINT — copy #{copyNumber}</p>
       )}
-      {doc && <DeliveryTicketDoc doc={doc} />}
+      {doc && <DeliveryTicketDoc doc={doc} routeDate={routeDate} />}
     </div>
   );
 }

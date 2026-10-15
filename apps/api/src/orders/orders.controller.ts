@@ -4647,12 +4647,24 @@ export class OrdersController {
    * without any lock taking effect.
    */
   @Post('orders/:id/delivery-ticket-print')
-  @RequirePermission('orders.update')
+  @RequirePermission('orders.view')
   async deliveryTicketPrint(
     @CurrentTenant() tenant: RequestTenantContext,
     @Param('id') id: string,
     @Body() body: { override?: OverrideCredentials; deliveryId?: string },
   ): Promise<{ lockedAt: Date | null; copyNumber: number }> {
+    // Owner 2026-10-15: the truck crew prints its own tickets from the
+    // delivery page. Whoever may edit the order, or complete deliveries
+    // (the Warehouse role), may print — and so lock — the ticket.
+    if (
+      !tenant.isSuperAdmin &&
+      !tenant.permissions.has('orders.update') &&
+      !tenant.permissions.has('deliveries.complete')
+    ) {
+      throw new ForbiddenException(
+        'Printing a delivery ticket needs the "Update orders" or "Mark deliveries delivered or failed" permission',
+      );
+    }
     const [order] = await this.db
       .select()
       .from(schema.orders)

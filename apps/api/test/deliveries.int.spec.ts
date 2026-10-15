@@ -38,6 +38,8 @@ let customerId = '';
 /** Mattress: 10 on hand, $1,000 flat, taxRate 0 for round numbers. */
 let mattressVariantId = '';
 let ownerCookie = '';
+let warehouseCookie = '';
+let booksCookie = '';
 
 async function resetTestDb() {
   const env = { ...process.env, DATABASE_URL: TEST_DB_URL };
@@ -95,6 +97,29 @@ async function seed() {
       status: 'active',
       acceptedAt: new Date(),
     });
+    // Owner 2026-10-15: the truck crew prints its own tickets.
+    for (const [email, roleName] of [
+      ['warehouse@deliveries-test.local', 'Warehouse'],
+      ['books@deliveries-test.local', 'Bookkeeper'],
+    ] as const) {
+      const [m] = await db
+        .insert(schema.users)
+        .values({ email, emailVerified: true, name: roleName })
+        .returning();
+      await db.insert(schema.accounts).values({
+        accountId: m!.id,
+        providerId: 'credential',
+        userId: m!.id,
+        password: passwordHash,
+      });
+      await db.insert(schema.memberships).values({
+        businessId,
+        userId: m!.id,
+        roleId: roles.get(roleName)!,
+        status: 'active',
+        acceptedAt: new Date(),
+      });
+    }
 
     const [loc] = await db
       .insert(schema.locations)
@@ -198,6 +223,8 @@ beforeAll(async () => {
   await app.init();
 
   ownerCookie = await captureCookie('owner@deliveries-test.local');
+  warehouseCookie = await captureCookie('warehouse@deliveries-test.local');
+  booksCookie = await captureCookie('books@deliveries-test.local');
 });
 
 afterAll(async () => {
@@ -884,5 +911,40 @@ describe('Delivery ticket flags — print, stale, reprint (erp-delivery-reprints
     const ok = await ownerReq().post(`/v1/orders/${orderId}/delivery-ticket-print`).send({});
     expect(ok.status).toBe(201);
     expect((await readFlags(first.body.id)).ticketFlag).toBe('P');
+  });
+});
+
+describe('Delivery ticket printing from the delivery page (owner 2026-10-15)', () => {
+  it('the Warehouse role prints the stop’s ticket; a role that can neither edit orders nor complete deliveries cannot', async () => {
+    const o = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        confirm: true,
+        lines: [{ variantId: mattressVariantId, quantity: 1 }],
+      });
+    expect(o.status).toBe(201);
+    const del = await ownerReq()
+      .post(`/v1/orders/${o.body.id}/deliveries`)
+      .send({ scheduledDate: '2030-01-15' });
+    expect(del.status).toBe(201);
+
+    const books = await request(app.getHttpServer())
+      .post(`/v1/orders/${o.body.id}/delivery-ticket-print`)
+      .set('Cookie', booksCookie)
+      .set('X-Business-Id', businessId)
+      .send({ deliveryId: del.body.id });
+    expect(books.status).toBe(403);
+
+    const crew = await request(app.getHttpServer())
+      .post(`/v1/orders/${o.body.id}/delivery-ticket-print`)
+      .set('Cookie', warehouseCookie)
+      .set('X-Business-Id', businessId)
+      .send({ deliveryId: del.body.id });
+    expect(crew.status).toBe(201);
+    expect(crew.body.copyNumber).toBe(1);
+    expect(crew.body.lockedAt).toBeTruthy();
   });
 });
