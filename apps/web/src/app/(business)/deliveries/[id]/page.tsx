@@ -144,7 +144,11 @@ export default function DeliveryDetailPage() {
                 size="sm"
                 variant="primary"
                 onClick={() =>
-                  window.open(`/print/orders/${d.orderId}/delivery-ticket`, '_blank', 'noopener')
+                  window.open(
+                    `/print/orders/${d.orderId}/delivery-ticket?deliveryId=${d.id}`,
+                    '_blank',
+                    'noopener',
+                  )
                 }
                 data-testid="print-delivery-ticket"
               >

@@ -6875,4 +6875,8 @@ Owner: the delivery page reached from the Deliveries calendar printed only what 
 - The delivery page header has **Print delivery ticket**. It opens the same
   `/print/orders/:id/delivery-ticket` page, so the print lock and copy count still apply.
   Return pickups don't show it.
+- Codex review: the button passes `?deliveryId=`, so a multi-date order prints that stop's date
+  and records the print against that stop (not the order's next live one).
+- The truck crew can print it: the print endpoint now accepts `orders.update` **or**
+  `deliveries.complete` (Warehouse has the second). Bookkeeper still gets a 403.
 - Checked in Chromium: the button opens the ticket for the stop's order.
