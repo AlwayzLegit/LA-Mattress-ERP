@@ -6880,3 +6880,36 @@ Owner: the delivery page reached from the Deliveries calendar printed only what 
 - The truck crew can print it: the print endpoint now accepts `orders.update` **or**
   `deliveries.complete` (Warehouse has the second). Bookkeeper still gets a 403.
 - Checked in Chromium: the button opens the ticket for the stop's order.
+
+### Checkpoint — 2026-10-16 (Register: unsaved new customer is called out)
+
+Owner: the register "locked up" after a card payment — Complete sale stayed grey. Production logs
+showed the new customer had been typed into the New customer form but not saved; the only cue was
+the small grey "Add a customer to complete". Three minutes later Create was clicked and the sale
+completed normally.
+
+- When the New customer form has a name or phone typed in but is not saved, the hint under
+  Complete becomes a yellow warning: "Click Create customer to finish adding <name>".
+- The form's button now reads **Create customer** (was "Create") to match.
+- e2e: `orders.spec` asserts the warning before Create and its absence after.
+
+### Checkpoint — 2026-10-16 (Register: duplicate customers + slow customer search)
+
+Owner: "Grace Schimmel" showed twice in the register search. Production logs: she was created at
+4:53 PM; at 6:17 PM her phone search found her (13-15 s per keystroke), but the New customer form
+was used anyway, and its duplicate-phone check — the all-records `/v1/search` — took **66 s**, so
+Create went through before "already exists — use them instead?" could show. The production
+database is Render basic_256mb (0.1 CPU) and was running near its limit; every phone search did a
+`regexp_replace` over every customer row.
+
+- Migration 0112: `pg_trgm` + GIN trigram indexes on the same digits-only phone / phone2
+  expressions the customer search uses, so `LIKE '%<digits>%'` is an index lookup.
+- Register duplicate check now asks the indexed `/v1/customers?q=<digits>&limit=1`, and **Create
+  customer** is disabled ("Checking phone…") until the answer is in.
+- Register customer search: 400 ms debounce and only the newest answer lands (a slow reply for
+  "310" can no longer replace the list for the full number).
+- e2e: `orders.spec` creates a customer with a phone, types the same phone again, sees the
+  duplicate warning and uses the existing record.
+- **Ops (owner):** the database plan is the main limit; a larger Render Postgres plan is the
+  biggest single speed-up. Merge the existing Grace Schimmel duplicate from her customer page
+  (Possible duplicates → Merge into this record).

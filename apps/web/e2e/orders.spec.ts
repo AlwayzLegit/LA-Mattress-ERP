@@ -107,8 +107,13 @@ test.describe('Day 2 — order writer', () => {
     await page.getByRole('button', { name: 'New customer' }).click();
     await page.getByPlaceholder('First name').fill('Dana');
     await page.getByPlaceholder('Last name').fill('Buyer');
+    // Owner 2026-10-16: typed but not saved, the register says so by name.
+    await expect(page.getByTestId('unsaved-customer-warning')).toContainText(
+      'Click Create customer to finish adding Dana Buyer',
+    );
     await page.getByTestId('create-customer').click();
     await expect(page.getByTestId('order-customer')).toContainText('Dana Buyer');
+    await expect(page.getByTestId('unsaved-customer-warning')).toHaveCount(0);
 
     // ...add the product through the popup search...
     await page.getByTestId('add-product').click();
@@ -210,9 +215,23 @@ test.describe('Day 2 — order writer', () => {
     await expect(page.getByPlaceholder('Last name')).toHaveValue('');
 
     // Create, then Change (customer detached; the panel must not remember them).
+    const freshPhone = `818${String(Date.now()).slice(-7)}`;
     await firstName.fill('Fresh');
     await page.getByPlaceholder('Last name').fill('Shopper');
+    await page.getByPlaceholder('Phone', { exact: true }).fill(freshPhone);
+    await expect(page.getByTestId('create-customer')).toHaveText('Create customer');
     await page.getByTestId('create-customer').click();
+    await expect(page.getByTestId('order-customer')).toContainText('Fresh Shopper');
+    await page.getByRole('button', { name: 'Change', exact: true }).click();
+    await openPanel();
+    await expect(firstName).toHaveValue('');
+
+    // Owner 2026-10-16: the same phone again is caught before Create, and
+    // Use existing attaches the first record instead of making a second.
+    await firstName.fill('Fresh');
+    await page.getByPlaceholder('Phone', { exact: true }).fill(freshPhone);
+    await expect(page.getByTestId('dupe-warning')).toContainText('Fresh Shopper');
+    await page.getByTestId('use-existing-customer').click();
     await expect(page.getByTestId('order-customer')).toContainText('Fresh Shopper');
     await page.getByRole('button', { name: 'Change', exact: true }).click();
     await openPanel();
