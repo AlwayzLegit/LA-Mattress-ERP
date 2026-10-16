@@ -272,6 +272,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [custOpen, setCustOpen] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingBusy, setCreatingBusy] = useState(false);
+  const [dupeChecking, setDupeChecking] = useState(false);
   const [newCust, setNewCust] = useState(EMPTY_NEW_CUSTOMER);
   const [dupeWarn, setDupeWarn] = useState<{
     id: string;
@@ -281,6 +282,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const [billDiffers, setBillDiffers] = useState(false);
   const [newBill, setNewBill] = useState(EMPTY_ADDRESS);
   const custTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const custSeq = useRef(0);
   const customerInput = useRef<HTMLInputElement>(null);
 
   // --- ship to ---
@@ -376,20 +378,37 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   // ---------------------------------------------------------------- effects
 
+  // Owner 2026-10-16: the duplicate check used the all-records search and
+  // took 66 s on a busy night, so Create went through before the warning
+  // showed and a customer was made twice. It now asks the indexed customer
+  // search, and Create waits until the answer is in.
   useEffect(() => {
     const digits = newCust.phone.replace(/\D/g, '');
     if (!creatingCustomer || digits.length < 7) {
       setDupeWarn(null);
+      setDupeChecking(false);
       return;
     }
+    let stale = false;
+    setDupeChecking(true);
     const t = setTimeout(() => {
-      void api<{ customers: { id: string; name: string; phone: string | null }[] }>(
-        `/v1/search?q=${encodeURIComponent(digits)}`,
-      )
-        .then((r) => setDupeWarn(r.customers[0] ?? null))
-        .catch(() => setDupeWarn(null));
+      void api<{ data: CustomerHit[] }>(`/v1/customers?q=${encodeURIComponent(digits)}&limit=1`)
+        .then((r) => {
+          if (stale) return;
+          const c = r.data[0];
+          setDupeWarn(c ? { id: c.id, name: customerName(c), phone: c.phone } : null);
+        })
+        .catch(() => {
+          if (!stale) setDupeWarn(null);
+        })
+        .finally(() => {
+          if (!stale) setDupeChecking(false);
+        });
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
   }, [creatingCustomer, newCust.phone]);
 
   // §7: while writing a delivery sale, show how many stops the chosen day has left.
@@ -542,6 +561,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   // Universal customer search — debounced.
   useEffect(() => {
     if (custTimer.current) clearTimeout(custTimer.current);
+    const seq = ++custSeq.current;
     const q = custQuery.trim();
     if (q.length < 2) {
       setCustHits([]);
@@ -552,15 +572,18 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         `/v1/customers?q=${encodeURIComponent(q)}&limit=20`,
       )
         .then((r) => {
+          // A slow answer for "310" must not replace the one for the full number.
+          if (seq !== custSeq.current) return;
           setCustHits(r.data);
           setCustMore(r.nextCursor != null || r.data.length >= 20);
           setCustOpen(true);
         })
         .catch(() => {
+          if (seq !== custSeq.current) return;
           setCustHits([]);
           setCustMore(false);
         });
-    }, 250);
+    }, 400);
   }, [custQuery]);
 
   // Sourcing: untouched lines follow the order's fulfillment / store / default.
@@ -2434,6 +2457,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                 dupeWarn={dupeWarn}
                 onUseExisting={(id) => void attachExistingCustomer(id)}
                 busy={creatingBusy}
+                checking={dupeChecking}
                 onCancel={() => {
                   setCreatingCustomer(false);
                   clearNewCustomer();
@@ -3568,6 +3592,7 @@ function NewCustomerForm({
   dupeWarn,
   onUseExisting,
   busy,
+  checking,
   onCancel,
   onCreate,
 }: {
@@ -3585,6 +3610,8 @@ function NewCustomerForm({
   dupeWarn: { id: string; name: string; phone: string | null } | null;
   onUseExisting: (id: string) => void;
   busy: boolean;
+  /** The duplicate-phone check is still out — Create waits for it. */
+  checking: boolean;
   onCancel: () => void;
   onCreate: () => void;
 }) {
@@ -3765,8 +3792,13 @@ function NewCustomerForm({
         <Button disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
-        <Button variant="primary" data-testid="create-customer" disabled={busy} onClick={onCreate}>
-          {busy ? 'Creating…' : 'Create customer'}
+        <Button
+          variant="primary"
+          data-testid="create-customer"
+          disabled={busy || checking}
+          onClick={onCreate}
+        >
+          {busy ? 'Creating…' : checking ? 'Checking phone…' : 'Create customer'}
         </Button>
       </div>
     </div>
