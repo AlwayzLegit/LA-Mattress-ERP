@@ -107,8 +107,13 @@ test.describe('Day 2 — order writer', () => {
     await page.getByRole('button', { name: 'New customer' }).click();
     await page.getByPlaceholder('First name').fill('Dana');
     await page.getByPlaceholder('Last name').fill('Buyer');
+    // Owner 2026-10-16: typed but not saved, the register says so by name.
+    await expect(page.getByTestId('unsaved-customer-warning')).toContainText(
+      'Click Create customer to finish adding Dana Buyer',
+    );
     await page.getByTestId('create-customer').click();
     await expect(page.getByTestId('order-customer')).toContainText('Dana Buyer');
+    await expect(page.getByTestId('unsaved-customer-warning')).toHaveCount(0);
 
     // ...add the product through the popup search...
     await page.getByTestId('add-product').click();

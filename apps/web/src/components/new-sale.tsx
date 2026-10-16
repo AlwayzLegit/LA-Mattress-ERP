@@ -1886,6 +1886,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         : codActive && totals.paidCents === 0
           ? 'Complete — COD'
           : 'Complete with balance';
+  // Owner 2026-10-16: a new customer typed into the form but never saved
+  // left Complete greyed out behind a small grey hint, and the register
+  // looked frozen. Name them and say which button finishes the job.
+  const unsavedCustomerName =
+    !customer && creatingCustomer
+      ? `${newCust.firstName} ${newCust.lastName}`.trim() ||
+        (newCust.phone.trim() ? formatPhone(newCust.phone) : '')
+      : '';
   const completeHint = isExchange
     ? !exchangeOriginal
       ? 'Loading the original order…'
@@ -1899,7 +1907,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               : 'Receives the return and settles the credit — collect from the exchange page'
             : 'Writes the exchange now; settle when the truck brings the goods back'
     : !customer
-      ? 'Add a customer to complete'
+      ? unsavedCustomerName
+        ? `Click Create customer to finish adding ${unsavedCustomerName}`
+        : 'Add a customer to complete'
       : lines.length === 0
         ? ' '
         : needsMoney
@@ -3186,7 +3196,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   </div>
                 </>
               )}
-              <div className="reg-hint">{completeHint}</div>
+              {unsavedCustomerName && !isExchange ? (
+                <Alert tone="warning" data-testid="unsaved-customer-warning">
+                  {completeHint}
+                </Alert>
+              ) : (
+                <div className="reg-hint">{completeHint}</div>
+              )}
             </section>
           ) : (
             <section className="reg-card reg-done" aria-label="Sale complete">
@@ -3750,7 +3766,7 @@ function NewCustomerForm({
           Cancel
         </Button>
         <Button variant="primary" data-testid="create-customer" disabled={busy} onClick={onCreate}>
-          {busy ? 'Creating…' : 'Create'}
+          {busy ? 'Creating…' : 'Create customer'}
         </Button>
       </div>
     </div>
