@@ -7269,3 +7269,15 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
 - `deliveries.int.spec.ts`: added line rides the same stop (and a second
   schedule call says nothing is left), raised quantity joins, take-with
   leaves, promised date books then moves the stop, quote confirm books.
+
+### Checkpoint — 2026-10-16 (Register: unsaved new customer is called out)
+
+Owner: the register "locked up" after a card payment — Complete sale stayed grey. Production logs
+showed the new customer had been typed into the New customer form but not saved; the only cue was
+the small grey "Add a customer to complete". Three minutes later Create was clicked and the sale
+completed normally.
+
+- When the New customer form has a name or phone typed in but is not saved, the hint under
+  Complete becomes a yellow warning: "Click Create customer to finish adding <name>".
+- The form's button now reads **Create customer** (was "Create") to match.
+- e2e: `orders.spec` asserts the warning before Create and its absence after.
