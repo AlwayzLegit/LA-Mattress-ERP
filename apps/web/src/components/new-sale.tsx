@@ -3190,7 +3190,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             </section>
           ) : (
             <section className="reg-card reg-done" aria-label="Sale complete">
-              <p className="reg-done-line">
+              <div className="reg-done-line">
                 <h2 className="reg-done-title">Sale complete</h2>{' '}
                 {lines.filter((l) => l.lineType !== 'custom').length} line
                 {lines.filter((l) => l.lineType !== 'custom').length === 1 ? '' : 's'}
@@ -3203,7 +3203,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   : fulfillment === 'will_call'
                     ? ' Held for the customer — they will call when ready.'
                     : ''}
-              </p>
+              </div>
               {done!.splitOrders && done!.splitOrders.length > 0 && (
                 <Alert tone="info" data-testid="split-siblings">
                   Backordered lines split into{' '}
