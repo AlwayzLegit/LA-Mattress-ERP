@@ -47,6 +47,7 @@ export function LinkButton({
   kbd,
   className,
   children,
+  prefetch = false,
   ...props
 }: {
   href: string;
@@ -55,10 +56,17 @@ export function LinkButton({
   kbd?: string;
   className?: string;
   children: ReactNode;
+  /**
+   * Off by default: every (business) route is dynamic, so a prefetch is a
+   * server round trip per visible link (a list page renders dozens). Opt in
+   * for the one or two links a user is about to click.
+   */
+  prefetch?: boolean;
 } & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       {...props}
       className={cx('btn', variantClass(variant), size === 'sm' && 'btn-sm', className)}
     >
