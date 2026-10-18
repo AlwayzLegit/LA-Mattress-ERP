@@ -53,6 +53,7 @@ export function Sidebar({
       <nav className="nav" aria-label="Main">
         <Link
           href={HOME.href}
+          prefetch={false}
           onClick={onNavigate}
           className={`nav-item${isActiveHref(pathname, HOME.href) ? ' is-active' : ''}`}
           aria-current={isActiveHref(pathname, HOME.href) ? 'page' : undefined}
@@ -75,6 +76,7 @@ export function Sidebar({
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={false}
                       onClick={onNavigate}
                       className={`nav-item${active ? ' is-active' : ''}`}
                       aria-current={active ? 'page' : undefined}

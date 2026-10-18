@@ -449,6 +449,7 @@ export function OrdersBook({ children }: { children?: ReactNode }) {
         <>
           <Link
             href={`/orders/${r.id}${writeFilters(f)}`}
+            prefetch={false}
             className="ob-num"
             data-testid="order-number-link"
             onClick={(e) => e.stopPropagation()}
