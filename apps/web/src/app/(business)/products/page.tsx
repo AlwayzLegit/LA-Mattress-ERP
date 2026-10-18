@@ -162,6 +162,7 @@ const FIXED_BEFORE_STORES: Column[] = [
     render: (p) => (
       <Link
         href={`/products/${p.id}`}
+        prefetch={false}
         className="pb-sku"
         data-testid="product-link"
         onClick={(e) => e.stopPropagation()}
@@ -182,7 +183,12 @@ const FIXED_BEFORE_STORES: Column[] = [
     label: 'Description',
     sort: 'name',
     render: (p) => (
-      <Link href={`/products/${p.id}`} className="pb-name" onClick={(e) => e.stopPropagation()}>
+      <Link
+        href={`/products/${p.id}`}
+        prefetch={false}
+        className="pb-name"
+        onClick={(e) => e.stopPropagation()}
+      >
         {p.name}
       </Link>
     ),
