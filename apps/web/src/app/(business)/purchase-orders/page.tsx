@@ -45,6 +45,25 @@ interface PoRow {
 }
 
 type SuggestionLine = ReorderSuggestion & { vendorSku: string | null };
+
+/**
+ * The documents waiting on a suggestion: each order once, then each
+ * draft transfer the origin cannot ship (owner 2026-10-21 — a floor
+ * model on a transfer that must be ordered first shows here too).
+ */
+function waitingRefs(l: SuggestionLine): { href: string; label: string; title?: string }[] {
+  const orders = [...new Map((l.waitingOrders ?? []).map((w) => [w.orderId, w])).values()].map(
+    (w) => ({ href: `/orders/${w.orderId}`, label: w.orderNumber }),
+  );
+  const transfers = [
+    ...new Map((l.waitingTransfers ?? []).map((w) => [w.transferId, w])).values(),
+  ].map((w) => ({
+    href: `/transfers/${w.transferId}`,
+    label: w.transferNumber,
+    title: `Transfer ${w.fromLocationName ?? '?'} → ${w.toLocationName ?? '?'}, waiting on stock at ${w.fromLocationName ?? 'the origin'}`,
+  }));
+  return [...orders, ...transfers];
+}
 interface SuggestionGroup {
   vendorId: string | null;
   vendorName: string | null;
@@ -341,20 +360,17 @@ export default function PurchaseOrdersPage() {
                                 <>
                                   <strong>{l.waitingQty}</strong>
                                   <span className="muted"> · </span>
-                                  {[
-                                    ...new Map(
-                                      (l.waitingOrders ?? []).map((w) => [w.orderId, w]),
-                                    ).values(),
-                                  ]
+                                  {waitingRefs(l)
                                     .slice(0, 3)
                                     .map((w, i) => (
-                                      <span key={w.orderId}>
+                                      <span key={w.href}>
                                         {i > 0 && ', '}
-                                        <Link href={`/orders/${w.orderId}`}>{w.orderNumber}</Link>
+                                        <Link href={w.href} title={w.title}>
+                                          {w.label}
+                                        </Link>
                                       </span>
                                     ))}
-                                  {new Set((l.waitingOrders ?? []).map((w) => w.orderId)).size >
-                                    3 && <span className="muted"> …</span>}
+                                  {waitingRefs(l).length > 3 && <span className="muted"> …</span>}
                                 </>
                               ) : (
                                 <span className="muted">—</span>

@@ -294,7 +294,15 @@ export default function TransferDetailPage() {
               </form>
             </Card>
           ) : (
-            <Card title="Lines" flush>
+            <Card
+              title="Lines"
+              flush
+              description={
+                isDraft
+                  ? `A draft ships once ${t.fromLocationName ?? 'the origin'} has every unit on hand: print the ticket, then Ship transfer. Until the stock is there the lines wait under Purchasing → Reorder suggestions, linked to this transfer, so the buyer can order them.`
+                  : undefined
+              }
+            >
               {linesTable}
             </Card>
           )}

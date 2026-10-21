@@ -13,7 +13,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, or, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import {
@@ -36,7 +36,6 @@ import {
   type PageResponse,
 } from '../common/pagination';
 import { isUniqueViolation } from '../common/db-errors';
-import { vendorMatchFor } from '../common/vendor-match';
 import { DRIZZLE } from '../database/database.module';
 import { mergeShipping, parseShipping, type ProductShipping } from './product-shipping';
 import {
@@ -49,6 +48,7 @@ import {
 } from './product-stock';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import { loadCategoryIndex } from './category-tree';
+import { productFilters } from './product-filters';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
 /** Connector syncs write import batches under their provider name. */
@@ -380,7 +380,6 @@ export class CatalogProductsController {
     @Query('costMax') costMaxQ?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
-    const includeInactive = includeInactiveStr === '1' || includeInactiveStr === 'true';
     const storeSort = /^available:([0-9a-f-]{36})$/i.exec(sortRaw ?? '')?.[1] ?? null;
     const sortKey = (PRODUCT_SORT_KEYS as readonly string[]).includes(sortRaw ?? '')
       ? (sortRaw as ProductSortKey)
@@ -403,118 +402,26 @@ export class CatalogProductsController {
       }
       return sortKey ? sortProductRows(rows, sortKey, dir) : rows;
     };
-    const filters: ReturnType<typeof and>[] = [];
-    if (!includeInactive) filters.push(eq(schema.products.isActive, true));
-    const availAt = sql`(il.on_hand - il.reserved - il.floor_sample)`;
-    const levelsOf = sql`FROM inventory_levels il INNER JOIN product_variants v ON v.id = il.variant_id WHERE v.product_id = ${schema.products.id}`;
-    if (stockQ === 'anywhere') {
-      filters.push(sql`EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
-    } else if (stockQ === 'out') {
-      filters.push(sql`NOT EXISTS (SELECT 1 ${levelsOf} AND ${availAt} > 0)`);
-    } else if (stockQ === 'short') {
-      // Short somewhere: a store at zero with units reserved or waiting on
-      // an open order, or a store under its own minimum.
-      filters.push(
-        sql`(EXISTS (SELECT 1 ${levelsOf} AND ((${availAt} <= 0 AND il.reserved > 0) OR (il.reorder_point IS NOT NULL AND ${availAt} < il.reorder_point)))
-          OR EXISTS (SELECT 1 FROM order_lines ol INNER JOIN orders o ON o.id = ol.order_id INNER JOIN product_variants v2 ON v2.id = ol.variant_id
-            WHERE v2.product_id = ${schema.products.id} AND o.status IN ('open','partially_fulfilled') AND ol.line_type = 'stock'
-              AND ol.quantity - ol.qty_reserved - ol.qty_fulfilled > 0))`,
-      );
-    } else if (stockQ) {
-      throw new BadRequestException('stock must be one of anywhere, short, out');
-    }
-    const cents = (raw: string | undefined, name: string): number | null => {
-      if (raw == null || raw === '') return null;
-      const n = Number(raw);
-      if (!Number.isInteger(n) || n < 0)
-        throw new BadRequestException(`${name} must be a non-negative integer of cents`);
-      return n;
-    };
-    const priceMin = cents(priceMinQ, 'priceMin');
-    const priceMax = cents(priceMaxQ, 'priceMax');
-    if (priceMin != null || priceMax != null) {
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.priceCents} >= ${priceMin ?? 0} AND ${schema.productVariants.priceCents} <= ${priceMax ?? 2_147_483_647})`,
-      );
-    }
-    const costMin = cents(costMinQ, 'costMin');
-    const costMax = cents(costMaxQ, 'costMax');
-    if (costMin != null || costMax != null) {
-      if (!(tenant.isSuperAdmin || tenant.permissions.has('products.cost.view'))) {
-        throw new ForbiddenException('Filtering by cost needs product cost access');
-      }
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.costCents} IS NOT NULL AND ${schema.productVariants.costCents} >= ${costMin ?? 0} AND ${schema.productVariants.costCents} <= ${costMax ?? 2_147_483_647})`,
-      );
-    }
-    if (categoryId) {
-      // A22.1: categories nest — picking "Mattresses" returns the hybrids too.
-      const categoryIndex = await loadCategoryIndex(this.db, tenant.businessId!);
-      filters.push(inArray(schema.products.categoryId, categoryIndex.treeIds(categoryId)));
-    }
-    // Vendor (owner 2026-09-02): the vendors page's "products we carry"
-    // count opens here. Same rule as the Add Product popup.
-    if (vendorId) {
-      const match = await vendorMatchFor(this.db, tenant.businessId!, vendorId);
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} LEFT JOIN ${schema.brands} ON ${schema.brands.id} = ${schema.products.brandId} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${match})`,
-      );
-    }
-    // A21 D13: each criterion narrows every browse mode below.
-    const contains = (v: string) => `%${v.trim()}%`;
-    if (skuQ?.trim()) {
-      filters.push(
-        sql`(${schema.products.sku} ILIKE ${contains(skuQ)} OR EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.sku} ILIKE ${contains(skuQ)}))`,
-      );
-    }
-    if (nameQ?.trim()) {
-      filters.push(
-        sql`(${schema.products.name} ILIKE ${contains(nameQ)} OR ${schema.products.secondDescription} ILIKE ${contains(nameQ)})`,
-      );
-    }
-    if (brandId) filters.push(eq(schema.products.brandId, brandId));
-    if (collectionId) filters.push(eq(schema.products.collectionId, collectionId));
-    if (vendorModelQ?.trim()) {
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.vendorSku} ILIKE ${contains(vendorModelQ)})`,
-      );
-    }
-    if (groupQ?.trim()) {
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND lower(${schema.productVariants.attributesJson} ->> 'group') = lower(${groupQ.trim()}))`,
-      );
-    }
-    // A22.2: size and firmness are variant columns now — any spelling
-    // ("cal king", "California King", "CK") resolves to the canonical one.
-    if (sizeQ?.trim()) {
-      const size = normalizeSize(sizeQ);
-      if (!size) throw new BadRequestException(`size must be one of: ${MATTRESS_SIZES.join(', ')}`);
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.size} = ${size})`,
-      );
-    }
-    if (firmnessQ?.trim()) {
-      const firmness = normalizeFirmness(firmnessQ);
-      if (!firmness) {
-        throw new BadRequestException(`firmness must be one of: ${FIRMNESS_LEVELS.join(', ')}`);
-      }
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.productVariants} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.productVariants.firmness} = ${firmness})`,
-      );
-    }
-    if (purchaseStatusQ) {
-      if (!(PRODUCT_PURCHASE_STATUSES as readonly string[]).includes(purchaseStatusQ)) {
-        throw new BadRequestException(
-          `purchaseStatus must be one of ${PRODUCT_PURCHASE_STATUSES.join(', ')}`,
-        );
-      }
-      filters.push(eq(schema.products.purchaseStatus, purchaseStatusQ));
-    }
-    if (asIsReasonCodeId) {
-      filters.push(
-        sql`EXISTS (SELECT 1 FROM ${schema.asIsItems} INNER JOIN ${schema.productVariants} ON ${schema.productVariants.id} = ${schema.asIsItems.variantId} WHERE ${schema.productVariants.productId} = ${schema.products.id} AND ${schema.asIsItems.status} = 'pending_review' AND ${schema.asIsItems.reasonCodeId} = ${asIsReasonCodeId})`,
-      );
-    }
+    const filters: SQL[] = await productFilters(this.db, tenant, {
+      includeInactive: includeInactiveStr,
+      categoryId,
+      vendorId,
+      sku: skuQ,
+      name: nameQ,
+      brandId,
+      vendorModel: vendorModelQ,
+      collectionId,
+      group: groupQ,
+      size: sizeQ,
+      firmness: firmnessQ,
+      purchaseStatus: purchaseStatusQ,
+      asIsReasonCodeId,
+      stock: stockQ,
+      priceMin: priceMinQ,
+      priceMax: priceMaxQ,
+      costMin: costMinQ,
+      costMax: costMaxQ,
+    });
 
     if (q && q.trim().length > 0) {
       // Search returns ts_rank-ordered results — single page, no cursor.

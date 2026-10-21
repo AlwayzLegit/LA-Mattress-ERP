@@ -2202,6 +2202,7 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
             stockQty: number;
             suggestedQty: number;
             waitingOrders: { orderLineId: string; orderNumber: string; quantity: number }[];
+            waitingTransfers: { transferId: string; transferNumber: string; quantity: number }[];
           }[],
       )
       .find((l: { variantId: string }) => l.variantId === variantId);
@@ -2379,5 +2380,61 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
     const svcId = product.body.variants[0].id;
     await sellUnstocked(svcId, 'KO-20003', 1);
     expect(await suggestionFor(svcId)).toBeUndefined();
+  });
+
+  it('a draft transfer the origin cannot ship waits under its vendor, linked to the transfer (owner 2026-10-21)', async () => {
+    const [outlet] = await withDb((db) =>
+      db
+        .insert(schema.locations)
+        .values({ businessId, name: 'Outlet', timezone: 'America/New_York' })
+        .returning(),
+    );
+    const product = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        name: 'QUEEN BIRCH NATURAL',
+        sku: 'HEBS50-6080',
+        variants: [{ sku: 'HEBS50-6080', priceCents: 129_900, costCents: 60_000 }],
+      })
+      .expect(201);
+    const birchId = product.body.variants[0].id;
+    await request(app.getHttpServer())
+      .patch(`/v1/products/variants/${birchId}/reorder`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({ reorderPoint: 0, preferredVendorId: vendorId })
+      .expect(200);
+    // Nothing on hand anywhere: the floor model has to be bought first.
+    const xfer = await request(app.getHttpServer())
+      .post('/v1/stock-transfers')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        fromLocationId: locationId,
+        toLocationId: outlet!.id,
+        transferType: 'floor_sample',
+        lines: [{ variantId: birchId, quantity: 1 }],
+      })
+      .expect(201);
+    expect(xfer.body.status).toBe('draft');
+    const s = await suggestionFor(birchId);
+    expect(s).toMatchObject({ waitingQty: 1, customerQty: 1, stockQty: 0, suggestedQty: 1 });
+    expect(s.waitingOrders).toEqual([]);
+    expect(s.waitingTransfers).toEqual([
+      expect.objectContaining({
+        transferId: xfer.body.id,
+        transferNumber: xfer.body.number,
+        quantity: 1,
+      }),
+    ]);
+    // Once the origin holds the unit the transfer can ship: nothing to buy.
+    await withDb((db) =>
+      db
+        .insert(schema.inventoryLevels)
+        .values({ businessId, variantId: birchId, locationId, onHand: 1 }),
+    );
+    expect(await suggestionFor(birchId)).toBeUndefined();
   });
 });

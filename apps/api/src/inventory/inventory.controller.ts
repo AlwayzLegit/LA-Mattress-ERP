@@ -11,7 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -19,7 +19,10 @@ import {
   AS_IS_NON_SELLABLE_CONDITIONS,
   loadProductStockByLocation,
   type StockTotals,
+  loadProductStockTotals,
 } from '../catalog/product-stock';
+import { loadCategoryIndex } from '../catalog/category-tree';
+import { productFilters } from '../catalog/product-filters';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -31,7 +34,6 @@ import {
   timestampCursorWhere,
   type PageResponse,
 } from '../common/pagination';
-import { vendorMatchFor } from '../common/vendor-match';
 import { ExceptionsService } from '../controls/exceptions.service';
 import {
   SecurityOverrideService,
@@ -83,6 +85,26 @@ interface LevelRow {
   updatedAt: Date;
   /** False for a row that exists only because of As-Is pieces (no stock level to bin). */
   hasLevel: boolean;
+  // The Products browser's columns (owner 2026-10-21: Stock by location
+  // carries every column the Products tab has), per row.
+  categoryName: string | null;
+  categoryPath: string | null;
+  brandName: string | null;
+  collectionName: string | null;
+  vendorName: string | null;
+  vendorModel: string | null;
+  group: string | null;
+  size: string | null;
+  firmness: string | null;
+  priceCents: number | null;
+  /** Null without product cost access, or when no cost is on file. */
+  costCents: number | null;
+  purchaseStatus: string;
+  productActive: boolean;
+  /** Across every location. */
+  companyOnHand: number;
+  companyAvailable: number;
+  netOnPo: number;
 }
 
 interface MovementRow {
@@ -178,27 +200,53 @@ export class InventoryController {
   @Get('levels')
   @RequirePermission('inventory.view')
   async levels(
-    @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query() query: Record<string, string | undefined>,
     @Query('locationId') locationId?: string,
     @Query('q') q?: string,
-    @Query('vendorId') vendorId?: string,
   ): Promise<LevelRow[]> {
-    // Product filters shared by the stock rows and the As-Is rows below;
-    // the location filter is applied to each table on its own.
-    const filters = [];
-    // Vendor (owner 2026-09-02): the vendors page's "in inventory" count
-    // opens here, across every location. Same rule as the Add Product popup.
-    if (vendorId) filters.push(await vendorMatchFor(this.db, _tenant.businessId!, vendorId));
-    const query = q?.trim();
-    if (query) {
+    const businessId = tenant.businessId!;
+    const canSeeCost = tenant.isSuperAdmin || tenant.permissions.has('products.cost.view');
+    // Product filters shared with the Products browser (owner 2026-10-21):
+    // category, size, stock, vendor and the Advanced-search criteria mean
+    // the same thing here. `activeOnly=1` hides retired products the way
+    // the browser does by default; other callers keep seeing every row
+    // that holds stock. The location filter is applied to each table on
+    // its own.
+    const filters: SQL[] = await productFilters(this.db, tenant, {
+      ...query,
+      includeInactive: query.activeOnly === '1' ? '0' : '1',
+    });
+    const search = q?.trim();
+    if (search) {
       // Same tsvector the catalog search uses — covers product name,
       // variant SKU, and barcode in one predicate.
-      const tsq = sql`websearch_to_tsquery('simple', ${query})`;
+      const tsq = sql`websearch_to_tsquery('simple', ${search})`;
       filters.push(
         sql`(${schema.productVariants.searchTsv} @@ ${tsq}
              OR ${schema.products.searchTsv} @@ ${tsq})`,
       );
     }
+    const productCols = {
+      productId: schema.products.id,
+      productName: schema.products.name,
+      variantSku: schema.productVariants.sku,
+      variantName: schema.productVariants.name,
+      variantBarcode: schema.productVariants.barcode,
+      categoryId: schema.products.categoryId,
+      categoryName: schema.categories.name,
+      brandName: schema.brands.name,
+      collectionName: schema.collections.name,
+      vendorName: schema.vendors.name,
+      vendorModel: schema.productVariants.vendorSku,
+      group: sql<string | null>`${schema.productVariants.attributesJson} ->> 'group'`,
+      size: schema.productVariants.size,
+      firmness: schema.productVariants.firmness,
+      priceCents: schema.productVariants.priceCents,
+      costCents: schema.productVariants.costCents,
+      purchaseStatus: schema.products.purchaseStatus,
+      productActive: schema.products.isActive,
+    };
     const where = and(
       locationId ? eq(schema.inventoryLevels.locationId, locationId) : undefined,
       ...filters,
@@ -207,11 +255,7 @@ export class InventoryController {
       .select({
         variantId: schema.inventoryLevels.variantId,
         locationId: schema.inventoryLevels.locationId,
-        productId: schema.products.id,
-        productName: schema.products.name,
-        variantSku: schema.productVariants.sku,
-        variantName: schema.productVariants.name,
-        variantBarcode: schema.productVariants.barcode,
+        ...productCols,
         onHand: schema.inventoryLevels.onHand,
         reserved: schema.inventoryLevels.reserved,
         floorSample: schema.inventoryLevels.floorSample,
@@ -226,6 +270,9 @@ export class InventoryController {
       )
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+      .leftJoin(schema.collections, eq(schema.collections.id, schema.products.collectionId))
+      .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
       .leftJoin(schema.storageBins, eq(schema.storageBins.id, schema.inventoryLevels.storageBinId))
       .where(where)
       .orderBy(asc(schema.products.name), asc(schema.productVariants.sku));
@@ -238,11 +285,7 @@ export class InventoryController {
       .select({
         variantId: schema.asIsItems.variantId,
         locationId: schema.asIsItems.locationId,
-        productId: schema.products.id,
-        productName: schema.products.name,
-        variantSku: schema.productVariants.sku,
-        variantName: schema.productVariants.name,
-        variantBarcode: schema.productVariants.barcode,
+        ...productCols,
         onHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
         nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])}), 0)::int`,
         updatedAt: sql<Date>`max(${schema.asIsItems.createdAt})`,
@@ -251,6 +294,9 @@ export class InventoryController {
       .innerJoin(schema.productVariants, eq(schema.productVariants.id, schema.asIsItems.variantId))
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+      .leftJoin(schema.collections, eq(schema.collections.id, schema.products.collectionId))
+      .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
       .where(
         and(
           eq(schema.asIsItems.status, 'pending_review'),
@@ -263,20 +309,63 @@ export class InventoryController {
         schema.asIsItems.locationId,
         schema.products.id,
         schema.productVariants.id,
+        schema.categories.name,
+        schema.brands.name,
+        schema.collections.name,
+        schema.vendors.name,
       );
     const key = (variantId: string, locId: string) => `${variantId}:${locId}`;
     const asIsBy = new Map(asIs.map((a) => [key(a.variantId, a.locationId), a]));
+    const productIds = [...new Set([...rows, ...asIs].map((r) => r.productId))];
+    const [categoryIndex, totals] = await Promise.all([
+      loadCategoryIndex(this.db, businessId),
+      loadProductStockTotals(this.db, businessId, productIds),
+    ]);
+    const describe = (r: (typeof rows)[number] | (typeof asIs)[number]) => {
+      const t = totals.get(r.productId);
+      return {
+        productId: r.productId,
+        productName: r.productName,
+        variantSku: r.variantSku,
+        variantName: r.variantName,
+        variantBarcode: r.variantBarcode,
+        categoryName: r.categoryName,
+        categoryPath: categoryIndex.pathOf(r.categoryId),
+        brandName: r.brandName,
+        collectionName: r.collectionName,
+        vendorName: r.vendorName,
+        vendorModel: r.vendorModel,
+        group: r.group,
+        size: r.size,
+        firmness: r.firmness,
+        priceCents: r.priceCents,
+        costCents: canSeeCost ? (r.costCents ?? null) : null,
+        purchaseStatus: r.purchaseStatus,
+        productActive: r.productActive,
+        companyOnHand: t?.onHand ?? 0,
+        companyAvailable: t?.available ?? 0,
+        netOnPo: t?.netOnPo ?? 0,
+      };
+    };
     const out: LevelRow[] = rows.map((r) => {
       const a = asIsBy.get(key(r.variantId, r.locationId));
       asIsBy.delete(key(r.variantId, r.locationId));
       const asIsOnHand = a?.onHand ?? 0;
       const asIsNonSellable = a?.nonSellable ?? 0;
       return {
-        ...r,
+        variantId: r.variantId,
+        locationId: r.locationId,
+        ...describe(r),
+        onHand: r.onHand,
+        reserved: r.reserved,
+        floorSample: r.floorSample,
         available: Math.max(0, r.onHand - r.reserved - r.floorSample),
         asIsOnHand,
         asIsAvailable: Math.max(0, asIsOnHand - asIsNonSellable),
         asIsNonSellable,
+        storageBinId: r.storageBinId,
+        storageBinCode: r.storageBinCode,
+        updatedAt: r.updatedAt,
         hasLevel: true,
       };
     });
@@ -284,11 +373,7 @@ export class InventoryController {
       out.push({
         variantId: a.variantId,
         locationId: a.locationId,
-        productId: a.productId,
-        productName: a.productName,
-        variantSku: a.variantSku,
-        variantName: a.variantName,
-        variantBarcode: a.variantBarcode,
+        ...describe(a),
         onHand: 0,
         reserved: 0,
         floorSample: 0,

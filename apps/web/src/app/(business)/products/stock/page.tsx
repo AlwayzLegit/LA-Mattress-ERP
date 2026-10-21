@@ -1,10 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardList, PackageCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { CsvImport } from '@/components/csv-import';
+import {
+  productDetailColumns,
+  productIdentityColumns,
+  type ProductColumnFields,
+} from '@/components/product-columns';
+import { ProductFilterBar, useProductFilters } from '@/components/product-filters';
 import { ProductsNav } from '@/components/products-nav';
 import { ReassignReservationDialog } from '@/components/reassign-reservation-dialog';
 import { StockAdjustmentDialog } from '@/components/stock-adjustment-dialog';
@@ -16,27 +23,34 @@ import {
   type ColumnDef,
   ColumnHeadRow,
   EmptyState,
+  Field,
   Input,
   LinkButton,
   LoadingRows,
   PageHeader,
-  ResetColumns,
   Select,
   Stack,
-  TableEmpty,
-  TableWrap,
-  Toolbar,
   useListColumns,
 } from '@/components/ui';
+
+/**
+ * Stock by location: one row per SKU at the chosen store (or every
+ * store), with the store's own numbers — on hand, reserved, floor
+ * samples, available, As-Is, bin — beside every column the Products
+ * browser has, behind the same filter strip (owner 2026-10-21). Bins
+ * and adjustments act on the row's variant at its location.
+ */
 
 interface Location {
   id: string;
   name: string;
   isActive: boolean;
 }
+/** `/v1/inventory/levels` row: the store's stock plus the product columns. */
 interface Level {
   variantId: string;
   locationId: string;
+  productId: string;
   productName: string;
   variantSku: string | null;
   variantName: string | null;
@@ -52,6 +66,30 @@ interface Level {
   hasLevel?: boolean;
   storageBinId: string | null;
   storageBinCode: string | null;
+  categoryName: string | null;
+  categoryPath: string | null;
+  brandName: string | null;
+  collectionName: string | null;
+  vendorName: string | null;
+  vendorModel: string | null;
+  group: string | null;
+  size: string | null;
+  firmness: string | null;
+  priceCents: number | null;
+  costCents: number | null;
+  purchaseStatus: string;
+  productActive: boolean;
+  companyOnHand: number;
+  companyAvailable: number;
+  netOnPo: number;
+}
+/** A level row shaped for the shared product columns (company stock under the browser's names). */
+interface StockRow extends ProductColumnFields {
+  level: Level;
+  locOnHand: number;
+  reserved: number;
+  floorSample: number;
+  locAvailable: number;
 }
 interface Bin {
   id: string;
@@ -61,56 +99,119 @@ interface Bin {
   isActive: boolean;
 }
 
+function toRow(l: Level): StockRow {
+  return {
+    id: l.productId,
+    sku: l.variantSku,
+    name: l.productName,
+    isActive: l.productActive,
+    purchaseStatus: l.purchaseStatus,
+    brandName: l.brandName,
+    categoryName: l.categoryName,
+    categoryPath: l.categoryPath,
+    collectionName: l.collectionName,
+    vendorName: l.vendorName,
+    vendorModel: l.vendorModel,
+    group: l.group,
+    size: l.size,
+    firmness: l.firmness,
+    priceCents: l.priceCents,
+    costCents: l.costCents,
+    onHand: l.companyOnHand,
+    available: l.companyAvailable,
+    netOnPo: l.netOnPo,
+    asIsOnHand: l.asIsOnHand,
+    asIsAvailable: l.asIsAvailable,
+    asIsNonSellable: l.asIsNonSellable,
+    level: l,
+    locOnHand: l.onHand,
+    reserved: l.reserved,
+    floorSample: l.floorSample,
+    locAvailable: l.available,
+  };
+}
+
 export default function InventoryPage() {
+  const initial =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
   const [locations, setLocations] = useState<Location[]>([]);
-  const [vendor, setVendor] = useState<{ id: string; name: string } | null>(null);
-  const [locationId, setLocationId] = useState<string>('');
+  const [locationId, setLocationId] = useState<string>(initial.get('locationId') ?? '');
   const [levels, setLevels] = useState<Level[] | null>(null);
   const [bins, setBins] = useState<Bin[]>([]);
-  const [q, setQ] = useState('');
   const [newBin, setNewBin] = useState('');
   const [addingBin, setAddingBin] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const seq = useRef(0);
   // A22 slice 3: the STORIS Stock Adjustment dialog and the Reassign
   // Reservation dialog replace the old prompt() adjust and the
   // release-only reservations popup.
   const [adjustFor, setAdjustFor] = useState<Level | null>(null);
   const [resFor, setResFor] = useState<Level | null>(null);
+  // Vendor door (owner 2026-09-02): /products/stock?vendorId=…&locationId=all
+  // from the vendors page's "in inventory" count — the hook reads it.
+  const f = useProductFilters(initial);
 
-  async function loadLocations() {
-    try {
-      const rows = await api<Location[]>('/v1/business/locations');
-      const active = rows.filter((l) => l.isActive);
-      setLocations(active);
-      // Vendor door (owner 2026-09-02): /products/stock?vendorId=…&locationId=all
-      // from the vendors page's "in inventory" count.
-      const sp = new URLSearchParams(window.location.search);
-      const vendorId = sp.get('vendorId');
-      if (vendorId) setVendor({ id: vendorId, name: sp.get('vendor') ?? 'vendor' });
-      const wanted = sp.get('locationId');
-      if (wanted === 'all' || (wanted && active.some((l) => l.id === wanted))) {
-        setLocationId(wanted);
-        return;
-      }
-      if (active[0] && !locationId) setLocationId(active[0].id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
+  useEffect(() => {
+    api<Location[]>('/v1/business/locations')
+      .then((rows) => {
+        const active = rows.filter((l) => l.isActive);
+        setLocations(active);
+        setLocationId((cur) => {
+          if (cur === 'all' || active.some((l) => l.id === cur)) return cur;
+          return active[0]?.id ?? '';
+        });
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
 
-  async function loadLevels(loc: string, query = q, v: { id: string } | null = vendor) {
-    if (!loc) return;
-    try {
-      // 'all' is the combined view: no location filter, bins stay per store.
-      const params = new URLSearchParams(loc === 'all' ? {} : { locationId: loc });
-      if (query.trim()) params.set('q', query.trim());
-      if (v) params.set('vendorId', v.id);
-      setLevels(await api<Level[]>(`/v1/inventory/levels?${params.toString()}`));
-      setBins(loc === 'all' ? [] : await api<Bin[]>(`/v1/inventory/bins?locationId=${loc}`));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
+  const filterParams = f.params;
+  const params = useCallback(() => {
+    const p = filterParams();
+    // 'all' is the combined view: no location filter, bins stay per store.
+    if (locationId && locationId !== 'all') p.set('locationId', locationId);
+    // The levels endpoint lists every row holding stock unless told to
+    // hide retired products, the way the Products browser does by default.
+    if (!f.includeInactive) p.set('activeOnly', '1');
+    return p;
+  }, [filterParams, locationId, f.includeInactive]);
+
+  useEffect(() => {
+    if (!locationId) return;
+    const mine = ++seq.current;
+    // Mirror into the URL (replace, no history spam).
+    const u = filterParams();
+    u.set('locationId', locationId);
+    if (f.vendor) u.set('vendor', f.vendor.name);
+    window.history.replaceState(null, '', `?${u.toString()}`);
+    const t = setTimeout(
+      () => {
+        Promise.all([
+          api<Level[]>(`/v1/inventory/levels?${params().toString()}`),
+          locationId === 'all'
+            ? Promise.resolve([] as Bin[])
+            : api<Bin[]>(`/v1/inventory/bins?locationId=${locationId}`),
+        ])
+          .then(([rows, b]) => {
+            if (seq.current !== mine) return;
+            setLevels(rows);
+            setBins(b);
+            setError(null);
+          })
+          .catch((err) => {
+            if (seq.current !== mine) return;
+            setError(err instanceof Error ? err.message : String(err));
+          });
+      },
+      levels === null ? 0 : 250,
+    );
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, locationId, tick]);
+
+  const reload = () => setTick((n) => n + 1);
 
   async function assignBin(level: Level, storageBinId: string | null) {
     try {
@@ -122,7 +223,7 @@ export default function InventoryPage() {
           storageBinId,
         }),
       });
-      await loadLevels(locationId);
+      reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -130,7 +231,7 @@ export default function InventoryPage() {
 
   async function addBin() {
     const code = newBin.trim();
-    if (!code || !locationId || addingBin) return;
+    if (!code || !locationId || locationId === 'all' || addingBin) return;
     setAddingBin(true);
     try {
       await api('/v1/inventory/bins', {
@@ -138,20 +239,13 @@ export default function InventoryPage() {
         body: JSON.stringify({ locationId, code }),
       });
       setNewBin('');
-      await loadLevels(locationId);
+      reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setAddingBin(false);
     }
   }
-
-  useEffect(() => {
-    void loadLocations();
-  }, []);
-  useEffect(() => {
-    if (locationId) void loadLevels(locationId);
-  }, [locationId]);
 
   /** J2: hold N units as floor samples — on hand but never sellable. */
   async function setFloor(level: Level) {
@@ -174,61 +268,65 @@ export default function InventoryPage() {
           quantity,
         }),
       });
-      await loadLevels(locationId);
+      reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
   }
 
-  const filtered = q.trim() !== '' || vendor != null;
+  const canSeeCost = useOptionalActingStore()?.me?.canSeeCost;
+  const showCost = canSeeCost ?? (levels ?? []).some((r) => r.costCents != null);
+  const rows = useMemo(() => levels?.map(toRow) ?? null, [levels]);
   const activeBins = bins.filter((b) => b.isActive);
 
-  // Cells reach the bins list and the dialog setters, so the columns live
-  // in the component (the hook keys on ids, not array identity).
-  const STOCK_COLUMNS: ColumnDef<Level>[] = [
-    {
-      id: 'product',
-      label: 'Product',
-      sortValue: (l) => l.productName,
-      render: (l) => l.productName,
-    },
-    {
-      id: 'sku',
-      label: 'SKU',
-      sortValue: (l) => l.variantSku,
-      render: (l) => <code>{l.variantSku ?? '—'}</code>,
-    },
+  // The store's own columns sit between the product identity and the
+  // company-wide columns. Cells reach the bins list and the dialog
+  // setters, so they live in the component (the hook keys on ids).
+  const storeColumns: ColumnDef<StockRow>[] = [
+    ...(locationId === 'all'
+      ? [
+          {
+            id: 'location',
+            label: 'Location',
+            sortValue: (r: StockRow) =>
+              locations.find((l) => l.id === r.level.locationId)?.name ?? r.level.locationId,
+            render: (r: StockRow) =>
+              locations.find((l) => l.id === r.level.locationId)?.name ?? '—',
+          },
+        ]
+      : []),
     {
       id: 'barcode',
       label: 'Barcode',
-      sortValue: (l) => l.variantBarcode,
-      render: (l) => <code>{l.variantBarcode ?? '—'}</code>,
+      sortValue: (r) => r.level.variantBarcode,
+      render: (r) => <code>{r.level.variantBarcode ?? '—'}</code>,
     },
     {
-      id: 'onHand',
+      id: 'locOnHand',
       label: 'On hand',
       num: true,
-      sortValue: (l) => l.onHand,
-      render: (l) => l.onHand,
+      title: 'On hand at this location',
+      sortValue: (r) => r.locOnHand,
+      render: (r) => r.locOnHand,
     },
     {
       id: 'reserved',
       label: 'Reserved',
       num: true,
-      sortValue: (l) => l.reserved,
-      render: (l) =>
-        l.reserved > 0 ? (
+      sortValue: (r) => r.reserved,
+      render: (r) =>
+        r.reserved > 0 ? (
           <button
             type="button"
             className="btn-link"
             title="See which orders hold these units — back order one to sell the piece today, or reserve it elsewhere"
             data-testid="reserved-count"
-            onClick={() => setResFor(l)}
+            onClick={() => setResFor(r.level)}
           >
-            {l.reserved}
+            {r.reserved}
           </button>
         ) : (
-          l.reserved
+          r.reserved
         ),
     },
     {
@@ -236,65 +334,42 @@ export default function InventoryPage() {
       label: 'Floor',
       num: true,
       title: 'Floor samples — on hand but never sellable as new',
-      sortValue: (l) => l.floorSample,
-      render: (l) => (
+      sortValue: (r) => r.floorSample,
+      render: (r) => (
         <button
           type="button"
           className="btn-link"
           title="Click to set the floor-sample hold"
-          onClick={() => void setFloor(l)}
+          onClick={() => void setFloor(r.level)}
         >
-          {l.floorSample > 0 ? l.floorSample : '—'}
+          {r.floorSample > 0 ? r.floorSample : '—'}
         </button>
       ),
     },
     {
-      id: 'available',
+      id: 'locAvailable',
       label: 'Available',
       num: true,
-      sortValue: (l) => l.available,
-      render: (l) => l.available,
-    },
-    {
-      id: 'asIsOnHand',
-      label: 'As-Is on hand',
-      num: true,
-      title: 'As-Is pieces here still in review',
-      sortValue: (l) => l.asIsOnHand,
-      render: (l) => (l.asIsOnHand > 0 ? l.asIsOnHand : '—'),
-    },
-    {
-      id: 'asIsAvailable',
-      label: 'As-Is available',
-      num: true,
-      title: 'As-Is pieces here that can be sold',
-      sortValue: (l) => l.asIsAvailable,
-      render: (l) => (l.asIsAvailable > 0 ? l.asIsAvailable : '—'),
-    },
-    {
-      id: 'asIsNonSellable',
-      label: 'As-Is non-sellable',
-      num: true,
-      title: 'As-Is pieces here marked damaged or parts',
-      sortValue: (l) => l.asIsNonSellable,
-      render: (l) => (l.asIsNonSellable > 0 ? l.asIsNonSellable : '—'),
+      title: 'Available at this location (on hand − reserved − floor)',
+      sortValue: (r) => r.locAvailable,
+      render: (r) => r.locAvailable,
     },
     {
       id: 'bin',
       label: 'Bin',
-      sortValue: (l) => l.storageBinCode,
-      render: (l) =>
-        l.hasLevel === false ? (
+      sortValue: (r) => r.level.storageBinCode,
+      render: (r) =>
+        r.level.hasLevel === false ? (
           <span className="muted">—</span>
         ) : (
           <Select
-            value={l.storageBinId ?? ''}
-            onChange={(e) => void assignBin(l, e.target.value || null)}
-            aria-label={`Bin for ${l.variantSku ?? l.productName}`}
+            value={r.level.storageBinId ?? ''}
+            onChange={(e) => void assignBin(r.level, e.target.value || null)}
+            aria-label={`Bin for ${r.sku ?? r.name}`}
           >
             <option value="">—</option>
             {bins
-              .filter((b) => b.isActive || b.id === l.storageBinId)
+              .filter((b) => b.isActive || b.id === r.level.storageBinId)
               .map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.code}
@@ -303,17 +378,22 @@ export default function InventoryPage() {
           </Select>
         ),
     },
+  ];
+  const columns: ColumnDef<StockRow>[] = [
+    ...productIdentityColumns<StockRow>(),
+    ...storeColumns,
+    ...productDetailColumns<StockRow>(showCost),
     {
       id: 'actions',
       label: '',
       srLabel: 'Actions',
       className: 'actions',
       fixed: true,
-      render: (l) => (
+      render: (r) => (
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => setAdjustFor(l)}
+          onClick={() => setAdjustFor(r.level)}
           data-testid="stock-adjust"
         >
           Adjust
@@ -321,10 +401,31 @@ export default function InventoryPage() {
       ),
     },
   ];
-  const cols = useListColumns('products-stock', STOCK_COLUMNS, levels);
+  // v2: the column set changed on 2026-10-21 (product columns added), so
+  // a saved order from the old set starts fresh.
+  const cols = useListColumns('products-stock-v2', columns, rows);
+
+  const locationPicker = (
+    <Field label="Location">
+      <Select
+        id="inventory-location"
+        value={locationId}
+        onChange={(e) => setLocationId(e.target.value)}
+        data-testid="inventory-location"
+      >
+        <option value="">— Pick —</option>
+        <option value="all">All locations</option>
+        {locations.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.name}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
 
   return (
-    <div>
+    <div className="pb">
       <PageHeader
         title="Stock by location"
         actions={
@@ -342,79 +443,47 @@ export default function InventoryPage() {
       />
       <ProductsNav />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void loadLevels(locationId);
-        }}
-      >
-        <Toolbar>
-          <label htmlFor="inventory-location" className="muted">
-            Location
-          </label>
-          <Select
-            id="inventory-location"
-            value={locationId}
-            onChange={(e) => setLocationId(e.target.value)}
-          >
-            <option value="">— Pick —</option>
-            <option value="all">All locations</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-          {vendor && (
-            <span className="muted" data-testid="inventory-vendor-chip">
-              Vendor: <strong>{vendor.name}</strong>{' '}
+      <section className="pb-card" aria-label="Stock by location">
+        <ProductFilterBar
+          f={f}
+          showCost={showCost}
+          before={locationPicker}
+          testIdPrefix="stock"
+          end={
+            cols.isCustom && (
               <Button
-                type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  setVendor(null);
-                  window.history.replaceState(null, '', '/products/stock');
-                  void loadLevels(locationId, q, null);
-                }}
+                onClick={cols.reset}
+                data-testid="stock-reset-columns"
               >
-                clear
+                Reset columns
               </Button>
-            </span>
+            )
+          }
+        />
+
+        <div className="pb-sheet">
+          {error && (
+            <div style={{ padding: 12 }}>
+              <Alert
+                tone="error"
+                action={
+                  <Button size="sm" onClick={reload}>
+                    Retry
+                  </Button>
+                }
+              >
+                {error}
+              </Alert>
+            </div>
           )}
-          <Input
-            name="q"
-            aria-label="Search stock by name, SKU, or barcode"
-            placeholder="Search by name, SKU, or barcode"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setQ('');
-              void loadLevels(locationId, '');
-            }}
-          >
-            Clear
-          </Button>
-        </Toolbar>
-      </form>
-
-      <Stack>
-        {error && <Alert tone="error">{error}</Alert>}
-
-        {levels == null ? (
-          <Card>
-            <LoadingRows />
-          </Card>
-        ) : levels.length === 0 && !filtered ? (
-          <Card>
+          {!rows && !error && (
+            <div style={{ padding: 12 }}>
+              <LoadingRows rows={8} height={34} what="Stock" />
+            </div>
+          )}
+          {rows && rows.length === 0 && !f.filtered ? (
             <EmptyState
               title="No stock at this location yet"
               action={
@@ -425,34 +494,57 @@ export default function InventoryPage() {
             >
               Use Receive to add some.
             </EmptyState>
-          </Card>
-        ) : (
-          <Card flush>
-            <TableWrap>
-              <table className="table">
+          ) : (
+            rows && (
+              <table className="table table-sticky pb-table" data-testid="stock-table">
                 <thead>
                   <ColumnHeadRow list={cols} testIdPrefix="products-stock" />
                 </thead>
                 <tbody>
-                  {levels.length === 0 && (
-                    <TableEmpty colSpan={cols.ordered.length}>
-                      {q.trim()
-                        ? `No stock matches "${q.trim()}" at this location.`
-                        : 'No stock from this vendor at this location.'}
-                    </TableEmpty>
-                  )}
-                  {cols.sorted.map((l) => (
-                    <tr key={`${l.variantId}-${l.locationId}`}>
-                      <ColumnCells list={cols} row={l} />
+                  {cols.sorted.map((r) => (
+                    <tr
+                      key={`${r.level.variantId}-${r.level.locationId}`}
+                      data-testid="stock-row"
+                      className={r.isActive ? undefined : 'is-inactive'}
+                    >
+                      <ColumnCells list={cols} row={r} />
                     </tr>
                   ))}
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={cols.ordered.length} className="pb-empty">
+                        <div className="pb-empty-title">Nothing matches</div>
+                        <div>Try fewer words or clear a filter.</div>
+                        <Button size="sm" onClick={f.clearAll} style={{ marginTop: 10 }}>
+                          Clear filters
+                        </Button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-              <ResetColumns list={cols} />
-            </TableWrap>
-          </Card>
-        )}
+            )
+          )}
+        </div>
 
+        <div className="pb-foot" data-testid="stock-footer">
+          <span>
+            Showing <strong>{rows?.length ?? 0}</strong>
+            {locationId === 'all' ? ' rows across every location' : ' SKUs at this location'}
+          </span>
+          <span>
+            On hand, Reserved, Floor, Available, As-Is and Bin are this location&apos;s;{' '}
+            <strong>On hand · company</strong>, Net on PO and Available · ATP count every location.
+          </span>
+          <span>
+            Sales margin cost{' '}
+            {showCost ? 'shows for your role' : 'hides for roles without cost access'}. Column order
+            is saved on this browser.
+          </span>
+        </div>
+      </section>
+
+      <Stack>
         <Card>
           <details data-testid="inventory-bins">
             <summary className="card-title">
@@ -481,7 +573,7 @@ export default function InventoryPage() {
                   type="submit"
                   variant="secondary"
                   size="sm"
-                  disabled={!newBin.trim() || !locationId || addingBin}
+                  disabled={!newBin.trim() || !locationId || locationId === 'all' || addingBin}
                 >
                   {addingBin ? 'Adding…' : 'Add bin'}
                 </Button>
@@ -512,10 +604,7 @@ export default function InventoryPage() {
                 location must match a store name exactly). Products must exist first; import the
                 product file on the Products page if they don&apos;t.
               </p>
-              <CsvImport
-                entity="inventory"
-                onCommitted={() => (locationId ? loadLevels(locationId) : undefined)}
-              />
+              <CsvImport entity="inventory" onCommitted={reload} />
             </Stack>
           </details>
         </Card>
@@ -527,7 +616,7 @@ export default function InventoryPage() {
           variantId={adjustFor.variantId}
           locationId={adjustFor.locationId}
           onClose={() => setAdjustFor(null)}
-          onChanged={() => void loadLevels(locationId)}
+          onChanged={reload}
           onReassign={() => {
             setResFor(adjustFor);
             setAdjustFor(null);
@@ -541,7 +630,7 @@ export default function InventoryPage() {
           locationId={resFor.locationId}
           itemLabel={`${resFor.variantSku ?? resFor.productName}`}
           onClose={() => setResFor(null)}
-          onChanged={() => void loadLevels(locationId)}
+          onChanged={reload}
         />
       )}
     </div>
