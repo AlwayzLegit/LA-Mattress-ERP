@@ -450,7 +450,8 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
       .set('X-Business-Id', businessId)
       .send({});
     expect(ful.status).toBe(201);
-    expect(ful.body.status).toBe('fulfilled');
+    // Paid in full and handed over → closed on the spot (owner 2026-10-22).
+    expect(ful.body.status).toBe('completed');
     expect(ful.body.lines[0].qtyFulfilled).toBe(1);
 
     const bad = await request(app.getHttpServer())

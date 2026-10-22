@@ -352,6 +352,11 @@ describe('Day 3 — deliveries: schedule, deliver, collect, complete', () => {
     expect(pay.status).toBe(201);
     expect(pay.body.balanceDueCents).toBe(0);
 
+    // The payment that cleared a delivered order closed it (owner 2026-10-22).
+    expect(pay.body.status).toBe('completed');
+    expect(pay.body.completedAt).toBeTruthy();
+
+    // Complete is now a no-op on a closed order, not an error.
     const done = await ownerReq().post(`/v1/orders/${orderId}/complete`).send({});
     expect(done.status).toBe(201);
     expect(done.body.status).toBe('completed');
@@ -422,6 +427,47 @@ describe('Day 3 — deliveries: schedule, deliver, collect, complete', () => {
 
     const after = await level();
     expect(after.onHand).toBe(before.onHand - 1);
+  });
+
+  it('a paid-in-full order closes itself when its last stop is delivered (owner 2026-10-22)', async () => {
+    const res = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        address: { line1: '9 Pier Ave', city: 'Santa Monica', region: 'CA', postalCode: '90401' },
+        lines: [{ variantId: mattressVariantId, quantity: 1 }],
+        confirm: true,
+      });
+    expect(res.status).toBe(201);
+    const paidId = res.body.id;
+    await ownerReq()
+      .post(`/v1/orders/${paidId}/payments`)
+      .send({ method: 'cash', amountCents: res.body.totalCents })
+      .expect(201);
+    const sched = await ownerReq()
+      .post(`/v1/orders/${paidId}/deliveries`)
+      .send({ scheduledDate: today });
+    expect(sched.status).toBe(201);
+
+    const delivered = await ownerReq().post(`/v1/deliveries/${sched.body.id}/complete`).send({});
+    expect(delivered.status).toBe(201);
+    expect(delivered.body.status).toBe('delivered');
+
+    const order = await ownerReq().get(`/v1/orders/${paidId}`);
+    expect(order.body.status).toBe('completed');
+    expect(order.body.completedAt).toBeTruthy();
+    expect(order.body.lines[0].qtyFulfilled).toBe(1);
+
+    const audit = await ownerReq().get(
+      `/v1/audit-logs?targetType=order&targetId=${paidId}&action=order.complete`,
+    );
+    expect(audit.status).toBe(200);
+    expect(audit.body.data[0]?.changesJson?.after).toMatchObject({
+      auto: true,
+      withBalance: false,
+    });
   });
 });
 

@@ -16,6 +16,7 @@ import { OrderActionsController } from './order-actions.controller';
 import { ReservationsController } from './reservations.controller';
 import { TasksController } from './tasks.controller';
 import { OrdersService } from './orders.service';
+import { OrderCompletionService } from './order-completion.service';
 
 @Module({
   imports: [
@@ -37,9 +38,10 @@ import { OrdersService } from './orders.service';
     ReservationsController,
     TasksController,
   ],
-  providers: [OrdersService, TicketFlagsService],
+  providers: [OrdersService, OrderCompletionService, TicketFlagsService],
   // Deliveries (Day 3) reserve, release, and reprice through the same
-  // service rather than reimplementing the stock math.
-  exports: [OrdersService],
+  // service rather than reimplementing the stock math; a delivered, paid
+  // order completes through OrderCompletionService (owner 2026-10-22).
+  exports: [OrdersService, OrderCompletionService],
 })
 export class OrdersModule {}
