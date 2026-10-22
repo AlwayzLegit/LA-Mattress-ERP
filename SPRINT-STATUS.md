@@ -6880,3 +6880,26 @@ Owner: the delivery page reached from the Deliveries calendar printed only what 
 - The truck crew can print it: the print endpoint now accepts `orders.update` **or**
   `deliveries.complete` (Warehouse has the second). Bookkeeper still gets a 403.
 - Checked in Chromium: the button opens the ticket for the stop's order.
+
+### Checkpoint — 2026-10-21 (Draft transfers wait under Purchasing; Stock by location = Products filters + columns)
+
+Owner: a store transfer for a floor model that still has to be bought (Warehouse → Koreatown,
+ST-2026-000009) could not leave Draft — printing the ticket changed nothing and Ship refused for
+lack of stock — and the piece never showed on the Purchasing page under its vendor.
+
+- Draft is the only waiting state a transfer has (draft → in_transit → received); the printed
+  ticket unlocks Ship, it does not advance the status. The transfer page's Lines card now says so.
+- **Reorder suggestions count draft transfers**: a draft line the origin cannot cover (scheduled
+  qty − what the origin has free after its own waiting orders) is waiting demand like an open
+  order line. The Customers waiting cell links the transfer (`waitingTransfers` on the line);
+  the PO builder puts those units on the stock line, since a PO line can only be allocated to
+  an order line. Auto transfers (made from an order) are skipped — their order is already waiting.
+- **Stock by location** carries the Products browser's filter strip (search, category / group,
+  size, stock, show inactive, vendor chip, Advanced search) and every Products column beside the
+  store's own on hand / reserved / floor / available / As-Is / bin. `activeOnly=1` on
+  `/v1/inventory/levels` hides retired products the way the browser does; the shared filter
+  builder is `catalog/product-filters.ts`, the shared strip and columns are
+  `components/product-filters.tsx` and `components/product-columns.tsx`.
+- Test: purchasing.int (draft transfer waits under its vendor, cleared once the origin has the
+  unit). Checked in Chromium: category / size filters on both tabs, the transfer link on
+  Purchasing, the draft hint on the transfer page.

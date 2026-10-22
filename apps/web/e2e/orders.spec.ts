@@ -159,10 +159,13 @@ test.describe('Day 2 — order writer', () => {
     await page.goto('/inventory');
     const invRow = page.locator('tr', { hasText: variantSku });
     await expect(invRow).toBeVisible();
-    // Columns: product, sku, barcode, on hand, reserved, floor, available.
-    await expect(invRow.locator('td').nth(3)).toHaveText('100');
-    await expect(invRow.locator('td').nth(4)).toHaveText('1');
-    await expect(invRow.locator('td').nth(6)).toHaveText('99');
+    // The store's own columns sit among the Products columns (2026-10-21),
+    // so find them by header label rather than position.
+    const headers = await page.locator('[data-testid=stock-table] thead th').allTextContents();
+    const col = (label: string) => headers.findIndex((h) => h.trim() === label);
+    await expect(invRow.locator('td').nth(col('On hand'))).toHaveText('100');
+    await expect(invRow.locator('td').nth(col('Reserved'))).toHaveText('1');
+    await expect(invRow.locator('td').nth(col('Available'))).toHaveText('99');
 
     // --- Orders book: the row opens the order's slide-over at /orders/[id] ---
     await page.goto('/orders');

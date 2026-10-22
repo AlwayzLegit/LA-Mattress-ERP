@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 
@@ -12,6 +13,22 @@ export interface WaitingOrderLine {
   quantity: number;
 }
 
+/**
+ * A draft transfer line the origin cannot ship yet (owner 2026-10-21: a
+ * floor model moved to a store on a transfer that must first be ordered
+ * on a PO shows under Purchasing, linked to the transfer, like a customer
+ * order would).
+ */
+export interface WaitingTransferLine {
+  transferLineId: string;
+  transferId: string;
+  transferNumber: string;
+  fromLocationName: string | null;
+  toLocationName: string | null;
+  /** Units the line still lacks at the origin. */
+  quantity: number;
+}
+
 export interface ReorderSuggestionLine {
   variantId: string;
   productName: string;
@@ -20,9 +37,13 @@ export interface ReorderSuggestionLine {
   vendorSku: string | null;
   available: number;
   reorderPoint: number | null;
-  /** Units sold to customers, not in stock and on no PO (oldest order first). */
+  /**
+   * Units sold to customers, not in stock and on no PO (oldest order
+   * first) — plus draft transfer units the origin store cannot ship.
+   */
   waitingQty: number;
   waitingOrders: WaitingOrderLine[];
+  waitingTransfers: WaitingTransferLine[];
   /** Open (placed) PO units not already promised to a customer. */
   onPoQty: number;
   /** Of `suggestedQty`: what the waiting customers still need. */
@@ -41,6 +62,79 @@ export interface ReorderVendorGroup {
 
 const OPEN_ORDER_STATUSES = ['open', 'partially_fulfilled'];
 const OPEN_PO_STATUSES = ['ordered', 'partially_received'];
+
+/**
+ * Draft transfers short of stock at their origin, per variant (owner
+ * 2026-10-21). A draft is the only state a transfer can wait in: it ships
+ * once the origin has the units, so until then its lines are demand on
+ * the origin the same way an open order line is. Counted: the scheduled
+ * quantity less what the origin has free, after the origin's own waiting
+ * orders (already counted) took theirs. Auto transfers (generated from a
+ * sales order) are skipped — their order line is already waiting.
+ */
+async function waitingTransferLines(
+  db: PostgresJsDatabase,
+  businessId: string | undefined,
+  orderDemandAt: Map<string, number>,
+): Promise<Map<string, WaitingTransferLine[]>> {
+  const from = alias(schema.locations, 'from_loc');
+  const to = alias(schema.locations, 'to_loc');
+  const freeAtOrigin = sql<number>`COALESCE((SELECT SUM(il.on_hand - il.reserved - il.floor_sample) FROM inventory_levels il WHERE il.variant_id = ${schema.stockTransferLines.variantId} AND il.location_id = ${schema.stockTransfers.fromLocationId}), 0)::int`;
+  const rows = await db
+    .select({
+      transferLineId: schema.stockTransferLines.id,
+      transferId: schema.stockTransfers.id,
+      transferNumber: schema.stockTransfers.number,
+      variantId: schema.stockTransferLines.variantId,
+      fromLocationId: schema.stockTransfers.fromLocationId,
+      fromLocationName: from.name,
+      toLocationName: to.name,
+      quantity: schema.stockTransferLines.quantityShipped,
+      freeAtOrigin,
+    })
+    .from(schema.stockTransferLines)
+    .innerJoin(
+      schema.stockTransfers,
+      eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+    )
+    .leftJoin(from, eq(from.id, schema.stockTransfers.fromLocationId))
+    .leftJoin(to, eq(to.id, schema.stockTransfers.toLocationId))
+    .where(
+      and(
+        businessId ? eq(schema.stockTransferLines.businessId, businessId) : undefined,
+        eq(schema.stockTransfers.status, 'draft'),
+        isNull(schema.stockTransfers.orderId),
+        sql`${schema.stockTransferLines.quantityShipped} > 0`,
+      ),
+    )
+    .orderBy(asc(schema.stockTransfers.createdAt), asc(schema.stockTransferLines.id));
+  const out = new Map<string, WaitingTransferLine[]>();
+  // Free stock at one origin covers its transfers in creation order, after
+  // the orders that already draw from that store.
+  const freeLeft = new Map<string, number>();
+  for (const r of rows) {
+    const key = `${r.variantId}:${r.fromLocationId}`;
+    if (!freeLeft.has(key)) {
+      freeLeft.set(key, Math.max(0, r.freeAtOrigin - (orderDemandAt.get(key) ?? 0)));
+    }
+    const free = freeLeft.get(key)!;
+    const covered = Math.min(free, r.quantity);
+    freeLeft.set(key, free - covered);
+    const short = r.quantity - covered;
+    if (short <= 0) continue;
+    const list = out.get(r.variantId) ?? [];
+    list.push({
+      transferLineId: r.transferLineId,
+      transferId: r.transferId,
+      transferNumber: r.transferNumber,
+      fromLocationName: r.fromLocationName ?? null,
+      toLocationName: r.toLocationName ?? null,
+      quantity: short,
+    });
+    out.set(r.variantId, list);
+  }
+  return out;
+}
 
 /**
  * Pure arithmetic of one suggestion row (owner 2026-10-01: "making the
@@ -125,6 +219,7 @@ export async function computeReorderSuggestions(
       customerName: sql<
         string | null
       >`NULLIF(TRIM(CONCAT(${schema.customers.firstName}, ' ', ${schema.customers.lastName})), '')`,
+      drawsFrom: sql<string>`COALESCE(${schema.orderLines.sourceLocationId}, ${schema.orders.stockLocationId}, ${schema.orders.locationId})`,
     })
     .from(schema.orderLines)
     .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
@@ -142,6 +237,8 @@ export async function computeReorderSuggestions(
     )
     .orderBy(asc(schema.orders.createdAt), asc(schema.orderLines.createdAt));
   const waitingBy = new Map<string, WaitingOrderLine[]>();
+  /** Waiting order units per (variant, store they draw from). */
+  const orderDemandAt = new Map<string, number>();
   for (const r of demandRows) {
     const short = r.quantity - r.qtyFulfilled - r.qtyReserved - r.allocated;
     if (short <= 0 || !r.variantId) continue;
@@ -154,8 +251,12 @@ export async function computeReorderSuggestions(
       quantity: short,
     });
     waitingBy.set(r.variantId, list);
+    const at = `${r.variantId}:${r.drawsFrom}`;
+    orderDemandAt.set(at, (orderDemandAt.get(at) ?? 0) + short);
   }
-  const waitingIds = [...waitingBy.keys()];
+  // 1b. Draft transfers the origin store cannot ship yet.
+  const transfersBy = await waitingTransferLines(db, businessId, orderDemandAt);
+  const waitingIds = [...new Set([...waitingBy.keys(), ...transfersBy.keys()])];
 
   // 2. Candidate variants: a reorder point, or customers waiting.
   const rows = await db
@@ -239,7 +340,10 @@ export async function computeReorderSuggestions(
   const byVendor = new Map<string, ReorderVendorGroup>();
   for (const r of rows) {
     const waitingOrders = waitingBy.get(r.variantId) ?? [];
-    const waitingQty = waitingOrders.reduce((n, w) => n + w.quantity, 0);
+    const waitingTransfers = transfersBy.get(r.variantId) ?? [];
+    const waitingQty =
+      waitingOrders.reduce((n, w) => n + w.quantity, 0) +
+      waitingTransfers.reduce((n, w) => n + w.quantity, 0);
     const onPoQty = onPoBy.get(r.variantId) ?? 0;
     const s = suggestionFor({
       available: r.available,
@@ -265,6 +369,7 @@ export async function computeReorderSuggestions(
       reorderPoint: r.reorderPoint,
       waitingQty,
       waitingOrders,
+      waitingTransfers,
       onPoQty,
       customerQty: s.customerQty,
       stockQty: s.stockQty,

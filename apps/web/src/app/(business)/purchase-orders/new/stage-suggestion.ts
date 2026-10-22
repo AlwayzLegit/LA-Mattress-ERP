@@ -14,6 +14,16 @@ export interface WaitingOrderLine {
   quantity: number;
 }
 
+/** A draft transfer the origin store cannot ship until the units arrive. */
+export interface WaitingTransferLine {
+  transferLineId: string;
+  transferId: string;
+  transferNumber: string;
+  fromLocationName: string | null;
+  toLocationName: string | null;
+  quantity: number;
+}
+
 export interface ReorderSuggestion {
   variantId: string;
   productName: string;
@@ -23,6 +33,8 @@ export interface ReorderSuggestion {
   reorderPoint: number | null;
   waitingQty?: number;
   waitingOrders?: WaitingOrderLine[];
+  /** Transfer units ride the stock line: a PO line cannot be allocated to a transfer. */
+  waitingTransfers?: WaitingTransferLine[];
   onPoQty?: number;
   customerQty?: number;
   stockQty?: number;
@@ -77,11 +89,14 @@ export function stageSuggestion(
   return out;
 }
 
-/** "2 for KO-10031, KO-10040 + 1 for stock". */
+/** "2 for KO-10031, KO-10040 + 1 for stock" — transfers list by their number too. */
 export function suggestionBreakdown(s: ReorderSuggestion): string | null {
   const customer = s.customerQty ?? 0;
   if (customer <= 0) return null;
-  const orders = (s.waitingOrders ?? []).map((w) => w.orderNumber);
+  const orders = [
+    ...(s.waitingOrders ?? []).map((w) => w.orderNumber),
+    ...(s.waitingTransfers ?? []).map((w) => w.transferNumber),
+  ];
   const unique = [...new Set(orders)];
   const named = unique.slice(0, 3).join(', ') + (unique.length > 3 ? ` +${unique.length - 3}` : '');
   const stock = s.stockQty ?? 0;
