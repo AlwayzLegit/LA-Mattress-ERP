@@ -6903,3 +6903,23 @@ lack of stock — and the piece never showed on the Purchasing page under its ve
 - Test: purchasing.int (draft transfer waits under its vendor, cleared once the origin has the
   unit). Checked in Chromium: category / size filters on both tabs, the transfer link on
   Purchasing, the draft hint on the transfer page.
+
+### Checkpoint — 2026-10-22 (Delivered, paid orders complete on their own)
+
+Owner: the sales competition board had not moved in weeks — Henry showed "no sales yet" with
+days of closed tickets. Only `completed` orders count, and a delivered order stopped at
+`fulfilled` unless someone opened it and clicked Complete; 87 October orders sat there, 85 paid
+in full. Commissions accrue at completion too, so none of those had accrued.
+
+- `OrderCompletionService` (orders module) owns the closing tail — release residue, stamp
+  `completed_at`, accrue commissions (G5), competitions hook, audit `order.complete`
+  (`auto: true` when automatic), `order.completed` webhook. The Complete endpoint uses it.
+- An order completes by itself the moment it is both fulfilled and paid (balance due = 0, the
+  plan's rule): at the delivery stop or the counter hand-over when the money is already in, or
+  at the payment that clears the balance afterwards. Complete-with-balance (AR, G8) stays a click.
+- Complete on an already-closed order returns it instead of a 400.
+- Tests: deliveries.int (paid order closes at its last stop; the clearing payment closes a
+  delivered one; Complete is a no-op after), orders.int (paid pickup closes at hand-over), e2e
+  orders (no Complete click after the balance is collected).
+- Backfill: this month's delivered, paid-in-full orders in production completed through the
+  Complete endpoint on 2026-10-22, so the October board and commissions catch up.

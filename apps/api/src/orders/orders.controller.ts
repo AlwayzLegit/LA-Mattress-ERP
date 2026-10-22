@@ -62,6 +62,7 @@ import {
   type OrderStatus,
 } from './order-math';
 import { OrdersService } from './orders.service';
+import { OrderCompletionService } from './order-completion.service';
 import { businessTimeZone } from '../common/business-today';
 import { parseDayRange, zonedBounds } from '../common/date-range';
 import { resolveTakenAt } from '../common/payment-taken-at';
@@ -665,6 +666,7 @@ export class OrdersController {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OrdersService) private readonly orders: OrdersService,
+    @Inject(OrderCompletionService) private readonly completion: OrderCompletionService,
     @Inject(WebhookDispatcher) private readonly webhooks: WebhookDispatcher,
     @Inject(CommissionsService) private readonly commissions: CommissionsService,
     @Inject(CompetitionsService) private readonly competitions: CompetitionsService,
@@ -4072,6 +4074,12 @@ export class OrdersController {
       }
     }
 
+    // A delivered order whose balance this payment cleared closes now
+    // (owner 2026-10-22); the webhook below then reports it completed.
+    for (const a of allocations) {
+      await this.completion.tryAutoComplete(tenant.businessId!, a.order.id, actor?.id ?? null);
+    }
+
     const detail = await this.loadDetail(id);
     if (primaryPaymentId) {
       this.fireOrderEvent('order.payment_received', tenant.businessId!, detail, {
@@ -4167,6 +4175,8 @@ export class OrdersController {
       targetId: id,
       after: { units: plan.steps.reduce((s, x) => s + x.quantity, 0), mode: 'pickup' },
     });
+    // Handed over and paid → closed, no second click (owner 2026-10-22).
+    await this.completion.tryAutoComplete(tenant.businessId!, id, actor?.id ?? null);
     return this.loadDetail(id);
   }
 
@@ -4195,7 +4205,9 @@ export class OrdersController {
       .where(eq(schema.orders.id, id))
       .limit(1);
     if (!order) throw new NotFoundException('Order not found');
-    if (order.completedAt) throw new BadRequestException('Order is already completed');
+    // Already closed — by an earlier click, or on its own once it was
+    // delivered and paid (owner 2026-10-22). Nothing to redo.
+    if (order.completedAt) return this.loadDetail(id);
     if (order.cancelledAt) throw new BadRequestException('A cancelled order cannot be completed');
 
     // Take-with hand-over (owner 2026-08-31): hitting Complete on a live
@@ -4309,38 +4321,14 @@ export class OrdersController {
       }
     }
 
-    // End clean: any reservation left (shortfall units that never shipped)
-    // goes back to the pool.
-    await this.orders.releaseOrder(this.db, {
-      businessId: tenant.businessId!,
-      orderId: id,
-      locationId: order.stockLocationId ?? order.locationId,
-      actorUserId: actor?.id ?? null,
+    // End clean (reservation residue back to the pool), stamp, accrue
+    // commissions, tell the competitions, audit, webhook — the same tail
+    // an automatic completion runs.
+    await this.completion.finalize(tenant.businessId!, id, actor?.id ?? null, {
+      dueCents: due,
+      auto: false,
     });
-    await this.db
-      .update(schema.orders)
-      .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(schema.orders.id, id));
-
-    // Commission accrues at completion (G5), split per split_bps;
-    // imported orders never accrue (D8) — enforced in the service.
-    await this.commissions.accrueForOrder(this.db, {
-      businessId: tenant.businessId!,
-      orderId: id,
-    });
-    // Sales competitions (redesign Phase 11): convert a matching lead and
-    // notice any overtake. Never blocks the completion.
-    await this.competitions.onOrderCompleted(tenant.businessId!, id);
-
-    await this.audit.log({
-      action: 'order.complete',
-      targetType: 'order',
-      targetId: id,
-      after: { balanceDueCents: due, withBalance: due > 0 },
-    });
-    const detail = await this.loadDetail(id);
-    this.fireOrderEvent('order.completed', tenant.businessId!, detail);
-    return detail;
+    return this.loadDetail(id);
   }
 
   /**

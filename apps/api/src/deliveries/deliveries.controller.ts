@@ -23,6 +23,7 @@ import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
 import { OrdersService } from '../orders/orders.service';
+import { OrderCompletionService } from '../orders/order-completion.service';
 import { OrderReturnsService } from '../returns/order-returns.service';
 import {
   deriveFulfillmentStatus,
@@ -176,6 +177,7 @@ export class DeliveriesController {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(OrdersService) private readonly orders: OrdersService,
+    @Inject(OrderCompletionService) private readonly completion: OrderCompletionService,
     @Inject(WebhookDispatcher) private readonly webhooks: WebhookDispatcher,
     @Inject(ExceptionsService) private readonly exceptions: ExceptionsService,
     @Inject(SecurityOverrideService) private readonly overrides: SecurityOverrideService,
@@ -831,7 +833,7 @@ export class DeliveriesController {
       .set({ status: 'delivered', completedAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.deliveries.id, id));
 
-    await this.advanceOrder(row.orderId);
+    await this.advanceOrder(tenant.businessId!, row.orderId, actor?.id ?? null);
 
     await this.audit.log({
       action: 'delivery.delivered',
@@ -1370,8 +1372,16 @@ export class DeliveriesController {
     return map;
   }
 
-  /** Recompute the order's fulfillment status from its lines and persist. */
-  private async advanceOrder(orderId: string): Promise<void> {
+  /**
+   * Recompute the order's fulfillment status from its lines and persist.
+   * The last stop delivered on a paid order closes it (owner 2026-10-22):
+   * a balance still due leaves it `fulfilled` until the payment clears.
+   */
+  private async advanceOrder(
+    businessId: string,
+    orderId: string,
+    actorUserId: string | null,
+  ): Promise<void> {
     const lines = await this.db
       .select({
         quantity: schema.orderLines.quantity,
@@ -1389,6 +1399,9 @@ export class DeliveriesController {
           inArray(schema.orders.status, ['open', 'partially_fulfilled', 'fulfilled']),
         ),
       );
+    if (status === 'fulfilled') {
+      await this.completion.tryAutoComplete(businessId, orderId, actorUserId);
+    }
   }
 
   private async hydrate(row: DeliveryRow): Promise<DeliveryDetail> {

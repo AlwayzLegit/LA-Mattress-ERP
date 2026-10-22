@@ -301,8 +301,10 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('payment-amount').fill('7.50');
     await page.getByTestId('take-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$0.00');
-    await page.getByTestId('complete-order').click();
+    // Delivered and paid → the order closed on its own (owner 2026-10-22);
+    // there is no Complete left to click.
     await expect(page.getByTestId('order-status')).toHaveText(/delivered/i);
+    await expect(page.getByTestId('complete-order')).toHaveCount(0);
 
     // Enter an Exchange from the delivered order (owner 2026-09-18: the
     // register in exchange mode): return the unit, take the same item
