@@ -6923,3 +6923,18 @@ in full. Commissions accrue at completion too, so none of those had accrued.
   orders (no Complete click after the balance is collected).
 - Backfill: this month's delivered, paid-in-full orders in production completed through the
   Complete endpoint on 2026-10-22, so the October board and commissions catch up.
+
+### Checkpoint — 2026-10-24 (Register: delivery date before tendering; Brooklyn / Helix in the Vendor list)
+
+Owner: a delivery sale tendered paid in full with no date never reached the Deliveries calendar
+and nobody knew until the customer called; and Brooklyn / Helix "aren't showing under Vendor"
+in the Add Product popup.
+
+- New Sale refuses Complete on a delivery sale with no date — Promised on the order, or a
+  Deliver-on date on every delivery line — with a plain error; quotes and drafts are untouched.
+  The Promised hint now reads "Required to complete". `data-testid="requested-date"` /
+  `newsale-error` for the e2e.
+- The Add Product popup's Vendor select is one alphabetical list: brands with no vendor set up
+  (Brooklyn, Helix) sit in their place among the vendors instead of a second group below all 36.
+- Tests: e2e orders (Complete without a date is refused; with one the register books the stop;
+  the two other delivery sales pick a date). Checked in Chromium.

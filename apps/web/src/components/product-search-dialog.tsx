@@ -125,6 +125,15 @@ export function ProductSearchDialog({
     }, 220);
   }, [q, maker, size, firmness, locationId]);
 
+  const makers = useMemo(
+    () =>
+      [
+        ...vendors.map((v) => ({ value: `v:${v.id}`, name: v.name })),
+        ...brands.map((b) => ({ value: `b:${b.id}`, name: b.name })),
+      ].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    [vendors, brands],
+  );
+
   const shown = useMemo(() => {
     if (!rows) return [];
     if (!inStockFirst) return rows;
@@ -202,30 +211,15 @@ export function ProductSearchDialog({
               data-testid="vendor-filter"
             >
               <option value="">Any</option>
-              {brands.length > 0 ? (
-                <>
-                  <optgroup label="Vendors">
-                    {vendors.map((v) => (
-                      <option key={v.id} value={`v:${v.id}`}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Brands (no vendor set up)">
-                    {brands.map((b) => (
-                      <option key={b.id} value={`b:${b.id}`}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                </>
-              ) : (
-                vendors.map((v) => (
-                  <option key={v.id} value={`v:${v.id}`}>
-                    {v.name}
-                  </option>
-                ))
-              )}
+              {/* One alphabetical list (owner 2026-10-24: Brooklyn and Helix
+                  sat in a second "Brands" group under all the vendors, where
+                  nobody scrolled). A brand with no vendor set up filters the
+                  same way; it is just keyed b: instead of v:. */}
+              {makers.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.name}
+                </option>
+              ))}
             </Select>
           </Field>
           <Field label="Size">

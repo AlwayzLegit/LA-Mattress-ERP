@@ -231,11 +231,13 @@ test.describe('Day 2 — order writer', () => {
     const result = page.getByTestId('product-result').first();
     await expect(result).toBeVisible();
     await result.click();
-    // No money = draft only: pay in full (cash) so Complete unlocks.
+    // No money = draft only: pay in full (cash) so Complete unlocks; a
+    // delivery sale also needs its date (owner 2026-10-24).
     await page.getByTestId('take-payment').click();
     await page.getByTestId('pay-method').selectOption('cash');
     await page.getByTestId('pay-full').click();
     await page.getByTestId('add-payment').click();
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByTestId('new-sale-again').click();
     await openPanel();
@@ -268,16 +270,17 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('pay-method').selectOption('cash');
     await page.getByTestId('pay-amount').fill('2.50');
     await page.getByTestId('add-payment').click();
+    // Tendering without a date is refused (owner 2026-10-24); with one,
+    // the register books the stop itself.
+    await page.getByTestId('complete-sale').click();
+    await expect(page.getByTestId('newsale-error')).toContainText(/delivery date/i);
+    const today = new Date().toISOString().slice(0, 10);
+    await page.getByTestId('requested-date').fill(today);
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
     await openFullOrder(page);
-
-    // Schedule a delivery for today.
-    const today = new Date().toISOString().slice(0, 10);
-    await page.getByTestId('delivery-date').fill(today);
-    await page.getByTestId('schedule-delivery').click();
     await expect(page.locator('a', { hasText: today }).first()).toBeVisible();
 
     // The calendar shows the stop.
@@ -349,6 +352,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('pay-card-brand').selectOption('visa');
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
 
