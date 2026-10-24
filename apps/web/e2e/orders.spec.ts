@@ -133,13 +133,15 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
 
-    // ...and complete with the balance due at the door.
+    // ...pick the delivery day (owner 2026-10-24: required to complete a
+    // delivery sale) and complete with the balance due at the door.
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
 
     // --- Detail: open, line reserved, deposit on file ---
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
     const lineRow = page.locator('tbody tr').first();
     await expect(lineRow).toContainText('Widget'); // seeded product name
@@ -279,7 +281,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
     await expect(page.locator('a', { hasText: today }).first()).toBeVisible();
 
@@ -357,7 +359,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByRole('button', { name: 'Open order' }).click();
 
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
     await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
