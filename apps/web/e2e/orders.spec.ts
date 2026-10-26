@@ -149,7 +149,9 @@ test.describe('Day 2 — order writer', () => {
     // from, amount); the reserved count sits under the item name —
     // confirming committed the full quantity.
     await expect(lineRow.getByTestId('order-line-qty')).toHaveValue('1');
-    await expect(lineRow).toContainText('1 reserved');
+    // The register booked the stop, so the line reads Scheduled (it stays
+    // reserved underneath — the inventory check below proves it).
+    await expect(lineRow).toContainText(/1 reserved|Scheduled/);
     await expect(lineRow.getByTestId('order-line-price')).toHaveValue('10.00');
 
     // --- The register deposit is on the order ---
@@ -285,12 +287,13 @@ test.describe('Day 2 — order writer', () => {
     await openFullOrder(page);
     await expect(page.locator('a', { hasText: today }).first()).toBeVisible();
 
-    // The calendar shows the stop.
+    // The calendar shows the stop — this order's, not another test's.
     await page.goto('/deliveries');
-    await expect(page.getByTestId('delivery-card').first()).toBeVisible();
+    const card = page.getByTestId('delivery-card').filter({ hasText: 'Del Ivery' }).first();
+    await expect(card).toBeVisible();
 
     // Drive the truck: open the delivery, mark delivered.
-    await page.getByTestId('delivery-card').first().click();
+    await card.click();
     await page.waitForURL(/\/deliveries\/[0-9a-f-]{36}$/);
     await page.getByTestId('mark-delivered').click();
     await expect(page.getByTestId('delivery-status')).toHaveText(/delivered/i);
