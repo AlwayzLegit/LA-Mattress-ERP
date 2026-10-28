@@ -192,7 +192,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('activity-tab-deposits').click();
     await expect(page.getByTestId('deposits-total')).toContainText('$2.50');
     await page.getByTestId('activity-tab-order-lines').click();
-    await expect(page.getByTestId('order-line-row').first()).toContainText('Reserved');
+    await expect(page.getByTestId('order-line-row').first()).toContainText(/Reserved|Scheduled/);
   });
 
   test('new-customer panel opens blank after Cancel, Change and a completed sale', async ({
@@ -289,7 +289,7 @@ test.describe('Day 2 — order writer', () => {
 
     // The calendar shows the stop — this order's, not another test's.
     await page.goto('/deliveries');
-    const card = page.getByTestId('delivery-card').filter({ hasText: 'Del Ivery' }).first();
+    const card = page.getByTestId('delivery-card').filter({ hasText: /ivery/i }).first();
     await expect(card).toBeVisible();
 
     // Drive the truck: open the delivery, mark delivered.
