@@ -36,7 +36,7 @@ import {
   type Fulfillment,
   type SourcingContext,
 } from '@/lib/pos-sourcing';
-import { autofillFromZip, type ZipHit } from '@/lib/zip-lookup';
+import { autofillFromZip, lookupZip, type ZipHit } from '@/lib/zip-lookup';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
 import { Money } from '@/components/money';
 import {
@@ -103,7 +103,14 @@ interface CustomerHit {
   lastName: string | null;
   email: string | null;
   phone: string | null;
-  addressesJson: { line1?: string | null; city?: string | null; region?: string | null }[] | null;
+  addressesJson:
+    | {
+        line1?: string | null;
+        city?: string | null;
+        region?: string | null;
+        postalCode?: string | null;
+      }[]
+    | null;
 }
 interface Addons {
   removal: boolean;
@@ -725,9 +732,27 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   // shipped) to a state other than the store's → no sales tax. The
   // store's state comes from its address on Locations; a store without
   // one borrows the state of any other store that has one.
-  const deliveryState = stateCode(
-    shipDiffers ? ship.region : (customer?.addressesJson?.[0]?.region ?? null),
-  );
+  //
+  // Owner 2026-10-25: the ZIP decides the delivery state when it is on
+  // file — a State typed as "LA" for Los Angeles reads as Louisiana and
+  // switched tax off on a Studio City delivery. The typed State only
+  // counts when the ZIP is missing or unknown.
+  const deliveryAddress = shipDiffers ? ship : (customer?.addressesJson?.[0] ?? null);
+  const deliveryZip = (deliveryAddress?.postalCode ?? '').trim();
+  const [zipState, setZipState] = useState<{ zip: string; state: string | null } | null>(null);
+  useEffect(() => {
+    if (!deliveryZip) return;
+    let live = true;
+    void lookupZip(deliveryZip).then((hit) => {
+      if (live) setZipState({ zip: deliveryZip, state: hit ? stateCode(hit.state) : null });
+    });
+    return () => {
+      live = false;
+    };
+  }, [deliveryZip]);
+  const deliveryState =
+    (deliveryZip && zipState?.zip === deliveryZip ? zipState.state : null) ??
+    stateCode(deliveryAddress?.region ?? null);
   const storeState =
     stateCode(locs.find((l) => l.id === locationId)?.region) ??
     locs.map((l) => stateCode(l.region)).find(Boolean) ??
