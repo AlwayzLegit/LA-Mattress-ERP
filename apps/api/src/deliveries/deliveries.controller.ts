@@ -225,7 +225,7 @@ export class DeliveriesController {
         asc(schema.deliveries.createdAt),
       )
       .limit(limit);
-    return Promise.all(rows.map((r) => this.hydrate(r)));
+    return this.hydrateMany(rows);
   }
 
   /**
@@ -1405,8 +1405,25 @@ export class DeliveriesController {
   }
 
   private async hydrate(row: DeliveryRow): Promise<DeliveryDetail> {
-    const [order] = await this.db
+    const [detail] = await this.hydrateMany([row]);
+    return detail!;
+  }
+
+  /**
+   * Joins the order, customer, tender total, lines and RMA onto a page of
+   * deliveries in five queries total rather than five per row. The month
+   * board asks for up to 2,000 rows at once; per-row hydration put it at
+   * ~1,500 round trips and two seconds on a store-sized dataset.
+   */
+  private async hydrateMany(rows: DeliveryRow[]): Promise<DeliveryDetail[]> {
+    if (rows.length === 0) return [];
+    const orderIds = [...new Set(rows.map((r) => r.orderId))];
+    const deliveryIds = rows.map((r) => r.id);
+    const returnIds = [...new Set(rows.map((r) => r.returnId).filter((x): x is string => !!x))];
+
+    const orderRows = await this.db
       .select({
+        id: schema.orders.id,
         number: schema.orders.number,
         customerId: schema.orders.customerId,
         fulfillmentType: schema.orders.fulfillmentType,
@@ -1419,27 +1436,37 @@ export class DeliveriesController {
         addressPhone: schema.orders.addressPhone,
       })
       .from(schema.orders)
-      .where(eq(schema.orders.id, row.orderId))
-      .limit(1);
-    const [customer] = order
+      .where(inArray(schema.orders.id, orderIds));
+    const orders = new Map(orderRows.map((o) => [o.id, o]));
+
+    const customerIds = [...new Set(orderRows.map((o) => o.customerId))];
+    const customerRows = customerIds.length
       ? await this.db
           .select({
+            id: schema.customers.id,
             firstName: schema.customers.firstName,
             lastName: schema.customers.lastName,
           })
           .from(schema.customers)
-          .where(eq(schema.customers.id, order.customerId))
-          .limit(1)
+          .where(inArray(schema.customers.id, customerIds))
       : [];
-    const payments = await this.db
-      .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
-      .from(schema.payments)
-      .where(eq(schema.payments.orderId, row.orderId));
-    const paid = payments
-      .filter((p) => p.status === 'succeeded')
-      .reduce((s, p) => s + p.amountCents, 0);
-    const lines = await this.db
+    const customers = new Map(customerRows.map((c) => [c.id, c]));
+
+    const paidRows = await this.db
       .select({
+        orderId: schema.payments.orderId,
+        paid: sql<number>`coalesce(sum(${schema.payments.amountCents}), 0)::int`,
+      })
+      .from(schema.payments)
+      .where(
+        and(inArray(schema.payments.orderId, orderIds), eq(schema.payments.status, 'succeeded')),
+      )
+      .groupBy(schema.payments.orderId);
+    const paidByOrder = new Map(paidRows.map((p) => [p.orderId, p.paid]));
+
+    const lineRows = await this.db
+      .select({
+        deliveryId: schema.deliveryLines.deliveryId,
         id: schema.deliveryLines.id,
         orderLineId: schema.deliveryLines.orderLineId,
         quantity: schema.deliveryLines.quantity,
@@ -1450,32 +1477,48 @@ export class DeliveriesController {
       })
       .from(schema.deliveryLines)
       .innerJoin(schema.orderLines, eq(schema.orderLines.id, schema.deliveryLines.orderLineId))
-      .where(eq(schema.deliveryLines.deliveryId, row.id));
-    const [ret] = row.returnId
+      .where(inArray(schema.deliveryLines.deliveryId, deliveryIds))
+      .orderBy(asc(schema.deliveryLines.id));
+    const linesByDelivery = new Map<string, DeliveryDetail['lines']>();
+    for (const { deliveryId, ...line } of lineRows) {
+      const list = linesByDelivery.get(deliveryId) ?? [];
+      list.push(line);
+      linesByDelivery.set(deliveryId, list);
+    }
+
+    const returnRows = returnIds.length
       ? await this.db
-          .select({ rmaNumber: schema.orderReturns.rmaNumber })
+          .select({ id: schema.orderReturns.id, rmaNumber: schema.orderReturns.rmaNumber })
           .from(schema.orderReturns)
-          .where(eq(schema.orderReturns.id, row.returnId))
-          .limit(1)
+          .where(inArray(schema.orderReturns.id, returnIds))
       : [];
-    return {
-      ...row,
-      orderNumber: order?.number ?? '?',
-      rmaNumber: ret?.rmaNumber ?? null,
-      customerId: order?.customerId ?? '',
-      customerName: customer
-        ? [customer.firstName, customer.lastName].filter(Boolean).join(' ') || null
-        : null,
-      addressLine1: order?.addressLine1 ?? null,
-      addressLine2: order?.addressLine2 ?? null,
-      addressCity: order?.addressCity ?? null,
-      addressRegion: order?.addressRegion ?? null,
-      addressPostalCode: order?.addressPostalCode ?? null,
-      addressPhone: order?.addressPhone ?? null,
-      fulfillmentType: order?.fulfillmentType ?? 'delivery',
-      balanceDueCents: Math.max(0, (order?.totalCents ?? 0) - paid),
-      lines,
-    };
+    const returns = new Map(returnRows.map((r) => [r.id, r.rmaNumber]));
+
+    return rows.map((row) => {
+      const order = orders.get(row.orderId);
+      const customer = order ? customers.get(order.customerId) : undefined;
+      return {
+        ...row,
+        orderNumber: order?.number ?? '?',
+        rmaNumber: row.returnId ? (returns.get(row.returnId) ?? null) : null,
+        customerId: order?.customerId ?? '',
+        customerName: customer
+          ? [customer.firstName, customer.lastName].filter(Boolean).join(' ') || null
+          : null,
+        addressLine1: order?.addressLine1 ?? null,
+        addressLine2: order?.addressLine2 ?? null,
+        addressCity: order?.addressCity ?? null,
+        addressRegion: order?.addressRegion ?? null,
+        addressPostalCode: order?.addressPostalCode ?? null,
+        addressPhone: order?.addressPhone ?? null,
+        fulfillmentType: order?.fulfillmentType ?? 'delivery',
+        balanceDueCents: Math.max(
+          0,
+          (order?.totalCents ?? 0) - (paidByOrder.get(row.orderId) ?? 0),
+        ),
+        lines: linesByDelivery.get(row.id) ?? [],
+      };
+    });
   }
 
   private fireEvent(
