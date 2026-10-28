@@ -1268,9 +1268,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     // Owner 2026-10-24: a delivery sale tendered without a date never
     // reached the Deliveries calendar, and nobody knew until the customer
     // called. The date (on the order, or on every delivery line) is part
-    // of tendering, not an afterthought.
+    // of tendering, not an afterthought. An exchange keeps its own
+    // scheduling from the exchange page, so it is not gated here.
     if (
       mode === 'complete' &&
+      !exchangeOriginal &&
       orderType !== 'quote' &&
       !requestedDate &&
       lines.some(
