@@ -15,7 +15,7 @@ env:
 jobs:
   verify:
     name: Lint, typecheck, test, build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -211,7 +211,7 @@ jobs:
 
   e2e:
     name: Playwright E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: verify
     services:
       postgres:
@@ -265,7 +265,7 @@ jobs:
 
   migration-drift:
     name: Drizzle migration drift check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
