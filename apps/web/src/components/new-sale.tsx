@@ -1265,6 +1265,28 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       setError('No money on this order yet — record a payment to complete, or Save draft.');
       return;
     }
+    // Owner 2026-10-24: a delivery sale tendered without a date never
+    // reached the Deliveries calendar, and nobody knew until the customer
+    // called. The date (on the order, or on every delivery line) is part
+    // of tendering, not an afterthought. An exchange keeps its own
+    // scheduling from the exchange page, so it is not gated here.
+    if (
+      mode === 'complete' &&
+      !exchangeOriginal &&
+      orderType !== 'quote' &&
+      !requestedDate &&
+      lines.some(
+        (l) =>
+          l.lineType !== 'custom' &&
+          !l.deliveryDate &&
+          effectiveFulfillment(l, fulfillment) === 'delivery',
+      )
+    ) {
+      setError(
+        'Pick the delivery date before completing — set Promised above (or a Deliver-on date on each delivery line) so the order lands on the Deliveries calendar.',
+      );
+      return;
+    }
     if (mode === 'complete' && parseDollars(payAmount) > 0) {
       setError(
         `You typed $${payAmount} in the payment box but didn't record it — press Record, or clear the box, then Complete.`,
@@ -2662,7 +2684,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     </span>
                   ) : fulfillment === 'delivery' && !requestedDate && !locked ? (
                     <span data-testid="newsale-no-date">
-                      Blank = not on the Deliveries calendar until it is scheduled
+                      Required to complete — the date puts the order on the Deliveries calendar
                     </span>
                   ) : undefined
                 }
@@ -2689,6 +2711,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   onChange={(e) => setRequestedDate(e.target.value)}
                   disabled={locked || fulfillment === 'take_with' || fulfillment === 'will_call'}
                   className="input-mono"
+                  data-testid="requested-date"
                 />
               </Field>
             </div>
@@ -2909,7 +2932,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
           {!locked ? (
             <section className="reg-card reg-actions" aria-label="Payment and completion">
-              <div aria-live="polite">{error && <Alert tone="error">{error}</Alert>}</div>
+              <div aria-live="polite">
+                {error && (
+                  <Alert tone="error" data-testid="newsale-error">
+                    {error}
+                  </Alert>
+                )}
+              </div>
               {hasZero && (
                 <div className="reg-zero" data-testid="zero-guard">
                   <strong>A line is priced at $0.00.</strong> Fix the price, or confirm it is

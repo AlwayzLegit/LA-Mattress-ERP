@@ -133,13 +133,15 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
 
-    // ...and complete with the balance due at the door.
+    // ...pick the delivery day (owner 2026-10-24: required to complete a
+    // delivery sale) and complete with the balance due at the door.
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
 
     // --- Detail: open, line reserved, deposit on file ---
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
     const lineRow = page.locator('tbody tr').first();
     await expect(lineRow).toContainText('Widget'); // seeded product name
@@ -147,7 +149,9 @@ test.describe('Day 2 — order writer', () => {
     // from, amount); the reserved count sits under the item name —
     // confirming committed the full quantity.
     await expect(lineRow.getByTestId('order-line-qty')).toHaveValue('1');
-    await expect(lineRow).toContainText('1 reserved');
+    // The register booked the stop, so the line reads Scheduled (it stays
+    // reserved underneath — the inventory check below proves it).
+    await expect(lineRow).toContainText(/1 reserved|Scheduled/);
     await expect(lineRow.getByTestId('order-line-price')).toHaveValue('10.00');
 
     // --- The register deposit is on the order ---
@@ -188,7 +192,7 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('activity-tab-deposits').click();
     await expect(page.getByTestId('deposits-total')).toContainText('$2.50');
     await page.getByTestId('activity-tab-order-lines').click();
-    await expect(page.getByTestId('order-line-row').first()).toContainText('Reserved');
+    await expect(page.getByTestId('order-line-row').first()).toContainText(/Reserved|Scheduled/);
   });
 
   test('new-customer panel opens blank after Cancel, Change and a completed sale', async ({
@@ -231,11 +235,13 @@ test.describe('Day 2 — order writer', () => {
     const result = page.getByTestId('product-result').first();
     await expect(result).toBeVisible();
     await result.click();
-    // No money = draft only: pay in full (cash) so Complete unlocks.
+    // No money = draft only: pay in full (cash) so Complete unlocks; a
+    // delivery sale also needs its date (owner 2026-10-24).
     await page.getByTestId('take-payment').click();
     await page.getByTestId('pay-method').selectOption('cash');
     await page.getByTestId('pay-full').click();
     await page.getByTestId('add-payment').click();
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByTestId('new-sale-again').click();
     await openPanel();
@@ -268,24 +274,26 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('pay-method').selectOption('cash');
     await page.getByTestId('pay-amount').fill('2.50');
     await page.getByTestId('add-payment').click();
+    // Tendering without a date is refused (owner 2026-10-24); with one,
+    // the register books the stop itself.
+    await page.getByTestId('complete-sale').click();
+    await expect(page.getByTestId('newsale-error')).toContainText(/delivery date/i);
+    const today = new Date().toISOString().slice(0, 10);
+    await page.getByTestId('requested-date').fill(today);
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
-
-    // Schedule a delivery for today.
-    const today = new Date().toISOString().slice(0, 10);
-    await page.getByTestId('delivery-date').fill(today);
-    await page.getByTestId('schedule-delivery').click();
     await expect(page.locator('a', { hasText: today }).first()).toBeVisible();
 
-    // The calendar shows the stop.
+    // The calendar shows the stop — this order's, not another test's.
     await page.goto('/deliveries');
-    await expect(page.getByTestId('delivery-card').first()).toBeVisible();
+    const card = page.getByTestId('delivery-card').filter({ hasText: /ivery/i }).first();
+    await expect(card).toBeVisible();
 
     // Drive the truck: open the delivery, mark delivered.
-    await page.getByTestId('delivery-card').first().click();
+    await card.click();
     await page.waitForURL(/\/deliveries\/[0-9a-f-]{36}$/);
     await page.getByTestId('mark-delivered').click();
     await expect(page.getByTestId('delivery-status')).toHaveText(/delivered/i);
@@ -349,11 +357,12 @@ test.describe('Day 2 — order writer', () => {
     await page.getByTestId('pay-card-brand').selectOption('visa');
     await page.getByTestId('add-payment').click();
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
+    await page.getByTestId('requested-date').fill(new Date().toISOString().slice(0, 10));
     await page.getByTestId('complete-sale').click();
     await page.getByRole('button', { name: 'Open order' }).click();
 
     await page.waitForURL(/\/orders\/[0-9a-f-]{36}$/);
-    await expect(page.getByTestId('order-status')).toHaveText(/reserved/i);
+    await expect(page.getByTestId('order-status')).toHaveText(/scheduled/i);
     await openFullOrder(page);
     await expect(page.locator('tbody tr', { hasText: 'deposit' })).toContainText('$2.50');
     await expect(page.getByTestId('balance-due')).toContainText('$7.50');
