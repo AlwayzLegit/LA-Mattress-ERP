@@ -501,6 +501,24 @@ interface OrderDetail extends OrderListRow {
  * on order" until receiving accepts the units, then "accepted, reserved".
  * From po_line_allocations — ordered vs received quantities per line.
  */
+interface DriftRow {
+  variantId: string;
+  sku: string | null;
+  locationId: string;
+  lineReserved: number;
+  levelReserved: number;
+  driftUnits: number;
+}
+
+interface ReleasedLine {
+  orderId: string;
+  orderNumber: string;
+  orderLineId: string;
+  variantId: string;
+  locationId: string;
+  released: number;
+}
+
 export interface OrderLinePo {
   poId: string;
   poNumber: string;
@@ -1387,24 +1405,33 @@ export class OrdersController {
    */
   @Get('orders/reservation-drift')
   @RequirePermission('reports.inventory.view')
-  async reservationDrift(@CurrentTenant() tenant: RequestTenantContext): Promise<
-    {
-      variantId: string;
-      sku: string | null;
-      locationId: string;
-      lineReserved: number;
-      levelReserved: number;
-      driftUnits: number;
-    }[]
-  > {
+  async reservationDrift(@CurrentTenant() tenant: RequestTenantContext): Promise<DriftRow[]> {
+    return this.driftRows(tenant.businessId!);
+  }
+
+  /**
+   * A line reserves at its own source, else the order's stock location,
+   * else the selling store — the rule `reserveOrder`, the line release
+   * and the Reservations panel share. Owner 2026-10-28: the report
+   * grouped by the selling store and so listed every Warehouse-sourced
+   * order twice (short at the Warehouse, over at the store) while the
+   * real phantoms hid among them.
+   */
+  private async driftRows(businessId: string): Promise<DriftRow[]> {
     const rows = await this.db.execute(sql`
       WITH line_side AS (
-        SELECT o.location_id, ol.variant_id, SUM(ol.qty_reserved)::int AS line_reserved
+        SELECT COALESCE(ol.source_location_id, o.stock_location_id, o.location_id) AS location_id,
+               ol.variant_id, SUM(ol.qty_reserved)::int AS line_reserved
         FROM order_lines ol
         JOIN orders o ON o.id = ol.order_id
-        WHERE ol.business_id = ${tenant.businessId}
+        WHERE ol.business_id = ${businessId}
           AND ol.variant_id IS NOT NULL
-        GROUP BY o.location_id, ol.variant_id
+        GROUP BY 1, 2
+      ),
+      level_side AS (
+        SELECT variant_id, location_id, reserved
+        FROM inventory_levels
+        WHERE business_id = ${businessId}
       )
       SELECT
         COALESCE(ls.variant_id, il.variant_id) AS variant_id,
@@ -1413,9 +1440,8 @@ export class OrdersController {
         COALESCE(ls.line_reserved, 0) AS line_reserved,
         COALESCE(il.reserved, 0) AS level_reserved
       FROM line_side ls
-      FULL OUTER JOIN inventory_levels il
+      FULL OUTER JOIN level_side il
         ON il.variant_id = ls.variant_id AND il.location_id = ls.location_id
-        AND il.business_id = ${tenant.businessId}
       LEFT JOIN product_variants pv ON pv.id = COALESCE(ls.variant_id, il.variant_id)
       WHERE COALESCE(ls.line_reserved, 0) != COALESCE(il.reserved, 0)
     `);
@@ -1427,6 +1453,122 @@ export class OrdersController {
       levelReserved: Number(r.level_reserved),
       driftUnits: Number(r.line_reserved) - Number(r.level_reserved),
     }));
+  }
+
+  /**
+   * Owner 2026-10-28: put the reservations back in line with the orders.
+   * Two passes, both audited and visible in the stock ledger:
+   *
+   * 1. Lines holding more than they can still ship — units already
+   *    fulfilled, or a closed (completed / cancelled) order — release
+   *    the excess through the normal release path, so the line and the
+   *    level drop together.
+   * 2. Any (variant, location) whose level still disagrees with the sum
+   *    of its lines is set to that sum, with a `reservation_repair`
+   *    movement (delta 0) recording what it was.
+   *
+   * `dryRun` reports both lists without writing.
+   */
+  @Post('orders/reservation-drift/repair')
+  @RequirePermission('inventory.adjust')
+  async repairReservationDrift(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: { dryRun?: boolean },
+  ): Promise<{ dryRun: boolean; releasedLines: ReleasedLine[]; levels: DriftRow[] }> {
+    const dryRun = Boolean(body?.dryRun);
+    const businessId = tenant.businessId!;
+    const stale = await this.db
+      .select({
+        orderId: schema.orders.id,
+        orderNumber: schema.orders.number,
+        orderStatus: schema.orders.status,
+        orderLineId: schema.orderLines.id,
+        variantId: schema.orderLines.variantId,
+        quantity: schema.orderLines.quantity,
+        qtyReserved: schema.orderLines.qtyReserved,
+        qtyFulfilled: schema.orderLines.qtyFulfilled,
+        locationId: sql<string>`COALESCE(${schema.orderLines.sourceLocationId}, ${schema.orders.stockLocationId}, ${schema.orders.locationId})`,
+      })
+      .from(schema.orderLines)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+      .where(
+        and(
+          eq(schema.orders.businessId, businessId),
+          sql`${schema.orderLines.variantId} IS NOT NULL`,
+          sql`${schema.orderLines.qtyReserved} > 0`,
+          or(
+            inArray(schema.orders.status, ['completed', 'cancelled']),
+            sql`${schema.orderLines.qtyReserved} > ${schema.orderLines.quantity} - ${schema.orderLines.qtyFulfilled}`,
+          ),
+        ),
+      );
+    const releasedLines: ReleasedLine[] = [];
+    for (const s of stale) {
+      const keep = ['completed', 'cancelled'].includes(s.orderStatus)
+        ? 0
+        : Math.max(0, s.quantity - s.qtyFulfilled);
+      const released = s.qtyReserved - keep;
+      if (released <= 0) continue;
+      releasedLines.push({
+        orderId: s.orderId,
+        orderNumber: s.orderNumber,
+        orderLineId: s.orderLineId,
+        variantId: s.variantId!,
+        locationId: s.locationId,
+        released,
+      });
+      if (dryRun) continue;
+      await this.orders.applyReleases(this.db, {
+        businessId,
+        orderId: s.orderId,
+        locationId: s.locationId,
+        actorUserId: actor?.id ?? null,
+        releases: [{ orderLineId: s.orderLineId, variantId: s.variantId!, quantity: released }],
+        updateLines: true,
+      });
+    }
+
+    const levels = await this.driftRows(businessId);
+    if (!dryRun) {
+      for (const d of levels) {
+        await this.db
+          .insert(schema.inventoryLevels)
+          .values({
+            businessId,
+            variantId: d.variantId,
+            locationId: d.locationId,
+            onHand: 0,
+            reserved: d.lineReserved,
+          })
+          .onConflictDoUpdate({
+            target: [schema.inventoryLevels.variantId, schema.inventoryLevels.locationId],
+            set: { reserved: d.lineReserved, updatedAt: new Date() },
+          });
+        await this.db.insert(schema.inventoryMovements).values({
+          businessId,
+          variantId: d.variantId,
+          locationId: d.locationId,
+          delta: 0,
+          reason: 'reservation_repair',
+          referenceType: null,
+          referenceId: null,
+          actorUserId: actor?.id ?? null,
+          notes: `reserved ${d.levelReserved} → ${d.lineReserved} (what the order lines hold)`,
+        });
+      }
+      await this.audit.log({
+        action: 'inventory.reservation_repair',
+        targetType: 'business',
+        targetId: businessId,
+        after: {
+          releasedLines: releasedLines.length,
+          levels: levels.length,
+          units: levels.reduce((n, d) => n + Math.abs(d.driftUnits), 0),
+        },
+      });
+    }
+    return { dryRun, releasedLines, levels };
   }
 
   /**

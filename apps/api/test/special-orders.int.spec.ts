@@ -369,6 +369,59 @@ describe('PO builder pre-load: sold-not-in-stock lines carry the SO # (P6)', () 
   });
 });
 
+describe('Receipt reservations stop at what the line still needs (owner 2026-10-28)', () => {
+  it('a line already reserved from stock is not reserved again when its PO lands', async () => {
+    // One unit in free stock → the stock line reserves it at confirm.
+    const before = await level();
+    const adj = await ownerReq()
+      .post('/v1/inventory/adjust')
+      .send({ variantId: baseVariantId, locationId, delta: 1, reason: 'count_correction' });
+    expect(adj.status).toBe(201);
+    const order = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        lines: [{ variantId: baseVariantId, quantity: 1 }],
+        confirm: true,
+      });
+    expect(order.status).toBe(201);
+    expect(order.body.lines[0].qtyReserved).toBe(1);
+    expect(await level()).toEqual({ onHand: before.onHand + 1, reserved: before.reserved + 1 });
+
+    // A PO was raised for the same line anyway (KO-10069: the count
+    // correction and the PO both covered the one sale).
+    const po = await ownerReq()
+      .post('/v1/purchase-orders')
+      .send({
+        vendorId,
+        locationId,
+        lines: [
+          {
+            variantId: baseVariantId,
+            quantity: 1,
+            unitCostCents: 30000,
+            orderLineId: order.body.lines[0].id,
+          },
+        ],
+      });
+    expect(po.status).toBe(201);
+    const received = await ownerReq()
+      .post(`/v1/purchase-orders/${po.body.id}/receiving`)
+      .send({ lines: [{ lineId: po.body.lines[0].id, received: 1, inspected: 1, accepted: 1 }] });
+    expect(received.status).toBe(201);
+
+    // The unit entered stock, free: the line still holds exactly one.
+    const after = await ownerReq().get(`/v1/orders/${order.body.id}`);
+    expect(after.body.lines[0].qtyReserved).toBe(1);
+    expect(await level()).toEqual({ onHand: before.onHand + 2, reserved: before.reserved + 1 });
+    const drift = await ownerReq().get('/v1/orders/reservation-drift');
+    expect(
+      drift.body.find((r: { variantId: string }) => r.variantId === baseVariantId),
+    ).toBeUndefined();
+  });
+});
+
 describe('PO-060 (I7) — direct ship: vendor ships to the customer, stock never moves', () => {
   let dsVariantId = '';
   let orderId = '';
