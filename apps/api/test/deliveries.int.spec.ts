@@ -289,8 +289,29 @@ describe('Day 3 — deliveries: schedule, deliver, collect, complete', () => {
     expect(res.body.lines).toHaveLength(1);
     expect(res.body.lines[0].quantity).toBe(2);
     expect(res.body.balanceDueCents).toBe(150_000);
+    // Fully reserved: nothing short on the stop (owner 2026-10-28).
+    expect(res.body.unreservedUnits).toBe(0);
+    expect(res.body.lines[0].unreserved).toBe(0);
     // Scheduling moves no stock.
     expect(await level()).toEqual({ onHand: 10, reserved: 2 });
+  });
+
+  it('a stop whose units are not reserved reads as Partial on the calendar (owner 2026-10-28)', async () => {
+    const detail = await ownerReq().get(`/v1/orders/${orderId}`);
+    const lineId = detail.body.lines[0].id as string;
+    const rel = await ownerReq().post(`/v1/orders/${orderId}/lines/${lineId}/release`);
+    expect(rel.status).toBe(201);
+    expect(await level()).toEqual({ onHand: 10, reserved: 0 });
+    const cal = await ownerReq().get(`/v1/deliveries?from=${today}&to=${today}`);
+    const mine = cal.body.find((d: { id: string }) => d.id === deliveryId);
+    expect(mine.unreservedUnits).toBe(2);
+    expect(mine.lines[0].unreserved).toBe(2);
+    // Re-commit the units; the stop is whole again.
+    const re = await ownerReq().post(`/v1/orders/${orderId}/reserve`);
+    expect(re.status).toBe(201);
+    expect(await level()).toEqual({ onHand: 10, reserved: 2 });
+    const one = await ownerReq().get(`/v1/deliveries/${deliveryId}`);
+    expect(one.body.unreservedUnits).toBe(0);
   });
 
   it('refuses to double-book units already on that truck', async () => {

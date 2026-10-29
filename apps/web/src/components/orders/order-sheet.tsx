@@ -129,6 +129,7 @@ const TENDERS = [
   'shop_pay',
   'synchrony',
   'acima',
+  'vds',
 ];
 
 export function OrderSheet({ id }: { id: string }) {

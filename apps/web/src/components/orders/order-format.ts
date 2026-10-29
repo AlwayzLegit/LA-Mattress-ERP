@@ -84,6 +84,7 @@ export const METHOD_LABEL: Record<string, string> = {
   shop_pay: 'Shop Pay',
   synchrony: 'Synchrony',
   acima: 'Acima',
+  vds: 'VDS',
   store_credit: 'Store credit',
   gift_card: 'Gift card',
   financing: 'Financing',

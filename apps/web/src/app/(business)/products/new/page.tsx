@@ -46,10 +46,25 @@ export default function NewProductPage() {
   const [saving, setSaving] = useState(false);
   // Owner 2026-10-14: a new product can carry a product group too.
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  // Owner 2026-10-28: Vendor and Brand are picked when the product is
+  // made, not found later on its page. The vendor becomes every item's
+  // preferred vendor; the brand sits on the product.
+  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     void api<{ groups: { value: string }[] }>('/v1/products/facets')
       .then((f) => setGroupOptions((f.groups ?? []).map((g) => g.value)))
       .catch(() => setGroupOptions([]));
+    void api<{ vendors: { id: string; name: string }[] }>('/v1/pos/vendor-options')
+      .then((r) => setVendors(r.vendors))
+      .catch(() =>
+        api<{ id: string; name: string }[]>('/v1/vendors')
+          .then((r) => setVendors(Array.isArray(r) ? r : []))
+          .catch(() => setVendors([])),
+      );
+    void api<{ id: string; name: string; isActive: boolean }[]>('/v1/brands')
+      .then((r) => setBrands(r.filter((b) => b.isActive !== false)))
+      .catch(() => setBrands([]));
   }, []);
 
   function setVariant(i: number, patch: Partial<VariantInput>) {
@@ -68,6 +83,8 @@ export default function NewProductPage() {
         sku: productSku,
         description: String(data.get('description') ?? '') || null,
         group: String(data.get('group') ?? '').trim() || null,
+        preferredVendorId: String(data.get('vendorId') ?? '') || null,
+        brandId: String(data.get('brandId') ?? '') || null,
         // Owner 2026-09-28: a product saved with no priced row used to get
         // no item at all — unsellable, unstockable, no vendor, and nothing
         // on its page could fix it. Rows with a price, SKU or name are kept,
@@ -130,6 +147,26 @@ export default function NewProductPage() {
                     <option key={g} value={g} />
                   ))}
                 </datalist>
+              </Field>
+              <Field label="Vendor" hint="Who we buy it from — set on every item of the product.">
+                <Select name="vendorId" defaultValue="" data-testid="new-product-vendor">
+                  <option value="">—</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Brand">
+                <Select name="brandId" defaultValue="" data-testid="new-product-brand">
+                  <option value="">—</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Description" className="form-span">
                 <textarea className="textarea" name="description" rows={3} />
