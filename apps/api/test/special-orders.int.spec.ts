@@ -441,6 +441,25 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
   let poLineId = '';
   let transferId = '';
   let transferLineId = '';
+  let linkVariantId = '';
+
+  async function linkLevel(): Promise<{ onHand: number; reserved: number }> {
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const [row] = await drizzle(sql2)
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.variantId, linkVariantId),
+            eq(schema.inventoryLevels.locationId, locationId),
+          ),
+        );
+      return { onHand: row?.onHand ?? 0, reserved: row?.reserved ?? 0 };
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+  }
 
   it('setup: a second store, a stock line nobody can reserve, a plain PO for 3', async () => {
     const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
@@ -453,12 +472,18 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
     } finally {
       await sql2.end({ timeout: 5 });
     }
+    // Its own item, so nothing earlier tests left in stock reserves here.
+    const product = await ownerReq()
+      .post('/v1/products')
+      .send({ name: 'Link Test Sofa', variants: [{ sku: 'LINK-SOFA', priceCents: 50000 }] });
+    expect(product.status).toBe(201);
+    linkVariantId = product.body.variants[0].id;
     const order = await ownerReq()
       .post('/v1/orders')
       .send({
         locationId,
         customerId,
-        lines: [{ variantId: baseVariantId, quantity: 2 }],
+        lines: [{ variantId: linkVariantId, quantity: 2 }],
         confirm: true,
       });
     expect(order.status).toBe(201);
@@ -473,7 +498,7 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
       .send({
         vendorId,
         locationId,
-        lines: [{ variantId: baseVariantId, quantity: 3, unitCostCents: 30000 }],
+        lines: [{ variantId: linkVariantId, quantity: 3, unitCostCents: 30000 }],
       });
     expect(po.status).toBe(201);
     poId = po.body.id;
@@ -486,7 +511,7 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
       .send({
         fromLocationId: locationId,
         toLocationId: outletId,
-        lines: [{ variantId: baseVariantId, quantity: 1 }],
+        lines: [{ variantId: linkVariantId, quantity: 1 }],
       });
     expect(xfer.status).toBe(201);
     transferId = xfer.body.id;
@@ -508,7 +533,7 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
       ),
     ).toMatchObject({ transferId, need: 1 });
     // And the order line sees the PO line among the open lines it could wait on.
-    const open = await ownerReq().get(`/v1/purchase-orders/open-lines?variantId=${baseVariantId}`);
+    const open = await ownerReq().get(`/v1/purchase-orders/open-lines?variantId=${linkVariantId}`);
     expect(open.status).toBe(200);
     expect(open.body.find((l: { poLineId: string }) => l.poLineId === poLineId)).toMatchObject({
       poId,
@@ -585,14 +610,14 @@ describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft tr
       .send({ orderLineId, quantity: 2 });
     expect(relink.status).toBe(201);
 
-    const before = await level();
+    const before = await linkLevel();
     const received = await ownerReq()
       .post(`/v1/purchase-orders/${poId}/receiving`)
       .send({ lines: [{ lineId: poLineId, received: 3, inspected: 3, accepted: 3 }] });
     expect(received.status).toBe(201);
     expect(received.body.status).toBe('received');
     // 3 in; the transfer's unit is free (it ships from stock), the order's 2 are committed.
-    expect(await level()).toEqual({ onHand: before.onHand + 3, reserved: before.reserved + 2 });
+    expect(await linkLevel()).toEqual({ onHand: before.onHand + 3, reserved: before.reserved + 2 });
     const order = await ownerReq().get(`/v1/orders/${orderId}`);
     expect(order.body.lines[0].qtyReserved).toBe(2);
     const po = await ownerReq().get(`/v1/purchase-orders/${poId}`);
