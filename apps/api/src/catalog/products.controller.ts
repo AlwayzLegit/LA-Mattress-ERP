@@ -119,6 +119,11 @@ interface CreateProductBody {
   variants?: VariantInput[];
   /** STORIS product group (QUEEN, CAKING …); stored on every variant. */
   group?: string | null;
+  /**
+   * Owner 2026-10-28: the vendor picked on the New product form. Set as
+   * the preferred vendor on every item created with the product.
+   */
+  preferredVendorId?: string | null;
 }
 
 interface UpdateProductBody {
@@ -1000,6 +1005,7 @@ export class CatalogProductsController {
                 group: createGroup,
               }
             : (v.attributesJson ?? null)) as never,
+          preferredVendorId: body.preferredVendorId ?? null,
           ...deriveVariantSizing(v, p.name),
         })),
       );
