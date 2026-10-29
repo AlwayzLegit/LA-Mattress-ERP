@@ -89,6 +89,8 @@ const PAYMENT_METHODS = [
   'shop_pay',
   'synchrony',
   'acima',
+  // Owner 2026-10-28: VDS, taken outside the register like Zelle.
+  'vds',
 ] as const;
 type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 

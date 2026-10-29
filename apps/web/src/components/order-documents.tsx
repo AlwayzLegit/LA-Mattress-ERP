@@ -161,6 +161,7 @@ const TENDER_LABELS: Record<string, string> = {
   shop_pay: 'Shop Pay',
   synchrony: 'Synchrony',
   acima: 'Acima',
+  vds: 'VDS',
   financing: 'Financing',
   store_credit: 'Store credit',
 };
