@@ -20,7 +20,8 @@ import type { HandoffRow, HandoffsResponse } from './types';
  * Owner 2026-10-29: one tick per pickup, with who holds it on the row —
  * no grouping by runner and no "Received all" button. Each envelope is
  * counted into the owner's hands on its own. The list is sectioned by
- * store, oldest pickup first within each.
+ * store, oldest pickup first within each, and every payment on a pickup
+ * has its own tick; the pickup reads as received once all are ticked.
  */
 
 export function CashHandoffs() {
@@ -101,13 +102,16 @@ export function CashHandoffs() {
     }
   };
 
-  const toggle = (r: HandoffRow) =>
+  // Owner 2026-10-29: one tick per payment. The pickup closes on its own
+  // once every payment on it is ticked.
+  const toggleItem = (r: HandoffRow, paymentId: string, received: boolean) =>
     withBusy([r.id], async () => {
-      const updated = await api<HandoffRow>(`/v1/dashboard/cash-pickups/${r.id}/owner-received`, {
-        method: r.ownerReceipt ? 'DELETE' : 'PUT',
-      });
+      const updated = await api<HandoffRow>(
+        `/v1/dashboard/cash-pickups/${r.id}/items/${paymentId}/owner-received`,
+        { method: received ? 'DELETE' : 'PUT' },
+      );
       settle([updated]);
-      if (updated.ownerReceipt) {
+      if (updated.ownerReceipt && !r.ownerReceipt) {
         toast.success(`${r.number} · ${usdCents(r.countedCents)} received from ${r.byName}`);
       }
     });
@@ -155,62 +159,86 @@ export function CashHandoffs() {
             {store.rows.map((r) => {
               const got = r.ownerReceipt;
               const canUntick = !got || got.from === 'operator';
+              const ticked = r.items.filter((it) => it.ownerReceivedAt).length;
               return (
-                <label
+                <div
                   key={r.id}
-                  className={`ho-row${got ? ' is-received' : ''}`}
+                  className={`ho-pickup${got ? ' is-received' : ''}`}
                   data-testid="ho-row"
                   data-received={got ? 'true' : 'false'}
                 >
-                  <input
-                    type="checkbox"
-                    checked={!!got}
-                    disabled={busy.has(r.id) || !canUntick}
-                    onChange={() => void toggle(r)}
-                    style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
-                    aria-label={`Received ${r.number} ${usdCents(r.countedCents)} from ${r.byName}`}
-                  />
-                  <span className="ho-row-main">
-                    <span>
-                      <span className="mono" style={{ fontWeight: 600 }}>
-                        {r.number}
-                      </span>{' '}
-                      · {r.locationName} · picked up {stamp(r.recordedAt, r.timezone)}
-                    </span>
-                    <span className="ho-row-meta">
-                      {plural(r.paymentCount, 'payment')}
-                      {r.slip ? ` · slip ${r.slip}` : ''}
-                      {r.varianceCents ? (
-                        <span style={{ color: 'var(--status-risk-fg)' }}>
-                          {' '}
-                          · variance {varianceLabel(r.varianceCents)}
-                        </span>
-                      ) : null}
-                      {r.items.length > 0 && ' · '}
-                      {r.items.slice(0, 4).map((it, i) => (
-                        <span key={it.paymentId}>
-                          {i > 0 && ', '}
-                          <Link href={docHref(it.docKind, it.docId)} className="mono">
-                            {it.docNumber}
-                          </Link>
-                        </span>
-                      ))}
-                      {r.items.length > 4 && ` +${r.items.length - 4}`}
-                    </span>
-                  </span>
-                  <span className="ho-row-status">
-                    {got ? (
-                      <span style={{ color: 'var(--status-fulfilled-fg)' }}>
-                        ✓ Received {clockTime(got.receivedAt, r.timezone)}
+                  <div className="ho-pickup-head">
+                    <span className="ho-row-main">
+                      <span>
+                        <span className="mono" style={{ fontWeight: 600 }}>
+                          {r.number}
+                        </span>{' '}
+                        · picked up {stamp(r.recordedAt, r.timezone)}
+                        {r.slip ? ` · slip ${r.slip}` : ''}
+                        {r.varianceCents ? (
+                          <span style={{ color: 'var(--status-risk-fg)' }}>
+                            {' '}
+                            · variance {varianceLabel(r.varianceCents)}
+                          </span>
+                        ) : null}
                       </span>
-                    ) : (
-                      <span style={{ color: 'var(--status-waiting-fg)' }}>
-                        With {r.byName.split(' ')[0]}
+                      <span className="ho-row-meta">
+                        {ticked} of {plural(r.items.length, 'payment')} received
                       </span>
-                    )}
-                  </span>
-                  <span className="mono ho-row-amt">{usdCents(r.countedCents)}</span>
-                </label>
+                    </span>
+                    <span className="ho-row-status">
+                      {got ? (
+                        <span style={{ color: 'var(--status-fulfilled-fg)' }}>
+                          ✓ Received {clockTime(got.receivedAt, r.timezone)}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--status-waiting-fg)' }}>
+                          With {r.byName.split(' ')[0]}
+                        </span>
+                      )}
+                    </span>
+                    <span className="mono ho-row-amt">{usdCents(r.countedCents)}</span>
+                  </div>
+                  {r.items.map((it) => {
+                    const itGot = Boolean(it.ownerReceivedAt);
+                    return (
+                      <label
+                        key={it.paymentId}
+                        className={`ho-row ho-item${itGot ? ' is-received' : ''}`}
+                        data-testid="ho-item"
+                        data-received={itGot ? 'true' : 'false'}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={itGot}
+                          disabled={busy.has(r.id) || !canUntick}
+                          onChange={() => void toggleItem(r, it.paymentId, itGot)}
+                          style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+                          aria-label={`Received ${it.docNumber} ${usdCents(it.amountCents)} from ${r.byName}`}
+                        />
+                        <span className="ho-row-main">
+                          <span>
+                            <Link href={docHref(it.docKind, it.docId)} className="mono">
+                              {it.docNumber}
+                            </Link>
+                          </span>
+                        </span>
+                        <span className="ho-row-status">
+                          {itGot ? (
+                            <span style={{ color: 'var(--status-fulfilled-fg)' }}>
+                              ✓ Received {clockTime(it.ownerReceivedAt!, r.timezone)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--status-waiting-fg)' }}>
+                              With {r.byName.split(' ')[0]}
+                            </span>
+                          )}
+                        </span>
+                        <span className="mono ho-row-amt">{usdCents(it.amountCents)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>

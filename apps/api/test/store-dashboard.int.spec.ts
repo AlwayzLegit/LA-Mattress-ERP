@@ -1248,6 +1248,75 @@ describe('owner cash hand-off', () => {
       .expect(404);
   });
 
+  it('ticks one payment at a time; the pickup closes on the last tick and reopens on an untick (owner 2026-10-29)', async () => {
+    // Two more cash deposits at A Store, then a fresh pickup from the
+    // operator: two payments, both still out.
+    await withDb(async (db) => {
+      for (const amountCents of [20_000, 30_000]) {
+        await db.insert(schema.payments).values({
+          businessId,
+          orderId: fx.o1,
+          kind: 'deposit',
+          method: 'cash',
+          status: 'succeeded',
+          amountCents,
+        });
+      }
+    });
+    const posted = await as('ops')
+      .post('/v1/dashboard/cash-pickups')
+      .send({ locationId: aStoreId, countedCents: 50_000, slip: 'BAG-8' })
+      .expect(201);
+    const id = posted.body.pickup.id as string;
+    const items = posted.body.pickup.items as {
+      paymentId: string;
+      ownerReceivedAt: string | null;
+    }[];
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items.every((it) => it.ownerReceivedAt === null)).toBe(true);
+
+    const one = await as('owner')
+      .put(`/v1/dashboard/cash-pickups/${id}/items/${items[0]!.paymentId}/owner-received`)
+      .expect(200);
+    expect(one.body.ownerReceipt).toBeNull();
+    const ticked = (one.body.items as typeof items).filter((it) => it.ownerReceivedAt);
+    expect(ticked.map((it) => it.paymentId)).toEqual([items[0]!.paymentId]);
+    let h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect((h.body.awaiting as Handoff[]).map((r) => r.id)).toContain(id);
+
+    const rest = items.slice(1);
+    let last: { body: { ownerReceipt: unknown; items: typeof items } } | null = null;
+    for (const it of rest) {
+      last = await as('owner')
+        .put(`/v1/dashboard/cash-pickups/${id}/items/${it.paymentId}/owner-received`)
+        .expect(200);
+    }
+    expect(last!.body.ownerReceipt).toMatchObject({ byName: 'Olive Owner', from: 'operator' });
+    expect(last!.body.items.every((it) => it.ownerReceivedAt)).toBe(true);
+    h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect((h.body.awaiting as Handoff[]).map((r) => r.id)).not.toContain(id);
+
+    // Untick one payment: the pickup is open again, the others stay ticked.
+    const undo = await as('owner')
+      .delete(`/v1/dashboard/cash-pickups/${id}/items/${items[0]!.paymentId}/owner-received`)
+      .expect(200);
+    expect(undo.body.ownerReceipt).toBeNull();
+    const still = (undo.body.items as typeof items).filter((it) => it.ownerReceivedAt);
+    expect(still.map((it) => it.paymentId).sort()).toEqual(rest.map((it) => it.paymentId).sort());
+    h = await as('owner').get('/v1/dashboard/cash-pickups/handoffs').expect(200);
+    expect((h.body.awaiting as Handoff[]).map((r) => r.id)).toContain(id);
+    await as('owner')
+      .put(
+        `/v1/dashboard/cash-pickups/${id}/items/00000000-0000-4000-8000-000000000000/owner-received`,
+      )
+      .expect(404);
+    await as('ops')
+      .put(`/v1/dashboard/cash-pickups/${id}/items/${items[0]!.paymentId}/owner-received`)
+      .expect(403);
+    // Close it so later cases start clean.
+    await as('owner').put(`/v1/dashboard/cash-pickups/${id}/owner-received`).expect(200);
+  });
+
   it('counts a pickup the owner posts as taken straight from the store', async () => {
     const posted = await as('owner')
       .post('/v1/dashboard/cash-pickups')
