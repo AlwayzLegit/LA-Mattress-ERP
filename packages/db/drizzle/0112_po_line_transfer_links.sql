@@ -1,0 +1,5 @@
+ALTER TABLE "po_line_allocations" ALTER COLUMN "order_line_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "po_line_allocations" ADD COLUMN "transfer_line_id" uuid;--> statement-breakpoint
+ALTER TABLE "po_line_allocations" ADD CONSTRAINT "po_line_allocations_transfer_line_id_stock_transfer_lines_id_fk" FOREIGN KEY ("transfer_line_id") REFERENCES "public"."stock_transfer_lines"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "po_line_allocations_transfer_line_id_idx" ON "po_line_allocations" USING btree ("transfer_line_id");--> statement-breakpoint
+ALTER TABLE "po_line_allocations" ADD CONSTRAINT "po_line_allocations_one_target" CHECK (("po_line_allocations"."order_line_id" IS NOT NULL)::int + ("po_line_allocations"."transfer_line_id" IS NOT NULL)::int = 1);

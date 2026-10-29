@@ -46,6 +46,7 @@ import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { OrderNotesCard } from '@/components/order-notes-card';
 import { TeamTasks } from '@/components/team-tasks';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
+import { LinkToPo, unlinkPo } from '@/components/po-links';
 import { OrderActionsMenu } from '../actions/actions-menu';
 import { OrderHeaderDialog } from '../actions/header-dialog';
 import { LineDetailsDialog } from '../actions/edit-dialogs';
@@ -99,6 +100,8 @@ interface OrderLine {
     ordered: number;
     received: number;
     expectedAt: string | null;
+    /** Owner 2026-10-28: each live link, undoable while still on order. */
+    links?: { allocationId: string; poLineId: string; quantity: number; status: string }[];
   } | null;
 }
 interface OrderPayment {
@@ -1398,6 +1401,7 @@ export default function OrderDetailPage() {
                             canRelease={Boolean(editable && !order.onOpenRun)}
                             busy={busy}
                             onRelease={() => void releaseLine(l)}
+                            onChanged={load}
                           />
                         </td>
                         <td className="num">
@@ -3146,11 +3150,14 @@ function StockCell({
   canRelease,
   busy,
   onRelease,
+  onChanged,
 }: {
   line: OrderLine;
   canRelease: boolean;
   busy: boolean;
   onRelease: () => void;
+  /** Owner 2026-10-28: reload after a PO link is made or undone. */
+  onChanged: () => Promise<void> | void;
 }) {
   if (l.lineType === 'custom') {
     return <span className="muted">—</span>;
@@ -3187,7 +3194,50 @@ function StockCell({
                 ? `on order · due ${new Date(l.po.expectedAt).toLocaleDateString()}`
                 : 'on order'}
           </span>
+          {canRelease &&
+            (l.po.links ?? [])
+              .filter((k) => k.status === 'ordered')
+              .map((k) => (
+                <button
+                  key={k.allocationId}
+                  type="button"
+                  className="btn-link ml-1 text-xs"
+                  disabled={busy}
+                  aria-label={`Unlink ${l.po!.poNumber}`}
+                  title="Unlink — the units go back to the PO's free pool"
+                  data-testid="order-line-unlink-po"
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `Unlink ${l.po!.poNumber}? Its ${k.quantity} unit(s) go back to the PO's free pool.`,
+                      )
+                    )
+                      return;
+                    try {
+                      await unlinkPo({
+                        poId: l.po!.poId,
+                        poLineId: k.poLineId,
+                        allocationId: k.allocationId,
+                      });
+                      toast.success(`Unlinked ${l.po!.poNumber}.`);
+                      await onChanged();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                >
+                  unlink ×{k.quantity}
+                </button>
+              ))}
         </span>
+      )}
+      {canRelease && l.variantId && l.lineType !== 'direct_ship' && (
+        <LinkToPo
+          variantId={l.variantId}
+          target={{ orderLineId: l.id }}
+          need={open - l.qtyReserved - (l.po?.ordered ?? 0)}
+          onDone={onChanged}
+        />
       )}
       {canRelease && l.qtyReserved > 0 && (
         <button

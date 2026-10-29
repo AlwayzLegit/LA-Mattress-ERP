@@ -151,6 +151,11 @@ function ownerReq() {
         .post(url)
         .set('Cookie', ownerCookie)
         .set('X-Business-Id', businessId),
+    delete: (url: string) =>
+      request(app.getHttpServer())
+        .delete(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
     get: (url: string) =>
       request(app.getHttpServer())
         .get(url)
@@ -366,6 +371,179 @@ describe('PO builder pre-load: sold-not-in-stock lines carry the SO # (P6)', () 
     const after = await ownerReq().get(`/v1/orders/${order.body.id}`);
     expect(after.status).toBe(200);
     expect(after.body.lines[0].qtyReserved).toBe(1);
+  });
+});
+
+describe('Manual PO links (owner 2026-10-28): PO ↔ order line, PO ↔ draft transfer line', () => {
+  let outletId = '';
+  let orderId = '';
+  let orderLineId = '';
+  let poId = '';
+  let poLineId = '';
+  let transferId = '';
+  let transferLineId = '';
+
+  it('setup: a second store, a stock line nobody can reserve, a plain PO for 3', async () => {
+    const sql2 = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const [outlet] = await drizzle(sql2)
+        .insert(schema.locations)
+        .values({ businessId, name: 'Outlet', timezone: 'America/Los_Angeles', taxRateBps: 0 })
+        .returning();
+      outletId = outlet!.id;
+    } finally {
+      await sql2.end({ timeout: 5 });
+    }
+    const order = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        lines: [{ variantId: baseVariantId, quantity: 2 }],
+        confirm: true,
+      });
+    expect(order.status).toBe(201);
+    orderId = order.body.id;
+    orderLineId = order.body.lines[0].id;
+    expect(order.body.lines[0].qtyReserved).toBe(0);
+    expect(order.body.lines[0].po).toBeNull();
+
+    const po = await ownerReq()
+      .post('/v1/purchase-orders')
+      .send({
+        vendorId,
+        locationId,
+        lines: [{ variantId: baseVariantId, quantity: 3, unitCostCents: 30000 }],
+      });
+    expect(po.status).toBe(201);
+    poId = po.body.id;
+    poLineId = po.body.lines[0].id;
+    expect(po.body.lines[0].linkedOrders).toEqual([]);
+    expect(po.body.lines[0].linkedTransfers).toEqual([]);
+
+    const xfer = await ownerReq()
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: locationId,
+        toLocationId: outletId,
+        lines: [{ variantId: baseVariantId, quantity: 1 }],
+      });
+    expect(xfer.status).toBe(201);
+    transferId = xfer.body.id;
+    transferLineId = xfer.body.lines[0].id;
+  });
+
+  it('the PO line lists the waiting order line and draft transfer line as candidates', async () => {
+    const res = await ownerReq().get(
+      `/v1/purchase-orders/${poId}/lines/${poLineId}/link-candidates`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.poLine.free).toBe(3);
+    expect(
+      res.body.orders.find((o: { orderLineId: string }) => o.orderLineId === orderLineId),
+    ).toMatchObject({ orderId, need: 2 });
+    expect(
+      res.body.transfers.find(
+        (t: { transferLineId: string }) => t.transferLineId === transferLineId,
+      ),
+    ).toMatchObject({ transferId, need: 1 });
+    // And the order line sees the PO line among the open lines it could wait on.
+    const open = await ownerReq().get(`/v1/purchase-orders/open-lines?variantId=${baseVariantId}`);
+    expect(open.status).toBe(200);
+    expect(open.body.find((l: { poLineId: string }) => l.poLineId === poLineId)).toMatchObject({
+      poId,
+      free: 3,
+    });
+  });
+
+  it('links the order line for 2, refuses more than the line needs, shows on both pages', async () => {
+    const tooMany = await ownerReq()
+      .post(`/v1/purchase-orders/${poId}/lines/${poLineId}/links`)
+      .send({ orderLineId, quantity: 3 });
+    expect(tooMany.status).toBe(400);
+    expect(tooMany.body.message).toMatch(/only needs 2/);
+
+    const linked = await ownerReq()
+      .post(`/v1/purchase-orders/${poId}/lines/${poLineId}/links`)
+      .send({ orderLineId, quantity: 2 });
+    expect(linked.status).toBe(201);
+    expect(linked.body.lines[0].linkedOrders).toHaveLength(1);
+    expect(linked.body.lines[0].linkedOrders[0]).toMatchObject({
+      orderId,
+      orderLineId,
+      quantity: 2,
+      status: 'ordered',
+    });
+
+    const order = await ownerReq().get(`/v1/orders/${orderId}`);
+    expect(order.body.lines[0].po).toMatchObject({ poId, ordered: 2, received: 0 });
+    expect(order.body.lines[0].po.links).toHaveLength(1);
+
+    // The order is covered: it drops out of the candidates; the PO line has 1 free.
+    const cands = await ownerReq().get(
+      `/v1/purchase-orders/${poId}/lines/${poLineId}/link-candidates`,
+    );
+    expect(cands.body.poLine.free).toBe(1);
+    expect(
+      cands.body.orders.find((o: { orderLineId: string }) => o.orderLineId === orderLineId),
+    ).toBeUndefined();
+  });
+
+  it('unlinks the order line; the units are free again', async () => {
+    const order = await ownerReq().get(`/v1/orders/${orderId}`);
+    const allocationId = order.body.lines[0].po.links[0].allocationId as string;
+    const res = await ownerReq().delete(
+      `/v1/purchase-orders/${poId}/lines/${poLineId}/links/${allocationId}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.lines[0].linkedOrders).toEqual([]);
+    const after = await ownerReq().get(`/v1/orders/${orderId}`);
+    expect(after.body.lines[0].po).toBeNull();
+    const cands = await ownerReq().get(
+      `/v1/purchase-orders/${poId}/lines/${poLineId}/link-candidates`,
+    );
+    expect(cands.body.poLine.free).toBe(3);
+  });
+
+  it('links the draft transfer line; receiving marks it arrived without reserving', async () => {
+    const linked = await ownerReq()
+      .post(`/v1/purchase-orders/${poId}/lines/${poLineId}/links`)
+      .send({ transferLineId, quantity: 1 });
+    expect(linked.status).toBe(201);
+    expect(linked.body.lines[0].linkedTransfers[0]).toMatchObject({
+      transferId,
+      transferLineId,
+      quantity: 1,
+      status: 'ordered',
+    });
+    const xfer = await ownerReq().get(`/v1/stock-transfers/${transferId}`);
+    expect(xfer.body.lines[0].poLinks[0]).toMatchObject({ poId, quantity: 1, status: 'ordered' });
+
+    // Re-link the order for 2 so the receipt serves both.
+    const relink = await ownerReq()
+      .post(`/v1/purchase-orders/${poId}/lines/${poLineId}/links`)
+      .send({ orderLineId, quantity: 2 });
+    expect(relink.status).toBe(201);
+
+    const before = await level();
+    const received = await ownerReq()
+      .post(`/v1/purchase-orders/${poId}/receiving`)
+      .send({ lines: [{ lineId: poLineId, received: 3, inspected: 3, accepted: 3 }] });
+    expect(received.status).toBe(201);
+    expect(received.body.status).toBe('received');
+    // 3 in; the transfer's unit is free (it ships from stock), the order's 2 are committed.
+    expect(await level()).toEqual({ onHand: before.onHand + 3, reserved: before.reserved + 2 });
+    const order = await ownerReq().get(`/v1/orders/${orderId}`);
+    expect(order.body.lines[0].qtyReserved).toBe(2);
+    const po = await ownerReq().get(`/v1/purchase-orders/${poId}`);
+    expect(po.body.lines[0].linkedTransfers[0].status).toBe('received');
+    expect(po.body.lines[0].linkedOrders[0].status).toBe('received');
+
+    // A received link cannot be undone from the PO.
+    const undo = await ownerReq().delete(
+      `/v1/purchase-orders/${poId}/lines/${poLineId}/links/${po.body.lines[0].linkedOrders[0].allocationId}`,
+    );
+    expect(undo.status).toBe(400);
   });
 });
 

@@ -131,6 +131,17 @@ interface LineRow {
   quantityOrdered: number | null;
   /** D18: ordered − shipped, the not-yet-scheduled remainder. */
   quantityHeld: number;
+  /** Owner 2026-10-28: the PO lines earmarked for this line (live links). */
+  poLinks: {
+    allocationId: string;
+    poId: string;
+    poNumber: string;
+    poLineId: string;
+    poStatus: string;
+    expectedAt: string | null;
+    quantity: number;
+    status: string;
+  }[];
 }
 
 interface Detail extends ListRow {
@@ -1178,6 +1189,54 @@ export class TransfersController {
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .where(eq(schema.stockTransferLines.transferId, id));
 
+    const poLinks = new Map<string, LineRow['poLinks']>();
+    if (lines.length > 0) {
+      const links = await this.db
+        .select({
+          transferLineId: schema.poLineAllocations.transferLineId,
+          allocationId: schema.poLineAllocations.id,
+          poLineId: schema.poLineAllocations.poLineId,
+          quantity: schema.poLineAllocations.quantity,
+          status: schema.poLineAllocations.status,
+          poId: schema.purchaseOrders.id,
+          poNumber: schema.purchaseOrders.number,
+          poStatus: schema.purchaseOrders.status,
+          expectedAt: schema.purchaseOrders.expectedAt,
+        })
+        .from(schema.poLineAllocations)
+        .innerJoin(
+          schema.purchaseOrderLines,
+          eq(schema.purchaseOrderLines.id, schema.poLineAllocations.poLineId),
+        )
+        .innerJoin(
+          schema.purchaseOrders,
+          eq(schema.purchaseOrders.id, schema.purchaseOrderLines.purchaseOrderId),
+        )
+        .where(
+          and(
+            inArray(
+              schema.poLineAllocations.transferLineId,
+              lines.map((l) => l.id),
+            ),
+            sql`${schema.poLineAllocations.status} <> 'cancelled'`,
+            sql`${schema.purchaseOrders.deletedAt} IS NULL`,
+          ),
+        );
+      for (const k of links) {
+        const list = poLinks.get(k.transferLineId!) ?? [];
+        list.push({
+          allocationId: k.allocationId,
+          poId: k.poId,
+          poNumber: k.poNumber,
+          poLineId: k.poLineId,
+          poStatus: k.poStatus,
+          expectedAt: k.expectedAt ? k.expectedAt.toISOString() : null,
+          quantity: k.quantity,
+          status: k.status,
+        });
+        poLinks.set(k.transferLineId!, list);
+      }
+    }
     const { reasonCodeCode, reasonCodeDescription, ...rest } = row;
     return {
       ...rest,
@@ -1189,6 +1248,7 @@ export class TransfersController {
         ...l,
         productName: l.productName ?? '(deleted)',
         quantityHeld: Math.max(0, (l.quantityOrdered ?? l.quantityShipped) - l.quantityShipped),
+        poLinks: poLinks.get(l.id) ?? [],
       })),
     };
   }

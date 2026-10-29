@@ -9,6 +9,7 @@ import { api, ApiError } from '@/lib/api';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { Money } from '@/components/money';
 import { PrintablePurchaseOrder } from '@/components/printable-purchase-order';
+import { LinkFromPo, unlinkPo } from '@/components/po-links';
 import {
   Alert,
   BackLink,
@@ -44,7 +45,24 @@ interface PoLine {
   quantityRejected: number;
   unitCostCents: number;
   lineTotalCents: number;
-  linkedOrders: { orderId: string; orderNumber: string; quantity: number }[];
+  linkedOrders: {
+    allocationId: string;
+    orderId: string;
+    orderNumber: string;
+    orderLineId: string;
+    quantity: number;
+    status: string;
+  }[];
+  /** Owner 2026-10-28: draft transfer lines earmarked for this PO line. */
+  linkedTransfers: {
+    allocationId: string;
+    transferId: string;
+    transferNumber: string;
+    transferLineId: string;
+    toLocationName: string | null;
+    quantity: number;
+    status: string;
+  }[];
 }
 interface Po {
   id: string;
@@ -339,6 +357,18 @@ export default function PurchaseOrderDetailPage() {
   if (!po) return <LoadingRows rows={5} />;
 
   const receivable = po.status === 'ordered' || po.status === 'partially_received';
+  // Owner 2026-10-28: links are made and undone while the PO is open.
+  const linkable = !po.deletedAt && ['draft', 'ordered', 'partially_received'].includes(po.status);
+  async function unlink(poLineId: string, allocationId: string, label: string) {
+    if (!confirm(`Unlink ${label}? Its units go back to this PO line's free pool.`)) return;
+    try {
+      await unlinkPo({ poId: id, poLineId, allocationId });
+      toast.success(`Unlinked ${label}.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
   const cancellable =
     po.status === 'draft' || po.status === 'ordered' || po.status === 'partially_received';
   const editable = cancellable;
@@ -532,18 +562,80 @@ export default function PurchaseOrderDetailPage() {
                               <code className="muted">{l.vendorSku ?? l.sku}</code>
                             </>
                           )}
-                          {l.linkedOrders.length > 0 && (
-                            <div className="mt-1 flex flex-wrap gap-1">
+                          {(l.linkedOrders.length > 0 || l.linkedTransfers.length > 0) && (
+                            <div className="mt-1 flex flex-wrap gap-1" data-testid="po-line-links">
                               {l.linkedOrders.map((o) => (
-                                <Link
-                                  key={o.orderId}
-                                  href={`/orders/${o.orderId}`}
-                                  className="badge badge-info no-underline"
+                                <span
+                                  key={o.allocationId}
+                                  className="inline-flex items-center gap-1"
                                 >
-                                  {o.orderNumber} ×{o.quantity}
-                                </Link>
+                                  <Link
+                                    href={`/orders/${o.orderId}`}
+                                    className="badge badge-info no-underline"
+                                  >
+                                    {o.orderNumber} ×{o.quantity}
+                                    {o.status === 'received' ? ' · received' : ''}
+                                  </Link>
+                                  {linkable && o.status === 'ordered' && (
+                                    <button
+                                      type="button"
+                                      className="btn-link text-xs"
+                                      aria-label={`Unlink ${o.orderNumber}`}
+                                      title="Unlink — the units go back to this PO line's free pool"
+                                      data-testid="po-unlink"
+                                      onClick={() =>
+                                        void unlink(l.id, o.allocationId, o.orderNumber)
+                                      }
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </span>
+                              ))}
+                              {l.linkedTransfers.map((x) => (
+                                <span
+                                  key={x.allocationId}
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  <Link
+                                    href={`/transfers/${x.transferId}`}
+                                    className="badge badge-neutral no-underline"
+                                  >
+                                    {x.transferNumber}
+                                    {x.toLocationName ? ` → ${x.toLocationName}` : ''} ×{x.quantity}
+                                    {x.status === 'received' ? ' · received' : ''}
+                                  </Link>
+                                  {linkable && x.status === 'ordered' && (
+                                    <button
+                                      type="button"
+                                      className="btn-link text-xs"
+                                      aria-label={`Unlink ${x.transferNumber}`}
+                                      title="Unlink — the units go back to this PO line's free pool"
+                                      data-testid="po-unlink"
+                                      onClick={() =>
+                                        void unlink(l.id, x.allocationId, x.transferNumber)
+                                      }
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </span>
                               ))}
                             </div>
+                          )}
+                          {linkable && (
+                            <LinkFromPo
+                              poId={po.id}
+                              poLineId={l.id}
+                              free={
+                                l.quantityOrdered -
+                                [...l.linkedOrders, ...l.linkedTransfers].reduce(
+                                  (n, x) => n + x.quantity,
+                                  0,
+                                )
+                              }
+                              onDone={load}
+                            />
                           )}
                           {l.quantityReceived - l.quantityAccepted - l.quantityRejected > 0 && (
                             <div className="text-warning text-xs" data-testid="backlog-note">
@@ -683,7 +775,7 @@ function DeleteDraftDialog({
 }) {
   const [typed, setTyped] = useState('');
   const armed = typed.trim().toUpperCase() === po.number.toUpperCase();
-  const linked = po.lines.reduce((n, l) => n + l.linkedOrders.length, 0);
+  const linked = po.lines.reduce((n, l) => n + l.linkedOrders.length + l.linkedTransfers.length, 0);
   // Escape closes, focus stays inside and returns to the opener (Phase 12).
   const panel = useRef<HTMLDivElement>(null);
   useFocusTrap(panel, {
@@ -888,7 +980,10 @@ function EditOrderCard({ po, onChanged }: { po: Po; onChanged: () => Promise<voi
             <tbody>
               {po.lines.map((l) => {
                 const d = draftFor(l);
-                const locked = l.quantityReceived > 0 || l.linkedOrders.length > 0;
+                const locked =
+                  l.quantityReceived > 0 ||
+                  l.linkedOrders.length > 0 ||
+                  l.linkedTransfers.length > 0;
                 return (
                   <tr key={l.id} style={d.remove ? { opacity: 0.45 } : undefined}>
                     <td>

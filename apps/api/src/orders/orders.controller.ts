@@ -506,6 +506,8 @@ export interface OrderLinePo {
   ordered: number;
   received: number;
   expectedAt: Date | null;
+  /** Owner 2026-10-28: each live link, so the order page can undo one still on order. */
+  links: { allocationId: string; poLineId: string; quantity: number; status: string }[];
 }
 
 /**
@@ -1685,7 +1687,9 @@ export class OrdersController {
     // units reserved.
     const poRows = await this.db
       .select({
-        orderLineId: schema.poLineAllocations.orderLineId,
+        orderLineId: schema.orderLines.id,
+        allocationId: schema.poLineAllocations.id,
+        poLineId: schema.poLineAllocations.poLineId,
         allocStatus: schema.poLineAllocations.status,
         quantity: schema.poLineAllocations.quantity,
         poId: schema.purchaseOrders.id,
@@ -1719,9 +1723,16 @@ export class OrdersController {
         ordered: 0,
         received: 0,
         expectedAt: r.expectedAt ?? null,
+        links: [],
       };
       if (r.allocStatus === 'received') cur.received += r.quantity;
       else cur.ordered += r.quantity;
+      cur.links.push({
+        allocationId: r.allocationId,
+        poLineId: r.poLineId,
+        quantity: r.quantity,
+        status: r.allocStatus,
+      });
       linePo.set(r.orderLineId, cur);
     }
     const exchangeOrders = await this.db

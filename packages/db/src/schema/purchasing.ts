@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -10,9 +11,11 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { businesses, users } from './platform';
 import { locations } from './tenancy';
 import { collections, productVariants } from './catalog';
+import { stockTransferLines } from './transfers';
 
 /**
  * Suppliers / vendors that the business buys from. Kept lightweight —
@@ -191,6 +194,13 @@ export const purchaseOrderLines = pgTable(
  * these allocations: 'ordered' units become 'received', the customer's
  * order line reserves the just-arrived stock, and the store emails
  * "your item is in".
+ *
+ * Owner 2026-10-28: a link is also made by hand — from the PO, the
+ * sales order or a transfer — and undone while the units are still on
+ * order. A transfer line links the same way (`transfer_line_id`): the
+ * PO's units are earmarked for that store's draft transfer, and the
+ * receipt flips the link to received without reserving (a transfer
+ * ships from free stock). Exactly one of the two line ids is set.
  */
 export const poLineAllocations = pgTable(
   'po_line_allocations',
@@ -202,7 +212,10 @@ export const poLineAllocations = pgTable(
     poLineId: uuid('po_line_id')
       .notNull()
       .references(() => purchaseOrderLines.id, { onDelete: 'cascade' }),
-    orderLineId: uuid('order_line_id').notNull(),
+    orderLineId: uuid('order_line_id'),
+    transferLineId: uuid('transfer_line_id').references(() => stockTransferLines.id, {
+      onDelete: 'cascade',
+    }),
     quantity: integer('quantity').notNull(),
     /** 'ordered' | 'received' | 'cancelled' */
     status: text('status').notNull().default('ordered'),
@@ -213,6 +226,11 @@ export const poLineAllocations = pgTable(
     businessIdx: index('po_line_allocations_business_id_idx').on(t.businessId),
     poLineIdx: index('po_line_allocations_po_line_id_idx').on(t.poLineId),
     orderLineIdx: index('po_line_allocations_order_line_id_idx').on(t.orderLineId),
+    transferLineIdx: index('po_line_allocations_transfer_line_id_idx').on(t.transferLineId),
+    oneTarget: check(
+      'po_line_allocations_one_target',
+      sql`(${t.orderLineId} IS NOT NULL)::int + (${t.transferLineId} IS NOT NULL)::int = 1`,
+    ),
   }),
 );
 
