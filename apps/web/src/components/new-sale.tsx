@@ -89,6 +89,7 @@ const TENDERS = [
   { value: 'shop_pay', label: 'Shop Pay' },
   { value: 'synchrony', label: 'Synchrony' },
   { value: 'acima', label: 'Acima' },
+  { value: 'vds', label: 'VDS' },
   { value: 'store_credit', label: 'Store credit' },
 ] as const;
 type Tender = (typeof TENDERS)[number]['value'];

@@ -40,6 +40,7 @@ const METHOD: Record<string, string> = {
   shop_pay: 'Shop Pay',
   synchrony: 'Synchrony',
   acima: 'Acima',
+  vds: 'VDS',
   store_credit: 'store credit',
   gift_card: 'gift card',
   financing: 'financing',
