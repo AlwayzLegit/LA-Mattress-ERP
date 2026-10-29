@@ -6368,6 +6368,17 @@ select.picker-from {
   color: var(--status-waiting-fg);
   white-space: nowrap;
 }
+/* Owner 2026-10-28: STORIS "F" column — a stop with units not reserved
+   reads as Partial, in the same gold as a balance due. */
+.db-card-short {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--status-waiting-fg);
+  white-space: nowrap;
+}
 .db-empty {
   flex: 1;
   min-height: 70px;

@@ -152,6 +152,12 @@ interface DeliveryDetail extends DeliveryRow {
   addressPhone: string | null;
   fulfillmentType: string;
   balanceDueCents: number;
+  /**
+   * Owner 2026-10-28 (STORIS "F" column, C/P): units on this stop's stock
+   * lines that are neither reserved nor already fulfilled — what will
+   * not be on the truck unless stock turns up. 0 = fully reserved.
+   */
+  unreservedUnits: number;
   lines: {
     id: string;
     orderLineId: string;
@@ -160,6 +166,8 @@ interface DeliveryDetail extends DeliveryRow {
     pieces: number;
     description: string;
     lineType: string;
+    /** Units of the order line still unreserved (stock lines only). */
+    unreserved: number;
   }[];
 }
 
@@ -1447,6 +1455,9 @@ export class DeliveriesController {
         pieces: sql<number>`(${schema.deliveryLines.quantity} * coalesce(${schema.orderLines.pieces}, 1))::int`,
         description: schema.orderLines.description,
         lineType: schema.orderLines.lineType,
+        unreserved: sql<number>`CASE WHEN ${schema.orderLines.lineType} = 'stock'
+          THEN GREATEST(0, ${schema.orderLines.quantity} - ${schema.orderLines.qtyFulfilled} - ${schema.orderLines.qtyReserved})
+          ELSE 0 END::int`,
       })
       .from(schema.deliveryLines)
       .innerJoin(schema.orderLines, eq(schema.orderLines.id, schema.deliveryLines.orderLineId))
@@ -1474,6 +1485,10 @@ export class DeliveriesController {
       addressPhone: order?.addressPhone ?? null,
       fulfillmentType: order?.fulfillmentType ?? 'delivery',
       balanceDueCents: Math.max(0, (order?.totalCents ?? 0) - paid),
+      // A delivered / failed / cancelled stop is past reserving.
+      unreservedUnits: ['delivered', 'failed', 'cancelled'].includes(row.status)
+        ? 0
+        : lines.reduce((n, l) => n + l.unreserved, 0),
       lines,
     };
   }
