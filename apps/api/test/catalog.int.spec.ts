@@ -233,6 +233,31 @@ describe('Epic 1.7 — Product catalog', () => {
     expect(res.body.variants[0].costCents).toBe(800);
   });
 
+  it("A vendor picked on New product becomes every item's preferred vendor (owner 2026-10-28)", async () => {
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const [vendor] = await drizzle(sql)
+      .insert(schema.vendors)
+      .values({ businessId, name: 'South Bay Bedding' })
+      .returning();
+    await sql.end();
+    const res = await request(app.getHttpServer())
+      .post('/v1/products')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        name: 'Vendor Widget',
+        preferredVendorId: vendor!.id,
+        variants: [
+          { sku: 'VW-1', priceCents: 100 },
+          { sku: 'VW-2', priceCents: 200 },
+        ],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.variants).toHaveLength(2);
+    for (const v of res.body.variants) expect(v.preferredVendorId).toBe(vendor!.id);
+    expect(res.body.vendorName).toBe('South Bay Bedding');
+  });
+
   it('A duplicate SKU answers 409 with a readable message, not a 500', async () => {
     // Owner 2026-09-21: this returned "Internal server error" because the
     // guard matched on err.message, which drizzle replaces with
