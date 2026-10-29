@@ -6938,3 +6938,35 @@ in the Add Product popup.
   (Brooklyn, Helix) sit in their place among the vendors instead of a second group below all 36.
 - Tests: e2e orders (Complete without a date is refused; with one the register books the stop;
   the two other delivery sales pick a date). Checked in Chromium.
+
+### Checkpoint — 2026-10-28 (Owner batch: VDS tender, Vendor/Brand on New product, per-store stock columns, Partial flag on Deliveries, phantom reservations, manual PO links)
+
+Owner (seven asks in one message, one PR each — #240–#245):
+
+- VDS is a tender everywhere a method is picked or printed (register, order page, sheet,
+  documents, history). Plain external tender, no card brand or term.
+- New product has Vendor and Brand selects; the vendor becomes every created item's preferred
+  vendor (`preferredVendorId` on POST /v1/products).
+- Products browser: each store is three columns — on hand, available (toned), reserved. The
+  on-hand column keeps the old `loc:<id>` id so saved orders still place it; the API sorts on
+  `onhand:` / `available:` / `reserved:` + location.
+- Deliveries (STORIS "F" column, C/P): calendar cards and the stop page show "▲ N not reserved"
+  in the balance-due gold; `unreservedUnits` and per-line `unreserved` on the delivery rows.
+- FULL COBALT FIRM "1 reserved, no open order": KO-10069's line was delivered on 10/17 out of
+  count-corrected stock; when its PO landed 10/23 the special-order receipt reserved the unit
+  again. Three more SKUs sat reserved at Koreatown with no line (received there, delivered from
+  the Warehouse). Receipt now reserves only `quantity − fulfilled − reserved`, nothing for a
+  closed order, and pins a fresh line's source to the receiving store; the drift report
+  attributes lines by the location they reserve at; `POST /v1/orders/reservation-drift/repair`
+  (dryRun) releases what delivered/closed lines hold and resets drifted levels with a
+  `reservation_repair` ledger row; Settings → Reservation check runs it. **Ops: run Repair in
+  production once #244 deploys.**
+- Manual PO links: `po_line_allocations` takes an order line OR a draft transfer line
+  (migration 0112). PO page: "Link to an order or transfer…" per line, × to unlink while on
+  order; order page: "Link to a PO…" on a short stock line, unlink next to the PO; transfer page:
+  PO badges and "Link to a PO…" on a draft. Receiving flips a transfer link to received without
+  reserving (the transfer ships from free stock). `GET purchase-orders/open-lines?variantId`,
+  `GET/POST .../lines/:lineId/link-candidates|links`, `DELETE .../links/:allocationId`.
+- Tests: catalog (vendor on create), deliveries (Partial flag), orders (drift repair),
+  special-orders (receipt cap; manual links end to end). Docker Desktop was off, so the API
+  specs ran in CI only.

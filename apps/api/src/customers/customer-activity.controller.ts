@@ -344,6 +344,7 @@ export class CustomerActivityController {
       }
     >();
     for (const a of allocs) {
+      if (!a.orderLineId) continue;
       const cur = allocByLine.get(a.orderLineId) ?? {
         poId: a.poId,
         poNumber: a.poNumber,

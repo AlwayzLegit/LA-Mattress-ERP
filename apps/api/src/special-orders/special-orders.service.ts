@@ -82,6 +82,9 @@ export class SpecialOrdersService {
         });
       }
 
+      // Owner 2026-10-28: a transfer line's link only earmarks the units;
+      // the transfer ships them from free stock once they are here.
+      if (!alloc.orderLineId) continue;
       const [line] = await db
         .select({
           id: schema.orderLines.id,
@@ -204,6 +207,7 @@ export class SpecialOrdersService {
         });
       }
 
+      if (!alloc.orderLineId) continue;
       const [line] = await db
         .select({
           id: schema.orderLines.id,

@@ -7,6 +7,7 @@ import { PackageCheck, Printer, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
+import { LinkToPo, PoLinkBadge } from '@/components/po-links';
 import {
   Alert,
   BackLink,
@@ -33,6 +34,17 @@ interface TransferLine {
   quantityReceived: number;
   quantityOrdered: number | null;
   quantityHeld: number;
+  /** Owner 2026-10-28: the PO lines this draft line waits on. */
+  poLinks?: {
+    allocationId: string;
+    poId: string;
+    poNumber: string;
+    poLineId: string;
+    poStatus: string;
+    expectedAt: string | null;
+    quantity: number;
+    status: string;
+  }[];
 }
 interface Transfer {
   id: string;
@@ -182,6 +194,36 @@ export default function TransferDetailPage() {
                       {' '}
                       <code className="muted">{l.sku}</code>
                     </>
+                  )}
+                  {(l.poLinks ?? []).length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1" data-testid="transfer-line-po">
+                      {(l.poLinks ?? []).map((k) => (
+                        <PoLinkBadge
+                          key={k.allocationId}
+                          poId={k.poId}
+                          poNumber={k.poNumber}
+                          poLineId={k.poLineId}
+                          allocationId={k.allocationId}
+                          quantity={k.quantity}
+                          status={k.status}
+                          canUnlink={isDraft}
+                          onDone={load}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {isDraft && (
+                    <LinkToPo
+                      variantId={l.variantId}
+                      target={{ transferLineId: l.id }}
+                      need={
+                        (l.quantityOrdered ?? l.quantityShipped) -
+                        (l.poLinks ?? [])
+                          .filter((k) => k.status === 'ordered')
+                          .reduce((n, k) => n + k.quantity, 0)
+                      }
+                      onDone={load}
+                    />
                   )}
                 </td>
                 <td className="num">{l.quantityShipped}</td>

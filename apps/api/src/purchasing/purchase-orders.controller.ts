@@ -13,7 +13,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -163,7 +163,8 @@ interface PoLineRow {
   unitCostCents: number;
   lineTotalCents: number;
   /** §6: units on this line bought for specific customer orders. */
-  linkedOrders: { orderId: string; orderNumber: string; quantity: number }[];
+  linkedOrders: PoLinkedOrder[];
+  linkedTransfers: PoLinkedTransfer[];
 }
 
 interface PoDetail extends PoListRow {
@@ -195,6 +196,56 @@ interface PoReceiveResult extends PoDetail {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface PoLinkedOrder {
+  allocationId: string;
+  orderId: string;
+  orderNumber: string;
+  orderLineId: string;
+  quantity: number;
+  /** 'ordered' | 'received' */
+  status: string;
+}
+interface PoLinkedTransfer {
+  allocationId: string;
+  transferId: string;
+  transferNumber: string;
+  transferLineId: string;
+  toLocationName: string | null;
+  quantity: number;
+  status: string;
+}
+interface LinkCandidateOrder {
+  orderLineId: string;
+  orderId: string;
+  orderNumber: string;
+  orderStatus: string;
+  customerName: string | null;
+  promisedDate: string | null;
+  description: string;
+  lineType: string;
+  need: number;
+}
+interface LinkCandidateTransfer {
+  transferLineId: string;
+  transferId: string;
+  transferNumber: string;
+  toLocationName: string | null;
+  scheduledFor: string | null;
+  need: number;
+}
+interface OpenPoLine {
+  poLineId: string;
+  poId: string;
+  poNumber: string;
+  poStatus: string;
+  vendorName: string | null;
+  locationName: string | null;
+  expectedAt: string | null;
+  quantityOrdered: number;
+  quantityAccepted: number;
+  free: number;
+}
 
 @TenantScoped()
 @Controller('v1/purchase-orders')
@@ -287,6 +338,68 @@ export class PurchaseOrdersController {
    * reorder_qty when set, else a top-up to 2× the point (min/max).
    * Declared before the ':id' route so the static path wins.
    */
+  /**
+   * Owner 2026-10-28: the open PO lines of one item with units no link
+   * covers yet — what a sales-order or transfer line can be linked to
+   * from its own page. Soonest expected first.
+   */
+  @Get('open-lines')
+  @RequirePermission('purchase_orders.view')
+  async openLines(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query('variantId') variantId?: string,
+  ): Promise<OpenPoLine[]> {
+    if (!variantId) throw new BadRequestException('variantId is required');
+    const linked = sql<number>`COALESCE((SELECT SUM(a.quantity) FROM po_line_allocations a WHERE a.po_line_id = ${schema.purchaseOrderLines.id} AND a.status <> 'cancelled'), 0)::int`;
+    const rows = await this.db
+      .select({
+        poLineId: schema.purchaseOrderLines.id,
+        poId: schema.purchaseOrders.id,
+        poNumber: schema.purchaseOrders.number,
+        poStatus: schema.purchaseOrders.status,
+        vendorName: schema.vendors.name,
+        locationName: schema.locations.name,
+        expectedAt: schema.purchaseOrders.expectedAt,
+        quantityOrdered: schema.purchaseOrderLines.quantityOrdered,
+        quantityAccepted: schema.purchaseOrderLines.quantityAccepted,
+        free: sql<number>`${schema.purchaseOrderLines.quantityOrdered} - ${linked}`,
+      })
+      .from(schema.purchaseOrderLines)
+      .innerJoin(
+        schema.purchaseOrders,
+        eq(schema.purchaseOrders.id, schema.purchaseOrderLines.purchaseOrderId),
+      )
+      .leftJoin(schema.vendors, eq(schema.vendors.id, schema.purchaseOrders.vendorId))
+      .leftJoin(schema.locations, eq(schema.locations.id, schema.purchaseOrders.locationId))
+      .where(
+        and(
+          eq(schema.purchaseOrders.businessId, tenant.businessId!),
+          eq(schema.purchaseOrderLines.variantId, variantId),
+          inArray(schema.purchaseOrders.status, ['draft', 'ordered', 'partially_received']),
+          isNull(schema.purchaseOrders.deletedAt),
+          eq(schema.purchaseOrders.directShip, false),
+          sql`${schema.purchaseOrderLines.quantityOrdered} - ${linked} > 0`,
+        ),
+      )
+      .orderBy(
+        sql`${schema.purchaseOrders.expectedAt} ASC NULLS LAST`,
+        schema.purchaseOrders.createdAt,
+      )
+      .limit(50);
+    return rows.map((r) => ({
+      poLineId: r.poLineId,
+      poId: r.poId,
+      poNumber: r.poNumber,
+      poStatus: r.poStatus,
+      vendorName: r.vendorName ?? null,
+      locationName: r.locationName ?? null,
+      expectedAt: r.expectedAt ? r.expectedAt.toISOString() : null,
+      quantityOrdered: r.quantityOrdered,
+      quantityAccepted: r.quantityAccepted,
+      free: Number(r.free),
+    }));
+  }
+
   @Get('reorder-suggestions')
   @RequirePermission('purchase_orders.view')
   async reorderSuggestions(
@@ -1734,17 +1847,20 @@ export class PurchaseOrdersController {
       .where(eq(schema.purchaseOrderLines.purchaseOrderId, id));
 
     // §6: every PO line bought for a customer order carries that sales
-    // order # — resolved through the special-order allocations.
-    const linkedByLine = new Map<
-      string,
-      { orderId: string; orderNumber: string; quantity: number }[]
-    >();
+    // order # — resolved through the special-order allocations. Owner
+    // 2026-10-28: one entry per link (not per order) so each can be
+    // undone from the PO page, plus the transfer lines earmarked here.
+    const linkedByLine = new Map<string, PoLinkedOrder[]>();
+    const transfersByLine = new Map<string, PoLinkedTransfer[]>();
     if (lines.length > 0) {
+      const lineIds = lines.map((l) => l.id);
       const allocs = await this.db
         .select({
+          allocationId: schema.poLineAllocations.id,
           poLineId: schema.poLineAllocations.poLineId,
           quantity: schema.poLineAllocations.quantity,
           status: schema.poLineAllocations.status,
+          orderLineId: schema.orderLines.id,
           orderId: schema.orderLines.orderId,
           orderNumber: schema.orders.number,
         })
@@ -1755,18 +1871,64 @@ export class PurchaseOrdersController {
         )
         .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
         .where(
-          inArray(
-            schema.poLineAllocations.poLineId,
-            lines.map((l) => l.id),
+          and(
+            inArray(schema.poLineAllocations.poLineId, lineIds),
+            ne(schema.poLineAllocations.status, 'cancelled'),
           ),
-        );
+        )
+        .orderBy(schema.poLineAllocations.createdAt);
       for (const a of allocs) {
-        if (a.status === 'cancelled') continue;
         const list = linkedByLine.get(a.poLineId) ?? [];
-        const existing = list.find((o) => o.orderId === a.orderId);
-        if (existing) existing.quantity += a.quantity;
-        else list.push({ orderId: a.orderId, orderNumber: a.orderNumber, quantity: a.quantity });
+        list.push({
+          allocationId: a.allocationId,
+          orderId: a.orderId,
+          orderNumber: a.orderNumber,
+          orderLineId: a.orderLineId,
+          quantity: a.quantity,
+          status: a.status,
+        });
         linkedByLine.set(a.poLineId, list);
+      }
+      const xfers = await this.db
+        .select({
+          allocationId: schema.poLineAllocations.id,
+          poLineId: schema.poLineAllocations.poLineId,
+          quantity: schema.poLineAllocations.quantity,
+          status: schema.poLineAllocations.status,
+          transferLineId: schema.stockTransferLines.id,
+          transferId: schema.stockTransfers.id,
+          transferNumber: schema.stockTransfers.number,
+          toLocationName: schema.locations.name,
+        })
+        .from(schema.poLineAllocations)
+        .innerJoin(
+          schema.stockTransferLines,
+          eq(schema.stockTransferLines.id, schema.poLineAllocations.transferLineId),
+        )
+        .innerJoin(
+          schema.stockTransfers,
+          eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+        )
+        .leftJoin(schema.locations, eq(schema.locations.id, schema.stockTransfers.toLocationId))
+        .where(
+          and(
+            inArray(schema.poLineAllocations.poLineId, lineIds),
+            ne(schema.poLineAllocations.status, 'cancelled'),
+          ),
+        )
+        .orderBy(schema.poLineAllocations.createdAt);
+      for (const x of xfers) {
+        const list = transfersByLine.get(x.poLineId) ?? [];
+        list.push({
+          allocationId: x.allocationId,
+          transferId: x.transferId,
+          transferNumber: x.transferNumber,
+          transferLineId: x.transferLineId,
+          toLocationName: x.toLocationName ?? null,
+          quantity: x.quantity,
+          status: x.status,
+        });
+        transfersByLine.set(x.poLineId, list);
       }
     }
 
@@ -1784,8 +1946,368 @@ export class PurchaseOrdersController {
         ...l,
         productName: l.productName ?? '(deleted)',
         linkedOrders: linkedByLine.get(l.id) ?? [],
+        linkedTransfers: transfersByLine.get(l.id) ?? [],
       })),
     };
+  }
+
+  // ------------------------------------------------------- manual links
+
+  /**
+   * Owner 2026-10-28: what a PO line could be linked to — the open
+   * sales-order lines and draft transfer lines of the same variant that
+   * still need units no PO covers. Sales orders first by promised date.
+   */
+  @Get(':id/lines/:lineId/link-candidates')
+  @RequirePermission('purchase_orders.view')
+  async linkCandidates(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+  ): Promise<{
+    poLine: { id: string; variantId: string; sku: string | null; free: number };
+    orders: LinkCandidateOrder[];
+    transfers: LinkCandidateTransfer[];
+  }> {
+    const { line, free } = await this.poLineWithFree(id, lineId);
+    const allocatedSql = sql<number>`COALESCE((SELECT SUM(a.quantity) FROM po_line_allocations a WHERE a.order_line_id = ${schema.orderLines.id} AND a.status = 'ordered'), 0)::int`;
+    const need = sql<number>`${schema.orderLines.quantity} - ${schema.orderLines.qtyFulfilled} - ${schema.orderLines.qtyReserved} - ${allocatedSql}`;
+    const orders = await this.db
+      .select({
+        orderLineId: schema.orderLines.id,
+        orderId: schema.orders.id,
+        orderNumber: schema.orders.number,
+        orderStatus: schema.orders.status,
+        customerName: sql<
+          string | null
+        >`NULLIF(TRIM(CONCAT(${schema.customers.firstName}, ' ', ${schema.customers.lastName})), '')`,
+        promisedDate: sql<
+          string | null
+        >`coalesce(${schema.orderLines.deliveryDate}, ${schema.orders.requestedDate})`,
+        description: schema.orderLines.description,
+        lineType: schema.orderLines.lineType,
+        need: need,
+      })
+      .from(schema.orderLines)
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+      .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
+      .where(
+        and(
+          eq(schema.orders.businessId, tenant.businessId!),
+          eq(schema.orderLines.variantId, line.variantId),
+          inArray(schema.orders.status, ['open', 'partially_fulfilled']),
+          inArray(schema.orderLines.lineType, ['stock', 'special_order']),
+          sql`${need} > 0`,
+        ),
+      )
+      .orderBy(
+        sql`coalesce(${schema.orderLines.deliveryDate}, ${schema.orders.requestedDate}) ASC NULLS LAST`,
+        schema.orders.createdAt,
+      )
+      .limit(50);
+    const xAllocated = sql<number>`COALESCE((SELECT SUM(a.quantity) FROM po_line_allocations a WHERE a.transfer_line_id = ${schema.stockTransferLines.id} AND a.status = 'ordered'), 0)::int`;
+    const xNeed = sql<number>`coalesce(${schema.stockTransferLines.quantityOrdered}, ${schema.stockTransferLines.quantityShipped}) - ${xAllocated}`;
+    const transfers = await this.db
+      .select({
+        transferLineId: schema.stockTransferLines.id,
+        transferId: schema.stockTransfers.id,
+        transferNumber: schema.stockTransfers.number,
+        toLocationName: schema.locations.name,
+        scheduledFor: schema.stockTransfers.scheduledFor,
+        need: xNeed,
+      })
+      .from(schema.stockTransferLines)
+      .innerJoin(
+        schema.stockTransfers,
+        eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+      )
+      .leftJoin(schema.locations, eq(schema.locations.id, schema.stockTransfers.toLocationId))
+      .where(
+        and(
+          eq(schema.stockTransfers.businessId, tenant.businessId!),
+          eq(schema.stockTransferLines.variantId, line.variantId),
+          eq(schema.stockTransfers.status, 'draft'),
+          sql`${xNeed} > 0`,
+        ),
+      )
+      .orderBy(
+        sql`${schema.stockTransfers.scheduledFor} ASC NULLS LAST`,
+        schema.stockTransfers.createdAt,
+      )
+      .limit(50);
+    return {
+      poLine: { id: line.id, variantId: line.variantId, sku: line.sku ?? null, free },
+      orders: orders.map((o) => ({
+        orderLineId: o.orderLineId,
+        orderId: o.orderId,
+        orderNumber: o.orderNumber,
+        orderStatus: o.orderStatus,
+        customerName: o.customerName ?? null,
+        promisedDate: o.promisedDate ?? null,
+        description: o.description,
+        lineType: o.lineType,
+        need: Number(o.need),
+      })),
+      transfers: transfers.map((t) => ({
+        transferLineId: t.transferLineId,
+        transferId: t.transferId,
+        transferNumber: t.transferNumber,
+        toLocationName: t.toLocationName ?? null,
+        scheduledFor: t.scheduledFor ?? null,
+        need: Number(t.need),
+      })),
+    };
+  }
+
+  /**
+   * Link a PO line to a sales-order line or a draft transfer line by
+   * hand. The PO must still be open (draft, ordered, partially received),
+   * the variants must match, and the quantity can be neither more than
+   * the PO line's unlinked units nor more than the target still needs.
+   * From then on the link behaves like a generated special order: the
+   * receipt commits the units to the order (or marks the transfer's
+   * units as arrived), and the order page shows the PO.
+   */
+  @Post(':id/lines/:lineId/links')
+  @RequirePermission('purchase_orders.create')
+  async link(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body()
+    body: { orderLineId?: string | null; transferLineId?: string | null; quantity?: number },
+  ): Promise<PoDetail> {
+    const { po, line, free } = await this.poLineWithFree(id, lineId);
+    if (po.deletedAt || !['draft', 'ordered', 'partially_received'].includes(po.status)) {
+      throw new BadRequestException('Only an open purchase order can be linked');
+    }
+    if (Boolean(body.orderLineId) === Boolean(body.transferLineId)) {
+      throw new BadRequestException('Pass exactly one of orderLineId or transferLineId');
+    }
+    const quantity = body.quantity ?? 1;
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new BadRequestException('quantity must be a positive integer');
+    }
+    if (quantity > free) {
+      throw new BadRequestException(
+        free > 0
+          ? `Only ${free} unit(s) of this PO line are not linked yet`
+          : 'Every unit of this PO line is already linked',
+      );
+    }
+    let target: { label: string; need: number };
+    if (body.orderLineId) {
+      const [ol] = await this.db
+        .select({
+          id: schema.orderLines.id,
+          variantId: schema.orderLines.variantId,
+          quantity: schema.orderLines.quantity,
+          qtyReserved: schema.orderLines.qtyReserved,
+          qtyFulfilled: schema.orderLines.qtyFulfilled,
+          lineType: schema.orderLines.lineType,
+          orderNumber: schema.orders.number,
+          orderStatus: schema.orders.status,
+          businessId: schema.orders.businessId,
+        })
+        .from(schema.orderLines)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+        .where(eq(schema.orderLines.id, body.orderLineId))
+        .limit(1);
+      if (!ol || ol.businessId !== tenant.businessId) {
+        throw new NotFoundException('Order line not found');
+      }
+      if (ol.variantId !== line.variantId) {
+        throw new BadRequestException('The order line is for a different item than the PO line');
+      }
+      if (!['open', 'partially_fulfilled'].includes(ol.orderStatus)) {
+        throw new BadRequestException(`Order ${ol.orderNumber} is not open`);
+      }
+      if (!['stock', 'special_order'].includes(ol.lineType)) {
+        throw new BadRequestException('Only a stock or special-order line can wait on a PO');
+      }
+      const [alloc] = await this.db
+        .select({
+          q: sql<number>`COALESCE(SUM(${schema.poLineAllocations.quantity}), 0)::int`,
+        })
+        .from(schema.poLineAllocations)
+        .where(
+          and(
+            eq(schema.poLineAllocations.orderLineId, ol.id),
+            eq(schema.poLineAllocations.status, 'ordered'),
+          ),
+        );
+      const need = ol.quantity - ol.qtyFulfilled - ol.qtyReserved - (alloc?.q ?? 0);
+      target = { label: ol.orderNumber, need };
+    } else {
+      const [tl] = await this.db
+        .select({
+          id: schema.stockTransferLines.id,
+          variantId: schema.stockTransferLines.variantId,
+          quantityShipped: schema.stockTransferLines.quantityShipped,
+          quantityOrdered: schema.stockTransferLines.quantityOrdered,
+          transferNumber: schema.stockTransfers.number,
+          transferStatus: schema.stockTransfers.status,
+          businessId: schema.stockTransfers.businessId,
+        })
+        .from(schema.stockTransferLines)
+        .innerJoin(
+          schema.stockTransfers,
+          eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+        )
+        .where(eq(schema.stockTransferLines.id, body.transferLineId!))
+        .limit(1);
+      if (!tl || tl.businessId !== tenant.businessId) {
+        throw new NotFoundException('Transfer line not found');
+      }
+      if (tl.variantId !== line.variantId) {
+        throw new BadRequestException('The transfer line is for a different item than the PO line');
+      }
+      if (tl.transferStatus !== 'draft') {
+        throw new BadRequestException(
+          `Transfer ${tl.transferNumber} has already shipped — only a draft waits on a PO`,
+        );
+      }
+      const [alloc] = await this.db
+        .select({
+          q: sql<number>`COALESCE(SUM(${schema.poLineAllocations.quantity}), 0)::int`,
+        })
+        .from(schema.poLineAllocations)
+        .where(
+          and(
+            eq(schema.poLineAllocations.transferLineId, tl.id),
+            eq(schema.poLineAllocations.status, 'ordered'),
+          ),
+        );
+      const need = (tl.quantityOrdered ?? tl.quantityShipped) - (alloc?.q ?? 0);
+      target = { label: tl.transferNumber, need };
+    }
+    if (quantity > target.need) {
+      throw new BadRequestException(
+        target.need > 0
+          ? `${target.label} only needs ${target.need} more unit(s) of this item`
+          : `${target.label} is already covered for this item`,
+      );
+    }
+    const [created] = await this.db
+      .insert(schema.poLineAllocations)
+      .values({
+        businessId: tenant.businessId!,
+        poLineId: line.id,
+        orderLineId: body.orderLineId ?? null,
+        transferLineId: body.transferLineId ?? null,
+        quantity,
+        status: 'ordered',
+      })
+      .returning({ id: schema.poLineAllocations.id });
+    await this.audit.log({
+      action: 'purchase_order.link',
+      targetType: 'purchase_order',
+      targetId: id,
+      after: {
+        allocationId: created?.id,
+        poLineId: line.id,
+        orderLineId: body.orderLineId ?? null,
+        transferLineId: body.transferLineId ?? null,
+        target: target.label,
+        quantity,
+      },
+    });
+    return this.hydrate(id);
+  }
+
+  /** Undo a link whose units are still on order (a received link stays). */
+  @Delete(':id/lines/:lineId/links/:allocationId')
+  @RequirePermission('purchase_orders.create')
+  async unlink(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Param('allocationId') allocationId: string,
+  ): Promise<PoDetail> {
+    const [alloc] = await this.db
+      .select()
+      .from(schema.poLineAllocations)
+      .where(
+        and(
+          eq(schema.poLineAllocations.id, allocationId),
+          eq(schema.poLineAllocations.poLineId, lineId),
+          eq(schema.poLineAllocations.businessId, tenant.businessId!),
+        ),
+      )
+      .limit(1);
+    if (!alloc) throw new NotFoundException('Link not found');
+    if (alloc.status === 'cancelled') return this.hydrate(id);
+    if (alloc.status === 'received') {
+      throw new BadRequestException(
+        'These units have been received and committed — release them on the order instead',
+      );
+    }
+    await this.db
+      .update(schema.poLineAllocations)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(eq(schema.poLineAllocations.id, alloc.id));
+    await this.audit.log({
+      action: 'purchase_order.unlink',
+      targetType: 'purchase_order',
+      targetId: id,
+      after: {
+        allocationId: alloc.id,
+        poLineId: lineId,
+        orderLineId: alloc.orderLineId,
+        transferLineId: alloc.transferLineId,
+        quantity: alloc.quantity,
+      },
+    });
+    return this.hydrate(id);
+  }
+
+  /** The PO line with how many of its units no live link covers yet. */
+  private async poLineWithFree(
+    poId: string,
+    lineId: string,
+  ): Promise<{
+    po: typeof schema.purchaseOrders.$inferSelect;
+    line: { id: string; variantId: string; sku: string | null; quantityOrdered: number };
+    free: number;
+  }> {
+    const [po] = await this.db
+      .select()
+      .from(schema.purchaseOrders)
+      .where(eq(schema.purchaseOrders.id, poId))
+      .limit(1);
+    if (!po) throw new NotFoundException('Purchase order not found');
+    const [line] = await this.db
+      .select({
+        id: schema.purchaseOrderLines.id,
+        variantId: schema.purchaseOrderLines.variantId,
+        quantityOrdered: schema.purchaseOrderLines.quantityOrdered,
+        sku: schema.productVariants.sku,
+      })
+      .from(schema.purchaseOrderLines)
+      .leftJoin(
+        schema.productVariants,
+        eq(schema.productVariants.id, schema.purchaseOrderLines.variantId),
+      )
+      .where(
+        and(
+          eq(schema.purchaseOrderLines.id, lineId),
+          eq(schema.purchaseOrderLines.purchaseOrderId, poId),
+        ),
+      )
+      .limit(1);
+    if (!line) throw new NotFoundException('Purchase order line not found');
+    const [linked] = await this.db
+      .select({
+        q: sql<number>`COALESCE(SUM(${schema.poLineAllocations.quantity}), 0)::int`,
+      })
+      .from(schema.poLineAllocations)
+      .where(
+        and(
+          eq(schema.poLineAllocations.poLineId, line.id),
+          ne(schema.poLineAllocations.status, 'cancelled'),
+        ),
+      );
+    return { po, line, free: Math.max(0, line.quantityOrdered - (linked?.q ?? 0)) };
   }
 
   /**

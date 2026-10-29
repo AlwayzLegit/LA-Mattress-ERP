@@ -765,7 +765,7 @@ export class ProductActivityController {
       .orderBy(asc(schema.purchaseOrders.createdAt));
     const poFor = new Map<string, { id: string; number: string; quantity: number }>();
     for (const p of linkedPos) {
-      if (!poFor.has(p.orderLineId)) {
+      if (p.orderLineId && !poFor.has(p.orderLineId)) {
         poFor.set(p.orderLineId, { id: p.purchaseOrderId, number: p.number, quantity: p.quantity });
       }
     }
