@@ -47,7 +47,15 @@ interface DeliveryDetail {
   addressPostalCode: string | null;
   addressPhone: string | null;
   balanceDueCents: number;
-  lines: { id: string; description: string; quantity: number; lineType: string }[];
+  /** Owner 2026-10-28: units on the stop not reserved — 0 = fully reserved. */
+  unreservedUnits?: number;
+  lines: {
+    id: string;
+    description: string;
+    quantity: number;
+    lineType: string;
+    unreserved?: number;
+  }[];
 }
 
 export default function DeliveryDetailPage() {
@@ -183,12 +191,24 @@ export default function DeliveryDetailPage() {
 
         <Card title="On the truck">
           <Stack gap="sm">
+            {live && (d.unreservedUnits ?? 0) > 0 && (
+              <Alert tone="warning" data-testid="delivery-short">
+                Partial — {d.unreservedUnits} unit{d.unreservedUnits === 1 ? '' : 's'} not reserved
+                (not in stock at the source). Check stock on the order before loading.
+              </Alert>
+            )}
             <ul className="m-0 list-disc pl-[18px] text-[13px]">
               {d.lines.map((l) => (
                 <li key={l.id}>
                   {l.quantity} × {l.description}
                   {l.lineType === 'special_order' && (
                     <span className="muted"> (special order)</span>
+                  )}
+                  {live && (l.unreserved ?? 0) > 0 && (
+                    <span style={{ color: 'var(--status-waiting-fg)' }}>
+                      {' '}
+                      · {l.unreserved} not reserved
+                    </span>
                   )}
                 </li>
               ))}

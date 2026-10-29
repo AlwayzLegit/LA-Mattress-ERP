@@ -47,6 +47,8 @@ interface DeliveryRow {
   notes: string | null;
   addressCity: string | null;
   balanceDueCents: number;
+  /** Units on the stop not reserved (owner 2026-10-28) — 0 = fully reserved. */
+  unreservedUnits?: number;
   lines: { id: string; description: string; quantity: number }[];
 }
 interface Capacity {
@@ -530,6 +532,15 @@ function DeliveriesBoard() {
                                 </span>
                               )}
                             </span>
+                            {!pickup && (r.unreservedUnits ?? 0) > 0 && LIVE.has(r.status) && (
+                              <span
+                                className="db-card-short"
+                                title="Units on this stop are not reserved — not in stock at the source. Partial until stock arrives."
+                                data-testid="db-card-short"
+                              >
+                                ▲ {r.unreservedUnits} not reserved
+                              </span>
+                            )}
                           </span>
                         </a>
                       );
