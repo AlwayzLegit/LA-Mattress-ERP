@@ -100,7 +100,11 @@ export default function ProductsPage() {
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
 
-  // Store columns: the warehouse first, then the stores by name.
+  // Store columns: the warehouse first, then the stores by name. Owner
+  // 2026-10-28: each store is three columns — on hand, available (the
+  // toned cell), reserved — instead of one available figure with the
+  // rest in a tooltip. `loc:<id>` keeps its id so a saved column order
+  // still places the store; the two new columns sit right after it.
   const storeColumns = useMemo<ColumnDef<ProductRow>[]>(
     () =>
       [...locations]
@@ -110,29 +114,61 @@ export default function ProductsPage() {
           const wb = b.locationType === 'warehouse' ? 0 : 1;
           return wa - wb || a.name.localeCompare(b.name);
         })
-        .map((l) => ({
-          id: `loc:${l.id}`,
-          label: l.name,
-          sortKey: `available:${l.id}`,
-          num: true,
-          thClassName: 'pb-store-th',
-          render: (p: ProductRow): ReactNode => {
-            const c = p.stockByLocation[l.id];
-            const tone = cellTone(c);
-            return (
+        .flatMap((l): ColumnDef<ProductRow>[] => [
+          {
+            id: `loc:${l.id}`,
+            label: `${l.name} · on hand`,
+            sortKey: `onhand:${l.id}`,
+            num: true,
+            thClassName: 'pb-store-th',
+            render: (p) => (
               <span
-                className={`pb-store is-${tone}`}
-                title={`${l.name}: ${c?.onHand ?? 0} on hand · ${c?.reserved ?? 0} reserved${
-                  c?.min != null ? ` · minimum ${c.min}` : ''
-                }${(c?.demand ?? 0) > 0 ? ` · ${c!.demand} waiting on orders` : ''}`}
-                data-testid="store-cell"
-                data-tone={tone}
+                className={`pb-store is-${(p.stockByLocation[l.id]?.onHand ?? 0) > 0 ? 'ok' : 'zero'}`}
+                data-testid="store-onhand"
               >
-                {c?.available ?? 0}
+                {p.stockByLocation[l.id]?.onHand ?? 0}
               </span>
-            );
+            ),
           },
-        })),
+          {
+            id: `loc:${l.id}:available`,
+            label: `${l.name} · available`,
+            sortKey: `available:${l.id}`,
+            num: true,
+            thClassName: 'pb-store-th',
+            render: (p): ReactNode => {
+              const c = p.stockByLocation[l.id];
+              const tone = cellTone(c);
+              return (
+                <span
+                  className={`pb-store is-${tone}`}
+                  title={`${l.name}: ${c?.onHand ?? 0} on hand · ${c?.reserved ?? 0} reserved${
+                    c?.min != null ? ` · minimum ${c.min}` : ''
+                  }${(c?.demand ?? 0) > 0 ? ` · ${c!.demand} waiting on orders` : ''}`}
+                  data-testid="store-cell"
+                  data-tone={tone}
+                >
+                  {c?.available ?? 0}
+                </span>
+              );
+            },
+          },
+          {
+            id: `loc:${l.id}:reserved`,
+            label: `${l.name} · reserved`,
+            sortKey: `reserved:${l.id}`,
+            num: true,
+            thClassName: 'pb-store-th',
+            render: (p) => (
+              <span
+                className={`pb-store is-${(p.stockByLocation[l.id]?.reserved ?? 0) > 0 ? 'ok' : 'zero'}`}
+                data-testid="store-reserved"
+              >
+                {p.stockByLocation[l.id]?.reserved ?? 0}
+              </span>
+            ),
+          },
+        ]),
     [locations],
   );
   // `canSeeCost` comes from /members/me; until it loads, fall back to

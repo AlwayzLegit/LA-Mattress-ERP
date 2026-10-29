@@ -385,13 +385,22 @@ export class CatalogProductsController {
     @Query('costMax') costMaxQ?: string,
   ): Promise<PageResponse<ProductListRow>> {
     const limit = clampPageLimit(limitStr);
-    const storeSort = /^available:([0-9a-f-]{36})$/i.exec(sortRaw ?? '')?.[1] ?? null;
+    // Owner 2026-10-28: each store shows on hand, available and reserved
+    // as its own column; any of the three sorts.
+    const storeMatch = /^(available|onhand|reserved):([0-9a-f-]{36})$/i.exec(sortRaw ?? '');
+    const storeSort = storeMatch?.[2] ?? null;
+    const storeField: 'available' | 'onHand' | 'reserved' =
+      storeMatch?.[1]?.toLowerCase() === 'onhand'
+        ? 'onHand'
+        : storeMatch?.[1]?.toLowerCase() === 'reserved'
+          ? 'reserved'
+          : 'available';
     const sortKey = (PRODUCT_SORT_KEYS as readonly string[]).includes(sortRaw ?? '')
       ? (sortRaw as ProductSortKey)
       : null;
     if (sortRaw && !sortKey && !storeSort) {
       throw new BadRequestException(
-        `sort must be one of ${PRODUCT_SORT_KEYS.join(', ')} or available:<locationId>`,
+        `sort must be one of ${PRODUCT_SORT_KEYS.join(', ')} or available:<locationId> / onhand:<locationId> / reserved:<locationId>`,
       );
     }
     const dir: 'asc' | 'desc' = dirRaw === 'desc' ? 'desc' : 'asc';
@@ -401,8 +410,8 @@ export class CatalogProductsController {
         return [...rows].sort(
           (a, b) =>
             sign *
-              ((a.stockByLocation[storeSort]?.available ?? 0) -
-                (b.stockByLocation[storeSort]?.available ?? 0)) || a.name.localeCompare(b.name),
+              ((a.stockByLocation[storeSort]?.[storeField] ?? 0) -
+                (b.stockByLocation[storeSort]?.[storeField] ?? 0)) || a.name.localeCompare(b.name),
         );
       }
       return sortKey ? sortProductRows(rows, sortKey, dir) : rows;
