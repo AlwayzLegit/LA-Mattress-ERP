@@ -88,21 +88,52 @@ export class SpecialOrdersService {
           orderId: schema.orderLines.orderId,
           variantId: schema.orderLines.variantId,
           description: schema.orderLines.description,
+          quantity: schema.orderLines.quantity,
+          qtyReserved: schema.orderLines.qtyReserved,
+          qtyFulfilled: schema.orderLines.qtyFulfilled,
+          sourceLocationId: schema.orderLines.sourceLocationId,
+          orderStatus: schema.orders.status,
+          orderStockLocationId: schema.orders.stockLocationId,
+          orderLocationId: schema.orders.locationId,
         })
         .from(schema.orderLines)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
         .where(eq(schema.orderLines.id, alloc.orderLineId))
         .limit(1);
       if (!line) continue;
 
       // The arrived units belong to this customer: commit them on the
       // spot so the shared pool never sees them.
-      if (line.variantId) {
+      //
+      // Owner 2026-10-28 (KO-10069, FULL COBALT FIRM): the line had
+      // already been delivered out of count-corrected stock when its PO
+      // arrived, and the receipt reserved the unit again — a phantom
+      // reservation nobody could see. Reserve only what the line still
+      // lacks (quantity − fulfilled − reserved), and only while the
+      // order is live.
+      const need = Math.max(0, line.quantity - line.qtyFulfilled - line.qtyReserved);
+      const live = ['open', 'partially_fulfilled'].includes(line.orderStatus);
+      const take = live ? Math.min(consumed, need) : 0;
+      if (line.variantId && take > 0) {
+        // The units sit where the PO landed. A line that reserves
+        // nothing elsewhere follows them, so the delivery later consumes
+        // the reservation at the location it was made (a Koreatown
+        // receipt delivered from the Warehouse left levels reserved at
+        // the store with no line behind them).
+        const effective =
+          line.sourceLocationId ?? line.orderStockLocationId ?? line.orderLocationId;
+        if (line.qtyReserved === 0 && effective !== args.locationId) {
+          await db
+            .update(schema.orderLines)
+            .set({ sourceLocationId: args.locationId })
+            .where(eq(schema.orderLines.id, line.id));
+        }
         await this.orders.applyReservations(db, {
           businessId: args.businessId,
           orderId: line.orderId,
           locationId: args.locationId,
           actorUserId: args.actorUserId,
-          reservations: [{ orderLineId: line.id, variantId: line.variantId, quantity: consumed }],
+          reservations: [{ orderLineId: line.id, variantId: line.variantId, quantity: take }],
         });
       }
 

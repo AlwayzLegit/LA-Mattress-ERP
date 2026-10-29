@@ -2280,16 +2280,51 @@ describe('Line roll-up, Past Due, auto stock release, drift, duplicate prompt (P
       );
       expect(hit).toBeTruthy();
       expect(hit.driftUnits).toBe(-5);
-    } finally {
-      await db
-        .update(schema.inventoryLevels)
-        .set({ reserved: sql`${schema.inventoryLevels.reserved} - 5` })
+
+      // Owner 2026-10-28: the repair sets the level back to what the
+      // lines hold. Dry run first — reports, writes nothing.
+      const dry = await as(ownerCookie)
+        .post('/v1/orders/reservation-drift/repair')
+        .send({ dryRun: true });
+      expect(dry.status).toBe(201);
+      expect(dry.body.dryRun).toBe(true);
+      expect(
+        dry.body.levels.some(
+          (r: { variantId: string; locationId: string }) =>
+            r.variantId === g13VariantId && r.locationId === locationId,
+        ),
+      ).toBe(true);
+      expect((await as(ownerCookie).get('/v1/orders/reservation-drift')).body).toHaveLength(
+        drifted.body.length,
+      );
+      const run = await as(ownerCookie).post('/v1/orders/reservation-drift/repair').send({});
+      expect(run.status).toBe(201);
+      const after = await as(ownerCookie).get('/v1/orders/reservation-drift');
+      expect(
+        after.body.find(
+          (r: { variantId: string; locationId: string }) =>
+            r.variantId === g13VariantId && r.locationId === locationId,
+        ),
+      ).toBeUndefined();
+      const [level] = await db
+        .select({ reserved: schema.inventoryLevels.reserved })
+        .from(schema.inventoryLevels)
         .where(
           and(
             eq(schema.inventoryLevels.variantId, g13VariantId),
             eq(schema.inventoryLevels.locationId, locationId),
           ),
         );
+      expect(level!.reserved).toBe(hit.lineReserved);
+      const ledger = await as(ownerCookie).get(
+        `/v1/inventory/movements?variantId=${g13VariantId}&limit=5`,
+      );
+      expect(
+        (Array.isArray(ledger.body) ? ledger.body : ledger.body.data).some(
+          (m: { reason: string }) => m.reason === 'reservation_repair',
+        ),
+      ).toBe(true);
+    } finally {
       await sql2.end({ timeout: 5 });
     }
   });

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { CompetitionsCard, type CompetitionSettings } from './competitions-card';
+import { ReservationCheckCard } from './reservation-check-card';
 import { FeePresetsCard } from './fee-presets-card';
 import type { FeePreset } from '@/lib/fee-presets';
 
@@ -249,6 +250,8 @@ export default function SettingsPage() {
         <FeePresetsCard settings={settings} onSaved={setSettings} />
 
         <ReasonCodesCard />
+
+        <ReservationCheckCard />
 
         <BrandingCard settings={settings} onSaved={setSettings} />
 
