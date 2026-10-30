@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
 import { HANDOFF_EVENT, PICKUP_POSTED_EVENT, usdCents, varianceLabel } from './cash-pickups';
-import { clockTime, docHref, plural, stamp } from './kit';
+import { formatPhone } from '@jetnine/shared';
+import { clockTime, dayShort, docHref, plural, stamp } from './kit';
 import type { HandoffRow, HandoffsResponse } from './types';
 
 /**
@@ -221,6 +222,15 @@ export function CashHandoffs() {
                             <Link href={docHref(it.docKind, it.docId)} className="mono">
                               {it.docNumber}
                             </Link>
+                            {it.customerPhone && (
+                              <span className="mono"> · {formatPhone(it.customerPhone)}</span>
+                            )}
+                            {it.docDate && (
+                              <span className="muted">
+                                {' '}
+                                · written {dayShort(it.docDate, r.timezone)}
+                              </span>
+                            )}
                           </span>
                         </span>
                         <span className="ho-row-status">
