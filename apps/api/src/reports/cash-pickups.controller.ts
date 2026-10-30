@@ -94,6 +94,12 @@ export interface PickupItemRef {
   docKind: 'order' | 'sale' | 'service';
   docId: string;
   docNumber: string;
+  /**
+   * Owner 2026-10-29: when the owner ticked this payment's cash. A
+   * pickup received as a whole (or taken from the store / legacy) reads
+   * as received on every item.
+   */
+  ownerReceivedAt: Date | null;
 }
 
 /** The owner's tick on a pickup: the cash reached them. */
@@ -393,6 +399,8 @@ export class CashPickupsController {
         pickupId: schema.cashPickupItems.pickupId,
         paymentId: schema.payments.id,
         amountCents: schema.payments.amountCents,
+        itemOwnerAt: schema.cashPickupItems.ownerReceivedAt,
+        pickupOwnerAt: schema.cashPickups.ownerReceivedAt,
         orderId: schema.orders.id,
         orderNumber: schema.orders.number,
         saleId: schema.sales.id,
@@ -402,6 +410,7 @@ export class CashPickupsController {
       })
       .from(schema.cashPickupItems)
       .innerJoin(schema.payments, eq(schema.payments.id, schema.cashPickupItems.paymentId))
+      .innerJoin(schema.cashPickups, eq(schema.cashPickups.id, schema.cashPickupItems.pickupId))
       .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
       .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
       .leftJoin(schema.serviceOrders, eq(schema.serviceOrders.id, schema.payments.serviceOrderId))
@@ -423,6 +432,7 @@ export class CashPickupsController {
         docKind,
         docId,
         docNumber,
+        ownerReceivedAt: it.itemOwnerAt ?? it.pickupOwnerAt ?? null,
       });
       itemsBy.set(it.pickupId, list);
     }
@@ -910,6 +920,7 @@ export class CashPickupsController {
           docKind: p.docKind,
           docId: p.docId,
           docNumber: p.docNumber,
+          ownerReceivedAt: inserted.ownerAt ?? null,
         })),
         locationId: store.id,
         paymentIds,
@@ -1045,6 +1056,15 @@ export class CashPickupsController {
       )
       .returning({ id: schema.cashPickups.id });
     if (updated.length > 0) {
+      await this.db
+        .update(schema.cashPickupItems)
+        .set({ ownerReceivedAt: sql`now()`, ownerReceivedByMembershipId: tenant.membershipId })
+        .where(
+          and(
+            eq(schema.cashPickupItems.pickupId, pickupId),
+            isNull(schema.cashPickupItems.ownerReceivedAt),
+          ),
+        );
       await this.audit.log({
         action: 'cash_pickup.owner_receive',
         targetType: 'cash_pickup',
@@ -1115,6 +1135,116 @@ export class CashPickupsController {
   }
 
   /**
+   * Owner 2026-10-29: tick one payment's cash. The pickup itself counts
+   * as received the moment its last payment is ticked (same audit and
+   * webhook as the whole-pickup tick).
+   */
+  @Put(':pickupId/items/:paymentId/owner-received')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async receiveItem(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('pickupId') pickupId: string,
+    @Param('paymentId') paymentId: string,
+  ): Promise<HandoffRow> {
+    const businessId = tenant.businessId!;
+    const { row } = await this.pickupFor(tenant, businessId, pickupId);
+    if (!isUuid(paymentId) || !row.items.some((it) => it.paymentId === paymentId)) {
+      throw new NotFoundException('That payment is not on this pickup');
+    }
+    if (row.ownerReceipt) return row;
+    await this.db
+      .update(schema.cashPickupItems)
+      .set({ ownerReceivedAt: sql`now()`, ownerReceivedByMembershipId: tenant.membershipId })
+      .where(
+        and(
+          eq(schema.cashPickupItems.pickupId, pickupId),
+          eq(schema.cashPickupItems.paymentId, paymentId),
+          isNull(schema.cashPickupItems.ownerReceivedAt),
+        ),
+      );
+    await this.audit.log({
+      action: 'cash_pickup.item_owner_receive',
+      targetType: 'cash_pickup',
+      targetId: pickupId,
+      metadata: { number: row.number, paymentId, locationId: row.locationId },
+    });
+    const [left] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.cashPickupItems)
+      .where(
+        and(
+          eq(schema.cashPickupItems.pickupId, pickupId),
+          isNull(schema.cashPickupItems.ownerReceivedAt),
+        ),
+      );
+    if ((left?.n ?? 0) === 0) return this.receiveOne(tenant, pickupId);
+    const { row: after } = await this.pickupFor(tenant, businessId, pickupId);
+    return after;
+  }
+
+  /** Untick one payment — a mis-tick only; reopens the pickup if it had closed. */
+  @Delete(':pickupId/items/:paymentId/owner-received')
+  @RequirePermission('pos.cash.pickup_owner_receive')
+  async unreceiveItem(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('pickupId') pickupId: string,
+    @Param('paymentId') paymentId: string,
+  ): Promise<HandoffRow> {
+    const businessId = tenant.businessId!;
+    const { row } = await this.pickupFor(tenant, businessId, pickupId);
+    if (!isUuid(paymentId) || !row.items.some((it) => it.paymentId === paymentId)) {
+      throw new NotFoundException('That payment is not on this pickup');
+    }
+    const receipt = row.ownerReceipt;
+    if (receipt && receipt.from !== 'operator') {
+      throw new ConflictException(
+        receipt.from === 'store'
+          ? `${row.number} was taken from the store by the owner — there is no hand-off to undo`
+          : `${row.number} was settled before the owner hand-off existed — there is nothing to undo`,
+      );
+    }
+    if (receipt) {
+      // The pickup had closed: reopen it, keeping the other items' ticks.
+      await this.db
+        .update(schema.cashPickups)
+        .set({ ownerReceivedAt: null, ownerReceivedByMembershipId: null, ownerReceivedFrom: null })
+        .where(
+          and(eq(schema.cashPickups.businessId, businessId), eq(schema.cashPickups.id, pickupId)),
+        );
+      await this.audit.log({
+        action: 'cash_pickup.owner_unreceive',
+        targetType: 'cash_pickup',
+        targetId: pickupId,
+        metadata: {
+          number: row.number,
+          locationId: row.locationId,
+          countedCents: row.countedCents,
+          previouslyReceivedAt: receipt.receivedAt,
+          previouslyReceivedBy: receipt.byName,
+          paymentId,
+        },
+      });
+    }
+    await this.db
+      .update(schema.cashPickupItems)
+      .set({ ownerReceivedAt: null, ownerReceivedByMembershipId: null })
+      .where(
+        and(
+          eq(schema.cashPickupItems.pickupId, pickupId),
+          eq(schema.cashPickupItems.paymentId, paymentId),
+        ),
+      );
+    await this.audit.log({
+      action: 'cash_pickup.item_owner_unreceive',
+      targetType: 'cash_pickup',
+      targetId: pickupId,
+      metadata: { number: row.number, paymentId, locationId: row.locationId },
+    });
+    const { row: after } = await this.pickupFor(tenant, businessId, pickupId);
+    return after;
+  }
+
+  /**
    * Untick — a mis-tick only. The cash goes back to "with the operator".
    * A pickup the owner took from the store has no operator to go back to,
    * and a legacy one was never ticked, so neither can be undone.
@@ -1146,6 +1276,10 @@ export class CashPickupsController {
       .where(
         and(eq(schema.cashPickups.businessId, businessId), eq(schema.cashPickups.id, pickupId)),
       );
+    await this.db
+      .update(schema.cashPickupItems)
+      .set({ ownerReceivedAt: null, ownerReceivedByMembershipId: null })
+      .where(eq(schema.cashPickupItems.pickupId, pickupId));
     await this.audit.log({
       action: 'cash_pickup.owner_unreceive',
       targetType: 'cash_pickup',

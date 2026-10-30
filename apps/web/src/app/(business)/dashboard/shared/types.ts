@@ -204,6 +204,8 @@ export interface PickupItemRef {
   docKind: 'order' | 'sale' | 'service';
   docId: string;
   docNumber: string;
+  /** Owner 2026-10-29: when the owner ticked this payment's cash; null while it is still out. */
+  ownerReceivedAt?: string | null;
 }
 
 /** The owner's tick on a pickup (owner 2026-09-30): the cash reached them. */

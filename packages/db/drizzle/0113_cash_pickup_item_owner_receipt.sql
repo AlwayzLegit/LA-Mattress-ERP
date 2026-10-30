@@ -1,0 +1,3 @@
+ALTER TABLE "cash_pickup_items" ADD COLUMN "owner_received_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "cash_pickup_items" ADD COLUMN "owner_received_by_membership_id" uuid;--> statement-breakpoint
+ALTER TABLE "cash_pickup_items" ADD CONSTRAINT "cash_pickup_items_owner_received_by_membership_id_memberships_id_fk" FOREIGN KEY ("owner_received_by_membership_id") REFERENCES "public"."memberships"("id") ON DELETE set null ON UPDATE no action;

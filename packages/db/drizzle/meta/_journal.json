@@ -792,6 +792,13 @@
       "when": 1793258466280,
       "tag": "0112_po_line_transfer_links",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1793298950375,
+      "tag": "0113_cash_pickup_item_owner_receipt",
+      "breakpoints": true
     }
   ]
 }

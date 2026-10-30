@@ -160,6 +160,17 @@ export const cashPickupItems = pgTable(
       .references(() => payments.id, { onDelete: 'cascade' }),
     /** The payment's amount at the count, so the slip total is reproducible. */
     amountCents: integer('amount_cents').notNull(),
+    /**
+     * Owner 2026-10-29: the owner ticks each payment's cash on its own.
+     * Null while that envelope is still with whoever carried it; the
+     * pickup's own owner_received_at is set once every item is ticked
+     * (and clears again if one is unticked).
+     */
+    ownerReceivedAt: timestamp('owner_received_at', { withTimezone: true }),
+    ownerReceivedByMembershipId: uuid('owner_received_by_membership_id').references(
+      () => memberships.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
