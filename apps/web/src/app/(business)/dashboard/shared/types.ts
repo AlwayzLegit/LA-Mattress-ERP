@@ -206,6 +206,8 @@ export interface PickupItemRef {
   docNumber: string;
   /** Owner 2026-10-29: when the owner ticked this payment's cash; null while it is still out. */
   ownerReceivedAt?: string | null;
+  customerPhone?: string | null;
+  docDate?: string | null;
 }
 
 /** The owner's tick on a pickup (owner 2026-09-30): the cash reached them. */

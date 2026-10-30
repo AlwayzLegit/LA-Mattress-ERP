@@ -28,6 +28,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { alias } from 'drizzle-orm/pg-core';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
@@ -100,6 +101,10 @@ export interface PickupItemRef {
    * as received on every item.
    */
   ownerReceivedAt: Date | null;
+  /** Owner 2026-10-29: the customer's phone (the order's ship-to phone when none on file). */
+  customerPhone: string | null;
+  /** When the document was written. */
+  docDate: Date | null;
 }
 
 /** The owner's tick on a pickup: the cash reached them. */
@@ -394,6 +399,7 @@ export class CashPickupsController {
   private async pickupItems(pickupIds: string[]): Promise<Map<string, PickupItemRef[]>> {
     const itemsBy = new Map<string, PickupItemRef[]>();
     if (pickupIds.length === 0) return itemsBy;
+    const itemCustomer = alias(schema.customers, 'item_customer');
     const itemRows = await this.db
       .select({
         pickupId: schema.cashPickupItems.pickupId,
@@ -403,10 +409,15 @@ export class CashPickupsController {
         pickupOwnerAt: schema.cashPickups.ownerReceivedAt,
         orderId: schema.orders.id,
         orderNumber: schema.orders.number,
+        orderDate: schema.orders.createdAt,
+        orderPhone: schema.orders.addressPhone,
         saleId: schema.sales.id,
         saleNumber: schema.sales.number,
+        saleDate: schema.sales.createdAt,
         serviceId: schema.serviceOrders.id,
         serviceNumber: schema.serviceOrders.number,
+        serviceDate: schema.serviceOrders.createdAt,
+        customerPhone: itemCustomer.phone,
       })
       .from(schema.cashPickupItems)
       .innerJoin(schema.payments, eq(schema.payments.id, schema.cashPickupItems.paymentId))
@@ -414,6 +425,13 @@ export class CashPickupsController {
       .leftJoin(schema.orders, eq(schema.orders.id, schema.payments.orderId))
       .leftJoin(schema.sales, eq(schema.sales.id, schema.payments.saleId))
       .leftJoin(schema.serviceOrders, eq(schema.serviceOrders.id, schema.payments.serviceOrderId))
+      .leftJoin(
+        itemCustomer,
+        eq(
+          itemCustomer.id,
+          sql`coalesce(${schema.orders.customerId}, ${schema.sales.customerId}, ${schema.serviceOrders.customerId})`,
+        ),
+      )
       .where(inArray(schema.cashPickupItems.pickupId, pickupIds))
       .orderBy(desc(schema.payments.amountCents));
     for (const it of itemRows) {
@@ -433,6 +451,8 @@ export class CashPickupsController {
         docId,
         docNumber,
         ownerReceivedAt: it.itemOwnerAt ?? it.pickupOwnerAt ?? null,
+        customerPhone: it.customerPhone ?? it.orderPhone ?? null,
+        docDate: it.orderDate ?? it.saleDate ?? it.serviceDate ?? null,
       });
       itemsBy.set(it.pickupId, list);
     }
@@ -921,6 +941,8 @@ export class CashPickupsController {
           docId: p.docId,
           docNumber: p.docNumber,
           ownerReceivedAt: inserted.ownerAt ?? null,
+          customerPhone: null,
+          docDate: null,
         })),
         locationId: store.id,
         paymentIds,
