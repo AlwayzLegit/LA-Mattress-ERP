@@ -34,6 +34,10 @@ interface TransferLine {
   quantityReceived: number;
   quantityOrdered: number | null;
   quantityHeld: number;
+  /** Owner 2026-10-30: the origin's stock of this item right now. */
+  onHandAtFrom?: number;
+  reservedAtFrom?: number;
+  availableAtFrom?: number;
   /** Owner 2026-10-28: the PO lines this draft line waits on. */
   poLinks?: {
     allocationId: string;
@@ -160,7 +164,15 @@ export default function TransferDetailPage() {
   const isDraft = t.status === 'draft';
   const isInTransit = t.status === 'in_transit';
   const hasShortfall = t.lines.some((l) => l.quantityShipped > l.quantityReceived);
-  const lineColumns = isInTransit ? 5 : 4;
+  const lineColumns = isInTransit ? 7 : 6;
+  const fromName = t.fromLocationName ?? 'the origin';
+  const day = (v: string | null) =>
+    v
+      ? new Date(v.length === 10 ? `${v}T12:00:00` : v).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        })
+      : null;
 
   const linesTable = (
     <TableWrap>
@@ -168,8 +180,10 @@ export default function TransferDetailPage() {
         <thead>
           <tr>
             <th>Item</th>
-            <th className="num">Shipped</th>
-            <th className="num">Held</th>
+            <th className="num">Qty</th>
+            <th>Fulfillment</th>
+            <th>Inventory from</th>
+            <th>Stock</th>
             <th className="num">Received</th>
             {isInTransit && <th className="num">Receive qty</th>}
           </tr>
@@ -226,8 +240,29 @@ export default function TransferDetailPage() {
                     />
                   )}
                 </td>
-                <td className="num">{l.quantityShipped}</td>
-                <td className="num">{l.quantityHeld > 0 ? l.quantityHeld : '—'}</td>
+                <td className="num" data-testid="transfer-line-qty">
+                  {l.quantityOrdered ?? l.quantityShipped}
+                  {l.quantityHeld > 0 && (
+                    <div className="muted text-xs nowrap">{l.quantityHeld} held</div>
+                  )}
+                </td>
+                <td data-testid="transfer-line-fulfillment">
+                  <TransferLineFulfillment transfer={t} line={l} day={day} />
+                </td>
+                <td data-testid="transfer-line-from">
+                  <div>{fromName}</div>
+                  {l.availableAtFrom != null && (
+                    <div
+                      className={`text-xs ${l.availableAtFrom >= l.quantityShipped ? 'muted' : 'text-danger'}`}
+                    >
+                      {l.availableAtFrom} available
+                      {(l.reservedAtFrom ?? 0) > 0 ? ` · ${l.reservedAtFrom} reserved` : ''}
+                    </div>
+                  )}
+                </td>
+                <td data-testid="transfer-line-stock">
+                  <TransferLineStock transfer={t} line={l} day={day} />
+                </td>
                 <td className="num">{l.quantityReceived}</td>
                 {isInTransit && (
                   <td className="num">
@@ -433,4 +468,114 @@ export default function TransferDetailPage() {
       />
     </div>
   );
+}
+
+/**
+ * Owner 2026-10-30: transfer lines read like sales-order lines — the
+ * movement state of the units and, while it is a draft, whether the
+ * origin can actually ship them. A draft holds nothing, so "in stock"
+ * means Ship would find the units today; the PO links say when the
+ * missing ones are due.
+ */
+function TransferLineFulfillment({
+  transfer: t,
+  line: l,
+  day,
+}: {
+  transfer: Transfer;
+  line: TransferLine;
+  day: (v: string | null) => string | null;
+}) {
+  const remaining = l.quantityShipped - l.quantityReceived;
+  let text: string;
+  if (t.status === 'draft') {
+    text = t.scheduledFor ? `Ships ${day(t.scheduledFor)}` : 'Draft — unscheduled';
+  } else if (t.status === 'in_transit') {
+    text =
+      l.quantityReceived > 0 && remaining > 0
+        ? `In transit · ${l.quantityReceived} of ${l.quantityShipped} received`
+        : 'In transit';
+  } else if (t.status === 'received') {
+    text = 'Received';
+  } else if (t.status === 'closed_short') {
+    text = remaining > 0 ? `Closed short by ${remaining}` : 'Received';
+  } else if (t.status === 'canceled') {
+    text = 'Canceled';
+  } else {
+    text = t.status.replace(/_/g, ' ');
+  }
+  return (
+    <div className="grid gap-0.5 text-xs">
+      <span>{text}</span>
+      {t.shipDirect && <span className="muted">Ship direct</span>}
+      {t.route && <span className="muted">Route {t.route}</span>}
+    </div>
+  );
+}
+
+function TransferLineStock({
+  transfer: t,
+  line: l,
+  day,
+}: {
+  transfer: Transfer;
+  line: TransferLine;
+  day: (v: string | null) => string | null;
+}) {
+  const onPo = (l.poLinks ?? []).filter((k) => k.status === 'ordered');
+  const onPoUnits = onPo.reduce((n, k) => n + k.quantity, 0);
+  const due =
+    onPo
+      .map((k) => k.expectedAt)
+      .filter((d): d is string => !!d)
+      .sort()[0] ?? null;
+  const poNote =
+    onPoUnits > 0 ? (
+      <span className="muted">
+        {onPoUnits} on PO{due ? ` · due ${day(due)}` : ''}
+      </span>
+    ) : null;
+  if (t.status === 'draft') {
+    const avail = l.availableAtFrom;
+    if (avail == null) return <span className="muted">—</span>;
+    const want = l.quantityShipped;
+    const state =
+      avail >= want
+        ? { label: 'in stock', cls: 'badge-success' }
+        : avail > 0
+          ? { label: `${avail} of ${want} in stock`, cls: 'badge-warning' }
+          : { label: 'not in stock', cls: 'badge-danger' };
+    return (
+      <div className="grid gap-0.5 text-xs">
+        <span>
+          <span className={`badge ${state.cls}`}>{state.label}</span>
+        </span>
+        {avail < want && (
+          <span className="muted">
+            {want - avail} short at {t.fromLocationName ?? 'the origin'}
+          </span>
+        )}
+        {poNote}
+      </div>
+    );
+  }
+  if (t.status === 'in_transit') {
+    return (
+      <div className="grid gap-0.5 text-xs">
+        <span>
+          <span className="badge badge-neutral">{l.quantityShipped} shipped</span>
+        </span>
+        {poNote}
+      </div>
+    );
+  }
+  if (t.status === 'received' || t.status === 'closed_short') {
+    const short = l.quantityShipped - l.quantityReceived;
+    return (
+      <span className={`badge ${short > 0 ? 'badge-danger' : 'badge-success'}`}>
+        {short > 0 ? `${short} short` : `${l.quantityReceived} received`}
+      </span>
+    );
+  }
+  return <span className="muted">—</span>;
 }
