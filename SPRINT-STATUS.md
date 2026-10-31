@@ -6970,3 +6970,33 @@ Owner (seven asks in one message, one PR each — #240–#245):
 - Tests: catalog (vendor on create), deliveries (Partial flag), orders (drift repair),
   special-orders (receipt cap; manual links end to end). Docker Desktop was off, so the API
   specs ran in CI only.
+
+### Checkpoint — 2026-10-30 (Owner: transfer line columns; sell and move As-Is by the piece)
+
+Owner (two asks, one PR each — #250, #251):
+
+- Transfer lines read like sales-order lines: Qty (held remainder under it), Fulfillment
+  (draft scheduled date / in transit / received / closed short, ship direct + route),
+  Inventory from (origin with available and reserved right now), Stock (in stock / N of M /
+  not in stock, units on PO and their due date). `GET stock-transfers/:id` lines carry
+  `onHandAtFrom`, `reservedAtFrom`, `availableAtFrom`.
+- As-Is by the piece (migration 0114): `order_lines.as_is_item_id` and
+  `stock_transfer_lines.as_is_item_id`; `as_is_items` gains `committed` / `in_transit` /
+  `sold` statuses plus `order_line_id` / `transfer_line_id`. The piece IS the reservation —
+  an as-is line keeps `qty_reserved` in step so every "not reserved" reader stays right, but
+  stock levels never move for it (reserve / release / fulfill / drift / allocate-pending /
+  PO links all skip as-is lines; `apps/api/src/returns/as-is-pieces.ts` holds the lifecycle).
+  Product search: `asIsHere` / `asIsTotal` per row, `asIs=1` filter, `GET pos/as-is-pieces`.
+  Add product: "As-is" column, "As-is only", an As-is button per row that opens the piece
+  picker (number, condition, as-is price, where it sits). Register and order lines: "as-is…"
+  / "regular stock" switch per line (`asIsItemId` on POST lines and PATCH line), quantity
+  locked at 1, source pinned to the piece, price defaults to the piece's as-is price. Transfer
+  builder: search now reads the origin's stock and As-Is counts with "As-is…" per row; a draft
+  commits the piece, Ship puts it in transit, Receive lands it in the destination's queue,
+  Cancel hands it back, Close short writes it off. As-Is review page: committed / in transit
+  / sold filters, holder link per row. Products browser As-Is available excludes committed
+  pieces (`asIsReserved` on StockTotals).
+- Tests: transfers (origin figures; as-is line commit → ship → receive → cancel), orders
+  (search counts, as-is line commit at the as-is price, duplicate refused, switch back and to
+  another piece, fulfill sells, remove releases). Docker Desktop was off, so the API specs ran
+  in CI only.

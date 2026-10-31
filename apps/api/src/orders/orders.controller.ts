@@ -62,6 +62,7 @@ import {
   type OrderStatus,
 } from './order-math';
 import { OrdersService } from './orders.service';
+import { loadFreePiece, piecesByLine, type AsIsPiece } from '../returns/as-is-pieces';
 import { OrderCompletionService } from './order-completion.service';
 import { businessTimeZone } from '../common/business-today';
 import { parseDayRange, zonedBounds } from '../common/date-range';
@@ -124,6 +125,13 @@ interface OrderLineInput {
    */
   addonOf?: number | null;
   parentLineId?: string | null;
+  /**
+   * Owner 2026-10-30: sell this specific As-Is piece (an `as_is_items`
+   * row in review at the source) instead of new stock. Quantity must be
+   * 1; the line's source becomes the piece's location; the price
+   * defaults to the piece's as-is price when one is set.
+   */
+  asIsItemId?: string | null;
 }
 
 interface AddressInput {
@@ -341,6 +349,8 @@ interface LineEditBody {
     expectedDate?: string | null;
   } | null;
   needsInstall?: boolean;
+  /** Owner 2026-10-30: switch the line to a specific As-Is piece (or back to stock with null). */
+  asIsItemId?: string | null;
 }
 
 /** Line fields that pass the A1 print lock (metadata, never money or stock). */
@@ -408,6 +418,16 @@ interface OrderLineRow {
   comJson: unknown;
   directShipJson: unknown;
   needsInstall: boolean;
+  /** Owner 2026-10-30: the As-Is piece this line sells, when it is an as-is line. */
+  asIsItemId: string | null;
+  asIs: {
+    pieceNumber: string | null;
+    condition: string | null;
+    asIsPriceCents: number | null;
+    storageLocation: string | null;
+    status: string;
+    locationId: string;
+  } | null;
 }
 
 interface OrderPaymentRow {
@@ -1428,6 +1448,7 @@ export class OrdersController {
         JOIN orders o ON o.id = ol.order_id
         WHERE ol.business_id = ${businessId}
           AND ol.variant_id IS NOT NULL
+          AND ol.as_is_item_id IS NULL
         GROUP BY 1, 2
       ),
       level_side AS (
@@ -2064,6 +2085,9 @@ export class OrdersController {
     }
 
     const taxExemptReason = a20Text('taxExemptReason', body.taxExemptReason, 200);
+    // Owner 2026-10-30: as-is lines pin their source to the piece and take
+    // the piece's as-is price unless the register typed one.
+    const asIsPieces = await this.resolveAsIsInputs(tenant, body.lines);
     const priced = await this.priceLines(
       tenant,
       body.locationId,
@@ -2176,9 +2200,10 @@ export class OrdersController {
           businessId: tenant.businessId!,
           orderId: order.id,
           variantId: l.variantId,
-          description: l.description,
+          description: asIsDescription(l.description, asIsPieces.get(i), body.lines![i]),
           quantity: l.quantity,
           lineType: l.lineType,
+          asIsItemId: asIsPieces.get(i)?.id ?? null,
           unitPriceCents: l.unitPriceCents,
           discountCents: l.lineDiscountCents,
           taxRateBps: l.taxRateBps,
@@ -2727,6 +2752,7 @@ export class OrdersController {
     const order = await this.requireLiveOrder(id);
     this.assertUnlocked(order);
     await this.assertNotOnOpenRun(id);
+    const asIsPiece = (await this.resolveAsIsInputs(tenant, [body])).get(0) ?? null;
     const [priced] = await this.priceLines(
       tenant,
       order.locationId,
@@ -2771,9 +2797,10 @@ export class OrdersController {
         businessId: tenant.businessId!,
         orderId: id,
         variantId: priced!.variantId,
-        description: priced!.description,
+        description: asIsDescription(priced!.description, asIsPiece, body),
         quantity: priced!.quantity,
         lineType: priced!.lineType,
+        asIsItemId: asIsPiece?.id ?? null,
         unitPriceCents: priced!.unitPriceCents,
         discountCents: priced!.lineDiscountCents,
         taxRateBps: priced!.taxRateBps,
@@ -3346,6 +3373,7 @@ export class OrdersController {
           fulfillmentMethod: line.fulfillmentMethod,
           parentLineId,
           serialUnitIds: null,
+          asIsItemId: quantity === line.quantity ? line.asIsItemId : null,
           taxCents: 0,
           totalCents: 0,
         })
@@ -3591,6 +3619,11 @@ export class OrdersController {
     if (!line.variantId || line.lineType === 'custom') {
       throw new BadRequestException('Custom lines have no stock type to change');
     }
+    if (line.asIsItemId) {
+      throw new BadRequestException(
+        'This line sells an As-Is piece — switch it back to regular stock first',
+      );
+    }
     if (line.qtyFulfilled > 0) {
       throw new BadRequestException(
         'Cannot change the type of a line that has already been fulfilled',
@@ -3720,6 +3753,22 @@ export class OrdersController {
       setMeta('needsInstall', body.needsInstall);
     }
 
+    // Owner 2026-10-30: an as-is line is one specific piece — its quantity
+    // is 1 and its source is wherever the piece sits.
+    const nextAsIsId = body.asIsItemId === undefined ? line.asIsItemId : body.asIsItemId || null;
+    if (nextAsIsId && body.quantity !== undefined && body.quantity !== 1) {
+      throw new BadRequestException('An As-Is line sells one piece — quantity stays 1');
+    }
+    if (
+      nextAsIsId &&
+      body.asIsItemId === undefined &&
+      body.sourceLocationId !== undefined &&
+      (body.sourceLocationId || null) !== line.sourceLocationId
+    ) {
+      throw new BadRequestException(
+        'An As-Is line fulfills from where its piece sits — pick a different piece to change the source',
+      );
+    }
     if (body.quantity !== undefined) {
       if (!Number.isInteger(body.quantity) || body.quantity < 1) {
         throw new BadRequestException('quantity must be a positive integer');
@@ -3811,6 +3860,52 @@ export class OrdersController {
       }
     }
 
+    // Owner 2026-10-30: switch the line to a specific As-Is piece, or back
+    // to regular stock. Either way the current hold (stock or the old
+    // piece) is released below and the line re-reserves at the end.
+    let asIsSwitched = false;
+    if (body.asIsItemId !== undefined && nextAsIsId !== line.asIsItemId) {
+      if (line.lineType !== 'stock' || !line.variantId) {
+        throw new BadRequestException('Only a stock line can sell an As-Is piece');
+      }
+      if (line.qtyFulfilled > 0) {
+        throw new BadRequestException('This line has already been fulfilled');
+      }
+      if (line.quantity !== 1 && nextAsIsId && patch.quantity !== 1) {
+        throw new BadRequestException(
+          'An As-Is line sells one piece — set the quantity to 1 first, or split the line',
+        );
+      }
+      if (nextAsIsId) {
+        const piece = await loadFreePiece(this.db, {
+          businessId: tenant.businessId!,
+          pieceId: nextAsIsId,
+          variantId: line.variantId,
+        });
+        const defaultSource = order.stockLocationId ?? order.locationId;
+        const src = piece.locationId === defaultSource ? null : piece.locationId;
+        if (src !== line.sourceLocationId) {
+          patch.sourceLocationId = src;
+          before.sourceLocationId = line.sourceLocationId;
+          after.sourceLocationId = src;
+        }
+        if (
+          body.unitPriceCents === undefined &&
+          piece.asIsPriceCents != null &&
+          piece.asIsPriceCents !== line.unitPriceCents
+        ) {
+          patch.unitPriceCents = piece.asIsPriceCents;
+          before.unitPriceCents = line.unitPriceCents;
+          after.unitPriceCents = piece.asIsPriceCents;
+          repriced = true;
+        }
+      }
+      patch.asIsItemId = nextAsIsId;
+      before.asIsItemId = line.asIsItemId;
+      after.asIsItemId = nextAsIsId;
+      asIsSwitched = true;
+    }
+
     if (Object.keys(after).length === 0) return this.loadDetail(order.id);
 
     // A10 price monitor: a live-order price cut is logged (never
@@ -3850,7 +3945,8 @@ export class OrdersController {
     // shrinking the quantity releases just the excess. Both must land
     // before the row update so the reserved-range check holds.
     const targetQty = patch.quantity ?? line.quantity;
-    const releaseQty = sourceChanged ? line.qtyReserved : Math.max(0, line.qtyReserved - targetQty);
+    const releaseQty =
+      sourceChanged || asIsSwitched ? line.qtyReserved : Math.max(0, line.qtyReserved - targetQty);
     if (line.variantId && releaseQty > 0) {
       await this.orders.applyReleases(this.db, {
         businessId: tenant.businessId!,
@@ -3900,7 +3996,7 @@ export class OrdersController {
       line.lineType === 'stock' &&
       order.status !== 'quote' &&
       order.status !== 'draft' &&
-      (sourceChanged || targetQty > line.quantity)
+      (sourceChanged || asIsSwitched || targetQty > line.quantity)
     ) {
       await this.orders.reserveOrder(this.db, {
         businessId: tenant.businessId!,
@@ -5755,6 +5851,44 @@ export class OrdersController {
    * then the business default — so an order and a sale of the same item
    * on the same day are taxed identically.
    */
+  /**
+   * Owner 2026-10-30: validate the As-Is piece each line asks for and
+   * shape the input around it — quantity 1, source = the piece's
+   * location, price = the piece's as-is price unless typed. Returns the
+   * pieces by line index; `inputs` is mutated in place.
+   */
+  private async resolveAsIsInputs(
+    tenant: RequestTenantContext,
+    inputs: readonly OrderLineInput[],
+  ): Promise<Map<number, AsIsPiece>> {
+    const out = new Map<number, AsIsPiece>();
+    for (let i = 0; i < inputs.length; i++) {
+      const l = inputs[i]!;
+      if (!l.asIsItemId) continue;
+      if (!l.variantId || (l.lineType && l.lineType !== 'stock')) {
+        throw new BadRequestException('lines[].asIsItemId needs a stock line with a variant');
+      }
+      if (l.quantity !== undefined && l.quantity !== 1) {
+        throw new BadRequestException('An As-Is line sells one piece — lines[].quantity must be 1');
+      }
+      const piece = await loadFreePiece(this.db, {
+        businessId: tenant.businessId!,
+        pieceId: l.asIsItemId,
+        variantId: l.variantId,
+      });
+      if (out.size > 0 && [...out.values()].some((p) => p.id === piece.id)) {
+        throw new BadRequestException('The same As-Is piece is on two lines');
+      }
+      l.quantity = 1;
+      l.sourceLocationId = piece.locationId;
+      if (l.unitPriceCents === undefined && piece.asIsPriceCents != null) {
+        l.unitPriceCents = piece.asIsPriceCents;
+      }
+      out.set(i, piece);
+    }
+    return out;
+  }
+
   private async priceLines(
     tenant: RequestTenantContext,
     locationId: string,
@@ -6052,6 +6186,10 @@ export class OrdersController {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id))
       .orderBy(schema.payments.createdAt);
+    const asIsByPiece = await piecesByLine(
+      this.db,
+      lines.map((l) => l.asIsItemId).filter((x): x is string => !!x),
+    );
 
     // Split family (base number + letter suffixes), so the page can link
     // the pieces and offer to move credit between them.
@@ -6189,6 +6327,20 @@ export class OrdersController {
         comJson: l.comJson,
         directShipJson: l.directShipJson,
         needsInstall: l.needsInstall,
+        asIsItemId: l.asIsItemId ?? null,
+        asIs: (() => {
+          const piece = l.asIsItemId ? asIsByPiece.get(l.asIsItemId) : undefined;
+          return piece
+            ? {
+                pieceNumber: piece.pieceNumber,
+                condition: piece.condition,
+                asIsPriceCents: piece.asIsPriceCents,
+                storageLocation: piece.storageLocation,
+                status: piece.status,
+                locationId: piece.locationId,
+              }
+            : null;
+        })(),
       })),
       family,
       payments: payments.map((p) => ({
@@ -6244,4 +6396,14 @@ function idList(raw: string | undefined): string[] {
     .split(',')
     .map((x) => x.trim())
     .filter((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x));
+}
+
+/** The line reads "… — as-is AS-1234" unless the register typed its own description. */
+function asIsDescription(
+  description: string,
+  piece: AsIsPiece | null | undefined,
+  input: OrderLineInput | undefined,
+): string {
+  if (!piece || input?.description?.trim()) return description;
+  return `${description} — as-is ${piece.pieceNumber ?? piece.id.slice(0, 8).toUpperCase()}`;
 }

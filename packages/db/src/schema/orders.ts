@@ -19,6 +19,7 @@ import { locations, memberships } from './tenancy';
 import { reasonCodes } from './controls';
 import { customers } from './customers';
 import { productVariants } from './catalog';
+import { asIsItems } from './returns';
 import { taxClasses } from './taxes';
 
 /**
@@ -267,6 +268,17 @@ export const orderLines = pgTable(
     // Populated at fulfillment for serial-tracked products (G7, Day 4).
     serialUnitIds: uuid('serial_unit_ids').array(),
     /**
+     * Owner 2026-10-30: the line sells ONE specific As-Is piece (a
+     * returned / warranty / floor unit sitting in the As-Is queue at
+     * the line's source) instead of new stock. The piece is the
+     * reservation: it goes `committed` when the line reserves,
+     * `sold` when it fulfills, and never touches inventory_levels.
+     * Quantity is always 1.
+     */
+    asIsItemId: uuid('as_is_item_id').references((): AnyPgColumn => asIsItems.id, {
+      onDelete: 'set null',
+    }),
+    /**
      * Per-line override of the order's fulfillment method (split ticket):
      * 'delivery' | 'pickup' | 'will_call' | 'take_with' | 'direct_ship'. NULL inherits
      * the order default.
@@ -308,6 +320,7 @@ export const orderLines = pgTable(
     // Drives the Day 4 "to-order queue": special-order lines not yet
     // fully allocated to a PO.
     lineTypeIdx: index('order_lines_business_line_type_idx').on(t.businessId, t.lineType),
+    asIsItemIdx: index('order_lines_as_is_item_id_idx').on(t.asIsItemId),
     parentLineIdx: index('order_lines_parent_line_id_idx').on(t.parentLineId),
     quantityPositive: check('order_lines_quantity_positive', sql`${t.quantity} > 0`),
     reservedRange: check(

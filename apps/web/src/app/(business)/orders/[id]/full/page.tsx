@@ -46,6 +46,7 @@ import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import { OrderNotesCard } from '@/components/order-notes-card';
 import { TeamTasks } from '@/components/team-tasks';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
+import { AsIsPieceDialog, pieceLabel, type AsIsPiece } from '@/components/as-is-piece-dialog';
 import { LinkToPo, unlinkPo } from '@/components/po-links';
 import { OrderActionsMenu } from '../actions/actions-menu';
 import { OrderHeaderDialog } from '../actions/header-dialog';
@@ -92,6 +93,16 @@ interface OrderLine {
   parentLineId?: string | null;
   /** Catalog category path; its root decides the add-on chips. */
   categoryPath?: string | null;
+  /** Owner 2026-10-30: the As-Is piece this line sells, when it is an as-is line. */
+  asIsItemId?: string | null;
+  asIs?: {
+    pieceNumber: string | null;
+    condition: string | null;
+    asIsPriceCents: number | null;
+    storageLocation: string | null;
+    status: string;
+    locationId: string;
+  } | null;
   /** The PO this line rides on, when sourced through purchasing (owner 2026-09-02). */
   po: {
     poId: string;
@@ -288,6 +299,10 @@ export default function OrderDetailPage() {
   // the price it sells at, then the payment form pre-fills with the
   // charge so money can be taken on the new item immediately.
   const [pendingAdd, setPendingAdd] = useState<SearchRow | null>(null);
+  /** Owner 2026-10-30: the As-Is piece the pending add sells, when the search picked one. */
+  const [pendingAsIs, setPendingAsIs] = useState<AsIsPiece | null>(null);
+  /** An existing line switching to an As-Is piece at its source. */
+  const [asIsPickFor, setAsIsPickFor] = useState<OrderLine | null>(null);
   const [addPrice, setAddPrice] = useState('');
   const [addQty, setAddQty] = useState('1');
   const [payMethod, setPayMethod] = useState<(typeof TENDERS)[number]['value']>('card');
@@ -516,7 +531,12 @@ export default function OrderDetailPage() {
     }
   }
 
-  async function addLine(row: SearchRow, unitPriceCents: number, quantity: number) {
+  async function addLine(
+    row: SearchRow,
+    unitPriceCents: number,
+    quantity: number,
+    asIs: AsIsPiece | null = null,
+  ) {
     setBusy(true);
     setError(null);
     try {
@@ -526,12 +546,14 @@ export default function OrderDetailPage() {
         method: 'POST',
         body: JSON.stringify({
           variantId: row.variantId,
-          quantity,
+          quantity: asIs ? 1 : quantity,
           unitPriceCents,
           sourceLocationId: addSourceId && addSourceId !== defaultSource ? addSourceId : undefined,
+          asIsItemId: asIs?.id ?? undefined,
         }),
       });
       setPendingAdd(null);
+      setPendingAsIs(null);
       const deltaCents = Math.max(0, detail.balanceDueCents - prevBalance);
       if (deltaCents > 0) {
         // Pre-fill the payment form with exactly what the new item added
@@ -973,6 +995,25 @@ export default function OrderDetailPage() {
         onSuccess={() => void load()}
       />
 
+      {asIsPickFor && asIsPickFor.variantId && (
+        <AsIsPieceDialog
+          variantId={asIsPickFor.variantId}
+          locationId={asIsPickFor.sourceLocationId ?? order.stockLocationId ?? order.locationId}
+          locationName={
+            locationNames.get(
+              asIsPickFor.sourceLocationId ?? order.stockLocationId ?? order.locationId,
+            ) ?? null
+          }
+          productName={asIsPickFor.description}
+          listPriceCents={asIsPickFor.unitPriceCents}
+          onPick={(piece) => {
+            const line = asIsPickFor;
+            setAsIsPickFor(null);
+            void patchLineField(line.id, { asIsItemId: piece.id });
+          }}
+          onClose={() => setAsIsPickFor(null)}
+        />
+      )}
       {showAddProduct && (
         <ProductSearchDialog
           locationId={addSourceId || (order.stockLocationId ?? order.locationId)}
@@ -982,10 +1023,11 @@ export default function OrderDetailPage() {
           locations={locations}
           storeId={order.locationId}
           onChangeLocation={(locId) => setAddSourceId(locId)}
-          onAdd={(row) => {
+          onAdd={(row, asIs) => {
             setShowAddProduct(false);
             setPendingAdd(row);
-            setAddPrice((row.priceCents / 100).toFixed(2));
+            setPendingAsIs(asIs ?? null);
+            setAddPrice(((asIs?.asIsPriceCents ?? row.priceCents) / 100).toFixed(2));
             setAddQty('1');
           }}
           onClose={() => setShowAddProduct(false)}
@@ -1003,6 +1045,7 @@ export default function OrderDetailPage() {
               <>
                 Add {pendingAdd.productName}
                 {pendingAdd.variantName ? ` — ${pendingAdd.variantName}` : ''}
+                {pendingAsIs ? ` · as-is ${pieceLabel(pendingAsIs)}` : ''}
               </>
             }
             description={
@@ -1029,14 +1072,23 @@ export default function OrderDetailPage() {
                   type="number"
                   min={1}
                   step={1}
-                  value={addQty}
+                  value={pendingAsIs ? '1' : addQty}
                   onChange={(e) => setAddQty(e.target.value)}
+                  disabled={Boolean(pendingAsIs)}
+                  title={pendingAsIs ? 'An as-is line sells one piece' : undefined}
                   data-testid="add-line-qty"
                 />
               </Field>
             </FormGrid>
             <FormActions>
-              <Button variant="ghost" onClick={() => setPendingAdd(null)} disabled={busy}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setPendingAdd(null);
+                  setPendingAsIs(null);
+                }}
+                disabled={busy}
+              >
                 Cancel
               </Button>
               <Button
@@ -1048,6 +1100,7 @@ export default function OrderDetailPage() {
                     pendingAdd,
                     Math.round(Number(addPrice) * 100),
                     Math.max(1, Math.round(Number(addQty))),
+                    pendingAsIs,
                   )
                 }
               >
@@ -1173,6 +1226,50 @@ export default function OrderDetailPage() {
                             </span>
                           )}
                           {l.description}
+                          {l.asIsItemId && (
+                            <div>
+                              <span className="as-is-tag" data-testid="order-line-as-is">
+                                as-is ·{' '}
+                                {pieceLabel({
+                                  id: l.asIsItemId,
+                                  pieceNumber: l.asIs?.pieceNumber ?? null,
+                                })}
+                                {l.asIs?.condition
+                                  ? ` · ${l.asIs.condition.replace(/_/g, ' ')}`
+                                  : ''}
+                              </span>
+                              {editable && l.qtyFulfilled === 0 && (
+                                <button
+                                  type="button"
+                                  className="btn-link ml-2 text-xs"
+                                  disabled={busy}
+                                  onClick={() => void patchLineField(l.id, { asIsItemId: null })}
+                                  title="Back to new stock — the piece returns to the As-Is queue"
+                                  data-testid="order-line-as-is-clear"
+                                >
+                                  regular stock
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {editable &&
+                            !l.asIsItemId &&
+                            l.lineType === 'stock' &&
+                            l.variantId &&
+                            l.qtyFulfilled === 0 && (
+                              <div>
+                                <button
+                                  type="button"
+                                  className="btn-link text-xs"
+                                  disabled={busy}
+                                  onClick={() => setAsIsPickFor(l)}
+                                  title="Sell one of the As-Is pieces at this line's source instead of new stock"
+                                  data-testid="order-line-as-is-open"
+                                >
+                                  as-is…
+                                </button>
+                              </div>
+                            )}
                           {editable && lineHasAddons(l) && (
                             <div className="reg-addons">
                               {(
@@ -1267,6 +1364,8 @@ export default function OrderDetailPage() {
                               }}
                               className="w-16"
                               aria-label={`Quantity for ${l.description}`}
+                              disabled={Boolean(l.asIsItemId)}
+                              title={l.asIsItemId ? 'An as-is line sells one piece' : undefined}
                               data-testid="order-line-qty"
                             />
                           ) : (
@@ -1373,6 +1472,12 @@ export default function OrderDetailPage() {
                               }}
                               className="w-36"
                               aria-label={`Inventory source for ${l.description}`}
+                              disabled={Boolean(l.asIsItemId)}
+                              title={
+                                l.asIsItemId
+                                  ? 'An as-is line fulfills from where its piece sits'
+                                  : undefined
+                              }
                               data-testid="order-line-source"
                             >
                               {[...locations]
@@ -1453,8 +1558,9 @@ export default function OrderDetailPage() {
                               className="text-warning"
                               data-testid="order-line-short"
                             >
-                              {l.quantity - l.qtyFulfilled - l.qtyReserved} not reserved — not in
-                              stock at the selected source location.
+                              {l.asIsItemId
+                                ? 'The As-Is piece is no longer held for this line — reserve again, or pick another piece.'
+                                : `${l.quantity - l.qtyFulfilled - l.qtyReserved} not reserved — not in stock at the selected source location.`}
                             </td>
                           </tr>
                         )}
@@ -3164,16 +3270,23 @@ function StockCell({
     return <span className="muted">—</span>;
   }
   const open = l.quantity - l.qtyFulfilled;
+  // Owner 2026-10-30: an as-is line holds one specific piece — held
+  // (committed) counts as reserved; a piece that slipped away reads as
+  // not reserved so the store goes and picks another.
   const state =
     l.lineType === 'direct_ship'
       ? { label: 'vendor ships', cls: 'badge-neutral' }
       : open <= 0
-        ? { label: 'fulfilled', cls: 'badge-success' }
-        : l.qtyReserved >= open
-          ? { label: 'reserved', cls: 'badge-success' }
-          : l.qtyReserved > 0
-            ? { label: `${l.qtyReserved}/${open} reserved`, cls: 'badge-warning' }
-            : { label: 'not reserved', cls: 'badge-danger' };
+        ? { label: l.asIsItemId ? 'as-is piece sold' : 'fulfilled', cls: 'badge-success' }
+        : l.asIsItemId
+          ? l.qtyReserved >= open
+            ? { label: 'as-is piece held', cls: 'badge-success' }
+            : { label: 'as-is piece not held', cls: 'badge-danger' }
+          : l.qtyReserved >= open
+            ? { label: 'reserved', cls: 'badge-success' }
+            : l.qtyReserved > 0
+              ? { label: `${l.qtyReserved}/${open} reserved`, cls: 'badge-warning' }
+              : { label: 'not reserved', cls: 'badge-danger' };
   return (
     <div className="grid gap-0.5 text-xs" data-testid="order-line-stock">
       <span>
@@ -3232,7 +3345,7 @@ function StockCell({
               ))}
         </span>
       )}
-      {canRelease && l.variantId && l.lineType !== 'direct_ship' && (
+      {canRelease && l.variantId && l.lineType !== 'direct_ship' && !l.asIsItemId && (
         <LinkToPo
           variantId={l.variantId}
           target={{ orderLineId: l.id }}
@@ -3248,7 +3361,7 @@ function StockCell({
           className="btn-link text-left"
           data-testid="order-line-release"
         >
-          Release {l.qtyReserved} reserved
+          {l.asIsItemId ? 'Release the piece' : `Release ${l.qtyReserved} reserved`}
         </button>
       )}
     </div>
