@@ -209,13 +209,18 @@ export function freeAsIsCountSql(
   variantIdCol: SQL | unknown,
   locationId: string | null,
 ): SQL<number> {
-  const nonSellable = [...AS_IS_NON_SELLABLE_CONDITIONS];
+  // A JS array in a sql template renders as a tuple (a record), which
+  // Postgres cannot cast to text[] — so the list is joined as parameters.
+  const nonSellable = sql.join(
+    AS_IS_NON_SELLABLE_CONDITIONS.map((c) => sql`${c}`),
+    sql`, `,
+  );
   return sql<number>`(
     SELECT count(*)::int FROM as_is_items a
     WHERE a.variant_id = ${variantIdCol as SQL}
       AND a.status = 'pending_review'
       AND a.quantity = 1
-      AND coalesce(a.condition, '') <> ALL(${nonSellable}::text[])
+      AND coalesce(a.condition, '') NOT IN (${nonSellable})
       ${locationId ? sql`AND a.location_id = ${locationId}` : sql``}
   )`;
 }
