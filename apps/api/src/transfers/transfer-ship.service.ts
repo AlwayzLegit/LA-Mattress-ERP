@@ -12,6 +12,7 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CostingService } from '../costing/costing.service';
 import { DRIZZLE } from '../database/database.module';
+import { shipPieces } from '../returns/as-is-pieces';
 
 /** Ops gates for transfers (Q2/Q3, owner 2026-08-28). Null = default. */
 export interface TransferOps {
@@ -83,8 +84,11 @@ export class TransferShipService {
       .from(schema.stockTransferLines)
       .where(eq(schema.stockTransferLines.transferId, transferId));
 
+    // Owner 2026-10-30: as-is lines ride on their piece, not the level.
+    const stockLines = lines.filter((l) => !l.asIsItemId);
+
     // Snapshot origin levels and refuse if any line would go negative.
-    const variantIds = lines.map((l) => l.variantId);
+    const variantIds = stockLines.map((l) => l.variantId);
     const originLevels = await this.db
       .select({
         variantId: schema.inventoryLevels.variantId,
@@ -98,7 +102,7 @@ export class TransferShipService {
         ),
       );
     const onHandByVariant = new Map(originLevels.map((r) => [r.variantId, r.onHand]));
-    for (const l of lines) {
+    for (const l of stockLines) {
       const onHand = onHandByVariant.get(l.variantId) ?? 0;
       if (onHand < l.quantityShipped) {
         throw new BadRequestException(
@@ -112,11 +116,12 @@ export class TransferShipService {
       actorId,
       transfer.id,
       transfer.fromLocationId,
-      lines.map((l) => ({ variantId: l.variantId, quantity: l.quantityShipped })),
+      stockLines.map((l) => ({ variantId: l.variantId, quantity: l.quantityShipped })),
       notes ?? transfer.notes,
     );
 
     await this.markSerialsInTransit(transferId);
+    await this.markAsIsInTransit(transferId);
 
     await this.db
       .update(schema.stockTransfers)
@@ -187,6 +192,18 @@ export class TransferShipService {
           },
         });
     }
+  }
+
+  /** Owner 2026-10-30: the as-is pieces on this transfer are on the truck. */
+  async markAsIsInTransit(transferId: string): Promise<void> {
+    const lines = await this.db
+      .select({ asIsItemId: schema.stockTransferLines.asIsItemId })
+      .from(schema.stockTransferLines)
+      .where(eq(schema.stockTransferLines.transferId, transferId));
+    await shipPieces(
+      this.db,
+      lines.map((l) => l.asIsItemId).filter((x): x is string => !!x),
+    );
   }
 
   /** J3: flag every named piece on this transfer as riding the truck. */
