@@ -263,6 +263,9 @@ describe('Phase 2.4 — Stock transfers', () => {
     transferId = res.body.id;
     widgetLineId = res.body.lines.find((l: { variantId: string }) => l.variantId === variantAId).id;
     gadgetLineId = res.body.lines.find((l: { variantId: string }) => l.variantId === variantBId).id;
+    // Owner 2026-10-30: each line says what the origin holds right now.
+    const widget = res.body.lines.find((l: { variantId: string }) => l.variantId === variantAId);
+    expect(widget).toMatchObject({ onHandAtFrom: 20, reservedAtFrom: 0, availableAtFrom: 20 });
   });
 
   it('Cannot ship a quantity exceeding origin on-hand', async () => {

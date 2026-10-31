@@ -131,6 +131,15 @@ interface LineRow {
   quantityOrdered: number | null;
   /** D18: ordered − shipped, the not-yet-scheduled remainder. */
   quantityHeld: number;
+  /**
+   * Owner 2026-10-30: what the origin holds of this item right now —
+   * the transfer page reads it the way the order page reads a line's
+   * stock (on hand − reserved − floor samples = available). A draft
+   * reserves nothing, so "available" is what Ship would find today.
+   */
+  onHandAtFrom: number;
+  reservedAtFrom: number;
+  availableAtFrom: number;
   /** Owner 2026-10-28: the PO lines earmarked for this line (live links). */
   poLinks: {
     allocationId: string;
@@ -1237,6 +1246,24 @@ export class TransfersController {
         poLinks.set(k.transferLineId!, list);
       }
     }
+    const originLevels = new Map<string, { onHand: number; reserved: number; floor: number }>();
+    if (lines.length > 0) {
+      const levels = await this.db
+        .select({
+          variantId: schema.inventoryLevels.variantId,
+          onHand: schema.inventoryLevels.onHand,
+          reserved: schema.inventoryLevels.reserved,
+          floor: schema.inventoryLevels.floorSample,
+        })
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.locationId, row.fromLocationId),
+            inArray(schema.inventoryLevels.variantId, [...new Set(lines.map((l) => l.variantId))]),
+          ),
+        );
+      for (const lv of levels) originLevels.set(lv.variantId, lv);
+    }
     const { reasonCodeCode, reasonCodeDescription, ...rest } = row;
     return {
       ...rest,
@@ -1244,12 +1271,18 @@ export class TransfersController {
         reasonCodeCode != null
           ? { code: reasonCodeCode, description: reasonCodeDescription ?? '' }
           : null,
-      lines: lines.map((l) => ({
-        ...l,
-        productName: l.productName ?? '(deleted)',
-        quantityHeld: Math.max(0, (l.quantityOrdered ?? l.quantityShipped) - l.quantityShipped),
-        poLinks: poLinks.get(l.id) ?? [],
-      })),
+      lines: lines.map((l) => {
+        const lv = originLevels.get(l.variantId) ?? { onHand: 0, reserved: 0, floor: 0 };
+        return {
+          ...l,
+          productName: l.productName ?? '(deleted)',
+          quantityHeld: Math.max(0, (l.quantityOrdered ?? l.quantityShipped) - l.quantityShipped),
+          onHandAtFrom: lv.onHand,
+          reservedAtFrom: lv.reserved,
+          availableAtFrom: Math.max(0, lv.onHand - lv.reserved - lv.floor),
+          poLinks: poLinks.get(l.id) ?? [],
+        };
+      }),
     };
   }
 
