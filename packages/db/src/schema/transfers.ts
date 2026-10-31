@@ -17,6 +17,7 @@ import { locations } from './tenancy';
 import { productVariants } from './catalog';
 import { reasonCodes } from './controls';
 import { orders } from './orders';
+import { asIsItems } from './returns';
 
 /**
  * Stock transfers move inventory between two of the business's own
@@ -138,6 +139,14 @@ export const stockTransferLines = pgTable(
      * no hold (ordered == shipped).
      */
     quantityOrdered: integer('quantity_ordered'),
+    /**
+     * Owner 2026-10-30: the line moves ONE specific As-Is piece from
+     * the origin's As-Is queue to the destination's. The piece is
+     * `committed` while the draft holds it, `in_transit` once shipped,
+     * and back to `pending_review` at the destination on receipt —
+     * stock levels never move for it. Quantity is always 1.
+     */
+    asIsItemId: uuid('as_is_item_id').references(() => asIsItems.id, { onDelete: 'set null' }),
     /**
      * FIFO cost carried across the transfer: the weighted unit cost of
      * the origin layers consumed at ship time. Receiving creates the

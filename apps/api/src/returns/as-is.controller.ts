@@ -107,6 +107,8 @@ interface AsIsRow {
   createdAt: Date;
   /** Where the piece came from — resolved from reference_type/id (owner 2026-09-02). */
   origin: AsIsOrigin | null;
+  /** Owner 2026-10-30: the order or transfer holding / moving / having sold the piece. */
+  holder: { kind: 'order' | 'stock_transfer'; documentId: string; documentNumber: string } | null;
 }
 
 /**
@@ -171,14 +173,70 @@ export class AsIsController {
   private async queryRows(conditions: SQL[], limit: number): Promise<AsIsRow[]> {
     const rows = await this.queryBaseRows(conditions, limit);
     const origins = await this.resolveOrigins(rows);
-    return rows.map((r) => ({ ...r, origin: origins.get(r.id) ?? null }));
+    const holders = await this.resolveHolders(rows);
+    return rows.map(({ orderLineId, transferLineId, ...r }) => ({
+      ...r,
+      origin: origins.get(r.id) ?? null,
+      holder:
+        (orderLineId && holders.orders.get(orderLineId)) ||
+        (transferLineId && holders.transfers.get(transferLineId)) ||
+        null,
+    }));
+  }
+
+  /** Owner 2026-10-30: which order / transfer line holds each committed, moving or sold piece. */
+  private async resolveHolders(
+    rows: { orderLineId: string | null; transferLineId: string | null }[],
+  ) {
+    const orders = new Map<string, NonNullable<AsIsRow['holder']>>();
+    const transfers = new Map<string, NonNullable<AsIsRow['holder']>>();
+    const olIds = [...new Set(rows.map((r) => r.orderLineId).filter((x): x is string => !!x))];
+    if (olIds.length) {
+      const hits = await this.db
+        .select({
+          lineId: schema.orderLines.id,
+          orderId: schema.orders.id,
+          number: schema.orders.number,
+        })
+        .from(schema.orderLines)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+        .where(inArray(schema.orderLines.id, olIds));
+      for (const h of hits) {
+        orders.set(h.lineId, { kind: 'order', documentId: h.orderId, documentNumber: h.number });
+      }
+    }
+    const tlIds = [...new Set(rows.map((r) => r.transferLineId).filter((x): x is string => !!x))];
+    if (tlIds.length) {
+      const hits = await this.db
+        .select({
+          lineId: schema.stockTransferLines.id,
+          transferId: schema.stockTransfers.id,
+          number: schema.stockTransfers.number,
+        })
+        .from(schema.stockTransferLines)
+        .innerJoin(
+          schema.stockTransfers,
+          eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+        )
+        .where(inArray(schema.stockTransferLines.id, tlIds));
+      for (const h of hits) {
+        transfers.set(h.lineId, {
+          kind: 'stock_transfer',
+          documentId: h.transferId,
+          documentNumber: h.number,
+        });
+      }
+    }
+    return { orders, transfers };
   }
 
   /**
    * Batch-resolve every row's reference to the document it came from:
    * one query per reference type, never one per row.
    */
-  private async resolveOrigins(rows: Omit<AsIsRow, 'origin'>[]): Promise<Map<string, AsIsOrigin>> {
+  private async resolveOrigins(
+    rows: { id: string; referenceType: string | null; referenceId: string | null }[],
+  ): Promise<Map<string, AsIsOrigin>> {
     const out = new Map<string, AsIsOrigin>();
     const idsOf = (type: string) => [
       ...new Set(
@@ -376,10 +434,17 @@ export class AsIsController {
   private async queryBaseRows(
     conditions: SQL[],
     limit: number,
-  ): Promise<Omit<AsIsRow, 'origin'>[]> {
+  ): Promise<
+    (Omit<AsIsRow, 'origin' | 'holder'> & {
+      orderLineId: string | null;
+      transferLineId: string | null;
+    })[]
+  > {
     return this.db
       .select({
         id: schema.asIsItems.id,
+        orderLineId: schema.asIsItems.orderLineId,
+        transferLineId: schema.asIsItems.transferLineId,
         variantId: schema.asIsItems.variantId,
         productName: schema.products.name,
         variantName: schema.productVariants.name,
@@ -1072,6 +1137,6 @@ export class AsIsController {
       .limit(1);
     if (!rows[0]) throw new NotFoundException('As-Is item not found');
     const origins = await this.resolveOrigins(rows);
-    return { ...rows[0], origin: origins.get(rows[0].id) ?? null };
+    return { ...rows[0], origin: origins.get(rows[0].id) ?? null, holder: null };
   }
 }

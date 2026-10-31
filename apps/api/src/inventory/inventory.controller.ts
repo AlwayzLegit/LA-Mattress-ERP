@@ -287,7 +287,7 @@ export class InventoryController {
         locationId: schema.asIsItems.locationId,
         ...productCols,
         onHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
-        nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])}), 0)::int`,
+        nonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${inArray(schema.asIsItems.condition, [...AS_IS_NON_SELLABLE_CONDITIONS])} or ${schema.asIsItems.status} = 'committed'), 0)::int`,
         updatedAt: sql<Date>`max(${schema.asIsItems.createdAt})`,
       })
       .from(schema.asIsItems)
@@ -299,7 +299,9 @@ export class InventoryController {
       .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
       .where(
         and(
-          eq(schema.asIsItems.status, 'pending_review'),
+          // Owner 2026-10-30: committed pieces (on an order or draft
+          // transfer) are still here — on hand, counted as not sellable.
+          inArray(schema.asIsItems.status, ['pending_review', 'committed']),
           locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
           ...filters,
         ),
@@ -1221,6 +1223,7 @@ export class InventoryController {
       asIsOnHand: 0,
       asIsAvailable: 0,
       asIsNonSellable: 0,
+      asIsReserved: 0,
       layawayReserved: 0,
       onOrderReserved: 0,
     };

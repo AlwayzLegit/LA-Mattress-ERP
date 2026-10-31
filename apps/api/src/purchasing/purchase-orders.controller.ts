@@ -2105,6 +2105,7 @@ export class PurchaseOrdersController {
           qtyReserved: schema.orderLines.qtyReserved,
           qtyFulfilled: schema.orderLines.qtyFulfilled,
           lineType: schema.orderLines.lineType,
+          asIsItemId: schema.orderLines.asIsItemId,
           orderNumber: schema.orders.number,
           orderStatus: schema.orders.status,
           businessId: schema.orders.businessId,
@@ -2124,6 +2125,9 @@ export class PurchaseOrdersController {
       }
       if (!['stock', 'special_order'].includes(ol.lineType)) {
         throw new BadRequestException('Only a stock or special-order line can wait on a PO');
+      }
+      if (ol.asIsItemId) {
+        throw new BadRequestException('An As-Is line sells a piece already in the building');
       }
       const [alloc] = await this.db
         .select({

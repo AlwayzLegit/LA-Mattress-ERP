@@ -38,6 +38,7 @@ import {
   clampLimit as clampPageLimit,
 } from '../common/pagination';
 import { brandMatchFor, vendorMatchFor } from '../common/vendor-match';
+import { freeAsIsCountSql, listFreePieces, type FreePieceRow } from '../returns/as-is-pieces';
 import { DRIZZLE } from '../database/database.module';
 import { CommissionsService } from '../money/commissions.service';
 import { GiftCardsService } from '../gift-cards/gift-cards.service';
@@ -335,6 +336,7 @@ export class SalesController {
     @Query('variantIds') variantIdsStr?: string,
     @Query('size') size?: string,
     @Query('firmness') firmness?: string,
+    @Query('asIs') asIs?: string,
   ): Promise<
     {
       variantId: string;
@@ -353,6 +355,13 @@ export class SalesController {
       categoryPath: string | null;
       availableHere: number;
       availableTotal: number;
+      /**
+       * Owner 2026-10-30: sellable As-Is pieces (in review, not damaged /
+       * parts) of this item at the selling location and everywhere — the
+       * register picks one by the piece to sell it as-is.
+       */
+      asIsHere: number;
+      asIsTotal: number;
       atpDate: string | null;
       /**
        * The product's own tax rate at the selling location (tax class
@@ -415,6 +424,12 @@ export class SalesController {
       .map((s) => s.trim())
       .filter((s) => /^[0-9a-f-]{36}$/i.test(s));
     if (variantIds.length > 0) filters.push(inArray(schema.productVariants.id, variantIds));
+    // Owner 2026-10-30: "As-is only" — items with a sellable as-is piece
+    // at the selling location (everywhere, when no location is given).
+    const asIsOnly = asIs === '1';
+    if (asIsOnly) {
+      filters.push(sql`${freeAsIsCountSql(schema.productVariants.id, locationId ?? null)} > 0`);
+    }
 
     const rows = await this.db
       .select({
@@ -441,6 +456,10 @@ export class SalesController {
           ? sql<number>`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}) FILTER (WHERE ${schema.inventoryLevels.locationId} = ${locationId}), 0)::int`
           : sql<number>`0`,
         availableTotal: sql<number>`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}), 0)::int`,
+        asIsHere: locationId
+          ? freeAsIsCountSql(schema.productVariants.id, locationId)
+          : sql<number>`0`,
+        asIsTotal: freeAsIsCountSql(schema.productVariants.id, null),
       })
       .from(schema.productVariants)
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
@@ -458,11 +477,13 @@ export class SalesController {
         schema.brands.name,
       )
       .having(
-        inStock === '1'
-          ? sql`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}), 0) > 0`
-          : inStock === '0'
-            ? sql`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}), 0) <= 0`
-            : sql`true`,
+        asIsOnly
+          ? sql`true`
+          : inStock === '1'
+            ? sql`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}), 0) > 0`
+            : inStock === '0'
+              ? sql`coalesce(sum(${schema.inventoryLevels.onHand} - ${schema.inventoryLevels.reserved} - ${schema.inventoryLevels.floorSample}), 0) <= 0`
+              : sql`true`,
       )
       .orderBy(schema.products.name)
       .limit(limit);
@@ -501,6 +522,30 @@ export class SalesController {
       categoryPath: categoryIndex.pathOf(categoryId),
       atpDate: atp.get(r.variantId) ?? null,
     }));
+  }
+
+  /**
+   * Owner 2026-10-30: the As-Is pieces of one item at one location the
+   * register can put on a line — piece number, condition, as-is price,
+   * where it sits. Oldest first. Non-sellable pieces (damaged / parts,
+   * legacy multi-unit rows) are listed but flagged, so the salesperson
+   * sees why one is not offered.
+   */
+  @Get('pos/as-is-pieces')
+  @RequirePermission('pos.access')
+  async asIsPieces(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Query('variantId') variantId?: string,
+    @Query('locationId') locationId?: string,
+  ): Promise<FreePieceRow[]> {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!variantId || !uuid.test(variantId)) {
+      throw new BadRequestException('variantId must be a uuid');
+    }
+    if (!locationId || !uuid.test(locationId)) {
+      throw new BadRequestException('locationId must be a uuid');
+    }
+    return listFreePieces(this.db, { businessId: tenant.businessId!, variantId, locationId });
   }
 
   @Get('pos/lookup')

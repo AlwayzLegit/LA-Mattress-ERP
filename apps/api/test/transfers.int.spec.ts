@@ -1614,3 +1614,189 @@ describe('Q1 manifests — build, load numbers, complete ships the truck (owner 
     expect(reComplete.status).toBe(403);
   });
 });
+
+/**
+ * Owner 2026-10-30: moving an As-Is piece by the piece. A draft line
+ * names one piece in the origin's As-Is queue; shipping puts it on the
+ * truck and receiving lands it in the destination's queue. The stock
+ * levels on both ends never move.
+ */
+describe('As-Is pieces on transfer lines (owner 2026-10-30)', () => {
+  let variantId = '';
+  let pieceId = '';
+  let transferId = '';
+  function asClerk() {
+    return {
+      get: (url: string) =>
+        request(app.getHttpServer())
+          .get(url)
+          .set('Cookie', clerkCookie)
+          .set('X-Business-Id', businessId),
+      post: (url: string) =>
+        request(app.getHttpServer())
+          .post(url)
+          .set('Cookie', clerkCookie)
+          .set('X-Business-Id', businessId),
+    };
+  }
+  function asManager() {
+    return {
+      get: (url: string) =>
+        request(app.getHttpServer())
+          .get(url)
+          .set('Cookie', managerCookie)
+          .set('X-Business-Id', businessId),
+      post: (url: string) =>
+        request(app.getHttpServer())
+          .post(url)
+          .set('Cookie', managerCookie)
+          .set('X-Business-Id', businessId),
+    };
+  }
+  async function piece(): Promise<{
+    status: string;
+    locationId: string;
+    transferLineId: string | null;
+  }> {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const [row] = await drizzle(sqlc)
+        .select({
+          status: schema.asIsItems.status,
+          locationId: schema.asIsItems.locationId,
+          transferLineId: schema.asIsItems.transferLineId,
+        })
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.id, pieceId));
+      return row!;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+  }
+  async function level(locationId: string): Promise<number | null> {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const [row] = await drizzle(sqlc)
+        .select({ onHand: schema.inventoryLevels.onHand })
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.variantId, variantId),
+            eq(schema.inventoryLevels.locationId, locationId),
+          ),
+        );
+      return row?.onHand ?? null;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+  }
+
+  it('setup: an item with one piece in the warehouse As-Is queue and no stock anywhere', async () => {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const db = drizzle(sqlc);
+      const [p] = await db
+        .insert(schema.products)
+        .values({ businessId, sku: 'ASIS-MOVE', name: 'As-Is Mover Twin' })
+        .returning();
+      const [v] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: p!.id, sku: 'ASIS-MOVE-1', priceCents: 30_000 })
+        .returning();
+      variantId = v!.id;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+    const intake = await asManager().post('/v1/as-is').send({
+      variantId,
+      locationId: warehouseLocationId,
+      quantity: 1,
+      source: 'warranty',
+      condition: 'light_wear',
+    });
+    expect(intake.status).toBe(201);
+    pieceId = (Array.isArray(intake.body) ? intake.body[0] : intake.body).id;
+  });
+
+  it('a draft line naming the piece holds it; stock ships normally alongside', async () => {
+    const res = await asClerk()
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: warehouseLocationId,
+        toLocationId: mainLocationId,
+        lines: [{ variantId, quantity: 1, asIsItemId: pieceId }],
+      });
+    expect(res.status).toBe(201);
+    transferId = res.body.id;
+    const line = res.body.lines[0];
+    expect(line).toMatchObject({
+      asIsItemId: pieceId,
+      quantityShipped: 1,
+      availableAtFrom: 0,
+      asIs: { status: 'committed', locationId: warehouseLocationId },
+    });
+    expect(await piece()).toMatchObject({ status: 'committed', transferLineId: line.id });
+
+    // The same piece cannot ride a second draft; a wrong-store piece is refused.
+    const dup = await asClerk()
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: warehouseLocationId,
+        toLocationId: mainLocationId,
+        lines: [{ variantId, quantity: 1, asIsItemId: pieceId }],
+      });
+    expect(dup.status).toBe(400);
+    const wrongStore = await asClerk()
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: mainLocationId,
+        toLocationId: warehouseLocationId,
+        lines: [{ variantId, quantity: 1, asIsItemId: pieceId }],
+      });
+    expect(wrongStore.status).toBe(400);
+  });
+
+  it('shipping puts the piece on the truck without touching the origin level', async () => {
+    await asClerk().post(`/v1/stock-transfers/${transferId}/ticket-printed`).send({});
+    const ship = await asClerk().post(`/v1/stock-transfers/${transferId}/ship`).send({});
+    expect(ship.status).toBe(201);
+    expect(ship.body.status).toBe('in_transit');
+    expect((await piece()).status).toBe('in_transit');
+    expect(await level(warehouseLocationId)).toBeNull();
+  });
+
+  it('receiving lands the piece in the destination queue, still as-is', async () => {
+    const detail = await asClerk().get(`/v1/stock-transfers/${transferId}`);
+    const lineId = detail.body.lines[0].id;
+    const recv = await asClerk()
+      .post(`/v1/stock-transfers/${transferId}/receive`)
+      .send({ lines: [{ lineId, quantity: 1 }] });
+    expect(recv.status).toBe(201);
+    expect(recv.body.status).toBe('received');
+    expect(await piece()).toEqual({
+      status: 'pending_review',
+      locationId: mainLocationId,
+      transferLineId: null,
+    });
+    expect(await level(mainLocationId)).toBeNull();
+    const queue = await asManager().get('/v1/as-is?status=pending_review');
+    const row = queue.body.data.find((r: { id: string }) => r.id === pieceId);
+    expect(row.locationName).toBe('Main Store');
+    expect(row.holder).toBeNull();
+  });
+
+  it('canceling a draft that holds a piece hands it back', async () => {
+    const draft = await asClerk()
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: mainLocationId,
+        toLocationId: warehouseLocationId,
+        lines: [{ variantId, quantity: 1, asIsItemId: pieceId }],
+      });
+    expect(draft.status).toBe(201);
+    expect((await piece()).status).toBe('committed');
+    const cancel = await asClerk().post(`/v1/stock-transfers/${draft.body.id}/cancel`).send({});
+    expect(cancel.status).toBe(201);
+    expect(await piece()).toMatchObject({ status: 'pending_review', transferLineId: null });
+  });
+});
