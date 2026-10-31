@@ -4806,6 +4806,25 @@ select.picker-from {
 .picker-here.is-out {
   color: var(--status-risk-fg);
 }
+/* Owner 2026-10-30: the As-is column reads quiet unless a piece is there. */
+.picker-asis {
+  color: var(--muted);
+}
+.picker-asis.is-in {
+  color: var(--status-waiting-fg);
+  font-weight: 600;
+}
+/* An as-is line: the piece it holds, under the item name. */
+.as-is-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--status-waiting-fg);
+}
 .picker-table .row-action {
   height: 32px;
   padding: 0 12px;

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { api } from '@/lib/api';
+import { AsIsPieceDialog, pieceLabel, type AsIsPiece } from '@/components/as-is-piece-dialog';
 import {
   Alert,
   BackLink,
@@ -31,6 +32,10 @@ interface VariantRow {
   productName: string;
   variantName: string | null;
   sku: string | null;
+  /** Owner 2026-10-30: stock and sellable As-Is pieces at the From location. */
+  availableHere?: number;
+  asIsHere?: number;
+  priceCents?: number;
 }
 interface Line {
   variantId: string;
@@ -40,6 +45,9 @@ interface Line {
   quantityOrdered: string;
   /** J3: specific pieces riding this line (ids of serial units). */
   serialIds: string[];
+  /** Owner 2026-10-30: the As-Is piece this line moves (quantity 1, no hold). */
+  asIsItemId?: string | null;
+  asIsPieceNumber?: string | null;
 }
 
 interface SerialRow {
@@ -80,6 +88,8 @@ export default function NewTransferPage() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** Owner 2026-10-30: the search row whose As-Is piece is being picked. */
+  const [asIsFor, setAsIsFor] = useState<VariantRow | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -100,6 +110,7 @@ export default function NewTransferPage() {
   }, []);
 
   const destinations = multi ? toLocationIds : toLocationId ? [toLocationId] : [];
+  const fromName = locations.find((l) => l.id === fromLocationId)?.name ?? 'origin';
   const totalPieces = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
 
   async function searchVariants() {
@@ -109,8 +120,11 @@ export default function NewTransferPage() {
     }
     setSearching(true);
     try {
+      // Owner 2026-10-30: the product search carries what the origin
+      // holds — stock and As-Is pieces — so the builder can say what will
+      // actually ship and offer the as-is pieces.
       const rows = await api<VariantRow[]>(
-        `/v1/pos/lookup?q=${encodeURIComponent(search.trim())}&limit=200`,
+        `/v1/pos/product-search?q=${encodeURIComponent(search.trim())}&locationId=${fromLocationId}&limit=100`,
       );
       setResults(rows);
     } catch (err) {
@@ -120,8 +134,9 @@ export default function NewTransferPage() {
     }
   }
 
-  function addLine(v: VariantRow) {
-    if (lines.some((l) => l.variantId === v.variantId)) return;
+  function addLine(v: VariantRow, asIs?: AsIsPiece) {
+    if (!asIs && lines.some((l) => l.variantId === v.variantId && !l.asIsItemId)) return;
+    if (asIs && lines.some((l) => l.asIsItemId === asIs.id)) return;
     setLines((prev) => [
       ...prev,
       {
@@ -130,6 +145,8 @@ export default function NewTransferPage() {
         quantity: 1,
         quantityOrdered: '',
         serialIds: [],
+        asIsItemId: asIs?.id ?? null,
+        asIsPieceNumber: asIs ? pieceLabel(asIs) : null,
       },
     ]);
     setSearch('');
@@ -215,14 +232,18 @@ export default function NewTransferPage() {
           route: route || null,
           shipDirect,
           fulfillmentInstructions: instructions || null,
-          lines: lines.map((l) => ({
-            variantId: l.variantId,
-            quantity: Number(l.quantity),
-            ...(l.quantityOrdered !== '' && Number(l.quantityOrdered) > Number(l.quantity)
-              ? { quantityOrdered: Number(l.quantityOrdered) }
-              : {}),
-            ...(l.serialIds.length > 0 ? { serialIds: l.serialIds } : {}),
-          })),
+          lines: lines.map((l) =>
+            l.asIsItemId
+              ? { variantId: l.variantId, quantity: 1, asIsItemId: l.asIsItemId }
+              : {
+                  variantId: l.variantId,
+                  quantity: Number(l.quantity),
+                  ...(l.quantityOrdered !== '' && Number(l.quantityOrdered) > Number(l.quantity)
+                    ? { quantityOrdered: Number(l.quantityOrdered) }
+                    : {}),
+                  ...(l.serialIds.length > 0 ? { serialIds: l.serialIds } : {}),
+                },
+          ),
         }),
       });
       if (printTicket) window.open(`/print/transfers/${created.id}`, '_blank');
@@ -474,12 +495,20 @@ export default function NewTransferPage() {
                     <tr>
                       <th>Item</th>
                       <th>SKU</th>
+                      <th className="num">At {fromName}</th>
+                      <th className="num">
+                        <abbr title="As-Is pieces at the origin that can ride this transfer">
+                          As-is
+                        </abbr>
+                      </th>
                       <th className="actions" />
                     </tr>
                   </thead>
                   <tbody>
                     {results.map((r) => {
-                      const staged = lines.some((l) => l.variantId === r.variantId);
+                      const staged = lines.some(
+                        (l) => l.variantId === r.variantId && !l.asIsItemId,
+                      );
                       return (
                         <tr key={r.variantId}>
                           <td>
@@ -489,7 +518,31 @@ export default function NewTransferPage() {
                           <td>
                             <code>{r.sku ?? '—'}</code>
                           </td>
+                          <td
+                            className={`num mono ${(r.availableHere ?? 0) > 0 ? 'text-success' : 'text-danger'}`}
+                            data-testid="transfer-result-avail"
+                          >
+                            {r.availableHere ?? 0}
+                          </td>
+                          <td
+                            className={`num mono picker-asis${(r.asIsHere ?? 0) > 0 ? ' is-in' : ''}`}
+                            data-testid="transfer-result-as-is"
+                          >
+                            {r.asIsHere ?? 0}
+                          </td>
                           <td className="actions">
+                            {(r.asIsHere ?? 0) > 0 && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setAsIsFor(r)}
+                                title="Move one of the As-Is pieces at the origin"
+                                data-testid="transfer-add-as-is"
+                              >
+                                As-is…
+                              </Button>
+                            )}
                             <Button
                               type="button"
                               size="sm"
@@ -530,9 +583,18 @@ export default function NewTransferPage() {
                   </thead>
                   <tbody>
                     {lines.map((l, i) => (
-                      <Fragment key={l.variantId}>
+                      <Fragment key={l.asIsItemId ?? l.variantId}>
                         <tr>
-                          <td>{l.description}</td>
+                          <td>
+                            {l.description}
+                            {l.asIsItemId && (
+                              <div>
+                                <span className="as-is-tag" data-testid="transfer-line-as-is">
+                                  as-is · {l.asIsPieceNumber}
+                                </span>
+                              </div>
+                            )}
+                          </td>
                           <td className="num">
                             <Input
                               type="number"
@@ -540,6 +602,8 @@ export default function NewTransferPage() {
                               aria-label={`Quantity for ${l.description}`}
                               value={l.quantity}
                               onChange={(e) => setLine(i, { quantity: Number(e.target.value) })}
+                              disabled={Boolean(l.asIsItemId)}
+                              title={l.asIsItemId ? 'An as-is line moves one piece' : undefined}
                               className="w-20"
                             />
                           </td>
@@ -552,19 +616,24 @@ export default function NewTransferPage() {
                               title="Total wanted (D18): anything above the shipped quantity is held and rolls into a new draft on receipt"
                               value={l.quantityOrdered}
                               onChange={(e) => setLine(i, { quantityOrdered: e.target.value })}
+                              disabled={Boolean(l.asIsItemId)}
                               className="w-20"
                             />
                           </td>
                           <td className="actions">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              aria-expanded={pickerLine === i}
-                              onClick={() => void togglePicker(i)}
-                            >
-                              {l.serialIds.length > 0 ? `Pieces (${l.serialIds.length})` : 'Pieces'}
-                            </Button>
+                            {!l.asIsItemId && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                aria-expanded={pickerLine === i}
+                                onClick={() => void togglePicker(i)}
+                              >
+                                {l.serialIds.length > 0
+                                  ? `Pieces (${l.serialIds.length})`
+                                  : 'Pieces'}
+                              </Button>
+                            )}
                             <Button
                               type="button"
                               size="sm"
@@ -608,6 +677,22 @@ export default function NewTransferPage() {
           </Card>
 
           {error && <Alert tone="error">{error}</Alert>}
+          {asIsFor && (
+            <AsIsPieceDialog
+              variantId={asIsFor.variantId}
+              locationId={fromLocationId}
+              locationName={fromName}
+              productName={[asIsFor.productName, asIsFor.variantName].filter(Boolean).join(' — ')}
+              listPriceCents={asIsFor.priceCents}
+              verb="Move"
+              onPick={(piece) => {
+                const row = asIsFor;
+                setAsIsFor(null);
+                addLine(row, piece);
+              }}
+              onClose={() => setAsIsFor(null)}
+            />
+          )}
           <FormActions>
             <LinkButton href="/transfers" variant="secondary">
               Cancel

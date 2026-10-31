@@ -5416,3 +5416,228 @@ describe('Orders list: tick several stores and salespeople (owner 2026-10-03)', 
     expect(await list(`locationId=${ids['Filter C']},nope`)).toEqual([c]);
   });
 });
+
+/**
+ * Owner 2026-10-30: selling an As-Is piece by the piece. The register
+ * picks a piece in the As-Is queue; the line holds it (committed) instead
+ * of reserving stock, the fulfillment sells it, and a release or removal
+ * hands it back to the queue. Stock levels never move for it.
+ */
+describe('As-Is pieces on order lines (owner 2026-10-30)', () => {
+  let asIsVariantId = '';
+  let pieceA = '';
+  let pieceB = '';
+  const owner = () => ({
+    get: (url: string) =>
+      request(app.getHttpServer())
+        .get(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+    post: (url: string) =>
+      request(app.getHttpServer())
+        .post(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+    patch: (url: string) =>
+      request(app.getHttpServer())
+        .patch(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+    delete: (url: string) =>
+      request(app.getHttpServer())
+        .delete(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
+  });
+  async function pieceStatus(id: string): Promise<{ status: string; orderLineId: string | null }> {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const [row] = await drizzle(sqlc)
+        .select({ status: schema.asIsItems.status, orderLineId: schema.asIsItems.orderLineId })
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.id, id));
+      return row!;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+  }
+
+  it('setup: an item with no sellable stock but two pieces in the As-Is queue', async () => {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const db = drizzle(sqlc);
+      const [p] = await db
+        .insert(schema.products)
+        .values({ businessId, sku: 'ASIS-LINE', name: 'Clearance Hybrid Queen' })
+        .returning();
+      const [v] = await db
+        .insert(schema.productVariants)
+        .values({ businessId, productId: p!.id, sku: 'ASIS-LINE-1', priceCents: 80_000 })
+        .returning();
+      asIsVariantId = v!.id;
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+    const intake = await owner().post('/v1/as-is').send({
+      variantId: asIsVariantId,
+      locationId,
+      quantity: 2,
+      source: 'return',
+      condition: 'light_wear',
+      storageLocation: 'Back rack',
+    });
+    expect(intake.status).toBe(201);
+    // Intake answers with the first piece; the picker list has both.
+    const listed = await owner().get(
+      `/v1/pos/as-is-pieces?variantId=${asIsVariantId}&locationId=${locationId}`,
+    );
+    expect(listed.status).toBe(200);
+    expect(listed.body.length).toBe(2);
+    pieceA = listed.body[0].id;
+    pieceB = listed.body[1].id;
+    const priced = await owner().patch(`/v1/as-is/${pieceA}`).send({ asIsPriceCents: 45_000 });
+    expect(priced.status).toBe(200);
+  });
+
+  it('the product search counts the sellable pieces at the store and lists them', async () => {
+    const search = await owner().get(
+      `/v1/pos/product-search?q=Clearance%20Hybrid&locationId=${locationId}`,
+    );
+    expect(search.status).toBe(200);
+    const row = search.body.find((r: { variantId: string }) => r.variantId === asIsVariantId);
+    expect(row).toMatchObject({ availableHere: 0, asIsHere: 2, asIsTotal: 2 });
+    const onlyAsIs = await owner().get(
+      `/v1/pos/product-search?locationId=${locationId}&asIs=1&limit=100`,
+    );
+    expect(onlyAsIs.status).toBe(200);
+    expect(onlyAsIs.body.every((r: { asIsHere: number }) => r.asIsHere > 0)).toBe(true);
+    const list = await owner().get(
+      `/v1/pos/as-is-pieces?variantId=${asIsVariantId}&locationId=${locationId}`,
+    );
+    expect(list.status).toBe(200);
+    expect(list.body.map((p: { id: string }) => p.id).sort()).toEqual([pieceA, pieceB].sort());
+    expect(list.body.find((p: { id: string }) => p.id === pieceA)).toMatchObject({
+      asIsPriceCents: 45_000,
+      sellable: true,
+    });
+  });
+
+  let orderId = '';
+  let lineId = '';
+  it('a confirmed order line selling a piece holds it at the as-is price, never the stock level', async () => {
+    const create = await owner()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'pickup',
+        lines: [{ variantId: asIsVariantId, quantity: 1, asIsItemId: pieceA }],
+        confirm: true,
+      });
+    expect(create.status).toBe(201);
+    orderId = create.body.id;
+    const line = create.body.lines[0];
+    lineId = line.id;
+    expect(line).toMatchObject({
+      asIsItemId: pieceA,
+      quantity: 1,
+      qtyReserved: 1,
+      unitPriceCents: 45_000,
+      asIs: { status: 'committed', asIsPriceCents: 45_000 },
+    });
+    expect(line.description).toMatch(/as-is AS-/);
+    expect(await pieceStatus(pieceA)).toEqual({ status: 'committed', orderLineId: lineId });
+    // No stock level was created or touched for the item.
+    expect(await levelOf(asIsVariantId)).toEqual({ onHand: 0, reserved: 0 });
+    // The piece left the sellable as-is pool.
+    const search = await owner().get(
+      `/v1/pos/product-search?q=Clearance%20Hybrid&locationId=${locationId}`,
+    );
+    expect(
+      search.body.find((r: { variantId: string }) => r.variantId === asIsVariantId),
+    ).toMatchObject({ asIsHere: 1 });
+    // The queue says who holds it.
+    const held = await owner().get('/v1/as-is?status=committed');
+    expect(held.body.data.find((r: { id: string }) => r.id === pieceA).holder).toMatchObject({
+      kind: 'order',
+      documentNumber: create.body.number,
+    });
+    // The reservation drift report ignores the as-is line.
+    const drift = await owner().get('/v1/orders/reservation-drift');
+    expect(drift.status).toBe(200);
+    expect(drift.body.some((d: { variantId: string }) => d.variantId === asIsVariantId)).toBe(
+      false,
+    );
+  });
+
+  it('the same piece cannot go on a second order; a quantity above 1 is refused', async () => {
+    const dup = await owner()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'pickup',
+        lines: [{ variantId: asIsVariantId, quantity: 1, asIsItemId: pieceA }],
+        confirm: true,
+      });
+    expect(dup.status).toBe(400);
+    expect(dup.body.message).toMatch(/already committed/);
+    const two = await owner()
+      .post(`/v1/orders/${orderId}/lines`)
+      .send({ variantId: asIsVariantId, quantity: 2, asIsItemId: pieceB });
+    expect(two.status).toBe(400);
+    const qty = await owner().patch(`/v1/orders/${orderId}/lines/${lineId}`).send({ quantity: 3 });
+    expect(qty.status).toBe(400);
+  });
+
+  it('switching the line back to regular stock frees the piece; picking another piece holds it', async () => {
+    const back = await owner()
+      .patch(`/v1/orders/${orderId}/lines/${lineId}`)
+      .send({ asIsItemId: null });
+    expect(back.status).toBe(200);
+    const line = back.body.lines.find((l: { id: string }) => l.id === lineId);
+    // No stock to reserve, so the line is simply short now.
+    expect(line).toMatchObject({ asIsItemId: null, qtyReserved: 0 });
+    expect((await pieceStatus(pieceA)).status).toBe('pending_review');
+    expect(await levelOf(asIsVariantId)).toEqual({ onHand: 0, reserved: 0 });
+
+    const other = await owner()
+      .patch(`/v1/orders/${orderId}/lines/${lineId}`)
+      .send({ asIsItemId: pieceB });
+    expect(other.status).toBe(200);
+    const line2 = other.body.lines.find((l: { id: string }) => l.id === lineId);
+    // Piece B has no as-is price: the line keeps its price.
+    expect(line2).toMatchObject({ asIsItemId: pieceB, qtyReserved: 1, unitPriceCents: 45_000 });
+    expect(await pieceStatus(pieceB)).toEqual({ status: 'committed', orderLineId: lineId });
+  });
+
+  it('fulfilling the line sells the piece — on hand untouched', async () => {
+    const fulfilled = await owner().post(`/v1/orders/${orderId}/fulfill`).send({});
+    expect(fulfilled.status).toBe(201);
+    const line = fulfilled.body.lines.find((l: { id: string }) => l.id === lineId);
+    expect(line).toMatchObject({ qtyFulfilled: 1, qtyReserved: 0, asIs: { status: 'sold' } });
+    expect((await pieceStatus(pieceB)).status).toBe('sold');
+    expect(await levelOf(asIsVariantId)).toEqual({ onHand: 0, reserved: 0 });
+    const sold = await owner().get('/v1/as-is?status=sold');
+    expect(sold.body.data.some((r: { id: string }) => r.id === pieceB)).toBe(true);
+  });
+
+  it('removing an as-is line on another order hands the piece back to the queue', async () => {
+    const create = await owner()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'pickup',
+        lines: [{ variantId: asIsVariantId, quantity: 1, asIsItemId: pieceA }],
+        confirm: true,
+      });
+    expect(create.status).toBe(201);
+    expect((await pieceStatus(pieceA)).status).toBe('committed');
+    const removed = await owner().delete(
+      `/v1/orders/${create.body.id}/lines/${create.body.lines[0].id}`,
+    );
+    expect(removed.status).toBe(200);
+    expect(await pieceStatus(pieceA)).toEqual({ status: 'pending_review', orderLineId: null });
+  });
+});

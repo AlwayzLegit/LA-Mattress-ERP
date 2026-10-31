@@ -38,6 +38,16 @@ interface TransferLine {
   onHandAtFrom?: number;
   reservedAtFrom?: number;
   availableAtFrom?: number;
+  /** Owner 2026-10-30: the As-Is piece this line moves, when it is an as-is line. */
+  asIsItemId?: string | null;
+  asIs?: {
+    pieceNumber: string | null;
+    condition: string | null;
+    asIsPriceCents: number | null;
+    storageLocation: string | null;
+    status: string;
+    locationId: string;
+  } | null;
   /** Owner 2026-10-28: the PO lines this draft line waits on. */
   poLinks?: {
     allocationId: string;
@@ -209,6 +219,14 @@ export default function TransferDetailPage() {
                       <code className="muted">{l.sku}</code>
                     </>
                   )}
+                  {l.asIsItemId && (
+                    <div>
+                      <span className="as-is-tag" data-testid="transfer-line-as-is">
+                        as-is · {l.asIs?.pieceNumber ?? l.asIsItemId.slice(0, 8).toUpperCase()}
+                        {l.asIs?.condition ? ` · ${l.asIs.condition.replace(/_/g, ' ')}` : ''}
+                      </span>
+                    </div>
+                  )}
                   {(l.poLinks ?? []).length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1" data-testid="transfer-line-po">
                       {(l.poLinks ?? []).map((k) => (
@@ -226,7 +244,7 @@ export default function TransferDetailPage() {
                       ))}
                     </div>
                   )}
-                  {isDraft && (
+                  {isDraft && !l.asIsItemId && (
                     <LinkToPo
                       variantId={l.variantId}
                       target={{ transferLineId: l.id }}
@@ -251,7 +269,8 @@ export default function TransferDetailPage() {
                 </td>
                 <td data-testid="transfer-line-from">
                   <div>{fromName}</div>
-                  {l.availableAtFrom != null && (
+                  {l.asIsItemId ? <div className="muted text-xs">As-Is queue</div> : null}
+                  {!l.asIsItemId && l.availableAtFrom != null && (
                     <div
                       className={`text-xs ${l.availableAtFrom >= l.quantityShipped ? 'muted' : 'text-danger'}`}
                     >
@@ -535,6 +554,29 @@ function TransferLineStock({
         {onPoUnits} on PO{due ? ` · due ${day(due)}` : ''}
       </span>
     ) : null;
+  // Owner 2026-10-30: an as-is line rides on its piece, not the level.
+  if (l.asIsItemId) {
+    const st = l.asIs?.status ?? '';
+    const label =
+      t.status === 'draft'
+        ? st === 'committed'
+          ? 'as-is piece held'
+          : 'as-is piece not held'
+        : t.status === 'in_transit'
+          ? 'as-is piece on the truck'
+          : t.status === 'received'
+            ? 'in As-Is at destination'
+            : t.status === 'closed_short'
+              ? 'as-is piece lost'
+              : 'as-is piece released';
+    const cls =
+      (t.status === 'draft' && st !== 'committed') || t.status === 'closed_short'
+        ? 'badge-danger'
+        : t.status === 'in_transit'
+          ? 'badge-neutral'
+          : 'badge-success';
+    return <span className={`badge ${cls}`}>{label}</span>;
+  }
   if (t.status === 'draft') {
     const avail = l.availableAtFrom;
     if (avail == null) return <span className="muted">—</span>;

@@ -38,6 +38,7 @@ import {
 } from '@/lib/pos-sourcing';
 import { autofillFromZip, lookupZip, type ZipHit } from '@/lib/zip-lookup';
 import { ProductSearchDialog, type SearchRow } from '@/components/product-search-dialog';
+import { AsIsPieceDialog, pieceLabel, type AsIsPiece } from '@/components/as-is-piece-dialog';
 import { Money } from '@/components/money';
 import {
   Alert,
@@ -141,6 +142,9 @@ interface Line {
   atpDate?: string | null;
   /** Product's own tax rate (tax class); null = the store rate; 0 = untaxed. */
   taxRateBps?: number | null;
+  /** Owner 2026-10-30: the As-Is piece this line sells (quantity 1, source = the piece's store). */
+  asIsItemId?: string | null;
+  asIsPieceNumber?: string | null;
 }
 interface PaymentLine {
   key: string;
@@ -924,7 +928,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }));
   }
 
-  function lineFromRow(row: SearchRow, fromId: string): Line {
+  function lineFromRow(row: SearchRow, fromId: string, asIs?: AsIsPiece): Line {
     const auto = defaultSourceFor(fulfillment, ctx);
     return {
       key: nextKey(),
@@ -934,29 +938,54 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       size: row.size,
       categoryPath: row.categoryPath ?? null,
       quantity: 1,
-      unitPriceCents: row.priceCents,
+      // Owner 2026-10-30: an as-is piece sells at its as-is price (list
+      // when none is set) and from the store it sits in.
+      unitPriceCents: asIs?.asIsPriceCents ?? row.priceCents,
       lineDiscountCents: 0,
       lineType: 'stock',
       fulfillmentMethod: '',
       sourceLocationId: fromId,
       // A "From" the salesperson picked in the dialog is their choice;
       // the rules only move lines they have not touched.
-      sourceTouched: fromId !== auto,
+      sourceTouched: asIs ? true : fromId !== auto,
       deliveryDate: '',
       addons: { ...NO_ADDONS },
       atpDate: row.atpDate,
       taxRateBps: row.taxRateBps ?? null,
+      asIsItemId: asIs?.id ?? null,
+      asIsPieceNumber: asIs ? pieceLabel(asIs) : null,
     };
   }
 
-  function addProduct(row: SearchRow, fromId: string) {
+  function addProduct(row: SearchRow, fromId: string, asIs?: AsIsPiece) {
     noteAvail(row, fromId);
     // Adding the same product again always makes a NEW line — a second
     // unit often sells at a different price.
-    setLines((prev) => [...prev, lineFromRow(row, fromId)]);
+    setLines((prev) => [...prev, lineFromRow(row, fromId, asIs)]);
     setShowProductSearch(false);
     toast.success(
-      `${row.productName}${row.size ? `, ${row.size}` : ''} added · from ${nameOf(fromId)}`,
+      asIs
+        ? `${row.productName}${row.size ? `, ${row.size}` : ''} added as-is · piece ${pieceLabel(asIs)} at ${nameOf(fromId)}`
+        : `${row.productName}${row.size ? `, ${row.size}` : ''} added · from ${nameOf(fromId)}`,
+    );
+  }
+
+  /** Owner 2026-10-30: a line switching to (or off) an As-Is piece at its source. */
+  const [asIsPickFor, setAsIsPickFor] = useState<Line | null>(null);
+  function setLineAsIs(key: string, piece: AsIsPiece | null) {
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key
+          ? {
+              ...l,
+              asIsItemId: piece?.id ?? null,
+              asIsPieceNumber: piece ? pieceLabel(piece) : null,
+              quantity: piece ? 1 : l.quantity,
+              unitPriceCents: piece?.asIsPriceCents ?? l.unitPriceCents,
+              sourceTouched: piece ? true : l.sourceTouched,
+            }
+          : l,
+      ),
     );
   }
 
@@ -1050,6 +1079,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       deliveryDate?: string;
       /** Add-on fee: index of the product line it belongs to (follows it through splits). */
       addonOf?: number;
+      asIsItemId?: string;
     }[] = [];
     const fee = (description: string, quantity: number, unitPriceCents: number, addonOf: number) =>
       out.push({ description, quantity, unitPriceCents, lineType: 'custom', addonOf });
@@ -1070,6 +1100,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             ? l.sourceLocationId
             : undefined,
         deliveryDate: l.deliveryDate || undefined,
+        asIsItemId: l.asIsItemId || undefined,
       });
       if (l.addons.removal) fee(REMOVAL_DESC, l.quantity, 0, parentIndex);
       if (l.addons.recycling) fee(RECYCLING_DESC, l.quantity, recyclingFeeCents, parentIndex);
@@ -1146,6 +1177,8 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           deliveryDate: string | null;
           categoryPath?: string | null;
           parentLineId?: string | null;
+          asIsItemId?: string | null;
+          asIs?: { pieceNumber: string | null } | null;
         }[];
         taxExemptReason?: string | null;
       }>(`/v1/orders/${id}`);
@@ -1221,6 +1254,10 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
               deliveryDate: l.deliveryDate ?? '',
               addons: addonsFor(l.id),
               taxRateBps: l.lineType === 'custom' ? 0 : (l.taxRateBps ?? null),
+              asIsItemId: l.asIsItemId ?? null,
+              asIsPieceNumber: l.asIsItemId
+                ? pieceLabel({ id: l.asIsItemId, pieceNumber: l.asIs?.pieceNumber ?? null })
+                : null,
             };
           }),
       );
@@ -2409,6 +2446,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                         onSource={setLineSource}
                         onAddon={toggleAddon}
                         onRemove={(k) => setLines((p) => p.filter((x) => x.key !== k))}
+                        onAsIs={(line, key) =>
+                          line ? setAsIsPickFor(line) : setLineAsIs(key!, null)
+                        }
                       />
                     ))}
                   </tbody>
@@ -3339,9 +3379,24 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           locations={locs}
           storeId={locationId}
           onChangeLocation={(id) => setPickerFrom(id)}
-          onAdd={(row) => addProduct(row, pickerLocation || locationId)}
+          onAdd={(row, asIs) => addProduct(row, pickerLocation || locationId, asIs)}
           sourceNote={pickerNote}
           onClose={() => setShowProductSearch(false)}
+        />
+      )}
+      {asIsPickFor && asIsPickFor.variantId && (
+        <AsIsPieceDialog
+          variantId={asIsPickFor.variantId}
+          locationId={asIsPickFor.sourceLocationId}
+          locationName={nameOf(asIsPickFor.sourceLocationId)}
+          productName={asIsPickFor.description}
+          listPriceCents={asIsPickFor.unitPriceCents}
+          onPick={(piece) => {
+            setLineAsIs(asIsPickFor.key, piece);
+            setAsIsPickFor(null);
+            toast.success(`Piece ${pieceLabel(piece)} is on the line`);
+          }}
+          onClose={() => setAsIsPickFor(null)}
         />
       )}
     </div>
@@ -3362,6 +3417,7 @@ function LineRow({
   onSource,
   onAddon,
   onRemove,
+  onAsIs,
 }: {
   line: Line;
   locked: boolean;
@@ -3374,27 +3430,31 @@ function LineRow({
   onSource: (key: string, id: string) => void;
   onAddon: (key: string, which: keyof Addons) => void;
   onRemove: (key: string) => void;
+  /** Owner 2026-10-30: open the As-Is piece picker for this line, or drop its piece (null). */
+  onAsIs: (line: Line | null, key?: string) => void;
 }) {
   const isFee = l.lineType === 'custom';
+  const asIs = Boolean(l.asIsItemId);
   const eff = effectiveFulfillment(l, ctx.orderFulfillment);
   const sourceName = ctx.locations.find((x) => x.id === l.sourceLocationId)?.name ?? 'the source';
   const addonCents = l.addons.recycling ? l.quantity * recyclingFeeCents : 0;
   const amount = l.quantity * l.unitPriceCents - l.lineDiscountCents + addonCents;
   const zero = !isFee && l.unitPriceCents === 0;
-  const warn = isFee
-    ? null
-    : lineWarning({
-        effective: eff,
-        available: avail?.availableHere,
-        quantity: l.quantity,
-        unitPriceCents: l.unitPriceCents,
-        sourceTouched: l.sourceTouched,
-        sourceLocationId: l.sourceLocationId,
-        orderLocationId: ctx.orderLocationId,
-        sourceName,
-        storeName,
-        atpDate: avail?.atpDate,
-      });
+  const warn =
+    isFee || asIs
+      ? null
+      : lineWarning({
+          effective: eff,
+          available: avail?.availableHere,
+          quantity: l.quantity,
+          unitPriceCents: l.unitPriceCents,
+          sourceTouched: l.sourceTouched,
+          sourceLocationId: l.sourceLocationId,
+          orderLocationId: ctx.orderLocationId,
+          sourceName,
+          storeName,
+          atpDate: avail?.atpDate,
+        });
   const short = avail != null && avail.availableHere < l.quantity;
   const orderLabel = FULFILLMENTS.find((f) => f.value === ctx.orderFulfillment)?.label ?? '';
   const sorted = [...ctx.locations].sort((a, b) =>
@@ -3412,6 +3472,33 @@ function LineRow({
           {l.sku && <span className="mono">{l.sku}</span>}
           {l.size && <span>{l.size}</span>}
           {isFee && <span className="muted">fee</span>}
+          {asIs && (
+            <span className="as-is-tag" data-testid="line-as-is">
+              as-is · {l.asIsPieceNumber}
+            </span>
+          )}
+          {!locked && !isFee && !asIs && (
+            <button
+              type="button"
+              className="reg-text-btn"
+              onClick={() => onAsIs(l)}
+              title="Sell one of the As-Is pieces at this line's source instead of new stock"
+              data-testid="line-as-is-open"
+            >
+              as-is…
+            </button>
+          )}
+          {!locked && asIs && (
+            <button
+              type="button"
+              className="reg-text-btn"
+              onClick={() => onAsIs(null, l.key)}
+              title="Back to new stock — the piece stays in the As-Is queue"
+              data-testid="line-as-is-clear"
+            >
+              regular stock
+            </button>
+          )}
           {!locked && (
             <button type="button" className="reg-text-btn" onClick={() => onRemove(l.key)}>
               remove
@@ -3470,7 +3557,8 @@ function LineRow({
           max={999}
           value={l.quantity}
           aria-label={`Quantity for ${l.description}`}
-          disabled={locked}
+          disabled={locked || asIs}
+          title={asIs ? 'An as-is line sells one piece' : undefined}
           className="input-num reg-cell-input"
           onChange={(e) => {
             const qty = Math.floor(Number(e.target.value));
@@ -3563,7 +3651,8 @@ function LineRow({
                 value={l.sourceLocationId}
                 onChange={(e) => onSource(l.key, e.target.value)}
                 aria-label={`Inventory source for ${l.description}`}
-                disabled={locked}
+                disabled={locked || asIs}
+                title={asIs ? 'An as-is line fulfills from where its piece sits' : undefined}
                 className="reg-cell-input"
                 data-testid="line-source"
               >
@@ -3579,13 +3668,19 @@ function LineRow({
                 </span>
               )}
             </div>
-            <div
-              className={`reg-avail${short ? (eff === 'take_with' ? ' is-risk' : ' is-waiting') : ''}`}
-            >
-              {avail
-                ? `${avail.availableHere} available${avail.atpDate ? ' · on PO' : ''}`
-                : 'checking stock…'}
-            </div>
+            {asIs ? (
+              <div className="reg-avail" data-testid="line-as-is-avail">
+                as-is piece {l.asIsPieceNumber} · held for this sale
+              </div>
+            ) : (
+              <div
+                className={`reg-avail${short ? (eff === 'take_with' ? ' is-risk' : ' is-waiting') : ''}`}
+              >
+                {avail
+                  ? `${avail.availableHere} available${avail.atpDate ? ' · on PO' : ''}`
+                  : 'checking stock…'}
+              </div>
+            )}
           </>
         )}
       </td>
