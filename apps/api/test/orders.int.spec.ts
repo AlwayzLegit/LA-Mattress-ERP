@@ -467,6 +467,59 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('complete-sale: order, tenders and hand-over in one request; a bad tender rolls it all back', async () => {
+    const sqlc = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const countOrders = async () =>
+      Number(
+        (await sqlc`select count(*)::int as n from orders where business_id = ${businessId}`)[0]!.n,
+      );
+    try {
+      const before = await countOrders();
+      // A refused tender (negative amount) must not leave the order behind.
+      const bad = await request(app.getHttpServer())
+        .post('/v1/orders/complete-sale')
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId)
+        .send({
+          locationId,
+          customerId,
+          fulfillmentType: 'take_with',
+          confirm: true,
+          lines: [{ variantId: sofaVariantId, quantity: 1, fulfillmentMethod: 'take_with' }],
+          payments: [{ method: 'cash', amountCents: -5 }],
+        });
+      expect(bad.status).toBe(400);
+      expect(await countOrders()).toBe(before);
+
+      const res = await request(app.getHttpServer())
+        .post('/v1/orders/complete-sale')
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId)
+        .send({
+          locationId,
+          customerId,
+          fulfillmentType: 'take_with',
+          confirm: true,
+          lines: [{ variantId: sofaVariantId, quantity: 1, fulfillmentMethod: 'take_with' }],
+          payments: [{ method: 'cash', amountCents: 1_000_000, kind: 'deposit' }],
+          complete: true,
+        });
+      expect(res.status).toBe(201);
+      expect(res.body.number).toMatch(/^SO-/);
+      expect(await countOrders()).toBe(before + 1);
+      // Money in, goods reserved, handed over on the spot.
+      expect(res.body.takeWith).toMatchObject({ orderId: res.body.id, completed: true });
+      expect(res.body.status).toBe('completed');
+      expect(res.body.lines[0].qtyFulfilled).toBe(1);
+      const payments = res.body.payments as { amountCents: number; status: string }[];
+      expect(payments.reduce((n, p) => n + (p.status === 'succeeded' ? p.amountCents : 0), 0)).toBe(
+        res.body.totalCents,
+      );
+    } finally {
+      await sqlc.end({ timeout: 5 });
+    }
+  });
+
   it('Product search: stock filters and ATP date from open POs', async () => {
     const out = await request(app.getHttpServer())
       .get(`/v1/pos/product-search?q=ATP&inStock=0&locationId=${locationId}`)
