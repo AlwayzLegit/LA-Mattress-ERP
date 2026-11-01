@@ -34,7 +34,9 @@ export function TimeClockStrip() {
   // While on the clock the hours keep moving; refresh every minute.
   useEffect(() => {
     if (!me || me.status === 'out') return;
-    const id = window.setInterval(() => void load(), 60_000);
+    const id = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 60_000);
     return () => window.clearInterval(id);
   }, [me, load]);
 
