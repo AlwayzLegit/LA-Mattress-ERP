@@ -78,10 +78,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         .then((c) => alive && setCounts(c))
         .catch(() => alive && setCounts(null));
     void load();
-    const id = window.setInterval(() => void load(), 60_000);
+    // A register left open in a background tab should not keep asking.
+    const tick = () => {
+      if (!document.hidden) void load();
+    };
+    const id = window.setInterval(tick, 60_000);
+    document.addEventListener('visibilitychange', tick);
     return () => {
       alive = false;
       window.clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
     };
   }, [pathname]);
 
