@@ -516,6 +516,8 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
       expect(payments.reduce((n, p) => n + (p.status === 'succeeded' ? p.amountCents : 0), 0)).toBe(
         res.body.totalCents,
       );
+      // The hand-over took a sofa off the shelf; later cases count the seeded eight.
+      await sqlc`update inventory_levels set on_hand = on_hand + 1 where variant_id = ${sofaVariantId}`;
     } finally {
       await sqlc.end({ timeout: 5 });
     }
