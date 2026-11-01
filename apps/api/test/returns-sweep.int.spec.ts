@@ -655,13 +655,18 @@ describe('Balance due after a return — original tender, store credit, exchange
   });
 
   it('the orders book, the customer page and the AR report agree', async () => {
-    const owing = await as(ownerCookie).get('/v1/orders?balanceDue=1&limit=50').expect(200);
+    const owing = await as(ownerCookie)
+      .get('/v1/orders/list-view?balanceDue=1&limit=50')
+      .expect(200);
     const owingNumbers = (owing.body.data as { number: string }[]).map((r) => r.number);
     expect(owingNumbers).not.toContain('SO-1');
     expect(owingNumbers).not.toContain('SO-2');
     expect(owingNumbers).not.toContain('SO-3');
-    const book = await as(ownerCookie).get('/v1/orders?q=SO-&limit=50').expect(200);
-    for (const row of book.body.data as { number: string; balanceDueCents: number }[]) {
+    expect(owing.body.summary.balanceDueCents).toBe(0);
+    const book = await as(ownerCookie).get('/v1/orders/list-view?limit=50').expect(200);
+    const bookRows = book.body.data as { number: string; balanceDueCents: number }[];
+    expect(bookRows.map((r) => r.number)).toEqual(expect.arrayContaining(['SO-1', 'SO-2', 'SO-3']));
+    for (const row of bookRows) {
       if (['SO-1', 'SO-2', 'SO-3'].includes(row.number)) expect(row.balanceDueCents).toBe(0);
     }
 
