@@ -1,0 +1,16 @@
+endpoint                                                                 ms_p50   ms_min   ms_max     bytes   gzip
+/v1/auth/me                                                                   5        4        5       594    594 200
+/v1/business/members/me                                                      12       12       13       319    319 200
+/v1/business/locations                                                       12       12       12      1802   1802 200
+/v1/business/settings/pos                                                    10       10       10       188    188 200
+/v1/dashboard/nav-counts                                                     20       19       21        66     66 200
+/v1/onboarding/checklist                                                      6        6        6       546    546 200
+/v1/inbox                                                                    12       11       18       128    128 200
+/v1/notifications?limit=50                                                   13       12       14      1587   1587 200
+/v1/dashboard/owner?start=2026-10-01&end=2026-10-31&compare=prior           113      112      199      4827   4827 200
+/v1/dashboard/stores?period=mtd                                              54       43       61     74009  74009 200
+/v1/orders/list-view?limit=50&start=2026-10-01&end=2026-10-31                48       41       50     28168  28168 200
+/v1/products?limit=50                                                        52       48       94     37632  37632 200
+/v1/search?q=garcia                                                          77       77       85      3111   3111 200
+/v1/deliveries?from=2026-10-26&to=2026-11-01&limit=2000                     390      363      403    127172 127172 200
+/v1/deliveries?from=2026-10-26&to=2026-11-29&limit=2000                     372      361      473    127172 127172 200
