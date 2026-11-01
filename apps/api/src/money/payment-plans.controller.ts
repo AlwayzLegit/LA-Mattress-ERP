@@ -18,6 +18,8 @@ import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import { resolveTakenAt } from '../common/payment-taken-at';
 import { DRIZZLE } from '../database/database.module';
 import { EmailService } from '../email/email.service';
+import { loadReturnsSettled } from '../orders/order-balance';
+import { balanceDueCents } from '../orders/order-math';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -117,10 +119,11 @@ export class PaymentPlansController {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, orderId));
-    const paid = payments
-      .filter((p) => p.status === 'succeeded')
-      .reduce((s, p) => s + p.amountCents, 0);
-    const balance = Math.max(0, order.totalCents - paid);
+    const balance = balanceDueCents(
+      order.totalCents,
+      payments,
+      await loadReturnsSettled(this.db, orderId),
+    );
     if (balance <= 0) throw new BadRequestException('Nothing left to schedule — balance is zero');
 
     let amount: number;

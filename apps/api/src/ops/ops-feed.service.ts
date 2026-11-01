@@ -4,6 +4,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import {
   resolveOpsThresholds,
@@ -277,6 +278,10 @@ export class OpsFeedService {
       )
       .groupBy(schema.payments.orderId);
     const paidBy = new Map(paidRows.map((r) => [r.orderId, r.cents]));
+    const settledBy = await loadReturnsSettledByOrder(
+      this.db,
+      candidates.map((c) => c.id),
+    );
 
     // Second pass for the family test: an order whose lines all share
     // one method can still be half of a split, as its own document.
@@ -307,7 +312,10 @@ export class OpsFeedService {
         severity: 'critical' as const,
         kind: 'Take-with on an open ticket',
         summary: `${c.number}: ${c.takeWithUnits} unit${c.takeWithUnits === 1 ? '' : 's'} went out on a split ticket still ${c.status}`,
-        amountCents: Math.max(0, c.totalCents - (paidBy.get(c.id) ?? 0)),
+        amountCents: Math.max(
+          0,
+          c.totalCents - (paidBy.get(c.id) ?? 0) - (settledBy.get(c.id) ?? 0),
+        ),
         actorUserId: null,
         actorName: null,
         locationId: c.locationId,

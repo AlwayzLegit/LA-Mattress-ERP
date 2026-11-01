@@ -19,6 +19,7 @@ import { salesScopeCond, sellingScopeCond } from '../common/sales-scope';
 import { brandMatchFor } from '../common/vendor-match';
 import { CostingService } from '../costing/costing.service';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { toCsv } from './csv';
@@ -1141,6 +1142,10 @@ export class ReportsController {
         .groupBy(schema.payments.orderId);
       for (const p of pays) if (p.orderId) paid.set(p.orderId, p.amount);
     }
+    // Completed returns refunded to the order's own tenders are negative
+    // payment rows; the returned line is still on the total, so the settled
+    // value comes off too (order-math.ts balanceDueCents).
+    const settled = await loadReturnsSettledByOrder(this.db, orderIds);
 
     const byCustomer = new Map<
       string,
@@ -1155,7 +1160,7 @@ export class ReportsController {
     >();
     const now = Date.now();
     for (const o of orders) {
-      const balance = o.totalCents - (paid.get(o.id) ?? 0);
+      const balance = o.totalCents - (paid.get(o.id) ?? 0) - (settled.get(o.id) ?? 0);
       if (balance <= 0) continue;
       const days = Math.floor((now - new Date(o.createdAt).getTime()) / 86_400_000);
       const cur = byCustomer.get(o.customerId) ?? {

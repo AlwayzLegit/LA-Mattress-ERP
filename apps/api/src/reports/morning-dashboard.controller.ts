@@ -12,6 +12,7 @@ import { schema } from '@jetnine/db';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
+import { balanceDueCentsSql, paidCentsSql } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -834,7 +835,11 @@ export class MorningDashboardController {
     }
 
     // --- Open book at the store (queues, pipeline, past-due) --------------
-    const paidExpr = sql<number>`COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = ${schema.orders.id} AND p.status = 'succeeded'), 0)::int`;
+    const paidExpr = paidCentsSql(sql`${schema.orders.id}`);
+    const balanceExpr = balanceDueCentsSql(
+      sql`${schema.orders.id}`,
+      sql`${schema.orders.totalCents}`,
+    );
     const queueSelect = {
       id: schema.orders.id,
       number: schema.orders.number,
@@ -843,6 +848,7 @@ export class MorningDashboardController {
       requestedDate: schema.orders.requestedDate,
       totalCents: schema.orders.totalCents,
       paidCents: paidExpr,
+      balanceCents: balanceExpr,
       primary: schema.orders.salespersonMembershipId,
       second: schema.orders.secondSalespersonMembershipId,
       splitBps: schema.orders.splitBps,
@@ -1207,7 +1213,7 @@ export class MorningDashboardController {
       deliveryStatus: r.deliveryStatus,
       requestedDate: r.requestedDate,
       totalCents: r.totalCents,
-      balanceDueCents: Math.max(0, r.totalCents - r.paidCents),
+      balanceDueCents: r.balanceCents,
       customerId: r.customerId,
       customerName: [r.customerFirst, r.customerLast].filter(Boolean).join(' ').trim() || null,
       customerPhone: r.customerPhone,
@@ -1222,10 +1228,7 @@ export class MorningDashboardController {
       (r) => r.primary === myMembershipId || r.second === myMembershipId,
     );
     kpiMine.openCount = myOpenAll.length;
-    kpiMine.openBalanceCents = myOpenAll.reduce(
-      (sum, r) => sum + Math.max(0, r.totalCents - r.paidCents),
-      0,
-    );
+    kpiMine.openBalanceCents = myOpenAll.reduce((sum, r) => sum + r.balanceCents, 0);
     for (const r of closedRows) {
       const share = mineShareBps(r);
       if (share > 0) {
@@ -1254,10 +1257,7 @@ export class MorningDashboardController {
     ).length;
     const agingCutoff = Date.now() - 14 * 86_400_000;
     const unpaidAging = openRows.filter(
-      (r) =>
-        r.status === 'open' &&
-        r.totalCents - r.paidCents > 0 &&
-        r.createdAt.getTime() < agingCutoff,
+      (r) => r.status === 'open' && r.balanceCents > 0 && r.createdAt.getTime() < agingCutoff,
     ).length;
     const backorders = openRows
       .filter((r) => r.status === 'open' && (shortMap.get(r.id) ?? 0) > 0)

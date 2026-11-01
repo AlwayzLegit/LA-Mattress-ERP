@@ -22,6 +22,7 @@ import { CurrentTenant } from '../auth/current-user.decorator';
 import { tzDayEndExclusive, tzDayStart, type DayRange } from '../common/date-range';
 import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
+import { balanceDueCentsSql } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
@@ -563,7 +564,10 @@ export class StoreDashboardController {
         salespersonMembershipId: schema.orders.salespersonMembershipId,
         salespersonName: schema.users.name,
         customerName: sql<string>`concat_ws(' ', ${schema.customers.firstName}, ${schema.customers.lastName})`,
-        balanceDueCents: sql<number>`greatest(0, ${schema.orders.totalCents} - coalesce((select sum(p.amount_cents) from payments p where p.order_id = ${schema.orders.id} and p.status = 'succeeded'), 0))::int`,
+        balanceDueCents: balanceDueCentsSql(
+          sql`${schema.orders.id}`,
+          sql`${schema.orders.totalCents}`,
+        ),
       })
       .from(schema.orders)
       .innerJoin(schema.locations, eq(schema.locations.id, schema.orders.locationId))

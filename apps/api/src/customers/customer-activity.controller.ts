@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import { deriveDisplayStatus } from '../orders/orders.controller';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 
@@ -275,6 +276,9 @@ export class CustomerActivityController {
       if (!p.orderId) continue;
       paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) ?? 0) + p.amountCents);
     }
+    // Completed returns settled on the order (order-balance.ts) come off
+    // the balance too, or a refund to original tenders counts twice.
+    const settledByOrder = await loadReturnsSettledByOrder(this.db, orderIds);
 
     // Lines, with PO linkage for special orders.
     const lines = orderIds.length
@@ -431,7 +435,7 @@ export class CustomerActivityController {
     for (const o of orders) {
       if (!OPEN_ORDER_STATUSES.includes(o.status)) continue;
       const paid = paidByOrder.get(o.id) ?? 0;
-      const balance = Math.max(0, o.totalCents - paid);
+      const balance = Math.max(0, o.totalCents - paid - (settledByOrder.get(o.id) ?? 0));
       const ls = linesByOrder.get(o.id) ?? [];
       const reservedShort = ls.some(
         (l) => l.lineType === 'stock' && l.qtyReserved + l.qtyFulfilled < l.quantity,

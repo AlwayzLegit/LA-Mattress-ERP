@@ -69,7 +69,8 @@ export class StoreCreditService {
       businessId: string;
       customerId: string;
       amountCents: number;
-      referenceType: 'payment' | 'exchange';
+      /** 'exchange_refund': credit paid back out on the original order's tenders (see order-balance.ts). */
+      referenceType: 'payment' | 'exchange' | 'exchange_refund';
       referenceId: string | null;
       actorUserId: string | null;
       reason?: string;

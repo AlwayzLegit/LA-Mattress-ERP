@@ -564,3 +564,118 @@ describe('Update a Customer Address — number, names, alternate contact, instru
     });
   });
 });
+
+// Owner amendment A9 (2026-10-31): a completed return settles its value
+// on the order. After the three blocks above every order is paid in
+// full — none of them owes the refund it just gave back.
+describe('Balance due after a return — original tender, store credit, exchange', () => {
+  const detail = async (orderId: string) => {
+    const res = await as(ownerCookie).get(`/v1/orders/${orderId}`).expect(200);
+    return res.body as {
+      number: string;
+      totalCents: number;
+      paidCents: number;
+      balanceDueCents: number;
+      returnedCents: number;
+      creditDueCents: number;
+    };
+  };
+
+  it('a return refunded to the original tenders is not re-owed', async () => {
+    // SO-1: $1,000 paid, one $500 unit back with $75 of fees withheld →
+    // $425 refunded by card; the customer kept $500 of goods plus the
+    // fees, which the remaining $575 covers.
+    const o = await detail(order1Id);
+    expect(o).toMatchObject({
+      number: 'SO-1',
+      totalCents: 100000,
+      paidCents: 100000 - 42500,
+      returnedCents: 42500,
+      balanceDueCents: 0,
+      creditDueCents: 0,
+    });
+  });
+
+  it('a store-credit refund leaves the balance at zero and the credit on the ledger', async () => {
+    // SO-1's second unit, over the counter, refunded as store credit:
+    // no payment row moves, nothing is owed, $500 of credit is issued.
+    const before = await withDb(async (db) => {
+      const entries = await db
+        .select({ deltaCents: schema.storeCreditEntries.deltaCents })
+        .from(schema.storeCreditEntries)
+        .where(eq(schema.storeCreditEntries.customerId, customerId));
+      return entries.reduce((t, e) => t + e.deltaCents, 0);
+    });
+    await as(ownerCookie)
+      .post(`/v1/orders/${order1Id}/return`)
+      .send({
+        lines: [{ lineId: line1Id, quantity: 1 }],
+        fulfillment: 'drop_off',
+        refundMethod: 'store_credit',
+        locationId: storeId,
+      })
+      .expect(201);
+    const o = await detail(order1Id);
+    expect(o).toMatchObject({
+      paidCents: 100000 - 42500,
+      // Only the card refund settles on the order; the credit is the customer's.
+      returnedCents: 42500,
+      balanceDueCents: 0,
+      creditDueCents: 0,
+    });
+    const after = await withDb(async (db) => {
+      const entries = await db
+        .select({ deltaCents: schema.storeCreditEntries.deltaCents })
+        .from(schema.storeCreditEntries)
+        .where(eq(schema.storeCreditEntries.customerId, customerId));
+      return entries.reduce((t, e) => t + e.deltaCents, 0);
+    });
+    expect(after - before).toBe(50000);
+  });
+
+  it('an exchange whose leftover credit went back by card settles once', async () => {
+    // SO-2: $1,000 returned into a $500 replacement, $500 refunded by
+    // card. The $500 that moved to the replacement is on that order;
+    // the $500 refunded is matched by the settled value here.
+    const o = await detail(order2Id);
+    expect(o.paidCents).toBe(100000 - 50000);
+    expect(o.returnedCents).toBe(50000);
+    expect(o.balanceDueCents).toBe(0);
+    expect(o.creditDueCents).toBe(0);
+  });
+
+  it('an exchange settled in store credit owes nothing and settles nothing here', async () => {
+    const o = await detail(order3Id);
+    expect(o).toMatchObject({
+      paidCents: 100000,
+      returnedCents: 0,
+      balanceDueCents: 0,
+      creditDueCents: 0,
+    });
+  });
+
+  it('the orders book, the customer page and the AR report agree', async () => {
+    const owing = await as(ownerCookie).get('/v1/orders?balanceDue=1&limit=50').expect(200);
+    const owingNumbers = (owing.body.data as { number: string }[]).map((r) => r.number);
+    expect(owingNumbers).not.toContain('SO-1');
+    expect(owingNumbers).not.toContain('SO-2');
+    expect(owingNumbers).not.toContain('SO-3');
+    const book = await as(ownerCookie).get('/v1/orders?q=SO-&limit=50').expect(200);
+    for (const row of book.body.data as { number: string; balanceDueCents: number }[]) {
+      if (['SO-1', 'SO-2', 'SO-3'].includes(row.number)) expect(row.balanceDueCents).toBe(0);
+    }
+
+    const activity = await as(ownerCookie).get(`/v1/customers/${customerId}/activity`).expect(200);
+    for (const row of activity.body.openOrders.rows as { number: string; balanceCents: number }[]) {
+      if (['SO-1', 'SO-2', 'SO-3'].includes(row.number)) expect(row.balanceCents).toBe(0);
+    }
+
+    const ar = await as(ownerCookie).get('/v1/reports/ar').expect(200);
+    const mine = (ar.body.rows as { customerId: string; balanceCents: number }[]).find(
+      (r) => r.customerId === customerId,
+    );
+    // The replacement orders were paid by the exchange credit; nothing
+    // on this customer carries a balance.
+    expect(mine?.balanceCents ?? 0).toBe(0);
+  });
+});

@@ -4,7 +4,8 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { DRIZZLE } from '../database/database.module';
 import { Public } from '../tenancy/decorators';
-import { paidCents } from './order-math';
+import { loadReturnsSettled } from './order-balance';
+import { balanceDueCents, paidCents } from './order-math';
 
 const TOKEN_RE = /^[0-9a-f]{48}$/;
 
@@ -87,6 +88,7 @@ export class PublicOrderController {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, order.id));
     const paid = paidCents(payments);
+    const settled = await loadReturnsSettled(this.db, order.id);
 
     // The next ACTIVE delivery — cancelled/failed/completed attempts
     // must not surface a stale (possibly past) date to the customer.
@@ -114,7 +116,7 @@ export class PublicOrderController {
       lines,
       totalCents: order.totalCents,
       paidCents: paid,
-      balanceCents: Math.max(0, order.totalCents - paid),
+      balanceCents: balanceDueCents(order.totalCents, payments, settled),
       currencyCode: business?.currencyCode ?? 'USD',
     };
   }

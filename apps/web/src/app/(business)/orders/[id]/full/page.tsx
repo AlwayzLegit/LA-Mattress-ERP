@@ -135,6 +135,8 @@ interface OrderDetail {
   depositRequiredCents: number;
   paidCents: number;
   balanceDueCents: number;
+  /** Value of completed returns settled on the order (refunded to its tenders). */
+  returnedCents?: number;
   creditDueCents: number;
   /** Why the order charges no sales tax; null = taxed normally. */
   taxExemptReason?: string | null;
@@ -2034,6 +2036,14 @@ export default function OrderDetailPage() {
                     value: <MoneyValue cents={order.depositRequiredCents} />,
                   },
                   { label: 'Paid', value: <MoneyValue cents={order.paidCents} /> },
+                  ...((order.returnedCents ?? 0) > 0
+                    ? [
+                        {
+                          label: 'Returned',
+                          value: <MoneyValue cents={-(order.returnedCents ?? 0)} />,
+                        },
+                      ]
+                    : []),
                   {
                     label: <strong>Balance due</strong>,
                     value: (

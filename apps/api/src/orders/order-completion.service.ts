@@ -7,6 +7,7 @@ import { CompetitionsService } from '../competitions/competitions.service';
 import { DRIZZLE } from '../database/database.module';
 import { CommissionsService } from '../money/commissions.service';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
+import { loadReturnsSettled } from './order-balance';
 import { balanceDueCents, paidCents } from './order-math';
 import { OrdersService } from './orders.service';
 
@@ -57,7 +58,11 @@ export class OrderCompletionService {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, orderId));
-    const due = balanceDueCents(order.totalCents, payments);
+    const due = balanceDueCents(
+      order.totalCents,
+      payments,
+      await loadReturnsSettled(this.db, orderId),
+    );
     if (due > 0) return false;
     await this.finalize(businessId, orderId, actorUserId, { dueCents: 0, auto: true });
     return true;
@@ -116,6 +121,7 @@ export class OrderCompletionService {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, orderId));
     const paid = paidCents(payments);
+    const settled = await loadReturnsSettled(this.db, orderId);
     void this.webhooks.fire({
       businessId,
       eventType: 'order.completed',
@@ -127,7 +133,7 @@ export class OrderCompletionService {
         locationId: order.locationId,
         totalCents: order.totalCents,
         paidCents: paid,
-        balanceDueCents: balanceDueCents(order.totalCents, payments),
+        balanceDueCents: balanceDueCents(order.totalCents, payments, settled),
       },
     });
   }

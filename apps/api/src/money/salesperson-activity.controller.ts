@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import { deriveDisplayStatus } from '../orders/orders.controller';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 
@@ -212,6 +213,7 @@ export class SalespersonActivityController {
     const ids = orders.map((o) => o.id);
 
     const paid = new Map<string, number>();
+    let settled = new Map<string, number>();
     const trip = new Map<string, { date: string | null; status: string }>();
     const onPo = new Set<string>();
     const reservedShort = new Set<string>();
@@ -228,6 +230,7 @@ export class SalespersonActivityController {
         .where(and(inArray(schema.payments.orderId, ids), eq(schema.payments.status, 'succeeded')))
         .groupBy(schema.payments.orderId);
       for (const p of pays) if (p.orderId) paid.set(p.orderId, p.cents);
+      settled = await loadReturnsSettledByOrder(this.db, ids);
 
       const trips = await this.db
         .select({
@@ -309,7 +312,7 @@ export class SalespersonActivityController {
 
     const toRow = (o: (typeof orders)[number]): OrderRowOut => {
       const paidCents = paid.get(o.id) ?? 0;
-      const balance = Math.max(0, o.totalCents - paidCents);
+      const balance = Math.max(0, o.totalCents - paidCents - (settled.get(o.id) ?? 0));
       const t = trip.get(o.id);
       const merchandise = o.subtotalCents - o.discountCents;
       return {
