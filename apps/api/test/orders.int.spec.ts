@@ -501,7 +501,8 @@ describe('New Sale backend (PLAN-POS-OPERATIONS P2a)', () => {
           fulfillmentType: 'take_with',
           confirm: true,
           lines: [{ variantId: sofaVariantId, quantity: 1, fulfillmentMethod: 'take_with' }],
-          payments: [{ method: 'cash', amountCents: 1_000_000, kind: 'deposit' }],
+          // Sofa 1,299.99 + 7% tax = 1,390.99; a tender past the balance is refused.
+          payments: [{ method: 'cash', amountCents: 139_099, kind: 'deposit' }],
           complete: true,
         });
       expect(res.status).toBe(201);
