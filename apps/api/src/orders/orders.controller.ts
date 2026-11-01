@@ -5,6 +5,8 @@ import {
   Controller,
   Delete,
   ForbiddenException,
+  HttpException,
+  Logger,
   Get,
   Inject,
   NotFoundException,
@@ -297,6 +299,20 @@ interface UpdateOrderBody extends StepThreeFees {
   priceReason?: string;
   override?: OverrideCredentials;
 }
+
+const completeSaleLog = new Logger('OrdersController.completeSale');
+
+interface CompleteSaleBody extends CreateOrderBody {
+  /** Tenders to take once the order exists, in order; each is an OrderPaymentBody. */
+  payments?: OrderPaymentBody[];
+  /** Run the take-with hand-over (POST orders/:id/complete) after the money is in. */
+  complete?: boolean;
+}
+
+type CompleteSaleResult = OrderDetail & {
+  splitOrders?: { id: string; number: string; requestedDate: string | null }[];
+  takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
+};
 
 interface OrderPaymentBody {
   method?: PaymentMethod;
@@ -2322,6 +2338,51 @@ export class OrdersController {
     const detail = await this.loadDetail(order.id);
     this.fireOrderEvent('order.created', tenant.businessId!, detail);
     return splitOrders.length > 0 ? { ...detail, splitOrders } : detail;
+  }
+  /**
+   * The register's whole write in one request: create the order, take its
+   * tenders, and hand over take-with goods — what the screen used to do as
+   * three serial POSTs (create → payments → complete), each a round trip
+   * through the web proxy to the API. Runs inside the one request
+   * transaction, so a refused tender or a failed hand-over rolls the order
+   * back with it instead of leaving a half-written sale behind. Permissions
+   * mirror the three endpoints: `orders.create` for the order,
+   * `orders.deposit.take` for money and completion.
+   */
+  @Post('orders/complete-sale')
+  @RequirePermission('orders.create')
+  async completeSale(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: CompleteSaleBody,
+  ): Promise<CompleteSaleResult> {
+    const { payments = [], complete = false, ...orderBody } = body;
+    if (!Array.isArray(payments)) throw new BadRequestException('payments must be an array');
+    if ((payments.length > 0 || complete) && !tenant.isSuperAdmin) {
+      if (!tenant.permissions.has('orders.deposit.take')) {
+        throw new ForbiddenException('Missing permission: orders.deposit.take');
+      }
+    }
+    const created = await this.create(tenant, actor, orderBody);
+    let detail: OrderDetail = created;
+    for (const payment of payments) {
+      detail = await this.takePayment(tenant, actor, created.id, payment);
+    }
+    let takeWith: CompleteSaleResult['takeWith'];
+    if (complete) {
+      // The register used to swallow a failed hand-over and leave the sale
+      // written; keep that — the order and its money are the record, the
+      // -A piece can be finished from the order page.
+      try {
+        const done = await this.complete(tenant, actor, created.id, {});
+        takeWith = done.takeWith;
+        detail = done;
+      } catch (err) {
+        if (!(err instanceof HttpException)) throw err;
+        completeSaleLog.warn(`hand-over skipped for ${created.number}: ${err.message}`);
+      }
+    }
+    return { ...detail, splitOrders: created.splitOrders, takeWith };
   }
 
   /**
