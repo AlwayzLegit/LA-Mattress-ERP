@@ -35,13 +35,55 @@ export function paidCents(payments: readonly OrderPaymentLike[]): number {
   return sum;
 }
 
+export interface OrderReturnLike {
+  /** 'authorized' | 'completed' | 'cancelled' — only completed returns settle money. */
+  status: string;
+  /** Refund value of the return (fees already deducted). */
+  amountCents: number;
+  /**
+   * The part of that value handed back as store credit — a plain
+   * store-credit refund, or the credit an exchange minted for the
+   * replacement — rather than reversed on this order's own tenders.
+   * Credit that later left the ledger as a refund on this order is
+   * excluded again, because that refund is already a payment row.
+   */
+  creditOutCents: number;
+}
+
 /**
- * What the customer still owes. Never negative: an overpayment is a
- * refund/credit problem, not a negative balance, and reporting it as a
- * negative number would silently offset other orders in an AR total.
+ * Value of completed returns settled against the order itself (owner
+ * amendment 2026-10-31, PLAN-POS-OPERATIONS §0): a return refunded to
+ * the original tenders writes negative payment rows, so the refund must
+ * also come off what the order asks for or the credit counts twice —
+ * once as money out, once as a line still on the total. A store-credit
+ * refund never touched this order's tenders, so it settles nothing
+ * here; the customer holds the credit instead.
  */
-export function balanceDueCents(totalCents: number, payments: readonly OrderPaymentLike[]): number {
-  return Math.max(0, totalCents - paidCents(payments));
+export function returnsSettledCents(returns: readonly OrderReturnLike[]): number {
+  let sum = 0;
+  for (const r of returns) {
+    if (r.status !== 'completed') continue;
+    sum += Math.max(0, r.amountCents - r.creditOutCents);
+  }
+  return sum;
+}
+
+/**
+ * What the customer still owes: total − money collected − value of
+ * completed returns settled on this order. Never negative: an
+ * overpayment is a refund/credit problem, not a negative balance, and
+ * reporting it as a negative number would silently offset other orders
+ * in an AR total. `returnsSettled` is `returnsSettledCents(...)` (or the
+ * SQL twin in `order-balance.ts`); callers with no returns loaded pass 0
+ * only when the order cannot have been returned against (a quote, a
+ * brand-new order).
+ */
+export function balanceDueCents(
+  totalCents: number,
+  payments: readonly OrderPaymentLike[],
+  returnsSettled = 0,
+): number {
+  return Math.max(0, totalCents - paidCents(payments) - returnsSettled);
 }
 
 /**

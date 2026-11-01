@@ -32,7 +32,8 @@ import {
   type OverrideCredentials,
 } from '../controls/security-override.service';
 import { DRIZZLE } from '../database/database.module';
-import { paidCents } from '../orders/order-math';
+import { loadReturnsSettled } from '../orders/order-balance';
+import { balanceDueCents, paidCents } from '../orders/order-math';
 import { StoreCreditService } from '../returns/store-credit.service';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
@@ -672,7 +673,11 @@ export class ExchangesController {
       .select()
       .from(schema.payments)
       .where(eq(schema.payments.orderId, saleOrder.id));
-    const balanceDue = Math.max(0, saleOrder.totalCents - paidCents(salePayments));
+    const balanceDue = balanceDueCents(
+      saleOrder.totalCents,
+      salePayments,
+      await loadReturnsSettled(this.db, saleOrder.id),
+    );
     const ledger = await this.storeCredit.balanceCents(this.db, ret.customerId);
     const applied = Math.min(ret.amountCents, balanceDue, ledger);
     if (applied > 0) {
@@ -811,6 +816,7 @@ export class ExchangesController {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, row.saleOrderId));
     const salePaidCents = paidCents(salePayments);
+    const saleSettledCents = await loadReturnsSettled(this.db, row.saleOrderId);
     const creditCents = Math.max(0, row.returnCents - row.restockingFeeCents);
 
     await this.lazyComplete([row]);
@@ -823,7 +829,7 @@ export class ExchangesController {
         creditCents,
         saleTotalCents: row.saleTotalCents,
         salePaidCents,
-        saleBalanceDueCents: Math.max(0, row.saleTotalCents - salePaidCents),
+        saleBalanceDueCents: balanceDueCents(row.saleTotalCents, salePayments, saleSettledCents),
       },
     };
   }
