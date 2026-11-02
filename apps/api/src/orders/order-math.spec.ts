@@ -6,6 +6,7 @@ import {
   deriveFulfillmentStatus,
   isLiveOrderStatus,
   paidCents,
+  returnsSettledCents,
   planReleases,
   planReservations,
   type ReservableLine,
@@ -59,6 +60,49 @@ describe('paidCents / balanceDueCents', () => {
 
   it('reaches exactly zero when the balance is collected in full', () => {
     expect(balanceDueCents(129_999, [succeeded(32_500), succeeded(97_499)])).toBe(0);
+  });
+
+  // Owner amendment 2026-10-31: a completed return settles its value on
+  // the order, so a refund to the original tenders is not re-owed.
+  it('a return refunded to original tenders leaves a paid-in-full order at zero', () => {
+    // LB-11230: $3,047.23 paid, one $328.49 line returned and refunded.
+    const payments = [succeeded(304_723), succeeded(-32_849)];
+    const settled = returnsSettledCents([
+      { status: 'completed', amountCents: 32_849, creditOutCents: 0 },
+    ]);
+    expect(settled).toBe(32_849);
+    expect(balanceDueCents(304_723, payments, settled)).toBe(0);
+  });
+
+  it('a store-credit refund settles nothing on the order itself', () => {
+    const settled = returnsSettledCents([
+      { status: 'completed', amountCents: 32_849, creditOutCents: 32_849 },
+    ]);
+    expect(settled).toBe(0);
+    // Paid in full: nothing owed, and the credit lives on the ledger.
+    expect(balanceDueCents(304_723, [succeeded(304_723)], settled)).toBe(0);
+    // Half paid: the goods kept are still owed; the credit is separate.
+    expect(balanceDueCents(100_000, [succeeded(40_000)], settled)).toBe(60_000);
+  });
+
+  it('an exchange counts only the credit that stayed out as settled', () => {
+    // $1,000 returned into an exchange, $400 applied to the replacement,
+    // the $600 leftover refunded to the card (refund rows on the order).
+    const payments = [succeeded(100_000), succeeded(-60_000)];
+    const settled = returnsSettledCents([
+      { status: 'completed', amountCents: 100_000, creditOutCents: 100_000 - 60_000 },
+    ]);
+    expect(settled).toBe(60_000);
+    expect(balanceDueCents(100_000, payments, settled)).toBe(0);
+  });
+
+  it('ignores returns that are only authorized or cancelled', () => {
+    expect(
+      returnsSettledCents([
+        { status: 'authorized', amountCents: 5_000, creditOutCents: 0 },
+        { status: 'cancelled', amountCents: 5_000, creditOutCents: 0 },
+      ]),
+    ).toBe(0);
   });
 });
 

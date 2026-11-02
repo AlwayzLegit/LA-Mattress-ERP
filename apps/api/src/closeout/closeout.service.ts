@@ -11,6 +11,7 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { ROOT_DRIZZLE } from '../database/database.module';
 import { ExceptionsService } from '../controls/exceptions.service';
+import { balanceDueCentsSql } from '../orders/order-balance';
 import { OrdersService } from '../orders/orders.service';
 
 export interface CloseoutSummary {
@@ -205,19 +206,13 @@ export class CloseoutService implements OnModuleInit, OnModuleDestroy {
     // "quietly write off the balance after delivery" pattern.
     const withBalance = await db.execute(sql`
       SELECT o.id, o.number,
-             o.total_cents - COALESCE((
-               SELECT SUM(p.amount_cents) FROM payments p
-               WHERE p.order_id = o.id AND p.status = 'succeeded'
-             ), 0) AS balance_cents
+             ${balanceDueCentsSql(sql.raw('o.id'), sql.raw('o.total_cents'))} AS balance_cents
       FROM orders o
       WHERE o.business_id = ${args.businessId}
         AND o.location_id = ${args.locationId}
         AND o.status IN ('fulfilled', 'completed')
         AND o.imported_at IS NULL
-        AND o.total_cents - COALESCE((
-              SELECT SUM(p.amount_cents) FROM payments p
-              WHERE p.order_id = o.id AND p.status = 'succeeded'
-            ), 0) > 0
+        AND ${balanceDueCentsSql(sql.raw('o.id'), sql.raw('o.total_cents'))} > 0
       LIMIT 25
     `);
     const balanceRows = (withBalance as unknown as Record<string, unknown>[]).map((r) => ({

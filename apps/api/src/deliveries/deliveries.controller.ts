@@ -22,6 +22,7 @@ import { SecurityOverrideService } from '../controls/security-override.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettled, loadReturnsSettledByOrder } from '../orders/order-balance';
 import { OrdersService } from '../orders/orders.service';
 import { OrderCompletionService } from '../orders/order-completion.service';
 import { OrderReturnsService } from '../returns/order-returns.service';
@@ -1251,7 +1252,12 @@ export class DeliveriesController {
       if (p.status !== 'succeeded' || !p.orderId) continue;
       paidBy.set(p.orderId, (paidBy.get(p.orderId) ?? 0) + p.amountCents);
     }
-    return orders.reduce((sum, o) => sum + Math.max(0, o.totalCents - (paidBy.get(o.id) ?? 0)), 0);
+    const settledBy = await loadReturnsSettledByOrder(this.db, unique);
+    return orders.reduce(
+      (sum, o) =>
+        sum + Math.max(0, o.totalCents - (paidBy.get(o.id) ?? 0) - (settledBy.get(o.id) ?? 0)),
+      0,
+    );
   }
 
   private async codDueForRun(runId: string): Promise<number> {
@@ -1446,6 +1452,7 @@ export class DeliveriesController {
     const paid = payments
       .filter((p) => p.status === 'succeeded')
       .reduce((s, p) => s + p.amountCents, 0);
+    const settled = await loadReturnsSettled(this.db, row.orderId);
     const lines = await this.db
       .select({
         id: schema.deliveryLines.id,
@@ -1484,7 +1491,7 @@ export class DeliveriesController {
       addressPostalCode: order?.addressPostalCode ?? null,
       addressPhone: order?.addressPhone ?? null,
       fulfillmentType: order?.fulfillmentType ?? 'delivery',
-      balanceDueCents: Math.max(0, (order?.totalCents ?? 0) - paid),
+      balanceDueCents: Math.max(0, (order?.totalCents ?? 0) - paid - settled),
       // A delivered / failed / cancelled stop is past reserving.
       unreservedUnits: ['delivered', 'failed', 'cancelled'].includes(row.status)
         ? 0

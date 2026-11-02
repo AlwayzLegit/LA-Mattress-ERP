@@ -26,6 +26,7 @@ import {
   type PageResponse,
 } from '../common/pagination';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
@@ -298,6 +299,10 @@ export class CustomersController {
           .groupBy(schema.payments.orderId)
       : [];
     const paidBy = new Map(paid.map((p) => [p.orderId, p.paidCents]));
+    const settledBy = await loadReturnsSettledByOrder(
+      this.db,
+      open.map((o) => o.id),
+    );
 
     return {
       lifetime: {
@@ -310,7 +315,11 @@ export class CustomersController {
       },
       openOrders: open.map((o) => {
         const paidCents = paidBy.get(o.id) ?? 0;
-        return { ...o, paidCents, balanceCents: o.totalCents - paidCents };
+        return {
+          ...o,
+          paidCents,
+          balanceCents: Math.max(0, o.totalCents - paidCents - (settledBy.get(o.id) ?? 0)),
+        };
       }),
     };
   }

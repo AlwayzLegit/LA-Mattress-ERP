@@ -12,6 +12,7 @@ import { schema } from '@jetnine/db';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
+import { balanceDueCentsSql, paidCentsSql } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -594,7 +595,8 @@ export class MyDayController {
     me: string,
     today: string,
   ): Promise<MyDaySummary['balanceDue']> {
-    const paid = sql<number>`COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = ${schema.orders.id} AND p.status = 'succeeded'), 0)::int`;
+    const paid = paidCentsSql(sql`${schema.orders.id}`);
+    const balance = balanceDueCentsSql(sql`${schema.orders.id}`, sql`${schema.orders.totalCents}`);
     const rows = await this.db
       .select({
         orderId: schema.orders.id,
@@ -607,6 +609,7 @@ export class MyDayController {
         requestedDate: schema.orders.requestedDate,
         totalCents: schema.orders.totalCents,
         paidCents: paid,
+        balanceCents: balance,
       })
       .from(schema.orders)
       .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
@@ -616,7 +619,7 @@ export class MyDayController {
           inArray(schema.orders.status, LIVE_ORDER),
           isNull(schema.orders.importedAt),
           this.mineCond(me),
-          sql`${schema.orders.totalCents} > ${paid}`,
+          sql`${balance} > 0`,
           salesScopeCond(tenant, schema.orders.locationId),
         ),
       )
@@ -632,7 +635,7 @@ export class MyDayController {
       requestedDate: r.requestedDate ?? null,
       totalCents: r.totalCents,
       paidCents: r.paidCents,
-      balanceCents: r.totalCents - r.paidCents,
+      balanceCents: r.balanceCents,
       dueNow: r.requestedDate != null && r.requestedDate <= today,
     }));
     return {

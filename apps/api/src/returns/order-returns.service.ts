@@ -11,7 +11,8 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { DRIZZLE } from '../database/database.module';
 import { CommissionsService } from '../money/commissions.service';
-import { paidCents } from '../orders/order-math';
+import { loadReturnsSettled } from '../orders/order-balance';
+import { balanceDueCents, paidCents } from '../orders/order-math';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 import { StoreCreditService } from './store-credit.service';
 
@@ -206,7 +207,11 @@ export class OrderReturnsService {
         .select()
         .from(schema.payments)
         .where(eq(schema.payments.orderId, saleOrder.id));
-      const balanceDue = Math.max(0, saleOrder.totalCents - paidCents(salePayments));
+      const balanceDue = balanceDueCents(
+        saleOrder.totalCents,
+        salePayments,
+        await loadReturnsSettled(this.db, saleOrder.id),
+      );
       const applied = Math.min(credit, balanceDue);
       if (applied > 0) {
         await this.db.insert(schema.payments).values({
@@ -242,7 +247,10 @@ export class OrderReturnsService {
           businessId: ret.businessId,
           customerId: order.customerId,
           amountCents: residual,
-          referenceType: 'exchange',
+          // Distinct reference: this credit comes back out as refund
+          // payment rows on the original order, and the balance math
+          // (order-balance.ts) must not count it as credit still out.
+          referenceType: 'exchange_refund',
           referenceId: liveExchange.id,
           actorUserId,
           reason: `Refunded from exchange ${liveExchange.number} by ${liveExchange.refundTender}`,

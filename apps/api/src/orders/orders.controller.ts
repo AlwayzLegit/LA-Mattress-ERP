@@ -61,6 +61,7 @@ import {
   type FulfillmentRequest,
   type OrderStatus,
 } from './order-math';
+import { balanceDueCentsSql, loadReturnsSettled, loadReturnsSettledByOrder } from './order-balance';
 import { OrdersService } from './orders.service';
 import { OrderCompletionService } from './order-completion.service';
 import { businessTimeZone } from '../common/business-today';
@@ -432,8 +433,15 @@ interface OrderDetail extends OrderListRow {
   taxCents: number;
   /** Derived (D-money rule): sum of succeeded payments. */
   paidCents: number;
-  /** Derived: total - paid, floored at zero. */
+  /** Derived: total - paid - returnedCents, floored at zero. */
   balanceDueCents: number;
+  /**
+   * Derived (owner amendment 2026-10-31): value of completed returns
+   * settled on this order — refunded to its original tenders, so the
+   * refund rows in `paidCents` are matched here instead of reading as a
+   * balance still owed. Store-credit refunds settle nothing here.
+   */
+  returnedCents: number;
   /** Derived (§10 exchanges): paid - total, floored at zero. */
   creditDueCents: number;
   addressLine1: string | null;
@@ -885,9 +893,7 @@ export class OrdersController {
           where d.order_id = ${schema.orders.id}
             and d.status in ('scheduled','loaded','out_for_delivery')),
         ${schema.orders.requestedDate})`,
-      balanceDue: sql`greatest(0, ${schema.orders.totalCents} - coalesce(
-        (select sum(p.amount_cents) from payments p
-          where p.order_id = ${schema.orders.id} and p.status = 'succeeded'), 0))`,
+      balanceDue: balanceDueCentsSql(sql`${schema.orders.id}`, sql`${schema.orders.totalCents}`),
       // Redesign Phase 6 (README §3.2): every column sorts.
       store: sql`${schema.locations.name}`,
       // The display ladder (Draft → Quote → Pending/On PO/Reserved →
@@ -1066,6 +1072,7 @@ export class OrdersController {
     const pageRows = rows.slice(0, limit);
     const ids = pageRows.map((r) => r.id);
     const paid = new Map<string, number>();
+    let settled = new Map<string, number>();
     const deliveryState = new Map<string, { date: string | null; status: string }>();
     const poByOrder = new Map<string, string>();
     const reservedShort = new Set<string>();
@@ -1086,6 +1093,7 @@ export class OrdersController {
         .where(and(inArray(schema.payments.orderId, ids), eq(schema.payments.status, 'succeeded')))
         .groupBy(schema.payments.orderId);
       for (const p of pays) if (p.orderId) paid.set(p.orderId, p.cents);
+      settled = await loadReturnsSettledByOrder(this.db, ids);
 
       // Undelivered trips, most advanced status first per order.
       const trips = await this.db
@@ -1217,7 +1225,7 @@ export class OrdersController {
     }
 
     const enriched = pageRows.map((r) => {
-      const balance = Math.max(0, r.totalCents - (paid.get(r.id) ?? 0));
+      const balance = Math.max(0, r.totalCents - (paid.get(r.id) ?? 0) - (settled.get(r.id) ?? 0));
       const credit = Math.max(0, (paid.get(r.id) ?? 0) - r.totalCents);
       const trip = deliveryState.get(r.id);
       const displayStatus = deriveDisplayStatus({
@@ -1755,6 +1763,7 @@ export class OrdersController {
       if (p.status !== 'succeeded' || !p.orderId) continue;
       paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) ?? 0) + p.amountCents);
     }
+    const settledByOrder = await loadReturnsSettledByOrder(this.db, orderIds);
     const linesByOrder = new Map<string, typeof lines>();
     for (const l of lines) {
       const bucket = linesByOrder.get(l.orderId) ?? [];
@@ -1774,7 +1783,7 @@ export class OrdersController {
         ...o,
         docType: 'order' as const,
         paidCents: paid,
-        balanceDueCents: Math.max(0, o.totalCents - paid),
+        balanceDueCents: Math.max(0, o.totalCents - paid - (settledByOrder.get(o.id) ?? 0)),
         lines: (linesByOrder.get(o.id) ?? []).map(({ orderId: _orderId, ...rest }) => rest),
       };
     });
@@ -3119,7 +3128,11 @@ export class OrdersController {
     ]);
     const creditCents = paidCents(fromPayments) - order.totalCents;
     if (creditCents <= 0) throw new BadRequestException('This order has no credit to move');
-    const targetDue = balanceDueCents(target.totalCents, toPayments);
+    const targetDue = balanceDueCents(
+      target.totalCents,
+      toPayments,
+      await loadReturnsSettled(this.db, target.id),
+    );
     if (targetDue <= 0) throw new BadRequestException(`${target.number} has no balance due`);
     const amountCents = Math.min(creditCents, targetDue);
     await this.movePayments(id, target.id, amountCents);
@@ -4064,7 +4077,7 @@ export class OrdersController {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id));
-    const due = balanceDueCents(order.totalCents, existing);
+    const due = balanceDueCents(order.totalCents, existing, await loadReturnsSettled(this.db, id));
 
     // One tender can cover a whole split family (SO-..., -A, -B): the
     // register takes a single payment for the combined balance and the
@@ -4093,7 +4106,11 @@ export class OrdersController {
           .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
           .from(schema.payments)
           .where(eq(schema.payments.orderId, sib.id));
-        const sibDue = balanceDueCents(sib.totalCents, sibPayments);
+        const sibDue = balanceDueCents(
+          sib.totalCents,
+          sibPayments,
+          await loadReturnsSettled(this.db, sib.id),
+        );
         if (sibDue <= 0) continue;
         const take = Math.min(leftover, sibDue);
         allocations.push({ order: sib, amountCents: take, hadMoney: paidCents(sibPayments) > 0 });
@@ -4464,7 +4481,7 @@ export class OrdersController {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id));
-    const due = balanceDueCents(order.totalCents, payments);
+    const due = balanceDueCents(order.totalCents, payments, await loadReturnsSettled(this.db, id));
     if (due > 0) {
       if (!body.allowBalance) {
         throw new BadRequestException(
@@ -4533,7 +4550,11 @@ export class OrdersController {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, pieceId));
-    const due = balanceDueCents(piece.totalCents, payments);
+    const due = balanceDueCents(
+      piece.totalCents,
+      payments,
+      await loadReturnsSettled(this.db, pieceId),
+    );
     if (due > 0) {
       return {
         completed: false,
@@ -4886,7 +4907,11 @@ export class OrdersController {
       .select({ amountCents: schema.payments.amountCents, status: schema.payments.status })
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id));
-    const balance = Math.max(0, order.totalCents - paidCents(payments));
+    const balance = balanceDueCents(
+      order.totalCents,
+      payments,
+      await loadReturnsSettled(this.db, id),
+    );
     const [biz] = await this.db
       .select({ opsSettingsJson: schema.businesses.opsSettingsJson })
       .from(schema.businesses)
@@ -6052,12 +6077,17 @@ export class OrdersController {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id))
       .orderBy(schema.payments.createdAt);
+    const returnedCents = await loadReturnsSettled(this.db, id);
 
     // Split family (base number + letter suffixes), so the page can link
     // the pieces and offer to move credit between them.
     const familyRows = await this.splitFamily(order.businessId, order.number, order.id);
     let family: OrderDetail['family'] = [];
     if (familyRows.length > 0) {
+      const famSettled = await loadReturnsSettledByOrder(
+        this.db,
+        familyRows.map((r) => r.id),
+      );
       const famPayments = await this.db
         .select({
           orderId: schema.payments.orderId,
@@ -6095,6 +6125,7 @@ export class OrdersController {
         balanceDueCents: balanceDueCents(
           r.totalCents,
           famPayments.filter((fp) => fp.orderId === r.id),
+          famSettled.get(r.id) ?? 0,
         ),
         fulfillmentType: r.fulfillmentType,
         requestedDate: r.requestedDate,
@@ -6122,7 +6153,8 @@ export class OrdersController {
       taxCents: order.taxCents,
       totalCents: order.totalCents,
       paidCents: paidCents(payments),
-      balanceDueCents: balanceDueCents(order.totalCents, payments),
+      balanceDueCents: balanceDueCents(order.totalCents, payments, returnedCents),
+      returnedCents,
       creditDueCents: Math.max(0, paidCents(payments) - order.totalCents),
       depositRequiredCents: order.depositRequiredCents,
       fulfillmentType: order.fulfillmentType,

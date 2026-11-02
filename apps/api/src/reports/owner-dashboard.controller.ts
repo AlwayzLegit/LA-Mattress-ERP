@@ -6,6 +6,7 @@ import { CurrentTenant } from '../auth/current-user.decorator';
 import { parseDayRange, tzDayEndExclusive, tzDayStart, type DayRange } from '../common/date-range';
 import { salesScopeCond } from '../common/sales-scope';
 import { DRIZZLE } from '../database/database.module';
+import { balanceDueCentsSql } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -368,11 +369,14 @@ export class OwnerDashboardController {
       rows.reduce((a, p) => a + p[k], 0);
 
     // Open book: orders still open, and what they still owe.
-    const paidExpr = sql<number>`COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = ${schema.orders.id} AND p.status = 'succeeded'), 0)`;
+    const balanceExpr = balanceDueCentsSql(
+      sql`${schema.orders.id}`,
+      sql`${schema.orders.totalCents}`,
+    );
     const [openBook] = await this.db
       .select({
         n: sql<number>`count(*)::int`,
-        balance: sql<number>`coalesce(sum(GREATEST(${schema.orders.totalCents} - ${paidExpr}, 0)), 0)::int`,
+        balance: sql<number>`coalesce(sum(${balanceExpr}), 0)::int`,
       })
       .from(schema.orders)
       .where(
@@ -390,8 +394,8 @@ export class OwnerDashboardController {
     if (tenant.isSuperAdmin || tenant.permissions.has('reports.financial.view')) {
       const [ar] = await this.db
         .select({
-          cents: sql<number>`coalesce(sum(GREATEST(${schema.orders.totalCents} - ${paidExpr}, 0)), 0)::int`,
-          accounts: sql<number>`count(DISTINCT ${schema.orders.customerId}) FILTER (WHERE ${schema.orders.totalCents} - ${paidExpr} > 0)::int`,
+          cents: sql<number>`coalesce(sum(${balanceExpr}), 0)::int`,
+          accounts: sql<number>`count(DISTINCT ${schema.orders.customerId}) FILTER (WHERE ${balanceExpr} > 0)::int`,
         })
         .from(schema.orders)
         .where(
@@ -656,7 +660,10 @@ export class OwnerDashboardController {
     const pageSize = Math.min(50, Math.max(5, Number(pageSizeQ) || 10));
     const pageWanted = Math.max(1, Number(pageQ) || 1);
 
-    const paidExpr = sql<number>`COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = ${schema.orders.id} AND p.status = 'succeeded'), 0)::int`;
+    const balanceExpr = balanceDueCentsSql(
+      sql`${schema.orders.id}`,
+      sql`${schema.orders.totalCents}`,
+    );
     const repUser = schema.users;
     const rows = await this.db
       .select({
@@ -672,7 +679,7 @@ export class OwnerDashboardController {
         fulfillmentType: schema.orders.fulfillmentType,
         requestedDate: schema.orders.requestedDate,
         totalCents: schema.orders.totalCents,
-        paidCents: paidExpr,
+        balanceCents: balanceExpr,
         repName: repUser.name,
         repEmail: repUser.email,
         createdAt: schema.orders.createdAt,
@@ -735,7 +742,7 @@ export class OwnerDashboardController {
         promised: r.requestedDate,
         promisedLate: r.status === 'open' && !!r.requestedDate && r.requestedDate < today,
         totalCents: r.totalCents,
-        balanceCents: Math.max(0, r.totalCents - r.paidCents),
+        balanceCents: r.balanceCents,
         rep: r.repName ?? r.repEmail ?? null,
         shortUnits: shortMap.get(r.id) ?? 0,
         ageDays: r.ageDays,

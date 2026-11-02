@@ -30,6 +30,7 @@ import { AuditService } from '../audit/audit.service';
 import { businessToday } from '../common/business-today';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettledByOrder } from '../orders/order-balance';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
@@ -307,9 +308,10 @@ export class SchedulingController {
     }
     const deliveryIds = rows.map((r) => r.deliveryId);
     const orderIds = [...new Set(rows.map((r) => r.orderId))];
-    const [loads, paid, lines, onOrder] = await Promise.all([
+    const [loads, paid, settled, lines, onOrder] = await Promise.all([
       this.deliveryLoads(deliveryIds),
       this.paidByOrder(orderIds),
+      loadReturnsSettledByOrder(this.db, orderIds),
       this.db
         .select({
           orderId: schema.orderLines.orderId,
@@ -343,7 +345,10 @@ export class SchedulingController {
     const onOrderSet = new Set(onOrder.map((o) => o.orderId));
     const out: ConfirmRow[] = rows.map((r) => {
       const load = loads.get(r.deliveryId) ?? { units: 0, volume: 0 };
-      const balance = Math.max(0, r.totalCents - (paid.get(r.orderId) ?? 0));
+      const balance = Math.max(
+        0,
+        r.totalCents - (paid.get(r.orderId) ?? 0) - (settled.get(r.orderId) ?? 0),
+      );
       return {
         deliveryId: r.deliveryId,
         orderId: r.orderId,
@@ -496,9 +501,11 @@ export class SchedulingController {
       )
       .limit(500);
     if (rows.length === 0) return [];
-    const [loads, paid] = await Promise.all([
+    const orderIds = [...new Set(rows.map((r) => r.orderId))];
+    const [loads, paid, settled] = await Promise.all([
       this.deliveryLoads(rows.map((r) => r.id)),
-      this.paidByOrder([...new Set(rows.map((r) => r.orderId))]),
+      this.paidByOrder(orderIds),
+      loadReturnsSettledByOrder(this.db, orderIds),
     ]);
     return rows.map((r) => {
       const load = loads.get(r.id) ?? { units: 0, volume: 0 };
@@ -523,7 +530,10 @@ export class SchedulingController {
         postalCode: r.postalCode,
         units: load.units,
         dollarsCents: r.totalCents,
-        balanceDueCents: Math.max(0, r.totalCents - (paid.get(r.orderId) ?? 0)),
+        balanceDueCents: Math.max(
+          0,
+          r.totalCents - (paid.get(r.orderId) ?? 0) - (settled.get(r.orderId) ?? 0),
+        ),
         volume: load.volume,
       };
     });
