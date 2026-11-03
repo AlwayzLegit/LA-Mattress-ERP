@@ -21,6 +21,7 @@ import { CurrentUser, type CurrentUserPayload } from '../auth/current-user.decor
 import { PLANS, type PlanId } from '../billing/pricing';
 import { isReadOnly, type SubscriptionStatus } from '../billing/subscription-state';
 import { isUniqueViolation } from '../common/db-errors';
+import { seedDefaultReasonCodes } from '../controls/default-reason-codes';
 import { SuperAdminOnly, TenantScoped } from '../tenancy/decorators';
 import { InvitationService } from '../business/invitation.service';
 import { TemplatesService, type TemplateSnapshot } from './templates.service';
@@ -211,6 +212,9 @@ export class AdminBusinessesController {
     }
     const ownerRoleId = roleIdByName.get('Owner');
     if (!ownerRoleId) throw new UnprocessableEntityException('Owner role missing after seed');
+    // Owner 2026-11-02: the standard As-Is reasons, so the first Move to
+    // As-Is is not a one-option picker.
+    await seedDefaultReasonCodes(this.db, biz.id);
 
     // 2b. Create-from-template (platform layer): stamp the chosen
     // template's config on top of the system seed.

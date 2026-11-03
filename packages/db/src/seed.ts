@@ -1,4 +1,4 @@
-import { SYSTEM_ROLES } from '@jetnine/shared';
+import { DEFAULT_AS_IS_REASON_CODES, SYSTEM_ROLES } from '@jetnine/shared';
 import { hashPassword } from 'better-auth/crypto';
 import { eq } from 'drizzle-orm';
 import { createClient } from './client';
@@ -12,6 +12,7 @@ import {
   memberships,
   productVariants,
   products,
+  reasonCodes,
   rolePermissions,
   roles,
   users,
@@ -89,6 +90,17 @@ async function main() {
 
     const ownerRole = seededRoles.find((r) => r.name === 'Owner');
     if (!ownerRole) throw new Error('Owner role missing after seed');
+
+    // 3b. The standard As-Is reasons (owner 2026-11-02) — the same list
+    // business creation seeds in the API.
+    await db.insert(reasonCodes).values(
+      DEFAULT_AS_IS_REASON_CODES.map((c) => ({
+        businessId: demo.id,
+        code: c.code,
+        description: c.description,
+        usageClass: 'as_is',
+      })),
+    );
 
     // 4. Demo owner user + credential + membership
     const [demoOwner] = await db

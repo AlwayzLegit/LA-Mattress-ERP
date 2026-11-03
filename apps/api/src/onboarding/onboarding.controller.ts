@@ -18,6 +18,7 @@ import { isSupportedCurrency, SUPPORTED_CURRENCIES, SYSTEM_ROLES } from '@jetnin
 import { AuditService } from '../audit/audit.service';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
+import { seedDefaultReasonCodes } from '../controls/default-reason-codes';
 import { DRIZZLE } from '../database/database.module';
 
 interface CreateOnboardingBody {
@@ -180,6 +181,9 @@ export class OnboardingController {
     }
     const ownerRoleId = roleIdByName.get('Owner');
     if (!ownerRoleId) throw new UnprocessableEntityException('Owner role missing after seed');
+    // Owner 2026-11-02: the standard As-Is reasons, so the first Move to
+    // As-Is is not a one-option picker.
+    await seedDefaultReasonCodes(this.db, biz.id);
 
     // 4. The caller becomes the Owner. No invite / acceptance round
     // trip — they're already authenticated and verified.
