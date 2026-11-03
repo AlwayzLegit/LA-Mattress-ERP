@@ -26,6 +26,7 @@ const ORDER_TYPES = [
   { key: 'layaway', label: 'Layaways' },
   { key: 'exchange', label: 'Exchanges' },
   { key: 'quote', label: 'Quotes (open shopping carts)' },
+  { key: 'transfer', label: 'Transfers' },
 ];
 
 const ORDER_TYPE_LABEL: Record<OpenOrderRow['orderType'], string> = {
@@ -33,7 +34,13 @@ const ORDER_TYPE_LABEL: Record<OpenOrderRow['orderType'], string> = {
   layaway: 'Layaway',
   exchange: 'Exchange',
   quote: 'Quote',
+  transfer: 'Transfer',
 };
+
+/** A10: a transfer row opens the transfer, every other row its order. */
+function rowHref(r: OpenOrderRow): string {
+  return r.orderType === 'transfer' ? `/transfers/${r.orderId}` : `/orders/${r.orderId}`;
+}
 
 function fulfillmentStatus(s: string | null): string {
   if (!s) return '—';
@@ -46,7 +53,7 @@ const OPEN_ORDER_COLUMNS: ColumnDef<OpenOrderRow>[] = [
     id: 'orderNumber',
     label: 'Order number',
     sortValue: (r) => r.orderNumber,
-    render: (r) => <Link href={`/orders/${r.orderId}`}>{r.orderNumber}</Link>,
+    render: (r) => <Link href={rowHref(r)}>{r.orderNumber}</Link>,
   },
   {
     id: 'orderType',
@@ -236,7 +243,7 @@ export function OpenOrdersPanel({
       <Card
         title="Open orders"
         flush
-        description="Lines of this product on open orders with units still to fulfill. Quotes show when the order type says so."
+        description="Lines of this product on open orders with units still to fulfill, and open transfers — they hold stock the same way. Quotes show when the order type says so."
         data-testid="activity-open-orders"
       >
         {loading && !data ? (

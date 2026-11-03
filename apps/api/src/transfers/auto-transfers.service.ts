@@ -5,6 +5,7 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { ExceptionsService } from '../controls/exceptions.service';
 import { computeAutoTransferDate } from './auto-schedule';
+import { reserveTransferOrigin } from './transfer-reservations';
 
 export interface AutoTransferShortfall {
   variantId: string;
@@ -169,6 +170,15 @@ export class AutoTransfersService {
           quantityShipped: l.quantity,
         })),
       );
+      // A10: the auto transfer is open, so it holds the picked units at
+      // the source — a second shortfall cannot claim the same pile.
+      await reserveTransferOrigin(db, {
+        businessId: args.businessId,
+        actorUserId: args.actorUserId,
+        transferId: transfer.id,
+        fromLocationId,
+        lines,
+      });
       await this.audit.log({
         action: 'stock_transfer.auto_create',
         targetType: 'stock_transfer',

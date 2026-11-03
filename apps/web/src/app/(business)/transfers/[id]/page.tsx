@@ -255,8 +255,18 @@ export default function TransferDetailPage() {
                     <div
                       className={`text-xs ${l.availableAtFrom >= l.quantityShipped ? 'muted' : 'text-danger'}`}
                     >
-                      {l.availableAtFrom} available
-                      {(l.reservedAtFrom ?? 0) > 0 ? ` · ${l.reservedAtFrom} reserved` : ''}
+                      {isDraft
+                        ? // A10: the origin's reserved count includes this
+                          // transfer's own hold — say so, or "1 reserved"
+                          // reads as someone else having the unit.
+                          `${l.onHandAtFrom ?? 0} on hand · ${l.quantityShipped} held for this transfer${
+                            (l.reservedAtFrom ?? 0) - l.quantityShipped > 0
+                              ? ` · ${(l.reservedAtFrom ?? 0) - l.quantityShipped} held elsewhere`
+                              : ''
+                          }`
+                        : `${l.availableAtFrom} available${
+                            (l.reservedAtFrom ?? 0) > 0 ? ` · ${l.reservedAtFrom} reserved` : ''
+                          }`}
                     </div>
                   )}
                 </td>
@@ -299,7 +309,7 @@ export default function TransferDetailPage() {
       <PageHeader
         eyebrow={back}
         title={<code>{t.number}</code>}
-        meta={<StatusBadge status={t.status} />}
+        meta={<StatusBadge status={isDraft ? 'open' : t.status} />}
         sub={
           <>
             <strong>{t.fromLocationName ?? '—'}</strong> →{' '}
@@ -376,7 +386,7 @@ export default function TransferDetailPage() {
               flush
               description={
                 isDraft
-                  ? `A draft ships once ${t.fromLocationName ?? 'the origin'} has every unit on hand: print the ticket, then Ship transfer. Until the stock is there the lines wait under Purchasing → Reorder suggestions, linked to this transfer, so the buyer can order them.`
+                  ? `This transfer is open: its units are held at ${t.fromLocationName ?? 'the origin'} like an open sales order's, so nothing else can sell or move them. It ships once every unit is on hand there: print the ticket, then Ship transfer. Until the stock is there the lines wait under Purchasing → Reorder suggestions, linked to this transfer, so the buyer can order them.`
                   : undefined
               }
             >
@@ -472,10 +482,11 @@ export default function TransferDetailPage() {
 
 /**
  * Owner 2026-10-30: transfer lines read like sales-order lines — the
- * movement state of the units and, while it is a draft, whether the
- * origin can actually ship them. A draft holds nothing, so "in stock"
- * means Ship would find the units today; the PO links say when the
- * missing ones are due.
+ * movement state of the units and, while it is open, whether the origin
+ * can actually ship them. An open transfer holds its units at the origin
+ * (A10), and `availableAtFrom` counts that hold as the transfer's own, so
+ * "in stock" means Ship would find the units today; the PO links say
+ * when the missing ones are due.
  */
 function TransferLineFulfillment({
   transfer: t,
@@ -489,7 +500,7 @@ function TransferLineFulfillment({
   const remaining = l.quantityShipped - l.quantityReceived;
   let text: string;
   if (t.status === 'draft') {
-    text = t.scheduledFor ? `Ships ${day(t.scheduledFor)}` : 'Draft — unscheduled';
+    text = t.scheduledFor ? `Ships ${day(t.scheduledFor)}` : 'Open — unscheduled';
   } else if (t.status === 'in_transit') {
     text =
       l.quantityReceived > 0 && remaining > 0

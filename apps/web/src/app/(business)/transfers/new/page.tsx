@@ -370,12 +370,13 @@ export default function NewTransferPage() {
                     disabled={complete}
                     onChange={(e) => setShipNow(e.target.checked)}
                   />
-                  Ship immediately (skip the draft step)
+                  Ship immediately (take the units off hand now)
                 </label>
                 {shipNow && !complete && (
                   <p className="field-hint">
                     Blocked when a printed transfer ticket is required before shipping (the default)
-                    — create the draft, print the ticket, then ship.
+                    — create the transfer, print the ticket, then ship. An open transfer already
+                    holds its units at the origin.
                   </p>
                 )}
                 <label className="mt-2 flex items-center gap-2">
@@ -549,7 +550,7 @@ export default function NewTransferPage() {
                               min={l.quantity}
                               placeholder="—"
                               aria-label={`Ordered quantity for ${l.description}`}
-                              title="Total wanted (D18): anything above the shipped quantity is held and rolls into a new draft on receipt"
+                              title="Total wanted (D18): anything above the shipped quantity is held and rolls into a new open transfer on receipt"
                               value={l.quantityOrdered}
                               onChange={(e) => setLine(i, { quantityOrdered: e.target.value })}
                               className="w-20"
@@ -620,7 +621,7 @@ export default function NewTransferPage() {
                   ? 'Create + complete'
                   : shipNow
                     ? 'Create + ship'
-                    : 'Create draft'}
+                    : 'Create transfer'}
             </Button>
           </FormActions>
         </Stack>

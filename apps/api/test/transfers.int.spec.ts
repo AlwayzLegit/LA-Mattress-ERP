@@ -166,6 +166,26 @@ async function captureCookie(email: string): Promise<string> {
   return sessionCookie;
 }
 
+/** A10: units an open transfer (or an order) holds at a location. */
+async function reservedAt(variantId: string, locationId: string): Promise<number> {
+  const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+  const db = drizzle(sql);
+  try {
+    const [row] = await db
+      .select({ reserved: schema.inventoryLevels.reserved })
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.variantId, variantId),
+          eq(schema.inventoryLevels.locationId, locationId),
+        ),
+      );
+    return row?.reserved ?? 0;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 async function levelAt(variantId: string, locationId: string): Promise<number> {
   const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
   const db = drizzle(sql);
@@ -264,8 +284,61 @@ describe('Phase 2.4 — Stock transfers', () => {
     widgetLineId = res.body.lines.find((l: { variantId: string }) => l.variantId === variantAId).id;
     gadgetLineId = res.body.lines.find((l: { variantId: string }) => l.variantId === variantBId).id;
     // Owner 2026-10-30: each line says what the origin holds right now.
+    // A10: the transfer's own hold is inside `reserved`, and it counts as
+    // available to this transfer (Ship would find the units today).
     const widget = res.body.lines.find((l: { variantId: string }) => l.variantId === variantAId);
-    expect(widget).toMatchObject({ onHandAtFrom: 20, reservedAtFrom: 0, availableAtFrom: 20 });
+    expect(widget).toMatchObject({ onHandAtFrom: 20, reservedAtFrom: 8, availableAtFrom: 20 });
+  });
+
+  it('A10: the open transfer holds its units at the origin — on hand unchanged, reserved up', async () => {
+    expect(await levelAt(variantAId, warehouseLocationId)).toBe(20);
+    expect(await reservedAt(variantAId, warehouseLocationId)).toBe(8);
+    expect(await reservedAt(variantBId, warehouseLocationId)).toBe(4);
+    // The ledger explains the hold without moving on-hand.
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql);
+    try {
+      const holds = await db
+        .select({ delta: schema.inventoryMovements.delta, notes: schema.inventoryMovements.notes })
+        .from(schema.inventoryMovements)
+        .where(
+          and(
+            eq(schema.inventoryMovements.referenceId, transferId),
+            eq(schema.inventoryMovements.reason, 'transfer_reserve'),
+          ),
+        );
+      expect(holds).toHaveLength(2);
+      expect(holds.every((h) => h.delta === 0)).toBe(true);
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+  });
+
+  it('A10: a second transfer cannot sell the held units — available is on hand less every hold', async () => {
+    // 20 on hand, 8 held by the first transfer: a transfer for 12 sees
+    // 12 available (its own 12 plus nothing left), one for 13 is short.
+    const res = await request(app.getHttpServer())
+      .post('/v1/stock-transfers')
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId)
+      .send({
+        fromLocationId: warehouseLocationId,
+        toLocationId: mainLocationId,
+        lines: [{ variantId: variantAId, quantity: 13 }],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.lines[0]).toMatchObject({
+      onHandAtFrom: 20,
+      reservedAtFrom: 21,
+      availableAtFrom: 12,
+    });
+    const cancel = await request(app.getHttpServer())
+      .post(`/v1/stock-transfers/${res.body.id}/cancel`)
+      .set('Cookie', clerkCookie)
+      .set('X-Business-Id', businessId);
+    expect(cancel.status).toBe(201);
+    // Cancelling hands the hold back; the first transfer's 8 stay held.
+    expect(await reservedAt(variantAId, warehouseLocationId)).toBe(8);
   });
 
   it('Cannot ship a quantity exceeding origin on-hand', async () => {
@@ -313,6 +386,9 @@ describe('Phase 2.4 — Stock transfers', () => {
 
     expect(await levelAt(variantAId, warehouseLocationId)).toBe(wh1 - 8);
     expect(await levelAt(variantBId, warehouseLocationId)).toBe(wg1 - 4);
+    // A10: the hold ends as the units leave — reserved drops with on-hand.
+    expect(await reservedAt(variantAId, warehouseLocationId)).toBe(0);
+    expect(await reservedAt(variantBId, warehouseLocationId)).toBe(0);
     // Destination not yet credited.
     expect(await levelAt(variantAId, mainLocationId)).toBe(main1);
   });
@@ -1226,7 +1302,9 @@ describe('Transfers pack quick wins — hold/scheduled quantity (D18/D19) + exce
       res.body.rows as { variantId: string; totalQuantity: number; maxTransferQuantity: number }[]
     ).find((r) => r.variantId === excessVariantId);
     expect(row).toBeTruthy();
-    expect(row!.totalQuantity).toBe(50);
+    // A10: the 2-unit transfer just made is open, so it holds its units —
+    // the report counts what is free to consolidate, 48, not the 50 on hand.
+    expect(row!.totalQuantity).toBe(48);
     expect(row!.maxTransferQuantity).toBe(2);
 
     // The widget from earlier suites has a 100-unit line on record —

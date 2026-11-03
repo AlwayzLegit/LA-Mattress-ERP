@@ -12,6 +12,7 @@ import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { CostingService } from '../costing/costing.service';
 import { DRIZZLE } from '../database/database.module';
+import { releaseTransferOrigin } from './transfer-reservations';
 
 /** Ops gates for transfers (Q2/Q3, owner 2026-08-28). Null = default. */
 export interface TransferOps {
@@ -107,6 +108,15 @@ export class TransferShipService {
       }
     }
 
+    // A10: the open transfer held these units at the origin; the hold
+    // ends as the units leave, so reserved and on-hand drop together.
+    await releaseTransferOrigin(this.db, {
+      businessId,
+      actorUserId: actorId,
+      transferId: transfer.id,
+      fromLocationId: transfer.fromLocationId,
+      lines: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantityShipped })),
+    });
     await this.deductOrigin(
       businessId,
       actorId,

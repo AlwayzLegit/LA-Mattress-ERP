@@ -125,7 +125,7 @@ export default function ManifestDetailPage() {
                   size="sm"
                   disabled={busy}
                   onClick={() => {
-                    if (window.confirm('Cancel this manifest? Transfers detach and stay drafts.')) {
+                    if (window.confirm('Cancel this manifest? Transfers detach and stay open.')) {
                       void act('/cancel');
                     }
                   }}

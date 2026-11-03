@@ -77,7 +77,9 @@ const TRANSFER_COLUMNS: ColumnDef<TransferRow>[] = [
     id: 'status',
     label: 'Status',
     sortValue: (t) => t.status,
-    render: (t) => <StatusBadge status={t.status} />,
+    // A10: the waiting-to-ship state is stored as `draft` but it is live —
+    // the units are held at the origin — so the owner-facing word is Open.
+    render: (t) => <StatusBadge status={t.status === 'draft' ? 'open' : t.status} />,
   },
   {
     id: 'scheduled',

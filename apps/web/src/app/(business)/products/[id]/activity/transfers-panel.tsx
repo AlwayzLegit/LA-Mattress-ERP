@@ -99,7 +99,8 @@ export function TransfersPanel({
       id: 'status',
       label: 'Status',
       sortValue: (r) => r.status,
-      render: (r) => <StatusBadge status={r.status} />,
+      // A10: a transfer waiting to ship is open — its units are held at the origin.
+      render: (r) => <StatusBadge status={r.status === 'draft' ? 'open' : r.status} />,
     },
   ];
   const cols = useListColumns(
