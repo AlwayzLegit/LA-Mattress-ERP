@@ -36,17 +36,83 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${apiUrl}${path}`, {
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
+interface RawResponse {
+  status: number;
+  statusText: string;
+  ok: boolean;
+  text: string;
+}
+
+async function fetchRaw(url: string, init: RequestInit): Promise<RawResponse> {
+  const res = await fetch(url, init);
+  return {
+    status: res.status,
+    statusText: res.statusText,
+    ok: res.ok,
+    text: res.status === 204 ? '' : await res.text(),
+  };
+}
+
+/**
+ * Identical GETs in flight at the same moment share one request. The shell
+ * mounts several providers that each ask for the member, the locations and
+ * the register settings, and a page's own panels ask again — on the owner
+ * dashboard three of twenty-one calls per load were duplicates, on the
+ * register two of fifteen. Only concurrent requests are shared (nothing is
+ * cached), so a refetch after a mutation still hits the server. Each caller
+ * keeps its own AbortSignal: aborting one never cancels the others.
+ */
+const inflight = new Map<string, Promise<RawResponse>>();
+
+function sharedGet(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal | null | undefined,
+): Promise<RawResponse> {
+  const key = `${url}#${JSON.stringify(init.headers ?? {})}`;
+  let shared = inflight.get(key);
+  if (!shared) {
+    shared = fetchRaw(url, { ...init, signal: undefined }).finally(() => inflight.delete(key));
+    inflight.set(key, shared);
+  }
+  if (!signal) return shared;
+  return new Promise<RawResponse>((resolve, reject) => {
+    const abort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+    shared.then(
+      (r) => {
+        signal.removeEventListener('abort', abort);
+        resolve(r);
       },
-      ...init,
-    });
+      (e: unknown) => {
+        signal.removeEventListener('abort', abort);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${apiUrl}${path}`;
+  const request: RequestInit = {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  };
+  const method = (init?.method ?? 'GET').toUpperCase();
+  let res: RawResponse;
+  try {
+    res =
+      method === 'GET' && init?.body == null
+        ? await sharedGet(url, request, init?.signal)
+        : await fetchRaw(url, request);
   } catch (err) {
     // A network failure (not an HTTP error): the server is unreachable or
     // the request was aborted. Only the former is an outage.
@@ -58,7 +124,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (isOutageStatus(res.status)) noteFailure(`${res.status} ${res.statusText}`);
   else noteSuccess();
   if (!res.ok) {
-    const text = await res.text();
+    const text = res.text;
     let message = `${res.status} ${res.statusText}`;
     let body: Record<string, unknown> | null = null;
     try {
@@ -86,5 +152,5 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, message, body);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return JSON.parse(res.text) as T;
 }

@@ -66,18 +66,24 @@ export function useNotifications(enabled: boolean, identity: string) {
   const [rows, setRows] = useState<NotificationRow[] | null>(null);
   const [seenAt, setSeenAt] = useState<string | null>(null);
   const key = `${SEEN_KEY}:${identity}`;
+  // The identity gains its business half once the inbox has loaded; that
+  // changes which "seen" marker applies, not which feed to fetch, so the
+  // fetch is keyed on the user alone.
+  const userPart = identity.split(':')[0] ?? '';
+  useEffect(() => {
+    setSeenAt(readSeenAt(key));
+  }, [key]);
   useEffect(() => {
     setRows(null);
     if (!enabled) return;
     const abort = new AbortController();
-    setSeenAt(readSeenAt(key));
     void api<{ data: NotificationRow[] }>('/v1/notifications?limit=50', { signal: abort.signal })
       .then((r) => setRows(r.data))
       .catch(() => {
         if (!abort.signal.aborted) setRows(null);
       });
     return () => abort.abort();
-  }, [enabled, key]);
+  }, [enabled, userPart]);
   const unread = rows ? rows.filter((n) => !seenAt || n.createdAt > seenAt).length : 0;
   const markRead = useCallback(() => {
     const newest = rows?.[0]?.createdAt ?? new Date().toISOString();
