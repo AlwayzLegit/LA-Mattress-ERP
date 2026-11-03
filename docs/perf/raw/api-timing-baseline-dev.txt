@@ -1,0 +1,26 @@
+endpoint                                                                 ms_p50   ms_min   ms_max     bytes   gzip
+/v1/auth/me                                                                   8        7        9       594    594 200
+/v1/dashboard/nav-counts                                                     25       25       30        67     67 200
+/v1/business/members/me                                                      17       16       20       319    319 200
+/v1/business/locations                                                       15       12       21      1802   1802 200
+/v1/business/settings/pos                                                    16       13       18       188    188 200
+/v1/dashboard/owner?start=2026-09-19&end=2026-10-18&compare=prior           157      132      170      4829   4829 200
+/v1/dashboard/stores?period=mtd                                              74       47       77     73213  73213 200
+/v1/dashboard/written-orders?period=today&offset=0                           25       24       27     25230  25230 200
+/v1/dashboard/changes?filter=all&limit=120                                   16       13       17       116    116 200
+/v1/dashboard/cash-pickups/queue                                             88       85      116    100788 100788 200
+/v1/dashboard/cash-pickups/handoffs                                          19       16       20        74     74 200
+/v1/competitions/current                                                     59       45       66     42717  42717 200
+/v1/schedule?week=2026-10-12                                                 25       25       27      3330   3330 200
+/v1/orders?limit=30                                                          23       23       34     14158  14158 200
+/v1/orders?status=draft&limit=30                                             16       13       19        29     29 200
+/v1/products?limit=50                                                        56       55      108     35064  35064 200
+/v1/products?q=queen                                                         50       48       60     38403  38403 200
+/v1/customers?q=garcia                                                       25       23       25     27187  27187 200
+/v1/customers                                                                19       15       20     30936  30936 200
+/v1/search?q=garcia                                                          86       78       86      3122   3122 200
+/v1/deliveries?from=2026-10-12&to=2026-11-16                               2218     2134     2725    525410 525410 200
+/v1/purchase-orders                                                          14       12       22     12471  12471 200
+/v1/notifications?limit=50                                                   14       14       16        29     29 200
+/v1/inbox                                                                    15       13       17       128    128 200
+/v1/onboarding/checklist                                                     10        9       28       546    546 200

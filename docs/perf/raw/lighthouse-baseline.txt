@@ -1,0 +1,6 @@
+dashboard    url=http://localhost:3103/dashboard perf=92 a11y=92 bp=96 FCP=0.4 s LCP=1.1 s TBT=0 ms CLS=0.158 SI=0.4 s
+orders       url=http://localhost:3103/orders perf=100 a11y=92 bp=96 FCP=0.3 s LCP=0.7 s TBT=0 ms CLS=0.003 SI=0.3 s
+pos          url=http://localhost:3103/pos perf=99 a11y=96 bp=96 FCP=0.4 s LCP=0.9 s TBT=0 ms CLS=0.006 SI=0.4 s
+deliveries   url=http://localhost:3103/deliveries perf=75 a11y=92 bp=96 FCP=0.4 s LCP=1.0 s TBT=0 ms CLS=0.726 SI=0.5 s
+products     url=http://localhost:3103/products perf=100 a11y=97 bp=96 FCP=0.3 s LCP=0.7 s TBT=0 ms CLS=0.039 SI=0.4 s
+customers    url=http://localhost:3103/customers perf=99 a11y=96 bp=96 FCP=0.4 s LCP=0.9 s TBT=0 ms CLS=0.008 SI=0.4 s

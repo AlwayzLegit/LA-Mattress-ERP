@@ -1,0 +1,36 @@
+=== /v1/dashboard/nav-counts
+│ Latency │ 25 ms │ 30 ms │ 72 ms │ 83 ms │ 33.28 ms │ 11.01 ms │ 92 ms │
+│ Req/Sec   │ 233    │ 233    │ 303    │ 323    │ 296.61 │ 25.85   │ 233    │
+│ Bytes/Sec │ 143 kB │ 143 kB │ 186 kB │ 199 kB │ 182 kB │ 15.9 kB │ 143 kB │
+3k requests in 10.07s, 1.82 MB read
+=== /v1/dashboard/owner?start=2026-09-19&end=2026-10-18&compare=prior
+│ Latency │ 146 ms │ 165 ms │ 223 ms │ 247 ms │ 172.02 ms │ 21.61 ms │ 256 ms │
+│ Req/Sec   │ 50     │ 50     │ 59     │ 60     │ 58     │ 3       │ 50     │
+│ Bytes/Sec │ 269 kB │ 269 kB │ 318 kB │ 323 kB │ 312 kB │ 16.2 kB │ 269 kB │
+590 requests in 10.14s, 3.12 MB read
+=== /v1/orders/list-view?limit=50&start=2026-09-19&end=2026-10-18
+│ Latency │ 65 ms │ 78 ms │ 125 ms │ 133 ms │ 82.26 ms │ 15.49 ms │ 142 ms │
+│ Req/Sec   │ 110     │ 110     │ 120     │ 130     │ 121     │ 5.39   │ 110     │
+│ Bytes/Sec │ 3.16 MB │ 3.16 MB │ 3.45 MB │ 3.74 MB │ 3.47 MB │ 155 kB │ 3.16 MB │
+1k requests in 10.08s, 34.8 MB read
+=== /v1/products?q=queen
+│ Latency │ 71 ms │ 86 ms │ 134 ms │ 162 ms │ 92.14 ms │ 19.82 ms │ 219 ms │
+│ Req/Sec   │ 80      │ 80      │ 110     │ 120     │ 108     │ 10.16  │ 80      │
+│ Bytes/Sec │ 3.12 MB │ 3.12 MB │ 4.29 MB │ 4.68 MB │ 4.21 MB │ 396 kB │ 3.12 MB │
+1k requests in 10.1s, 42.1 MB read
+=== /v1/search?q=garcia
+│ Latency │ 79 ms │ 92 ms │ 138 ms │ 150 ms │ 97.8 ms │ 16.24 ms │ 194 ms │
+│ Req/Sec   │ 90     │ 90     │ 101    │ 118    │ 101.6  │ 7.44    │ 90     │
+│ Bytes/Sec │ 331 kB │ 331 kB │ 371 kB │ 434 kB │ 373 kB │ 27.3 kB │ 331 kB │
+1k requests in 10.05s, 3.73 MB read
+=== /v1/deliveries?from=2026-10-12&to=2026-10-18&limit=2000
+│ Latency │ 884 ms │ 947 ms │ 1057 ms │ 1064 ms │ 951.44 ms │ 45.3 ms │ 1074 ms │
+│ Req/Sec   │ 10      │ 10      │ 10      │ 10      │ 10      │ 0     │ 10      │
+│ Bytes/Sec │ 1.46 MB │ 1.46 MB │ 1.46 MB │ 1.46 MB │ 1.46 MB │ 0 B   │ 1.46 MB │
+110 requests in 10.1s, 14.6 MB read
+=== /v1/dashboard/stores?period=mtd
+│ Latency │ 1983 ms │ 5824 ms │ 9645 ms │ 9799 ms │ 5836.48 ms │ 2340.56 ms │ 9818 ms │
+│ Req/Sec   │ 0   │ 0    │ 60      │ 60      │ 49      │ 20.89   │ 16      │
+│ Bytes/Sec │ 0 B │ 0 B  │ 4.43 MB │ 4.43 MB │ 3.61 MB │ 1.54 MB │ 1.18 MB │
+6k requests in 10.08s, 36.1 MB read
+5k errors (0 timeouts)

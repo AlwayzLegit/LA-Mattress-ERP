@@ -1,0 +1,4 @@
+endpoint                                                                 ms_p50   ms_min   ms_max     bytes   gzip
+/v1/deliveries?from=2026-10-12&to=2026-10-18&limit=2000                      49       28       50    145654 145654 200
+/v1/deliveries?from=2026-10-12&to=2026-11-16&limit=2000                      62       53       64    525410 525410 200
+/v1/deliveries?from=2025-10-01&to=2026-12-31&limit=2000                     405      389      432   2567063 2567063 200

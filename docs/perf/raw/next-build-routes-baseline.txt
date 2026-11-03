@@ -1,0 +1,56 @@
+├ ƒ /products/stock                      5.04 kB         169 kB
+├ ƒ /purchase-orders                     4.66 kB         159 kB
+├ ƒ /purchase-orders/[id]                10.3 kB         165 kB
+├ ƒ /purchase-orders/new                 4.54 kB         150 kB
+├ ƒ /replenishment                       7.25 kB         162 kB
+├ ƒ /reports                             6.49 kB         186 kB
+├ ƒ /reports/builder                      7.8 kB         159 kB
+├ ƒ /reports/cash-drawer-balancing         193 B         185 kB
+├ ƒ /reports/merchandising               3.24 kB         158 kB
+├ ƒ /reports/transfers-by-location       6.16 kB         157 kB
+├ ƒ /reports/written-sales                 193 B         189 kB
+├ ƒ /reset                               6.58 kB         180 kB
+├ ƒ /returns                             7.04 kB         162 kB
+├ ƒ /roles                               4.65 kB         156 kB
+├ ƒ /roles/[id]                            327 B         157 kB
+├ ƒ /roles/new                             398 B         157 kB
+├ ƒ /sales                               1.99 kB         172 kB
+├ ƒ /sales/[id]                          4.89 kB         159 kB
+├ ƒ /salespeople                         1.71 kB         172 kB
+├ ƒ /salespeople/[id]/activity           3.59 kB         173 kB
+├ ƒ /salespeople/activity                4.31 kB         146 kB
+├ ƒ /service                             6.11 kB         148 kB
+├ ƒ /service/[id]                        6.64 kB         158 kB
+├ ƒ /settings                            7.73 kB         154 kB
+├ ƒ /settings/api-keys                   5.23 kB         156 kB
+├ ƒ /settings/billing                    5.55 kB         157 kB
+├ ƒ /settings/discounts                  2.74 kB         157 kB
+├ ƒ /settings/import                     6.02 kB         148 kB
+├ ƒ /settings/integrations               6.17 kB         157 kB
+├ ƒ /settings/sessions                   4.52 kB         156 kB
+├ ƒ /settings/tax-classes                5.76 kB         157 kB
+├ ƒ /settings/webhooks                   5.68 kB         157 kB
+├ ƒ /shifts                              2.68 kB         148 kB
+├ ƒ /shifts/[id]                         3.38 kB         148 kB
+├ ƒ /shifts/close/[date]                  3.3 kB         168 kB
+├ ƒ /signup                              6.38 kB         180 kB
+├ ƒ /special-orders                      4.88 kB         146 kB
+├ ƒ /tasks                               3.26 kB         159 kB
+├ ƒ /timeclock                           6.07 kB         148 kB
+├ ƒ /track/[token]                       4.88 kB         146 kB
+├ ƒ /transfers                           4.95 kB         146 kB
+├ ƒ /transfers/[id]                      7.13 kB         158 kB
+├ ƒ /transfers/manifests                 6.78 kB         158 kB
+├ ƒ /transfers/manifests/[id]            4.98 kB         156 kB
+├ ƒ /transfers/new                       6.85 kB         148 kB
+├ ○ /tv/competition                      1.26 kB         165 kB
+├ ƒ /vendors                             4.88 kB         156 kB
+├ ƒ /vendors/[id]/settings               8.53 kB         160 kB
+├ ƒ /verify                              4.17 kB         146 kB
+├ ƒ /warehouse                           3.62 kB         178 kB
+└ ○ /welcome                             7.76 kB         171 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/904-41c565439657416e.js       46.7 kB
+  ├ chunks/e268ae7b-d96431f0997187e8.js  54.2 kB
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

@@ -1,0 +1,8 @@
+endpoint                                                                 ms_p50   ms_min   ms_max     bytes   gzip
+/v1/dashboard/nav-counts                                                     24       21       44        67     67 200
+/v1/dashboard/stores?period=mtd                                              63       45       73     73213  14310 200
+/v1/dashboard/cash-pickups/queue                                             82       75       84    100510  25570 200
+/v1/competitions/current                                                     60       47       69     42717   5592 200
+/v1/products?q=queen                                                         44       40       55     38403   3640 200
+/v1/deliveries?from=2026-10-12&to=2026-11-16&limit=2000                    1758     1700     2269    525410  96033 200
+/v1/reports/written-sales?start=2026-09-18&end=2026-10-18&orderType=both&reportType=detail&includeAuditComments=false&includeAllSalespeople=true&includeAddress=true      199      156      452    950700 188266 200
