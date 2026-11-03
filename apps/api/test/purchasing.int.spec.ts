@@ -2430,10 +2430,16 @@ describe('Reorder suggestions count customers waiting (owner 2026-10-01)', () =>
       }),
     ]);
     // Once the origin holds the unit the transfer can ship: nothing to buy.
+    // A10: the open transfer already wrote the origin's level row (its
+    // hold), so this is an update of on-hand, not a first insert.
     await withDb((db) =>
       db
         .insert(schema.inventoryLevels)
-        .values({ businessId, variantId: birchId, locationId, onHand: 1 }),
+        .values({ businessId, variantId: birchId, locationId, onHand: 1 })
+        .onConflictDoUpdate({
+          target: [schema.inventoryLevels.variantId, schema.inventoryLevels.locationId],
+          set: { onHand: 1 },
+        }),
     );
     expect(await suggestionFor(birchId)).toBeUndefined();
   });
