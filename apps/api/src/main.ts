@@ -1,5 +1,6 @@
 import './instrument';
 
+import compression from 'compression';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
@@ -19,6 +20,18 @@ async function bootstrap() {
   // STORIS import CSVs arrive as JSON body text; the express default of
   // 100kb would reject any real export file.
   app.useBodyParser('json', { limit: '25mb' });
+  // Report and board payloads run 50–500 KB of JSON; gzip cuts them 8–10×
+  // on the API → Vercel-proxy hop and for direct API clients. Streams stay
+  // uncompressed: the chat SSE feeds must flush each event as it happens.
+  app.use(
+    compression({
+      threshold: 1024,
+      filter: (req, res) =>
+        !String(res.getHeader('Content-Type') ?? '').startsWith('text/event-stream') &&
+        !req.headers.accept?.includes('text/event-stream') &&
+        compression.filter(req, res),
+    }),
+  );
 
   // CORS_ORIGIN is a comma-separated allow-list; entries may contain a
   // single `*` wildcard (e.g. https://*-teamslug.vercel.app) so Vercel
