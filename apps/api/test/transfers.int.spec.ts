@@ -1302,7 +1302,9 @@ describe('Transfers pack quick wins — hold/scheduled quantity (D18/D19) + exce
       res.body.rows as { variantId: string; totalQuantity: number; maxTransferQuantity: number }[]
     ).find((r) => r.variantId === excessVariantId);
     expect(row).toBeTruthy();
-    expect(row!.totalQuantity).toBe(50);
+    // A10: the 2-unit transfer just made is open, so it holds its units —
+    // the report counts what is free to consolidate, 48, not the 50 on hand.
+    expect(row!.totalQuantity).toBe(48);
     expect(row!.maxTransferQuantity).toBe(2);
 
     // The widget from earlier suites has a 100-unit line on record —
