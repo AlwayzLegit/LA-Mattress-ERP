@@ -13,6 +13,7 @@ import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import { schema } from '@jetnine/db';
+import { DEFAULT_AS_IS_REASON_CODES } from '@jetnine/shared';
 import { AppModule } from '../src/app.module';
 
 const TEST_DB_URL =
@@ -140,6 +141,16 @@ describe('Self-service onboarding', () => {
 
       const roles = await sql`SELECT name FROM roles WHERE business_id = ${businessId}`;
       expect(roles.length).toBeGreaterThanOrEqual(5); // Owner, Manager, Cashier, etc.
+
+      // Owner 2026-11-02: the standard As-Is reasons come with the business.
+      const asIs = await sql<{ code: string; active: boolean }[]>`
+        SELECT code, active FROM reason_codes
+        WHERE business_id = ${businessId} AND usage_class = 'as_is' ORDER BY code
+      `;
+      expect(asIs.map((r) => r.code)).toEqual(
+        [...DEFAULT_AS_IS_REASON_CODES].map((c) => c.code).sort(),
+      );
+      expect(asIs.every((r) => r.active)).toBe(true);
     } finally {
       await sql.end({ timeout: 5 });
     }
