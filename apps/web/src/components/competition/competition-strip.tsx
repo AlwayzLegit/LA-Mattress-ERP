@@ -51,7 +51,9 @@ export function useCompetition() {
   }, []);
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), POLL_MS);
+    const t = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, POLL_MS);
     const onPing = () => void load();
     window.addEventListener(COMPETITION_EVENT, onPing);
     window.addEventListener('erp:team-update', onPing);
