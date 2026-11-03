@@ -1465,12 +1465,23 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     }
 
     const sp = salespeople.filter(Boolean);
+    // Take-with hand-over: completing a sale with take-with lines splits
+    // them to a -A piece and completes it when stock and money allow.
+    const handOver =
+      mode === 'complete' &&
+      orderType !== 'quote' &&
+      lines.some(
+        (l) => effectiveFulfillment(l, fulfillment) === 'take_with' && l.lineType !== 'custom',
+      );
+    // One request writes the order, takes the tenders and hands over
+    // take-with goods — three round trips to the API before.
     const order = await api<{
       id: string;
       number: string;
       totalCents: number;
       splitOrders?: { id: string; number: string; requestedDate: string | null }[];
-    }>('/v1/orders', {
+      takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
+    }>('/v1/orders/complete-sale', {
       method: 'POST',
       body: JSON.stringify({
         locationId,
@@ -1504,47 +1515,24 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         draft: mode === 'draft' ? true : undefined,
         confirm: mode === 'complete' && orderType !== 'quote' ? true : undefined,
         splitByDeliveryDate: true,
+        payments:
+          mode === 'complete'
+            ? payments.map((p) => ({
+                method: p.method,
+                amountCents: p.amountCents,
+                kind: 'deposit',
+                processorRef: p.ref || undefined,
+                cardBrand: p.cardBrand,
+                financingMonths: p.financingMonths,
+                takenAtLocationId: actingStoreId(),
+              }))
+            : undefined,
+        complete: handOver || undefined,
       }),
     });
-
-    if (mode === 'complete') {
-      for (const p of payments) {
-        await api(`/v1/orders/${order.id}/payments`, {
-          method: 'POST',
-          body: JSON.stringify({
-            method: p.method,
-            amountCents: p.amountCents,
-            kind: 'deposit',
-            processorRef: p.ref || undefined,
-            cardBrand: p.cardBrand,
-            financingMonths: p.financingMonths,
-            takenAtLocationId: actingStoreId(),
-          }),
-        });
-      }
-    }
     if (resumedDraft && resumedDraft.id !== order.id && !(await cancelDraft(resumedDraft.id)))
       warnLeftover(resumedDraft.number);
-
-    // Take-with hand-over: completing a sale with take-with lines splits
-    // them to a -A piece and completes it when stock and money allow.
-    let takeWith: NonNullable<typeof done>['takeWith'];
-    if (
-      mode === 'complete' &&
-      orderType !== 'quote' &&
-      lines.some(
-        (l) => effectiveFulfillment(l, fulfillment) === 'take_with' && l.lineType !== 'custom',
-      )
-    ) {
-      try {
-        const res = await api<{
-          takeWith?: { orderId: string; number: string; completed: boolean; reason: string | null };
-        }>(`/v1/orders/${order.id}/complete`, { method: 'POST', body: JSON.stringify({}) });
-        takeWith = res.takeWith;
-      } catch {
-        takeWith = undefined;
-      }
-    }
+    const takeWith: NonNullable<typeof done>['takeWith'] = handOver ? order.takeWith : undefined;
 
     // The delivery date books the truck (one per split sibling on its own date).
     const bookedDeliveries: string[] = [];
