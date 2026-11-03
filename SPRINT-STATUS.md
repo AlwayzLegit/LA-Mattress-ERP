@@ -1,5 +1,16 @@
 # Sprint Status — STORIS Cutover
 
+## Transfers hold stock from creation — 2026-11-02
+
+- Owner QA (screenshots 2026-11-02): a printed transfer ticket left ST-2026-000014
+  in "Draft" and the two units it named stayed available. Amendment A10: there is
+  no draft phase — a transfer is live when created and reserves its units at the
+  origin (`transfer_reserve` / `transfer_release` movements, same shape as the
+  order reservation); ship releases the hold as on-hand drops, cancel releases it.
+  Open transfers are rows on the product's Open Orders tab (type Transfer).
+  Migration 0114 backfills the hold for transfers already waiting. The stored
+  status stays `draft`; the UI says Open.
+
 ## Owner dashboard controls — 2026-09-14
 
 - Click a salesperson row for written-order detail using the same store-local

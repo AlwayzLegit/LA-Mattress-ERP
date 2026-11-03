@@ -54,7 +54,8 @@ export interface PurchaseOrderRow {
 export interface OpenOrderRow {
   orderId: string;
   orderNumber: string;
-  orderType: 'sales_order' | 'layaway' | 'exchange' | 'quote';
+  /** A10: open stock transfers list here too — they hold stock like an order. */
+  orderType: 'sales_order' | 'layaway' | 'exchange' | 'quote' | 'transfer';
   sellingLocationId: string;
   sellingLocationName: string | null;
   fulfillmentDate: string | null;

@@ -79,7 +79,11 @@ async function waitingTransferLines(
 ): Promise<Map<string, WaitingTransferLine[]>> {
   const from = alias(schema.locations, 'from_loc');
   const to = alias(schema.locations, 'to_loc');
-  const freeAtOrigin = sql<number>`COALESCE((SELECT SUM(il.on_hand - il.reserved - il.floor_sample) FROM inventory_levels il WHERE il.variant_id = ${schema.stockTransferLines.variantId} AND il.location_id = ${schema.stockTransfers.fromLocationId}), 0)::int`;
+  // A10: open transfers hold their units inside `reserved` at the origin.
+  // Add those holds back so the origin's free pile is judged before any
+  // transfer took its share — the loop below hands it out in creation
+  // order, which is the same answer the pre-hold world gave.
+  const freeAtOrigin = sql<number>`(COALESCE((SELECT SUM(il.on_hand - il.reserved - il.floor_sample) FROM inventory_levels il WHERE il.variant_id = ${schema.stockTransferLines.variantId} AND il.location_id = ${schema.stockTransfers.fromLocationId}), 0) + COALESCE((SELECT SUM(hl.quantity_shipped) FROM stock_transfer_lines hl JOIN stock_transfers ht ON ht.id = hl.transfer_id WHERE hl.variant_id = ${schema.stockTransferLines.variantId} AND ht.from_location_id = ${schema.stockTransfers.fromLocationId} AND ht.status = 'draft'), 0))::int`;
   const rows = await db
     .select({
       transferLineId: schema.stockTransferLines.id,

@@ -97,7 +97,8 @@ export interface ActivityPurchaseOrderRow {
 export interface ActivityOpenOrderRow {
   orderId: string;
   orderNumber: string;
-  orderType: 'sales_order' | 'layaway' | 'exchange' | 'quote';
+  /** A10: open stock transfers list here too — they hold stock like an order. */
+  orderType: 'sales_order' | 'layaway' | 'exchange' | 'quote' | 'transfer';
   sellingLocationId: string;
   sellingLocationName: string | null;
   fulfillmentDate: string | null;
@@ -311,6 +312,8 @@ const MOVEMENT_MEMO: Record<string, string> = {
   order_fulfill: 'Order / invoice',
   order_reserve: 'Reserved',
   order_release: 'Released',
+  transfer_reserve: 'Held for transfer',
+  transfer_release: 'Transfer hold released',
 };
 
 function clampQuantity(raw: string | undefined): number {
@@ -609,13 +612,31 @@ export class ProductActivityController {
     const strip = await this.strip(tenant.businessId!, product.id, locationId);
     if (product.variantIds.length === 0) return { strip, rows: [] };
     const orderType = orderTypeRaw && orderTypeRaw !== 'all' ? orderTypeRaw : null;
-    if (orderType && !['sales_order', 'layaway', 'exchange', 'quote'].includes(orderType)) {
+    if (
+      orderType &&
+      !['sales_order', 'layaway', 'exchange', 'quote', 'transfer'].includes(orderType)
+    ) {
       throw new BadRequestException(
-        'orderType must be one of all, sales_order, layaway, exchange, quote',
+        'orderType must be one of all, sales_order, layaway, exchange, quote, transfer',
       );
     }
     const useFulfillment = useFulfillmentStr === undefined || useFulfillmentStr === '1';
     const useSelling = useSellingStr === undefined || useSellingStr === '1';
+    if (locationId && !useFulfillment && !useSelling) {
+      throw new BadRequestException('Pick the fulfillment location, the selling location, or both');
+    }
+    // A10: open transfers hold stock the way open orders do, so they
+    // sit in this list as rows of their own (a transfer carrying an
+    // order shows on that order's row instead).
+    const transferRows =
+      orderType === null || orderType === 'transfer'
+        ? await this.openTransferRows(tenant.businessId!, product.variantIds, {
+            locationId,
+            useFulfillment,
+            useSelling,
+          })
+        : [];
+    if (orderType === 'transfer') return { strip, rows: transferRows };
     const shipFrom = sql<string>`coalesce(${schema.orderLines.sourceLocationId}, ${schema.orders.stockLocationId}, ${schema.orders.locationId})`;
     const statuses = orderType === 'quote' ? ['quote'] : [...OPEN_ORDER_STATUSES];
     const conditions = [
@@ -635,11 +656,6 @@ export class ProductActivityController {
       );
     }
     if (locationId) {
-      if (!useFulfillment && !useSelling) {
-        throw new BadRequestException(
-          'Pick the fulfillment location, the selling location, or both',
-        );
-      }
       const parts = [
         useFulfillment ? sql`${shipFrom} = ${locationId}` : null,
         useSelling ? sql`${schema.orders.locationId} = ${locationId}` : null,
@@ -683,7 +699,7 @@ export class ProductActivityController {
         sql`coalesce(${schema.orderLines.deliveryDate}, ${schema.orders.requestedDate}) ASC NULLS LAST`,
         asc(schema.orders.createdAt),
       );
-    if (rows.length === 0) return { strip, rows: [] };
+    if (rows.length === 0) return { strip, rows: transferRows };
     const names = await this.locations(tenant.businessId!);
     // Fulfillment status: the line's live delivery, else the order's
     // delivery status (will call reads CWC on the page).
@@ -769,9 +785,9 @@ export class ProductActivityController {
         poFor.set(p.orderLineId, { id: p.purchaseOrderId, number: p.number, quantity: p.quantity });
       }
     }
-    return {
+    const orderRows = {
       strip,
-      rows: rows.map((r) => {
+      rows: rows.map((r): ActivityOpenOrderRow => {
         const delivery = deliveryFor.get(r.lineId);
         const transfer = transferFor.get(r.orderId);
         const po = poFor.get(r.lineId);
@@ -813,6 +829,99 @@ export class ProductActivityController {
         };
       }),
     };
+    return { strip, rows: [...orderRows.rows, ...transferRows] };
+  }
+
+  /**
+   * A10 (owner 2026-11-02): open stock transfers carrying this product,
+   * shaped like open-order rows. "Selling location" is the destination,
+   * "ship from" the origin; an open (not yet shipped) transfer shows its
+   * units as reserved at the origin, an in-transit one has already taken
+   * them off the shelf. Transfers generated for an order are left out —
+   * that order's own row names them as its linked transfer.
+   */
+  private async openTransferRows(
+    businessId: string,
+    variantIds: string[],
+    filter: { locationId?: string; useFulfillment: boolean; useSelling: boolean },
+  ): Promise<ActivityOpenOrderRow[]> {
+    const conditions = [
+      eq(schema.stockTransfers.businessId, businessId),
+      inArray(schema.stockTransferLines.variantId, variantIds),
+      inArray(schema.stockTransfers.status, ['draft', 'in_transit']),
+      isNull(schema.stockTransfers.orderId),
+      sql`(${schema.stockTransferLines.quantityShipped} - ${schema.stockTransferLines.quantityReceived}) > 0`,
+    ];
+    if (filter.locationId) {
+      const parts = [
+        filter.useFulfillment
+          ? sql`${schema.stockTransfers.fromLocationId} = ${filter.locationId}`
+          : null,
+        filter.useSelling
+          ? sql`${schema.stockTransfers.toLocationId} = ${filter.locationId}`
+          : null,
+      ].filter((x): x is ReturnType<typeof sql> => x !== null);
+      conditions.push(
+        parts.length === 2
+          ? sql`(${parts[0]} OR ${parts[1]})`
+          : (parts[0] as ReturnType<typeof sql>),
+      );
+    }
+    const rows = await this.db
+      .select({
+        transferId: schema.stockTransfers.id,
+        number: schema.stockTransfers.number,
+        status: schema.stockTransfers.status,
+        fromLocationId: schema.stockTransfers.fromLocationId,
+        toLocationId: schema.stockTransfers.toLocationId,
+        scheduledFor: schema.stockTransfers.scheduledFor,
+        createdAt: schema.stockTransfers.createdAt,
+        lineId: schema.stockTransferLines.id,
+        quantityShipped: schema.stockTransferLines.quantityShipped,
+        quantityReceived: schema.stockTransferLines.quantityReceived,
+        productName: schema.products.name,
+        variantName: schema.productVariants.name,
+      })
+      .from(schema.stockTransferLines)
+      .innerJoin(
+        schema.stockTransfers,
+        eq(schema.stockTransfers.id, schema.stockTransferLines.transferId),
+      )
+      .innerJoin(
+        schema.productVariants,
+        eq(schema.productVariants.id, schema.stockTransferLines.variantId),
+      )
+      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .where(and(...conditions))
+      .orderBy(asc(schema.stockTransfers.createdAt), asc(schema.stockTransferLines.id));
+    if (rows.length === 0) return [];
+    const names = await this.locations(businessId);
+    return rows.map((r) => ({
+      orderId: r.transferId,
+      orderNumber: r.number,
+      orderType: 'transfer' as const,
+      sellingLocationId: r.toLocationId,
+      sellingLocationName: names.get(r.toLocationId)?.name ?? null,
+      fulfillmentDate: r.scheduledFor ?? null,
+      orderQuantity: r.quantityShipped - r.quantityReceived,
+      reservedQuantity: r.status === 'draft' ? r.quantityShipped : 0,
+      fulfillmentType: 'transfer',
+      fulfillmentStatus: r.status === 'draft' ? 'open' : r.status,
+      shipFromLocationId: r.fromLocationId,
+      shipFromLocationName: names.get(r.fromLocationId)?.name ?? null,
+      orderDate: r.createdAt.toISOString(),
+      customerId: null,
+      customerName: null,
+      lineId: r.lineId,
+      lineDescription: r.variantName ? `${r.productName} — ${r.variantName}` : r.productName,
+      lineType: 'stock',
+      linkedTransferId: null,
+      linkedTransferNumber: null,
+      linkedTransferQuantity: 0,
+      linkedPurchaseOrderId: null,
+      linkedPurchaseOrderNumber: null,
+      linkedPurchaseOrderQuantity: 0,
+    }));
   }
 
   // ---------------------------------------------------------- sales history

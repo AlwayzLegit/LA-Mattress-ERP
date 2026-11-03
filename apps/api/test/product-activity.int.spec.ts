@@ -545,6 +545,8 @@ const as = (cookie: string) => ({
     request(app.getHttpServer()).get(url).set('Cookie', cookie).set('X-Business-Id', businessId),
   patch: (url: string) =>
     request(app.getHttpServer()).patch(url).set('Cookie', cookie).set('X-Business-Id', businessId),
+  post: (url: string) =>
+    request(app.getHttpServer()).post(url).set('Cookie', cookie).set('X-Business-Id', businessId),
 });
 const activity = (section: string, qs = '') =>
   `/v1/products/${productId}/activity/${section}${qs ? `?${qs}` : ''}`;
@@ -662,6 +664,52 @@ describe('Open Orders tab (A21 D6)', () => {
       .expect(200);
     expect(quotes.body.rows.map((r: { orderNumber: string }) => r.orderNumber)).toEqual(['Q-1']);
     expect(quotes.body.rows[0].orderType).toBe('quote');
+  });
+
+  it('A10: an open transfer is an open-order row of its own and holds the units it names', async () => {
+    const created = await as(ownerCookie)
+      .post('/v1/stock-transfers')
+      .send({
+        fromLocationId: warehouseId,
+        toLocationId: storeId,
+        lines: [{ variantId, quantity: 1 }],
+      });
+    expect(created.status).toBe(201);
+    const all = await as(ownerCookie).get(activity('open-orders')).expect(200);
+    expect(all.body.rows).toHaveLength(2);
+    const row = all.body.rows.find((r: { orderType: string }) => r.orderType === 'transfer');
+    expect(row).toMatchObject({
+      orderId: created.body.id,
+      orderNumber: created.body.number,
+      orderType: 'transfer',
+      sellingLocationName: 'Koreatown',
+      shipFromLocationName: 'Warehouse',
+      orderQuantity: 1,
+      reservedQuantity: 1,
+      fulfillmentType: 'transfer',
+      fulfillmentStatus: 'open',
+      customerId: null,
+      linkedTransferId: null,
+    });
+    // The hold shows on the stock strip as reserved, not available.
+    expect(all.body.strip.reserved).toBeGreaterThanOrEqual(1);
+    const only = await as(ownerCookie)
+      .get(activity('open-orders', 'orderType=transfer'))
+      .expect(200);
+    expect(only.body.rows.map((r: { orderNumber: string }) => r.orderNumber)).toEqual([
+      created.body.number,
+    ]);
+    // The customer transfer carrying SO-OPEN stays on that order's row.
+    const orders = await as(ownerCookie)
+      .get(activity('open-orders', 'orderType=sales_order'))
+      .expect(200);
+    expect(orders.body.rows).toHaveLength(1);
+    expect(orders.body.rows[0].linkedTransferId).toBe(transferId);
+    // Cancelling releases the hold and drops the row.
+    await as(ownerCookie).post(`/v1/stock-transfers/${created.body.id}/cancel`).expect(201);
+    const after = await as(ownerCookie).get(activity('open-orders')).expect(200);
+    expect(after.body.rows).toHaveLength(1);
+    expect(after.body.strip.reserved).toBe(all.body.strip.reserved - 1);
   });
 
   it('matches the location against the fulfillment and / or selling store', async () => {

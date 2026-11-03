@@ -276,11 +276,11 @@ export default function ManifestsPage() {
               <>
                 <SectionHeading
                   as="h3"
-                  title="Draft transfers on this lane"
+                  title="Open transfers on this lane"
                   description="Tick the transfers riding this truck."
                 />
                 {drafts.length === 0 ? (
-                  <EmptyState>No unmanifested draft transfers on this lane.</EmptyState>
+                  <EmptyState>No unmanifested open transfers on this lane.</EmptyState>
                 ) : (
                   <TableWrap>
                     <table className="table">

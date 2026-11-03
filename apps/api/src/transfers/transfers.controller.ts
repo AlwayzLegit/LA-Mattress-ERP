@@ -40,6 +40,7 @@ import { DRIZZLE } from '../database/database.module';
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import type { RequestTenantContext } from '../tenancy/request-context';
 import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
+import { releaseTransferOrigin, reserveTransferOrigin } from './transfer-reservations';
 
 interface TransferLineInput {
   variantId?: string;
@@ -598,6 +599,17 @@ export class TransfersController {
           body.notes ?? null,
         );
         await this.shipSvc.markSerialsInTransit(transfer.id);
+      } else {
+        // A10: the transfer is live from the moment it exists — its units
+        // are held at the origin like an open sales order's, so the
+        // register, other transfers and As-Is moves see them as taken.
+        await reserveTransferOrigin(this.db, {
+          businessId: tenant.businessId!,
+          actorUserId: actor.id,
+          transferId: transfer.id,
+          fromLocationId: transfer.fromLocationId,
+          lines: dest.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+        });
       }
 
       await this.audit.log({
@@ -985,6 +997,7 @@ export class TransfersController {
   @RequirePermission('inventory.transfer')
   async cancel(
     @CurrentTenant() _tenant: RequestTenantContext,
+    @CurrentUser() actor: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<Detail> {
     const [transfer] = await this.db
@@ -1007,6 +1020,23 @@ export class TransfersController {
       .update(schema.stockTransfers)
       .set({ status: 'canceled', canceledAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.stockTransfers.id, id));
+
+    // A10: an open transfer held its units at the origin; cancelling
+    // hands them back to available stock.
+    const heldLines = await this.db
+      .select({
+        variantId: schema.stockTransferLines.variantId,
+        quantity: schema.stockTransferLines.quantityShipped,
+      })
+      .from(schema.stockTransferLines)
+      .where(eq(schema.stockTransferLines.transferId, id));
+    await releaseTransferOrigin(this.db, {
+      businessId: transfer.businessId,
+      actorUserId: actor.id,
+      transferId: id,
+      fromLocationId: transfer.fromLocationId,
+      lines: heldLines,
+    });
 
     await this.audit.log({
       action: 'stock_transfer.cancel',
@@ -1119,6 +1149,14 @@ export class TransfersController {
         quantityShipped: l.quantity,
       })),
     );
+    // A10: the rolled-over transfer is open, so it holds its units too.
+    await reserveTransferOrigin(this.db, {
+      businessId,
+      actorUserId,
+      transferId: draft.id,
+      fromLocationId: transfer.fromLocationId,
+      lines: held,
+    });
     await this.audit.log({
       action: 'stock_transfer.hold_rollover',
       targetType: 'stock_transfer',
@@ -1273,13 +1311,18 @@ export class TransfersController {
           : null,
       lines: lines.map((l) => {
         const lv = originLevels.get(l.variantId) ?? { onHand: 0, reserved: 0, floor: 0 };
+        // A10: an open transfer's own hold sits inside `reserved`, so the
+        // units it has already claimed count as available to it — the
+        // stock pill asks "would Ship find my units", not "what is left
+        // for everyone else".
+        const ownHold = row.status === 'draft' ? l.quantityShipped : 0;
         return {
           ...l,
           productName: l.productName ?? '(deleted)',
           quantityHeld: Math.max(0, (l.quantityOrdered ?? l.quantityShipped) - l.quantityShipped),
           onHandAtFrom: lv.onHand,
           reservedAtFrom: lv.reserved,
-          availableAtFrom: Math.max(0, lv.onHand - lv.reserved - lv.floor),
+          availableAtFrom: Math.max(0, lv.onHand - lv.reserved - lv.floor + ownHold),
           poLinks: poLinks.get(l.id) ?? [],
         };
       }),
