@@ -52,6 +52,9 @@ interface MinStockRow {
   productName: string;
   variantName: string | null;
   variantSku: string | null;
+  /** Owner 2026-11-04: the screen sorts by brand and group. */
+  brandName: string | null;
+  groupName: string | null;
   onHand: number;
   available: number;
   /** The location's minimum (STORIS per-store Min Stock); null = not managed. */
@@ -745,6 +748,8 @@ export class InventoryController {
         productName: schema.products.name,
         variantName: schema.productVariants.name,
         variantSku: schema.productVariants.sku,
+        brandName: schema.brands.name,
+        groupName: schema.categories.name,
         onHand: sql<number>`COALESCE(${schema.inventoryLevels.onHand}, 0)::int`,
         reserved: sql<number>`COALESCE(${schema.inventoryLevels.reserved}, 0)::int`,
         floorSample: sql<number>`COALESCE(${schema.inventoryLevels.floorSample}, 0)::int`,
@@ -752,6 +757,8 @@ export class InventoryController {
       })
       .from(schema.productVariants)
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
       .leftJoin(
         schema.inventoryLevels,
         and(
@@ -822,6 +829,8 @@ export class InventoryController {
         productName: r.productName,
         variantName: r.variantName,
         variantSku: r.variantSku,
+        brandName: r.brandName,
+        groupName: r.groupName,
         onHand: r.onHand,
         available: Math.max(0, r.onHand - r.reserved - r.floorSample),
         reorderPoint: r.reorderPoint,

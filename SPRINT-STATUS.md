@@ -7015,3 +7015,11 @@ scope, member filter, CSV, role gate).
 Owner (Koreatown count screenshot): the count page and the printed count sheet carry Brand and
 Group (category) columns and come from the API ordered brand → group → bin → SKU, so the
 counter walks the floor the way the stock is grouped. `brandName` / `groupName` on count lines.
+
+## Min stock by brand, sortable, header fixed — 2026-11-04
+
+Owner (three screenshots): the Min stock header sat on top of the first rows (a sticky header
+inside the scrolling wrap pins to the wrap and slides 50px down) — now static. Brand and Group
+are columns of their own, every column sorts on click and the order drags; the min cell says
+"set to N" or "not set" beside the box, and an edited box turns amber until it saves.
+`brandName` / `groupName` on `GET /v1/inventory/min-stock`.
