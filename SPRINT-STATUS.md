@@ -6981,3 +6981,11 @@ Owner (seven asks in one message, one PR each — #240–#245):
 - Tests: catalog (vendor on create), deliveries (Partial flag), orders (drift repair),
   special-orders (receipt cap; manual links end to end). Docker Desktop was off, so the API
   specs ran in CI only.
+
+## Item search finds brands and groups — 2026-11-04
+
+Owner (transfer "Add items", 2026-11-04): searching "pillows" found nothing because the pick
+list only matched the item name and SKU. `GET /v1/pos/lookup` now also matches the brand, the
+category and its parent, and the collection, keeps name/SKU hits first, and returns
+`brandName` / `categoryName` so the transfer pick list shows why a row matched. Every pick list
+on that endpoint (transfers, POs, returns, labels, service parts) gets it.

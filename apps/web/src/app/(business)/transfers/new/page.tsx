@@ -31,6 +31,8 @@ interface VariantRow {
   productName: string;
   variantName: string | null;
   sku: string | null;
+  brandName?: string | null;
+  categoryName?: string | null;
 }
 interface Line {
   variantId: string;
@@ -454,7 +456,7 @@ export default function NewTransferPage() {
                     void searchVariants();
                   }
                 }}
-                placeholder="Search by name, SKU, or barcode"
+                placeholder="Search by name, SKU, barcode, brand or category"
                 aria-label="Search items"
               />
               <Button
@@ -486,6 +488,11 @@ export default function NewTransferPage() {
                           <td>
                             <strong>{r.productName}</strong>
                             {r.variantName && <span className="muted"> — {r.variantName}</span>}
+                            {(r.brandName || r.categoryName) && (
+                              <div className="muted text-xs">
+                                {[r.brandName, r.categoryName].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <code>{r.sku ?? '—'}</code>
