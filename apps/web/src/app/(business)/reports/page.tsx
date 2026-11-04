@@ -948,6 +948,13 @@ export default function ReportsPage() {
             >
               Transfers by location
             </LinkButton>
+            <LinkButton
+              size="sm"
+              href="/reports/sales-analysis"
+              data-testid="reports-sales-analysis-link"
+            >
+              Sales analysis
+            </LinkButton>
             <DateRangePicker value={range} onChange={setRange} testid="reports-range" />
           </>
         }

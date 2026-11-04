@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import request from 'supertest';
 import { Test } from '@nestjs/testing';
@@ -1841,5 +1841,190 @@ describe('Store-local days (owner 2026-10-02: evening sales missing from the Z)'
       .set('X-Business-Id', businessId);
     expect(list.status).toBe(200);
     expect(list.body.data.map((s: { number: string }) => s.number)).toEqual(['SC-EVENING-1']);
+  });
+});
+
+describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, goal', () => {
+  let analystMembershipId = '';
+  let bookkeeperMembershipId = '';
+  let deliveredOrderId = '';
+
+  beforeAll(async () => {
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql);
+    try {
+      const [cashierRole] = await db
+        .select({ id: schema.roles.id })
+        .from(schema.roles)
+        .where(and(eq(schema.roles.businessId, businessId), eq(schema.roles.name, 'Cashier')));
+      const [u] = await db
+        .insert(schema.users)
+        .values({ email: 'analyst@reports-test.local', emailVerified: true, name: 'Ana Lyst' })
+        .returning();
+      const [m] = await db
+        .insert(schema.memberships)
+        .values({
+          businessId,
+          userId: u!.id,
+          roleId: cashierRole!.id,
+          status: 'active',
+          acceptedAt: new Date(),
+          monthlyGoalCents: 100_000,
+        })
+        .returning();
+      analystMembershipId = m!.id;
+      const [bk] = await db
+        .select({ id: schema.memberships.id })
+        .from(schema.memberships)
+        .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+        .where(eq(schema.users.email, 'bookkeeper@reports-test.local'));
+      bookkeeperMembershipId = bk!.id;
+
+      const [cust] = await db
+        .insert(schema.customers)
+        .values({ businessId, firstName: 'Bonus', lastName: 'Buyer' })
+        .returning();
+      const now = new Date();
+      const [delivered] = await db
+        .insert(schema.orders)
+        .values({
+          businessId,
+          locationId,
+          customerId: cust!.id,
+          number: 'SA-DELIVERED',
+          status: 'completed',
+          completedAt: now,
+          totalCents: 60_000,
+          salespersonMembershipId: analystMembershipId,
+        })
+        .returning();
+      deliveredOrderId = delivered!.id;
+      await db.insert(schema.orders).values([
+        {
+          // Split 75/25 with the bookkeeper, delivered from the Annex.
+          businessId,
+          locationId: annexLocationId,
+          customerId: cust!.id,
+          number: 'SA-SPLIT',
+          status: 'completed',
+          completedAt: now,
+          totalCents: 20_000,
+          salespersonMembershipId: analystMembershipId,
+          secondSalespersonMembershipId: bookkeeperMembershipId,
+          splitBps: 7500,
+        },
+        {
+          // Written, not yet delivered: the open pipeline.
+          businessId,
+          locationId,
+          customerId: cust!.id,
+          number: 'SA-OPEN',
+          status: 'confirmed',
+          totalCents: 20_000,
+          salespersonMembershipId: analystMembershipId,
+        },
+      ]);
+      await db.insert(schema.orderReturns).values({
+        businessId,
+        orderId: deliveredOrderId,
+        rmaNumber: 'RMA-SA-DELIVERED-1',
+        status: 'completed',
+        completedAt: now,
+        amountCents: 10_000,
+        locationId,
+      });
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+  });
+
+  function rowFor(body: { rows: { membershipId: string | null }[] }, id: string) {
+    return body.rows.find((r) => r.membershipId === id) as Record<string, unknown> | undefined;
+  }
+
+  it('credits each salesperson their share and measures the goal on net delivered', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(res.status).toBe(200);
+    expect(res.body.basis).toBe('delivered');
+    expect(res.body.goalsApply).toBe(true);
+    const ana = rowFor(res.body, analystMembershipId)!;
+    expect(ana).toBeTruthy();
+    expect(ana.name).toBe('Ana Lyst');
+    expect(ana.writtenCents).toBe(95_000); // 60,000 + 15,000 share + 20,000 open
+    expect(ana.deliveredCents).toBe(75_000); // 60,000 + 15,000 share
+    expect(ana.returnedCents).toBe(10_000);
+    expect(ana.netDeliveredCents).toBe(65_000);
+    expect(ana.openCents).toBe(20_000);
+    expect(ana.openCount).toBe(1);
+    expect(ana.goalCents).toBe(100_000);
+    expect(ana.toGoalCents).toBe(35_000);
+    expect(ana.pctOfGoal).toBe(65);
+    const bk = rowFor(res.body, bookkeeperMembershipId)!;
+    expect(bk.deliveredCents).toBe(5_000);
+    expect(bk.goalCents).toBeNull();
+    expect(bk.toGoalCents).toBeNull();
+    // Rows sort by net delivered; the analyst leads the bookkeeper.
+    const order = res.body.rows.map((r: { membershipId: string | null }) => r.membershipId);
+    expect(order.indexOf(analystMembershipId)).toBeLessThan(order.indexOf(bookkeeperMembershipId));
+    // The totals row sums every listed goal (the dashboard test above
+    // gave another member one too), so check it against the rows.
+    const goalSum = (res.body.rows as { goalCents: number | null }[]).reduce(
+      (s, r) => s + (r.goalCents ?? 0),
+      0,
+    );
+    expect(goalSum).toBeGreaterThanOrEqual(100_000);
+    expect(res.body.totals.goalCents).toBe(goalSum);
+  });
+
+  it('measures the goal on written dollars when asked', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?basis=written')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const ana = rowFor(res.body, analystMembershipId)!;
+    expect(ana.toGoalCents).toBe(5_000);
+    expect(ana.pctOfGoal).toBe(95);
+  });
+
+  it('leaves the goal columns empty across a month boundary', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?start=2026-01-01&end=2026-12-31')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(res.body.goalsApply).toBe(false);
+    const ana = rowFor(res.body, analystMembershipId)!;
+    expect(ana.goalCents).toBe(100_000);
+    expect(ana.toGoalCents).toBeNull();
+    expect(ana.pctOfGoal).toBeNull();
+  });
+
+  it('is cut to a store-scoped member’s own stores', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis')
+      .set('Cookie', scopedCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const ana = rowFor(res.body, analystMembershipId)!;
+    // The split order delivered from the Annex is out of scope.
+    expect(ana.deliveredCents).toBe(60_000);
+    expect(ana.netDeliveredCents).toBe(50_000);
+    expect(rowFor(res.body, bookkeeperMembershipId)).toBeUndefined();
+  });
+
+  it('exports CSV with a totals row', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?format=csv')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text).toContain('Net delivered $');
+    expect(res.text).toContain('Ana Lyst');
+    expect(res.text).toMatch(/\nTotal,/);
   });
 });

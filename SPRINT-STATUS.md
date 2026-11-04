@@ -6989,3 +6989,13 @@ list only matched the item name and SKU. `GET /v1/pos/lookup` now also matches t
 category and its parent, and the collection, keeps name/SKU hits first, and returns
 `brandName` / `categoryName` so the transfer pick list shows why a row matched. Every pick list
 on that endpoint (transfers, POs, returns, labels, service parts) gets it.
+
+## Sales Analysis report — 2026-11-04
+
+Owner: STORIS "Run Sales Analysis Report" made it obvious what each seller had delivered and how
+far they were from bonus. `GET /v1/reports/sales-analysis?start&end&basis&locationId[&format=csv]`
+(`reports.sales.view`, store-scoped) and `/reports/sales-analysis` (linked from Reports): one row
+per salesperson — written, delivered, returned, net delivered, open pipeline, monthly goal,
+to-go and a progress bar — with totals and CSV. Goal progress is measured on net delivered
+(switch to written); goals come from the member page's "Monthly sales goal". Amendment A11.
+Tests in `reports.int.spec.ts` (split credit, basis switch, cross-month, store scope, CSV).
