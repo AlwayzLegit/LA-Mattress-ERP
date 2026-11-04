@@ -633,6 +633,20 @@ describe('the master week (owner 2026-11-04)', () => {
     d: string,
   ) => people.find((p) => p.name === name)?.shifts.find((s) => s.date === d);
 
+  beforeAll(async () => {
+    // Earlier blocks leave shifts in this week; start from a clean slate.
+    await withDb((db) =>
+      db
+        .delete(schema.staffShifts)
+        .where(
+          and(
+            gte(schema.staffShifts.date, thisMonday),
+            lte(schema.staffShifts.date, addDays(nextMonday, 6)),
+          ),
+        ),
+    );
+  });
+
   it('is saved from a week and stamped onto another as drafts', async () => {
     // Priya Tue 9–5 at A Store, Walt Wed 7–3 (no store).
     await as('ops')
