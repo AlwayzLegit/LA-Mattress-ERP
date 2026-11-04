@@ -13,6 +13,7 @@ import {
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { alias } from 'drizzle-orm/pg-core';
 import { schema } from '@jetnine/db';
 import {
   FIRMNESS_LEVELS,
@@ -60,6 +61,9 @@ interface LookupRow {
   barcode: string | null;
   variantName: string | null;
   priceCents: number;
+  /** Owner 2026-11-04: the pick lists show what matched, not just the name. */
+  brandName: string | null;
+  categoryName: string | null;
 }
 
 interface PaymentInput {
@@ -514,20 +518,37 @@ export class SalesController {
     if (!query) return [];
     const limit = clampLimit(limitStr, 25);
 
+    // The brand, the category (with its parent, so "pillows" finds a
+    // "Pillows › Memory foam" item) and the collection ride along on
+    // every row — owner 2026-11-04: a transfer, PO or return pick list
+    // should find "pillows" the way the STORIS group search did, and
+    // show why a row matched.
+    const parentCategory = alias(schema.categories, 'parent_category');
+    const cols = {
+      variantId: schema.productVariants.id,
+      productId: schema.products.id,
+      productName: schema.products.name,
+      sku: schema.productVariants.sku,
+      barcode: schema.productVariants.barcode,
+      variantName: schema.productVariants.name,
+      priceCents: schema.productVariants.priceCents,
+      brandName: schema.brands.name,
+      categoryName: schema.categories.name,
+    };
+    const base = () =>
+      this.db
+        .select(cols)
+        .from(schema.productVariants)
+        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+        .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
+        .leftJoin(parentCategory, eq(parentCategory.id, schema.categories.parentId))
+        .leftJoin(schema.collections, eq(schema.collections.id, schema.products.collectionId))
+        .$dynamic();
+
     // Exact barcode hit first — when the cashier scans, this is the
     // expected single-row result.
-    const barcodeRows = await this.db
-      .select({
-        variantId: schema.productVariants.id,
-        productId: schema.products.id,
-        productName: schema.products.name,
-        sku: schema.productVariants.sku,
-        barcode: schema.productVariants.barcode,
-        variantName: schema.productVariants.name,
-        priceCents: schema.productVariants.priceCents,
-      })
-      .from(schema.productVariants)
-      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+    const barcodeRows = await base()
       .where(
         and(
           eq(schema.productVariants.barcode, query),
@@ -538,28 +559,26 @@ export class SalesController {
       .limit(limit);
     if (barcodeRows.length > 0) return barcodeRows;
 
-    // Otherwise, ILIKE on name + SKU. We don't use the products
-    // tsvector here because POS lookups are partial-prefix patterns
-    // ("coke") and tsvector lemmatization could miss exact substrings.
+    // Otherwise, ILIKE on name, SKU, brand, category and collection. We
+    // don't use the products tsvector here because POS lookups are
+    // partial-prefix patterns ("coke") and tsvector lemmatization could
+    // miss exact substrings. Name and SKU hits sort first so a brand-wide
+    // match ("Tempur") does not bury the item actually named that.
     const pattern = `%${query.replace(/[%_]/g, '\\$&')}%`;
-    return this.db
-      .select({
-        variantId: schema.productVariants.id,
-        productId: schema.products.id,
-        productName: schema.products.name,
-        sku: schema.productVariants.sku,
-        barcode: schema.productVariants.barcode,
-        variantName: schema.productVariants.name,
-        priceCents: schema.productVariants.priceCents,
-      })
-      .from(schema.productVariants)
-      .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+    const nameOrSku = sql`(${schema.products.name} ILIKE ${pattern} OR ${schema.productVariants.sku} ILIKE ${pattern} OR ${schema.productVariants.name} ILIKE ${pattern})`;
+    const groupMatch = sql`(${schema.brands.name} ILIKE ${pattern} OR ${schema.categories.name} ILIKE ${pattern} OR ${parentCategory.name} ILIKE ${pattern} OR ${schema.collections.name} ILIKE ${pattern})`;
+    return base()
       .where(
         and(
           eq(schema.productVariants.isActive, true),
           eq(schema.products.isActive, true),
-          sql`(${schema.products.name} ILIKE ${pattern} OR ${schema.productVariants.sku} ILIKE ${pattern})`,
+          sql`(${nameOrSku} OR ${groupMatch})`,
         ),
+      )
+      .orderBy(
+        sql`CASE WHEN ${nameOrSku} THEN 0 ELSE 1 END`,
+        schema.products.name,
+        schema.productVariants.sku,
       )
       .limit(limit);
   }

@@ -115,9 +115,29 @@ async function seed() {
       .returning();
     locationId = loc!.id;
 
+    // Owner 2026-11-04: the lookup also matches the brand and the
+    // category tree, so a transfer can search "soft drinks" or "coke co".
+    const [brand] = await db
+      .insert(schema.brands)
+      .values({ businessId, name: 'Coke Co' })
+      .returning();
+    const [parentCat] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Soft drinks' })
+      .returning();
+    const [childCat] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Cola', parentId: parentCat!.id })
+      .returning();
     const [productA] = await db
       .insert(schema.products)
-      .values({ businessId, sku: 'COKE', name: 'Coca-Cola' })
+      .values({
+        businessId,
+        sku: 'COKE',
+        name: 'Coca-Cola',
+        brandId: brand!.id,
+        categoryId: childCat!.id,
+      })
       .returning();
     const [variantA] = await db
       .insert(schema.productVariants)
@@ -231,6 +251,24 @@ describe('Epic 1.10 — POS register & sales', () => {
       .set('X-Business-Id', businessId);
     expect(res.status).toBe(200);
     expect(res.body.some((r: { productName: string }) => r.productName === 'Coca-Cola')).toBe(true);
+  });
+
+  it('POS lookup matches the brand, the category and its parent, and says which', async () => {
+    for (const q of ['coke co', 'cola', 'soft drink']) {
+      const res = await request(app.getHttpServer())
+        .get(`/v1/pos/lookup?q=${encodeURIComponent(q)}`)
+        .set('Cookie', cashierCookie)
+        .set('X-Business-Id', businessId);
+      expect(res.status).toBe(200);
+      const hit = res.body.find((r: { productName: string }) => r.productName === 'Coca-Cola');
+      expect(hit, q).toBeDefined();
+      expect(hit.brandName).toBe('Coke Co');
+      expect(hit.categoryName).toBe('Cola');
+      // The chips are in no brand or category, so a group search leaves them out.
+      expect(res.body.some((r: { productName: string }) => r.productName.startsWith('Lay'))).toBe(
+        false,
+      );
+    }
   });
 
   it('Inventory clerk (no pos.access) is blocked from lookup', async () => {
