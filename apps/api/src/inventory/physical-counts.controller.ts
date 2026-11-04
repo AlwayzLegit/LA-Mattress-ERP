@@ -47,6 +47,9 @@ interface CountLineOut {
   variantId: string;
   sku: string | null;
   productName: string;
+  /** Owner 2026-11-04: the count walks the floor by brand, then group (category). */
+  brandName: string | null;
+  groupName: string | null;
   binCode: string | null;
   frozenQty: number;
   frozenReserved: number;
@@ -523,6 +526,8 @@ export class PhysicalCountsController {
         variantId: schema.physicalCountLines.variantId,
         sku: schema.productVariants.sku,
         productName: schema.products.name,
+        brandName: schema.brands.name,
+        groupName: schema.categories.name,
         binCode: schema.storageBins.code,
         frozenQty: schema.physicalCountLines.frozenQty,
         frozenReserved: schema.physicalCountLines.frozenReserved,
@@ -536,12 +541,21 @@ export class PhysicalCountsController {
         eq(schema.productVariants.id, schema.physicalCountLines.variantId),
       )
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+      .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.products.categoryId))
       .leftJoin(
         schema.storageBins,
         eq(schema.storageBins.id, schema.physicalCountLines.storageBinId),
       )
       .where(eq(schema.physicalCountLines.countId, count.id))
-      .orderBy(sql`${schema.storageBins.code} ASC NULLS LAST`, asc(schema.productVariants.sku));
+      // Owner 2026-11-04: the sheet reads brand, then group, then the bin
+      // walk and SKU — items without a brand or group close each run.
+      .orderBy(
+        sql`${schema.brands.name} ASC NULLS LAST`,
+        sql`${schema.categories.name} ASC NULLS LAST`,
+        sql`${schema.storageBins.code} ASC NULLS LAST`,
+        asc(schema.productVariants.sku),
+      );
 
     // Soft-freeze correction: ledger delta since the freeze, per variant.
     const deltas = await this.db

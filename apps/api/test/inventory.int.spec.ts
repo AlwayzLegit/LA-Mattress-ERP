@@ -108,9 +108,24 @@ async function seed() {
       .returning();
     locationId = loc!.id;
 
+    // The count sheet carries the brand and the group (owner 2026-11-04).
+    const [brand] = await db
+      .insert(schema.brands)
+      .values({ businessId, name: 'Xbrand' })
+      .returning();
+    const [group] = await db
+      .insert(schema.categories)
+      .values({ businessId, name: 'Xgroup' })
+      .returning();
     const [product] = await db
       .insert(schema.products)
-      .values({ businessId, sku: 'X-001', name: 'Variant X' })
+      .values({
+        businessId,
+        sku: 'X-001',
+        name: 'Variant X',
+        brandId: brand!.id,
+        categoryId: group!.id,
+      })
       .returning();
     const [variant] = await db
       .insert(schema.productVariants)
@@ -539,6 +554,8 @@ describe('Physical counts — soft-freeze lifecycle', () => {
     expect(detail.body.lines).toHaveLength(1);
     expect(detail.body.lines[0].frozenQty).toBe(8);
     expect(detail.body.lines[0].countedQty).toBeNull();
+    expect(detail.body.lines[0].brandName).toBe('Xbrand');
+    expect(detail.body.lines[0].groupName).toBe('Xgroup');
   });
 
   it('A mid-count sale is netted out: variance = counted − (frozen + delta)', async () => {
