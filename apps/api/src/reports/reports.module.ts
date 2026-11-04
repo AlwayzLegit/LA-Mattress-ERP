@@ -9,6 +9,7 @@ import { MorningDashboardController } from './morning-dashboard.controller';
 import { OrderChangesController } from './order-changes.controller';
 import { OwnerDashboardController } from './owner-dashboard.controller';
 import { ReportsController } from './reports.controller';
+import { SalesAnalysisController } from './sales-analysis.controller';
 import { StoreDashboardController } from './store-dashboard.controller';
 import { TransfersByLocationController } from './transfers-by-location.controller';
 import { WrittenSalesController } from './written-sales.controller';
@@ -27,6 +28,7 @@ import { WebsiteStatsController, WebsiteStatsService } from './website-stats.con
     CashPickupsController,
     OrderChangesController,
     TransfersByLocationController,
+    SalesAnalysisController,
   ],
   providers: [WebsiteStatsService],
 })
