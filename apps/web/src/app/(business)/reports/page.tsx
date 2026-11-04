@@ -954,6 +954,10 @@ export default function ReportsPage() {
               data-testid="reports-sales-analysis-link"
             >
               Sales analysis
+              href="/reports/time-clock-activity"
+              data-testid="reports-time-clock-activity-link"
+            >
+              Time clock activity
             </LinkButton>
             <DateRangePicker value={range} onChange={setRange} testid="reports-range" />
           </>

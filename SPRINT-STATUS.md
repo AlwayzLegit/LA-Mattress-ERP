@@ -6999,3 +6999,12 @@ per salesperson — written, delivered, returned, net delivered, open pipeline, 
 to-go and a progress bar — with totals and CSV. Goal progress is measured on net delivered
 (switch to written); goals come from the member page's "Monthly sales goal". Amendment A11.
 Tests in `reports.int.spec.ts` (split credit, basis switch, cross-month, store scope, CSV).
+## Report Time Clock Activity — 2026-11-04
+
+Owner: the STORIS "Report Time Clock Activity" with a start and end date. `GET
+/v1/timeclock/activity?start&end&membershipId&locationId[&format=csv]` (new permission
+`timeclock.report`: Owner, Manager, Operations, Bookkeeper; backfilled by the role sync at boot)
+and `/reports/time-clock-activity` (linked from Reports): a card per member, a row per store-local
+day — in, out, break, hours, every punch on request — totals per person and overall, CSV.
+Amendment A12. Tests in `schedule.int.spec.ts` (hours and break, a shift across midnight, store
+scope, member filter, CSV, role gate).

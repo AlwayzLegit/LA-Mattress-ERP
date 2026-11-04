@@ -76,6 +76,8 @@ const operationsPermissions: Permission[] = [
   'schedule.view',
   'schedule.edit',
   'timeclock.punch',
+  // Owner 2026-11-04: reads everyone's hours (STORIS Report Time Clock Activity).
+  'timeclock.report',
 
   // The audit surfaces the feed links into.
   'audit.view',
@@ -203,6 +205,8 @@ const bookkeeperPermissions: Permission[] = [
   // Store list — see the cashier note; the books read per-store too.
   'locations.view',
   'schedule.view',
+  // Owner 2026-11-04: hours for payroll.
+  'timeclock.report',
   // In-house GL (owner 2026-08-28): the books own the ledger.
   'gl.view',
   'gl.post',
