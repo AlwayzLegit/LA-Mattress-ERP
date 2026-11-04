@@ -1969,7 +1969,14 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
     // Rows sort by net delivered; the analyst leads the bookkeeper.
     const order = res.body.rows.map((r: { membershipId: string | null }) => r.membershipId);
     expect(order.indexOf(analystMembershipId)).toBeLessThan(order.indexOf(bookkeeperMembershipId));
-    expect(res.body.totals.goalCents).toBe(100_000);
+    // The totals row sums every listed goal (the dashboard test above
+    // gave another member one too), so check it against the rows.
+    const goalSum = (res.body.rows as { goalCents: number | null }[]).reduce(
+      (s, r) => s + (r.goalCents ?? 0),
+      0,
+    );
+    expect(goalSum).toBeGreaterThanOrEqual(100_000);
+    expect(res.body.totals.goalCents).toBe(goalSum);
   });
 
   it('measures the goal on written dollars when asked', async () => {
