@@ -455,3 +455,169 @@ describe('the time clock', () => {
     expect(rep.body.status).toBe('out');
   });
 });
+
+describe('GET /v1/timeclock/activity (owner 2026-11-04, Report Time Clock Activity)', () => {
+  /** The UTC instant of `HH:MM` on `day` on the store's wall clock. */
+  function storeTime(day: string, hhmm: string): Date {
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+    const [hh, mm] = hhmm.split(':').map(Number) as [number, number];
+    const guess = Date.UTC(y, m - 1, d, hh, mm);
+    const wall = (at: number) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: TZ,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).formatToParts(new Date(at));
+      const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+      return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+    };
+    const first = guess - (wall(guess) - guess);
+    return new Date(first - (wall(first) - guess));
+  }
+  const shiftDay = (n: number) => {
+    const d = new Date(`${localDay()}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const yesterday = shiftDay(-1);
+  const twoAgo = shiftDay(-2);
+  const threeAgo = shiftDay(-3);
+
+  beforeAll(async () => {
+    await withDb(async (db) => {
+      // Priya: a plain day at A Store yesterday, half an hour of break.
+      await db.insert(schema.timePunches).values(
+        (
+          [
+            ['clock_in', '09:00'],
+            ['break_start', '12:00'],
+            ['break_end', '12:30'],
+            ['clock_out', '17:00'],
+          ] as const
+        ).map(([type, at]) => ({
+          businessId,
+          membershipId: members.rep,
+          locationId: aStoreId,
+          type,
+          at: storeTime(yesterday, at),
+        })),
+      );
+      // Walt (no store): a night shift that crosses midnight two nights ago.
+      await db.insert(schema.timePunches).values([
+        {
+          businessId,
+          membershipId: members.wh,
+          type: 'clock_in',
+          at: storeTime(threeAgo, '22:00'),
+        },
+        { businessId, membershipId: members.wh, type: 'clock_out', at: storeTime(twoAgo, '02:00') },
+      ]);
+    });
+  });
+
+  it('is for managers, Operations, the owner and the books — not the floor', () => {
+    const perms = (name: string) => SYSTEM_ROLES.find((r) => r.name === name)!.permissions;
+    for (const role of ['Owner', 'Manager', 'Operations', 'Bookkeeper']) {
+      expect(perms(role), role).toContain('timeclock.report');
+    }
+    for (const role of ['Cashier', 'Warehouse']) {
+      expect(perms(role), role).not.toContain('timeclock.report');
+    }
+  });
+
+  it('refuses a cashier', async () => {
+    await as('rep').get(`/v1/timeclock/activity?start=${yesterday}&end=${yesterday}`).expect(403);
+  });
+
+  it('lists a day per member with in, out, break and hours', async () => {
+    const res = await as('owner')
+      .get(`/v1/timeclock/activity?start=${yesterday}&end=${yesterday}`)
+      .expect(200);
+    expect(res.body.range).toEqual({ start: yesterday, end: yesterday });
+    expect(res.body.timezone).toBe(TZ);
+    const priya = res.body.people.find(
+      (p: { membershipId: string }) => p.membershipId === members.rep,
+    );
+    expect(priya).toBeTruthy();
+    expect(priya.name).toBe('Priya Nair');
+    expect(priya.locationName).toBe('A Store');
+    expect(priya.days).toHaveLength(1);
+    expect(priya.days[0]).toMatchObject({
+      date: yesterday,
+      firstIn: `${yesterday}T09:00`,
+      lastOut: `${yesterday}T17:00`,
+      breakMinutes: 30,
+      hours: 7.5,
+      openAtEnd: false,
+    });
+    expect(priya.days[0].punches.map((p: { type: string }) => p.type)).toEqual([
+      'clock_in',
+      'break_start',
+      'break_end',
+      'clock_out',
+    ]);
+    expect(priya.days[0].punches[0].locationName).toBe('A Store');
+    expect(priya.totalHours).toBe(7.5);
+    expect(priya.daysWorked).toBe(1);
+    // Walt's night shift was two nights ago, outside this window.
+    expect(
+      res.body.people.some((p: { membershipId: string }) => p.membershipId === members.wh),
+    ).toBe(false);
+    expect(res.body.totals).toEqual({ people: 1, daysWorked: 1, hours: 7.5 });
+  });
+
+  it('splits a shift that crosses midnight at store midnight', async () => {
+    const res = await as('owner')
+      .get(`/v1/timeclock/activity?start=${threeAgo}&end=${twoAgo}`)
+      .expect(200);
+    const walt = res.body.people.find(
+      (p: { membershipId: string }) => p.membershipId === members.wh,
+    );
+    expect(walt).toBeTruthy();
+    expect(walt.locationName).toBe('All locations');
+    expect(walt.days).toHaveLength(2);
+    expect(walt.days[0]).toMatchObject({
+      date: threeAgo,
+      firstIn: `${threeAgo}T22:00`,
+      lastOut: null,
+      hours: 2,
+      openAtEnd: true,
+    });
+    expect(walt.days[1]).toMatchObject({
+      date: twoAgo,
+      firstIn: null,
+      lastOut: `${twoAgo}T02:00`,
+      hours: 2,
+      openAtEnd: false,
+    });
+    expect(walt.totalHours).toBe(4);
+  });
+
+  it('shows a store-scoped manager their own store’s people only', async () => {
+    const res = await as('manager')
+      .get(`/v1/timeclock/activity?start=${threeAgo}&end=${yesterday}`)
+      .expect(200);
+    const ids = res.body.people.map((p: { membershipId: string }) => p.membershipId);
+    expect(ids).toContain(members.rep);
+    expect(ids).not.toContain(members.wh);
+  });
+
+  it('filters to one member and exports CSV', async () => {
+    const one = await as('owner')
+      .get(`/v1/timeclock/activity?start=${threeAgo}&end=${yesterday}&membershipId=${members.wh}`)
+      .expect(200);
+    expect(one.body.people.map((p: { membershipId: string }) => p.membershipId)).toEqual([
+      members.wh,
+    ]);
+    const csv = await as('owner')
+      .get(`/v1/timeclock/activity?start=${yesterday}&end=${yesterday}&format=csv`)
+      .expect(200);
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.text).toContain('Priya Nair');
+    expect(csv.text).toContain(`${yesterday},09:00,17:00,30,7.5`);
+  });
+});

@@ -165,6 +165,8 @@ export const PERMISSIONS = {
   'schedule.view': 'See the staff schedule',
   'schedule.edit': 'Set shifts and publish the week (Owner and Operations)',
   'timeclock.punch': 'Clock in and out, take breaks, on the dashboard time clock',
+  'timeclock.report':
+    'Run the time clock activity report — everyone’s punches and hours between two dates',
 
   'reason_codes.manage': 'Manage the reason-code registry (add / deactivate / restrict codes)',
   'security_overrides.view': 'View the security-override register',
