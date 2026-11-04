@@ -93,3 +93,40 @@ export const timePunches = pgTable(
     ),
   }),
 );
+
+/**
+ * The master week (owner 2026-11-04): the schedule is the same most
+ * weeks, so one saved week — a shift per member per weekday, minutes
+ * from store-local midnight like `staff_shifts` — is stamped onto any
+ * week and adjusted from there. `dow` is 0 = Monday … 6 = Sunday.
+ */
+export const staffShiftTemplates = pgTable(
+  'staff_shift_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    businessId: uuid('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+    membershipId: uuid('membership_id')
+      .notNull()
+      .references(() => memberships.id, { onDelete: 'cascade' }),
+    locationId: uuid('location_id').references(() => locations.id, { onDelete: 'set null' }),
+    dow: integer('dow').notNull(),
+    startMinutes: integer('start_minutes').notNull(),
+    endMinutes: integer('end_minutes').notNull(),
+    updatedByMembershipId: uuid('updated_by_membership_id').references(() => memberships.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    businessIdx: index('staff_shift_templates_business_idx').on(t.businessId),
+    memberDowUnique: uniqueIndex('staff_shift_templates_member_dow_uniq').on(t.membershipId, t.dow),
+    dowRange: check('staff_shift_templates_dow_range', sql`${t.dow} >= 0 AND ${t.dow} <= 6`),
+    endAfterStart: check(
+      'staff_shift_templates_end_after_start',
+      sql`${t.startMinutes} >= 0 AND ${t.endMinutes} > ${t.startMinutes} AND ${t.endMinutes} <= 1440`,
+    ),
+  }),
+);

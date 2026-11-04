@@ -806,6 +806,13 @@
       "when": 1793736736522,
       "tag": "0114_transfer_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1793833856582,
+      "tag": "0115_staff_shift_templates",
+      "breakpoints": true
     }
   ]
 }

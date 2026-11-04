@@ -66,6 +66,7 @@ export const TENANT_SCOPED_TABLES = [
   'competition_results',
   'order_change_acks',
   'staff_shifts',
+  'staff_shift_templates',
   'time_punches',
   'order_tasks',
   'member_notifications',
