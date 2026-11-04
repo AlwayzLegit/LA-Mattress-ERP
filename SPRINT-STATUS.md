@@ -6999,6 +6999,7 @@ per salesperson — written, delivered, returned, net delivered, open pipeline, 
 to-go and a progress bar — with totals and CSV. Goal progress is measured on net delivered
 (switch to written); goals come from the member page's "Monthly sales goal". Amendment A11.
 Tests in `reports.int.spec.ts` (split credit, basis switch, cross-month, store scope, CSV).
+
 ## Report Time Clock Activity — 2026-11-04
 
 Owner: the STORIS "Report Time Clock Activity" with a start and end date. `GET

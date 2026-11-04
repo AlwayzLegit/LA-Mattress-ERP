@@ -22,9 +22,10 @@ import { addDays } from './week';
  * report and the strip never disagree.
  *
  * Permission `timeclock.report` — the Owner, Managers, Operations and
- * the Bookkeeper. A store-scoped viewer sees the people of their own
- * stores (members whose store access overlaps theirs); unscoped members
- * (warehouse, office) show only to an unrestricted viewer.
+ * the Bookkeeper. A viewer with store access rows sees the people of
+ * their own stores (members whose store access overlaps theirs), as the
+ * schedule does; unscoped members (warehouse, office) show only to an
+ * unrestricted viewer.
  */
 
 export interface TimeClockDay {
@@ -173,8 +174,9 @@ export class TimeClockActivityController {
       list.push({ id: s.locationId, name: s.locationName });
       scopeOf.set(s.membershipId, list);
     }
-    const viewerStores =
-      tenant.dataScope === 'store' ? new Set(tenant.scopeLocationIds ?? []) : null;
+    // Same rule as the schedule: a member with store-access rows sees
+    // their own stores' people, whatever their data scope says.
+    const viewerStores = tenant.scopeLocationIds ? new Set(tenant.scopeLocationIds) : null;
 
     const people = members.filter((m) => {
       if (onlyMember && m.membershipId !== onlyMember) return false;

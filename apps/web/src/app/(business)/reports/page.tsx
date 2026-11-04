@@ -954,6 +954,9 @@ export default function ReportsPage() {
               data-testid="reports-sales-analysis-link"
             >
               Sales analysis
+            </LinkButton>
+            <LinkButton
+              size="sm"
               href="/reports/time-clock-activity"
               data-testid="reports-time-clock-activity-link"
             >
