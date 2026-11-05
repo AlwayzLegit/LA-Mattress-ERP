@@ -7065,3 +7065,15 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
 - `reports.int.spec.ts`: seeds subtotal/discount/tax and a FIFO cost on the
   Sales Analysis orders; asserts the split, the fallback cost, profit, the
   10% commission, and that out-of-range percentages are ignored.
+
+### 2026-11-05 — Store cards: what was sold and the profit (owner)
+
+- `GET /v1/dashboard/stores` cards carry `sold[]` (item, SKU, quantity,
+  merchandise net of discounts before tax, catalog cost, profit) built from the
+  lines of the orders written in the window plus the register sale lines rung
+  in it, plus `soldUnits`, `soldMerchandiseCents`, `soldCostCents` and
+  `profitCents`; totals add `soldMerchandiseCents` / `profitCents`.
+- Store card: a **Profit** figure in the header and a **Sold** table under the
+  three columns (best seller first, totals row, scrolls past ~12 rows).
+- `store-dashboard.int.spec.ts`: the three live A Store orders → 3 units,
+  $3,400 sold, $1,500 cost, $1,900 profit; noise orders stay out.
