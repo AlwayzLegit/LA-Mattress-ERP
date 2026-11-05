@@ -30,6 +30,8 @@ interface CountLine {
   variantId: string;
   sku: string | null;
   productName: string;
+  brandName: string | null;
+  groupName: string | null;
   binCode: string | null;
   frozenQty: number;
   frozenReserved: number;
@@ -241,6 +243,8 @@ export default function PhysicalCountDetailPage() {
                 <table className="table">
                   <thead>
                     <tr>
+                      <th>Brand</th>
+                      <th>Group</th>
                       <th>Bin</th>
                       <th>SKU</th>
                       <th>Item</th>
@@ -251,7 +255,7 @@ export default function PhysicalCountDetailPage() {
                   </thead>
                   <tbody>
                     {count.lines.length === 0 && (
-                      <TableEmpty colSpan={6}>No lines on this count.</TableEmpty>
+                      <TableEmpty colSpan={8}>No lines on this count.</TableEmpty>
                     )}
                     {count.lines.map((l) => {
                       const expected = l.frozenQty + l.postFreezeDelta;
@@ -260,6 +264,8 @@ export default function PhysicalCountDetailPage() {
                         count.status === 'posted' ? l.postedVariance : l.variance;
                       return (
                         <tr key={l.id}>
+                          <td>{l.brandName ?? '—'}</td>
+                          <td>{l.groupName ?? '—'}</td>
                           <td>{l.binCode ?? '—'}</td>
                           <td>
                             <code>{l.sku ?? '—'}</code>

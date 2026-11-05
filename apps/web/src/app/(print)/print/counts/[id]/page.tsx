@@ -10,7 +10,8 @@ import { PrintToolbar } from '../../print-toolbar';
  * Count sheet (physical inventory, FAQ pack C1). Deliberately **blind**:
  * system quantities are not printed, so the counter writes what is
  * actually on the floor instead of confirming what the screen says.
- * Lines come bin-ordered from the API — the walking order.
+ * Lines come from the API by brand, then group, then bin and SKU
+ * (owner 2026-11-04) — the walking order.
  */
 
 interface CountLine {
@@ -18,6 +19,8 @@ interface CountLine {
   variantId: string;
   sku: string | null;
   productName: string;
+  brandName: string | null;
+  groupName: string | null;
   binCode: string | null;
   countedQty: number | null;
 }
@@ -111,7 +114,7 @@ export default function CountSheetPrintPage() {
             <table style={table}>
               <thead>
                 <tr>
-                  {['Bin', 'SKU', 'Item', 'Counted qty', 'Initials'].map((h) => (
+                  {['Brand', 'Group', 'Bin', 'SKU', 'Item', 'Counted qty', 'Initials'].map((h) => (
                     <th key={h} style={{ ...cell, ...label, textAlign: 'left' }}>
                       {h}
                     </th>
@@ -121,8 +124,10 @@ export default function CountSheetPrintPage() {
               <tbody>
                 {c.lines.map((l) => (
                   <tr key={l.id}>
-                    <td style={{ ...cell, width: 80 }}>{l.binCode ?? '—'}</td>
-                    <td style={{ ...cell, width: 140 }}>
+                    <td style={{ ...cell, width: 90 }}>{l.brandName ?? '—'}</td>
+                    <td style={{ ...cell, width: 110 }}>{l.groupName ?? '—'}</td>
+                    <td style={{ ...cell, width: 60 }}>{l.binCode ?? '—'}</td>
+                    <td style={{ ...cell, width: 120 }}>
                       <code>{l.sku ?? '—'}</code>
                     </td>
                     <td style={cell}>{l.productName}</td>
@@ -161,8 +166,10 @@ export default function CountSheetPrintPage() {
               <tbody>
                 {[0, 1, 2].map((i) => (
                   <tr key={i}>
-                    <td style={{ ...cell, width: 80 }}>&nbsp;</td>
-                    <td style={{ ...cell, width: 140 }}>&nbsp;</td>
+                    <td style={{ ...cell, width: 90 }}>&nbsp;</td>
+                    <td style={{ ...cell, width: 110 }}>&nbsp;</td>
+                    <td style={{ ...cell, width: 60 }}>&nbsp;</td>
+                    <td style={{ ...cell, width: 120 }}>&nbsp;</td>
                     <td style={cell}>&nbsp;</td>
                     <td style={{ ...cell, width: 90 }}>&nbsp;</td>
                     <td style={{ ...cell, width: 70 }}>&nbsp;</td>

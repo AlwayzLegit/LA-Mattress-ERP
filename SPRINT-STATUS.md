@@ -7009,3 +7009,9 @@ and `/reports/time-clock-activity` (linked from Reports): a card per member, a r
 day — in, out, break, hours, every punch on request — totals per person and overall, CSV.
 Amendment A12. Tests in `schedule.int.spec.ts` (hours and break, a shift across midnight, store
 scope, member filter, CSV, role gate).
+
+## Count sheet by brand and group — 2026-11-04
+
+Owner (Koreatown count screenshot): the count page and the printed count sheet carry Brand and
+Group (category) columns and come from the API ordered brand → group → bin → SKU, so the
+counter walks the floor the way the stock is grouped. `brandName` / `groupName` on count lines.
