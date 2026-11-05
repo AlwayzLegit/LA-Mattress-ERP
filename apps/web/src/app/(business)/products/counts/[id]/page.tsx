@@ -272,6 +272,12 @@ export default function PhysicalCountDetailPage() {
   }, [status, live, drafts]);
   const cols = useListColumns('count-lines', columns, count?.lines ?? null);
 
+  // Owner 2026-11-04: the count sheet prints in the order on screen, so
+  // the link carries the current sort to the print page.
+  const sheetHref = cols.sort
+    ? `/print/counts/${id}?sort=${encodeURIComponent(cols.sort)}&dir=${cols.dir}`
+    : `/print/counts/${id}`;
+
   return (
     <div>
       <PageHeader
@@ -284,7 +290,7 @@ export default function PhysicalCountDetailPage() {
             : undefined
         }
         actions={
-          <LinkButton href={`/print/counts/${id}`} variant="secondary" size="sm">
+          <LinkButton href={sheetHref} variant="secondary" size="sm">
             <Printer size={14} />
             Count sheet
           </LinkButton>

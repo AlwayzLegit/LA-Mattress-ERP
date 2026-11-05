@@ -17,6 +17,7 @@ export {
   ColumnCells,
   ColumnHeadRow,
   ResetColumns,
+  sortRows,
   useListColumns,
   type ColumnDef,
   type ListColumns,

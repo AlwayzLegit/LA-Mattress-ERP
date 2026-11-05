@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { TableWrap } from '@/components/ui';
+import { type ColumnDef, type SortDir, sortRows, TableWrap } from '@/components/ui';
 import { PrintToolbar } from '../../print-toolbar';
 
 /**
@@ -11,7 +11,9 @@ import { PrintToolbar } from '../../print-toolbar';
  * system quantities are not printed, so the counter writes what is
  * actually on the floor instead of confirming what the screen says.
  * Lines come from the API by brand, then group, then bin and SKU
- * (owner 2026-11-04) — the walking order.
+ * (owner 2026-11-04) — the walking order. When the count page was sorted
+ * by a column, `?sort=<column>&dir=asc|desc` prints the sheet in that
+ * same order (owner 2026-11-04: "print related to the sort").
  */
 
 interface CountLine {
@@ -22,7 +24,11 @@ interface CountLine {
   brandName: string | null;
   groupName: string | null;
   binCode: string | null;
+  frozenQty: number;
+  postFreezeDelta: number;
   countedQty: number | null;
+  variance: number | null;
+  postedVariance: number | null;
 }
 
 interface CountDetail {
@@ -52,11 +58,40 @@ const cell: React.CSSProperties = {
 const wrap: React.CSSProperties = { border: 'none', borderRadius: 0, background: 'transparent' };
 const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' };
 
+/** The same sort keys the count page offers, by column id. */
+const SORTS: Record<string, ColumnDef<CountLine>> = Object.fromEntries(
+  (
+    [
+      ['brand', 'Brand', (l) => l.brandName],
+      ['group', 'Group', (l) => l.groupName],
+      ['bin', 'Bin', (l) => l.binCode],
+      ['sku', 'SKU', (l) => l.sku],
+      ['item', 'Item', (l) => l.productName],
+      ['expected', 'Expected', (l) => l.frozenQty + l.postFreezeDelta],
+      ['counted', 'Counted', (l) => l.countedQty],
+      ['variance', 'Variance', (l) => l.postedVariance ?? l.variance],
+    ] as [string, string, (l: CountLine) => string | number | null][]
+  ).map(([id, label, sortValue]) => [id, { id, label, sortValue, render: () => null }]),
+);
+
 export default function CountSheetPrintPage() {
+  return (
+    <Suspense fallback={null}>
+      <CountSheet />
+    </Suspense>
+  );
+}
+
+function CountSheet() {
   const params = useParams<{ id: string }>();
   const id = (params?.id ?? '') as string;
+  const search = useSearchParams();
+  const sortCol = SORTS[search.get('sort') ?? ''];
+  const dir: SortDir = search.get('dir') === 'desc' ? 'desc' : 'asc';
   const [c, setC] = useState<CountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const lines = useMemo(() => (c ? sortRows(c.lines, sortCol, dir) : []), [c, sortCol, dir]);
 
   useEffect(() => {
     if (!id) return;
@@ -100,6 +135,11 @@ export default function CountSheetPrintPage() {
               <div style={{ fontSize: 10, marginTop: 2 }}>
                 Frozen {new Date(c.frozenAt).toLocaleString()}
               </div>
+              {sortCol && (
+                <div style={{ fontSize: 10, marginTop: 2 }} data-testid="count-sheet-sort">
+                  Sorted by {sortCol.label} {dir === 'desc' ? '↓' : '↑'}
+                </div>
+              )}
             </div>
           </div>
 
@@ -122,7 +162,7 @@ export default function CountSheetPrintPage() {
                 </tr>
               </thead>
               <tbody>
-                {c.lines.map((l) => (
+                {lines.map((l) => (
                   <tr key={l.id}>
                     <td style={{ ...cell, width: 90 }}>{l.brandName ?? '—'}</td>
                     <td style={{ ...cell, width: 110 }}>{l.groupName ?? '—'}</td>
