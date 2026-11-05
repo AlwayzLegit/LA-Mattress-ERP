@@ -2796,6 +2796,9 @@ kbd.key {
 .dt .last {
   padding-right: var(--pad);
 }
+.dt td.minstock-below {
+  color: var(--warn);
+}
 .dt-static th {
   position: static;
 }

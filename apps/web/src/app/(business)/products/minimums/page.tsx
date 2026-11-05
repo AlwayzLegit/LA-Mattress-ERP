@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { categoryList, categoryOptions, type CategoryFlat } from '@/lib/categories';
@@ -8,13 +8,18 @@ import { ProductsNav } from '@/components/products-nav';
 import {
   Alert,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   EmptyState,
   Field,
   Input,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 /**
@@ -38,6 +43,8 @@ interface MinStockRow {
   productName: string;
   variantName: string | null;
   variantSku: string | null;
+  brandName: string | null;
+  groupName: string | null;
   onHand: number;
   available: number;
   reorderPoint: number | null;
@@ -154,6 +161,126 @@ export default function MinStockPage() {
 
   const locationName = locations.find((l) => l.id === locationId)?.name ?? '…';
 
+  // Owner 2026-11-04: brand and group as columns of their own, every
+  // column sortable (click a header), order draggable. The min cell shows
+  // the saved number beside the box so "0" and "not set" read differently.
+  const columns = useMemo<ColumnDef<MinStockRow>[]>(() => {
+    const sold = (n: number, label: string, cls?: string): ColumnDef<MinStockRow> => ({
+      id: `sold${n}`,
+      label,
+      num: true,
+      className: cls,
+      sortValue: (r) => soldIn(r.weekly, n),
+      render: (r) => soldIn(r.weekly, n),
+    });
+    const cols: ColumnDef<MinStockRow>[] = [
+      {
+        id: 'product',
+        label: 'Product',
+        className: 'first',
+        sortValue: (r) => r.productName,
+        render: (r) => (
+          <>
+            {r.productName}
+            {r.variantName ? (
+              <span style={{ color: 'var(--muted)' }}> · {r.variantName}</span>
+            ) : null}
+          </>
+        ),
+      },
+      {
+        id: 'sku',
+        label: 'SKU',
+        className: 'mono',
+        sortValue: (r) => r.variantSku,
+        render: (r) => r.variantSku ?? '—',
+      },
+      {
+        id: 'brand',
+        label: 'Brand',
+        sortValue: (r) => r.brandName,
+        render: (r) => r.brandName ?? <span style={{ color: 'var(--muted)' }}>—</span>,
+      },
+      {
+        id: 'group',
+        label: 'Group',
+        sortValue: (r) => r.groupName,
+        render: (r) => r.groupName ?? <span style={{ color: 'var(--muted)' }}>—</span>,
+      },
+      {
+        id: 'onHand',
+        label: 'On hand',
+        num: true,
+        sortValue: (r) => r.onHand,
+        render: (r) => r.onHand,
+      },
+      {
+        id: 'available',
+        label: 'Available',
+        num: true,
+        sortValue: (r) => r.available,
+        cellClassName: (r) =>
+          r.reorderPoint != null && r.reorderPoint > 0 && r.available < r.reorderPoint
+            ? 'minstock-below'
+            : null,
+        render: (r) => r.available,
+      },
+      {
+        id: 'min',
+        label: `Min · ${locationName}`,
+        num: true,
+        sortValue: (r) => r.reorderPoint,
+        render: (r) => {
+          const draft = drafts[r.variantId];
+          const dirty =
+            draft !== undefined && draft !== (r.reorderPoint != null ? String(r.reorderPoint) : '');
+          return (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span
+                className="text-xs"
+                style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}
+                data-testid="minstock-saved"
+              >
+                {r.reorderPoint == null ? 'not set' : `set to ${r.reorderPoint}`}
+              </span>
+              <Input
+                value={draft ?? (r.reorderPoint != null ? String(r.reorderPoint) : '')}
+                onChange={(e) =>
+                  setDrafts((d) => ({
+                    ...d,
+                    [r.variantId]: e.target.value.replace(/[^\d]/g, ''),
+                  }))
+                }
+                onBlur={() => void save(r)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                inputMode="numeric"
+                placeholder="—"
+                disabled={savingId === r.variantId}
+                className="input-num"
+                style={dirty ? { borderColor: 'var(--warn)' } : undefined}
+                title={dirty ? 'Unsaved — press Enter or leave the box to save' : undefined}
+                aria-label={`Minimum for ${r.productName}`}
+                data-testid="minstock-input"
+              />
+            </div>
+          );
+        },
+      },
+      sold(1, 'Sold 1 wk'),
+      sold(2, '2 wk'),
+      sold(3, '3 wk'),
+      sold(4, '4 wk', weeks > 4 ? undefined : 'last'),
+    ];
+    if (weeks > 4) cols.push(sold(weeks, `${weeks} wk`, 'last'));
+    return cols;
+  }, [drafts, locationName, save, savingId, weeks]);
+  const cols = useListColumns('minstock', columns, data?.rows ?? null);
+
   return (
     <div>
       <PageHeader
@@ -227,85 +354,29 @@ export default function MinStockPage() {
         </EmptyState>
       ) : data ? (
         <TableWrap>
-          <table className="dt" data-testid="minstock-table">
+          {/* dt-static: inside a scrolling wrap a sticky header pins to the
+              wrap, not the page, and slides 50px down over the first rows. */}
+          <table className="dt dt-static" data-testid="minstock-table">
             <thead>
-              <tr>
-                <th className="first">Product</th>
-                <th>SKU</th>
-                <th style={{ textAlign: 'right' }}>On hand</th>
-                <th style={{ textAlign: 'right' }}>Available</th>
-                <th style={{ textAlign: 'right' }}>Min · {locationName}</th>
-                <th style={{ textAlign: 'right' }}>Sold 1 wk</th>
-                <th style={{ textAlign: 'right' }}>2 wk</th>
-                <th style={{ textAlign: 'right' }}>3 wk</th>
-                <th style={{ textAlign: 'right' }}>4 wk</th>
-                {weeks > 4 && (
-                  <th className="last" style={{ textAlign: 'right' }}>
-                    {weeks} wk
-                  </th>
-                )}
-              </tr>
+              <ColumnHeadRow list={cols} testIdPrefix="minstock" />
             </thead>
             <tbody>
-              {data.rows.map((r) => {
-                const below =
-                  r.reorderPoint != null && r.reorderPoint > 0 && r.available < r.reorderPoint;
-                return (
-                  <tr key={r.variantId} data-testid="minstock-row">
-                    <td className="first">
-                      {r.productName}
-                      {r.variantName ? (
-                        <span style={{ color: 'var(--muted)' }}> · {r.variantName}</span>
-                      ) : null}
-                    </td>
-                    <td className="mono">{r.variantSku ?? '—'}</td>
-                    <td className="num">{r.onHand}</td>
-                    <td className="num" style={below ? { color: 'var(--warn)' } : undefined}>
-                      {r.available}
-                    </td>
-                    <td className="num" style={{ width: 110 }}>
-                      <Input
-                        value={
-                          drafts[r.variantId] ??
-                          (r.reorderPoint != null ? String(r.reorderPoint) : '')
-                        }
-                        onChange={(e) =>
-                          setDrafts((d) => ({
-                            ...d,
-                            [r.variantId]: e.target.value.replace(/[^\d]/g, ''),
-                          }))
-                        }
-                        onBlur={() => void save(r)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            (e.target as HTMLInputElement).blur();
-                          }
-                        }}
-                        inputMode="numeric"
-                        placeholder="—"
-                        disabled={savingId === r.variantId}
-                        className="input-num"
-                        aria-label={`Minimum for ${r.productName}`}
-                        data-testid="minstock-input"
-                      />
-                    </td>
-                    <td className="num">{soldIn(r.weekly, 1)}</td>
-                    <td className="num">{soldIn(r.weekly, 2)}</td>
-                    <td className="num">{soldIn(r.weekly, 3)}</td>
-                    <td className="num">{soldIn(r.weekly, 4)}</td>
-                    {weeks > 4 && <td className="num last">{soldIn(r.weekly, weeks)}</td>}
-                  </tr>
-                );
-              })}
+              {cols.sorted.map((r, i) => (
+                <tr key={r.variantId} data-testid="minstock-row">
+                  <ColumnCells list={cols} row={r} index={i} />
+                </tr>
+              ))}
             </tbody>
           </table>
+          <ResetColumns list={cols} />
         </TableWrap>
       ) : null}
       {data && (
         <p className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>
           Sold columns count units written at all stores (register sales + orders; quotes, cancels
           and imported history excluded). An amber Available sits below the item&apos;s minimum.
+          Click a column to sort; the box shows the saved minimum, and a blank box means the item is
+          not managed here.
         </p>
       )}
     </div>

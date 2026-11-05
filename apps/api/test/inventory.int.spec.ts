@@ -108,7 +108,7 @@ async function seed() {
       .returning();
     locationId = loc!.id;
 
-    // The count sheet carries the brand and the group (owner 2026-11-04).
+    // Brand and group ride along on the count sheet and the min-stock screen.
     const [brand] = await db
       .insert(schema.brands)
       .values({ businessId, name: 'Xbrand' })
@@ -309,6 +309,22 @@ describe('Epic 1.8 — Inventory', () => {
       .send({ variantId, locationId, delta: -1000, reason: 'count_correction' });
     expect(res.status).toBe(201);
     expect(res.body.onHand).toBe(0);
+  });
+
+  it('Min stock rows carry the brand and group and the saved minimum (owner 2026-11-04)', async () => {
+    await request(app.getHttpServer())
+      .patch('/v1/inventory/min-stock')
+      .set('Cookie', inventoryClerkCookie)
+      .set('X-Business-Id', businessId)
+      .send({ variantId, locationId, reorderPoint: 3 })
+      .expect(200);
+    const res = await request(app.getHttpServer())
+      .get(`/v1/inventory/min-stock?locationId=${locationId}`)
+      .set('Cookie', cashierCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    const row = res.body.rows.find((r: { variantId: string }) => r.variantId === variantId);
+    expect(row).toMatchObject({ brandName: 'Xbrand', groupName: 'Xgroup', reorderPoint: 3 });
   });
 
   it('Levels endpoint returns joined product + variant info', async () => {
