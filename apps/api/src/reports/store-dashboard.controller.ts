@@ -106,6 +106,21 @@ export interface SalespersonRow {
   lastWriteUpAt: Date | null;
 }
 
+/** One item sold at a store in the period (owner 2026-11-05: "what was sold and amount profit"). */
+export interface SoldItem {
+  variantId: string | null;
+  sku: string | null;
+  name: string;
+  variantName: string | null;
+  quantity: number;
+  /** Line price × quantity, net of every discount, before tax. */
+  merchandiseCents: number;
+  /** Catalog cost × quantity at report time. */
+  costCents: number;
+  /** merchandise − cost. */
+  profitCents: number;
+}
+
 export interface StoreCard {
   locationId: string;
   name: string;
@@ -127,6 +142,13 @@ export interface StoreCard {
   salespeople: SalespersonRow[];
   tenders: { method: string; cents: number; count: number }[];
   cashPayments: CashPaymentRow[];
+  /** Items on the orders written (and register sales rung) in the period, best seller first. */
+  sold: SoldItem[];
+  soldUnits: number;
+  soldMerchandiseCents: number;
+  soldCostCents: number;
+  /** Merchandise sold − its cost: the store's profit on what was written in the period. */
+  profitCents: number;
 }
 
 export interface StoresResponse {
@@ -144,6 +166,8 @@ export interface StoresResponse {
     receivedCents: number;
     receivedCount: number;
     cashPendingCents: number;
+    soldMerchandiseCents: number;
+    profitCents: number;
   };
 }
 
@@ -706,6 +730,116 @@ export class StoreDashboardController {
             .groupBy(refundLocation),
     ]);
 
+    // What was sold (owner 2026-11-05): every line on the orders written in
+    // the window plus the register sale lines rung in it, grouped by item
+    // per store. Merchandise is the line net of discounts and tax; cost is
+    // the item's catalog cost today (the FIFO cost is only known once the
+    // order ships), so profit here is the margin the sale was written at.
+    const soldCols = {
+      variantId: schema.productVariants.id,
+      sku: schema.productVariants.sku,
+      productName: schema.products.name,
+      variantName: schema.productVariants.name,
+    };
+    const saleScope = and(
+      eq(schema.sales.businessId, businessId),
+      sql`${schema.sales.status} IN ('completed', 'partially_refunded', 'refunded')`,
+      isNull(schema.sales.importedAt),
+      storeIds.length > 0 ? inArray(schema.sales.locationId, storeIds) : sql`false`,
+      salesScopeCond(tenant, schema.sales.locationId),
+    );
+    const [soldOnOrders, soldAtRegister] = await Promise.all([
+      storeIds.length === 0
+        ? Promise.resolve([])
+        : this.db
+            .select({
+              locationId: schema.orders.locationId,
+              ...soldCols,
+              description: sql<string>`MIN(${schema.orderLines.description})`,
+              quantity: sql<number>`COALESCE(SUM(${schema.orderLines.quantity}), 0)::int`,
+              merchandiseCents: sql<number>`COALESCE(SUM(${schema.orderLines.totalCents} - ${schema.orderLines.taxCents}), 0)::int`,
+              costCents: sql<number>`COALESCE(SUM(${schema.orderLines.quantity} * COALESCE(${schema.productVariants.costCents}, 0)), 0)::int`,
+            })
+            .from(schema.orderLines)
+            .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+            .leftJoin(
+              schema.productVariants,
+              eq(schema.productVariants.id, schema.orderLines.variantId),
+            )
+            .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+            .where(
+              and(
+                liveOrder,
+                storeWindow(stores, range, schema.orders.createdAt, schema.orders.locationId),
+              ),
+            )
+            .groupBy(
+              schema.orders.locationId,
+              schema.productVariants.id,
+              schema.productVariants.sku,
+              schema.products.name,
+              schema.productVariants.name,
+            ),
+      storeIds.length === 0
+        ? Promise.resolve([])
+        : this.db
+            .select({
+              locationId: schema.sales.locationId,
+              ...soldCols,
+              description: sql<string>`MIN(${schema.saleLines.description})`,
+              quantity: sql<number>`COALESCE(SUM(${schema.saleLines.quantity}), 0)::int`,
+              merchandiseCents: sql<number>`COALESCE(SUM(${schema.saleLines.totalCents} - ${schema.saleLines.taxCents}), 0)::int`,
+              costCents: sql<number>`COALESCE(SUM(${schema.saleLines.quantity} * COALESCE(${schema.productVariants.costCents}, 0)), 0)::int`,
+            })
+            .from(schema.saleLines)
+            .innerJoin(schema.sales, eq(schema.sales.id, schema.saleLines.saleId))
+            .leftJoin(
+              schema.productVariants,
+              eq(schema.productVariants.id, schema.saleLines.variantId),
+            )
+            .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+            .where(
+              and(
+                saleScope,
+                storeWindow(stores, range, schema.sales.completedAt, schema.sales.locationId),
+              ),
+            )
+            .groupBy(
+              schema.sales.locationId,
+              schema.productVariants.id,
+              schema.productVariants.sku,
+              schema.products.name,
+              schema.productVariants.name,
+            ),
+    ]);
+    const soldByStore = new Map<string, Map<string, SoldItem>>();
+    for (const row of [...soldOnOrders, ...soldAtRegister]) {
+      let items = soldByStore.get(row.locationId);
+      if (!items) {
+        items = new Map();
+        soldByStore.set(row.locationId, items);
+      }
+      const key = row.variantId ?? `custom:${row.description}`;
+      let item = items.get(key);
+      if (!item) {
+        item = {
+          variantId: row.variantId,
+          sku: row.sku,
+          name: row.productName ?? row.description,
+          variantName: row.variantName,
+          quantity: 0,
+          merchandiseCents: 0,
+          costCents: 0,
+          profitCents: 0,
+        };
+        items.set(key, item);
+      }
+      item.quantity += row.quantity;
+      item.merchandiseCents += row.merchandiseCents;
+      item.costCents += row.costCents;
+      item.profitCents = item.merchandiseCents - item.costCents;
+    }
+
     const refundsByStore = new Map<string, number>();
     for (const r of [...saleRefunds, ...orderRefunds]) {
       refundsByStore.set(r.locationId, (refundsByStore.get(r.locationId) ?? 0) + r.cents);
@@ -798,6 +932,13 @@ export class StoreDashboardController {
       const cashReceived = cashPayments.filter((p) => p.receipt);
       const cashPendingCents = cashTotalCents - cashReceived.reduce((s, p) => s + p.amountCents, 0);
 
+      const sold = [...(soldByStore.get(store.id)?.values() ?? [])].sort(
+        (a, b) => b.merchandiseCents - a.merchandiseCents || b.quantity - a.quantity,
+      );
+      const soldUnits = sold.reduce((n, i) => n + i.quantity, 0);
+      const soldMerchandiseCents = sold.reduce((n, i) => n + i.merchandiseCents, 0);
+      const soldCostCents = sold.reduce((n, i) => n + i.costCents, 0);
+
       const salespeople = [...reps.values()]
         .map((r) => ({
           ...r,
@@ -826,6 +967,11 @@ export class StoreDashboardController {
         salespeople,
         tenders,
         cashPayments,
+        sold,
+        soldUnits,
+        soldMerchandiseCents,
+        soldCostCents,
+        profitCents: soldMerchandiseCents - soldCostCents,
       };
     });
 
@@ -839,6 +985,8 @@ export class StoreDashboardController {
         receivedCents: t.receivedCents + c.receivedCents,
         receivedCount: t.receivedCount + c.receivedCount,
         cashPendingCents: t.cashPendingCents + c.cashPendingCents,
+        soldMerchandiseCents: t.soldMerchandiseCents + c.soldMerchandiseCents,
+        profitCents: t.profitCents + c.profitCents,
       }),
       {
         storeCount: 0,
@@ -849,6 +997,8 @@ export class StoreDashboardController {
         receivedCents: 0,
         receivedCount: 0,
         cashPendingCents: 0,
+        soldMerchandiseCents: 0,
+        profitCents: 0,
       },
     );
 

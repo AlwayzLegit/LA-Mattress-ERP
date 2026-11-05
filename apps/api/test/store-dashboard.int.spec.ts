@@ -394,6 +394,19 @@ interface Card {
     customerName: string | null;
     receipt: { byName: string; byRole: string | null; receivedAt: string } | null;
   }[];
+  sold: {
+    variantId: string | null;
+    sku: string | null;
+    name: string;
+    quantity: number;
+    merchandiseCents: number;
+    costCents: number;
+    profitCents: number;
+  }[];
+  soldUnits: number;
+  soldMerchandiseCents: number;
+  soldCostCents: number;
+  profitCents: number;
 }
 
 async function aStoreCard(who: Who = 'owner', qs = ''): Promise<Card> {
@@ -524,6 +537,31 @@ describe('GET /v1/dashboard/stores', () => {
       receivedCents: 370_000,
       cashPendingCents: 100_000,
     });
+  });
+
+  it('lists what was sold in the period with its cost and profit (owner 2026-11-05)', async () => {
+    const a = await aStoreCard();
+    // The three live written orders each carry one Queen at $1,000 / $2,000
+    // / $400 with a $500 catalog cost; the draft, cancelled, imported and
+    // 40-day-old orders stay out, and the register sale has no lines.
+    expect(a.sold).toHaveLength(1);
+    expect(a.sold[0]).toMatchObject({
+      variantId,
+      sku: 'SC-MAT-Q',
+      name: 'Store Card Mattress',
+      quantity: 3,
+      merchandiseCents: 340_000,
+      costCents: 150_000,
+      profitCents: 190_000,
+    });
+    expect(a.soldUnits).toBe(3);
+    expect(a.soldMerchandiseCents).toBe(340_000);
+    expect(a.soldCostCents).toBe(150_000);
+    expect(a.profitCents).toBe(190_000);
+    const res = await as('owner').get('/v1/dashboard/stores').expect(200);
+    const b = (res.body.stores as Card[]).find((s) => s.name === 'B Store')!;
+    expect(b.sold[0]).toMatchObject({ quantity: 1, merchandiseCents: 50_000, profitCents: 0 });
+    expect(res.body.totals).toMatchObject({ soldMerchandiseCents: 390_000, profitCents: 190_000 });
   });
 
   it('badges the store manager and lists each salesperson once', async () => {

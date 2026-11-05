@@ -13,7 +13,9 @@ import type { StoreCardData, StorePeriod } from './types';
  * · Received · Refunds on the right; then three columns — the
  * salespeople table, money received by method (each row opens the
  * payment list), and cash on hand with the tick list and the Record →
- * Post pickup flow.
+ * Post pickup flow. Under them (owner 2026-11-05: "what was sold and
+ * amount profit") the items sold in the period with quantity,
+ * merchandise, cost and profit, and a Profit figure in the header.
  */
 export function StoreCard({
   card,
@@ -61,6 +63,12 @@ export function StoreCard({
             muted={!card.deliveredCents}
           />
           <Fig label="Received" value={usdWhole(card.receivedCents)} />
+          <Fig
+            label="Profit"
+            value={card.soldUnits ? usdWhole(card.profitCents) : '—'}
+            muted={!card.soldUnits}
+            danger={card.profitCents < 0}
+          />
           <Fig
             label="Refunds"
             value={card.refundsCents ? `−${usdWhole(card.refundsCents)}` : '—'}
@@ -188,6 +196,82 @@ export function StoreCard({
 
           <div className="sc-col" style={{ minWidth: 0 }}>
             <CashOnHandPanel cp={cp} locationId={card.locationId} actorName={actorName} />
+          </div>
+
+          <div className="sc-col sc-sold" style={{ minWidth: 0, overflowX: 'auto' }}>
+            <div className="eyebrow sc-col-title">
+              Sold · {plural(card.soldUnits, 'unit', 'units')} · profit {usdWhole(card.profitCents)}
+            </div>
+            {card.sold.length === 0 ? (
+              <div className="sc-empty">Nothing sold at this store in the period.</div>
+            ) : (
+              <table className="store-table" data-testid="store-sold">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>SKU</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Sold</th>
+                    <th className="num">Cost</th>
+                    <th className="num" style={{ paddingRight: 0 }}>
+                      Profit
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {card.sold.map((i) => (
+                    <tr key={i.variantId ?? i.name} data-testid="store-sold-item">
+                      <td>
+                        {i.name}
+                        {i.variantName ? (
+                          <span style={{ color: 'var(--muted)' }}> · {i.variantName}</span>
+                        ) : null}
+                      </td>
+                      <td className="mono" style={{ color: 'var(--muted)' }}>
+                        {i.sku ?? '—'}
+                      </td>
+                      <td className="num">{i.quantity}</td>
+                      <td className="num">{usdWhole(i.merchandiseCents)}</td>
+                      <td className="num" style={{ color: 'var(--muted)' }}>
+                        {usdWhole(i.costCents)}
+                      </td>
+                      <td
+                        className="num"
+                        style={{
+                          paddingRight: 0,
+                          fontWeight: 600,
+                          color: i.profitCents < 0 ? 'var(--status-risk-fg)' : undefined,
+                        }}
+                      >
+                        {usdWhole(i.profitCents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr data-testid="store-sold-total">
+                    <td style={{ fontWeight: 600 }}>Total</td>
+                    <td />
+                    <td className="num" style={{ fontWeight: 600 }}>
+                      {card.soldUnits}
+                    </td>
+                    <td className="num" style={{ fontWeight: 600 }}>
+                      {usdWhole(card.soldMerchandiseCents)}
+                    </td>
+                    <td className="num" style={{ color: 'var(--muted)' }}>
+                      {usdWhole(card.soldCostCents)}
+                    </td>
+                    <td className="num" style={{ paddingRight: 0, fontWeight: 600 }}>
+                      {usdWhole(card.profitCents)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+            <div className="sc-empty" style={{ padding: '6px 0 0', fontSize: 11.5 }}>
+              Items on the orders written and register sales rung in the period. Sold is after
+              discounts, before tax and fees; cost is the item&apos;s catalog cost.
+            </div>
           </div>
         </div>
       )}
