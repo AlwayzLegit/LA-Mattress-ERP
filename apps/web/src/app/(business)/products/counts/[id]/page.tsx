@@ -10,6 +10,9 @@ import {
   BackLink,
   Button,
   Card,
+  ColumnCells,
+  type ColumnDef,
+  ColumnHeadRow,
   Field,
   FormActions,
   FormGrid,
@@ -18,11 +21,13 @@ import {
   LinkButton,
   LoadingRows,
   PageHeader,
+  ResetColumns,
   Select,
   Stack,
   StatusBadge,
   TableEmpty,
   TableWrap,
+  useListColumns,
 } from '@/components/ui';
 
 interface CountLine {
@@ -183,6 +188,90 @@ export default function PhysicalCountDetailPage() {
     }
   }
 
+  // Owner 2026-11-04: every column sorts on a click of its header (the
+  // API already orders by brand, group, bin, SKU); the order is draggable
+  // like the other lists. Expected and variance are derived per row.
+  const status = count?.status;
+  const columns = useMemo<ColumnDef<CountLine>[]>(() => {
+    const expectedOf = (l: CountLine) => l.frozenQty + l.postFreezeDelta;
+    const varianceOf = (l: CountLine) => (status === 'posted' ? l.postedVariance : l.variance);
+    return [
+      {
+        id: 'brand',
+        label: 'Brand',
+        sortValue: (l) => l.brandName,
+        render: (l) => l.brandName ?? '—',
+      },
+      {
+        id: 'group',
+        label: 'Group',
+        sortValue: (l) => l.groupName,
+        render: (l) => l.groupName ?? '—',
+      },
+      {
+        id: 'bin',
+        label: 'Bin',
+        sortValue: (l) => l.binCode,
+        render: (l) => l.binCode ?? '—',
+      },
+      {
+        id: 'sku',
+        label: 'SKU',
+        sortValue: (l) => l.sku,
+        render: (l) => <code>{l.sku ?? '—'}</code>,
+      },
+      {
+        id: 'item',
+        label: 'Item',
+        sortValue: (l) => l.productName,
+        render: (l) => l.productName,
+      },
+      {
+        id: 'expected',
+        label: 'Expected',
+        num: true,
+        sortValue: expectedOf,
+        render: expectedOf,
+      },
+      {
+        id: 'counted',
+        label: 'Counted',
+        num: true,
+        sortValue: (l) => l.countedQty,
+        render: (l) => {
+          const draft = drafts[l.variantId];
+          return live ? (
+            <Input
+              value={draft ?? (l.countedQty === null ? '' : String(l.countedQty))}
+              onChange={(e) => setDrafts((d) => ({ ...d, [l.variantId]: e.target.value }))}
+              inputMode="numeric"
+              placeholder="—"
+              aria-label={`Counted quantity for ${l.sku ?? l.productName}`}
+              className="w-20 text-right"
+            />
+          ) : (
+            (l.countedQty ?? '—')
+          );
+        },
+      },
+      {
+        id: 'variance',
+        label: 'Variance',
+        num: true,
+        sortValue: varianceOf,
+        cellClassName: (l) => {
+          const v = varianceOf(l);
+          return v != null && v !== 0 ? 'count-variance' : null;
+        },
+        render: (l) => {
+          const v = varianceOf(l);
+          return v == null ? '—' : v > 0 ? `+${v}` : v;
+        },
+      },
+    ];
+  }, [status, live, drafts]);
+  const cols = useListColumns('count-lines', columns, count?.lines ?? null);
+
   return (
     <div>
       <PageHeader
@@ -240,73 +329,24 @@ export default function PhysicalCountDetailPage() {
 
             <Card flush>
               <TableWrap>
-                <table className="table">
+                {/* dt-static: inside a scrolling wrap a sticky header pins to the
+                    wrap, not the page, and slides down over the first rows. */}
+                <table className="dt dt-static" data-testid="count-table">
                   <thead>
-                    <tr>
-                      <th>Brand</th>
-                      <th>Group</th>
-                      <th>Bin</th>
-                      <th>SKU</th>
-                      <th>Item</th>
-                      <th className="num">Expected</th>
-                      <th className="num">Counted</th>
-                      <th className="num">Variance</th>
-                    </tr>
+                    <ColumnHeadRow list={cols} testIdPrefix="count" />
                   </thead>
                   <tbody>
                     {count.lines.length === 0 && (
                       <TableEmpty colSpan={8}>No lines on this count.</TableEmpty>
                     )}
-                    {count.lines.map((l) => {
-                      const expected = l.frozenQty + l.postFreezeDelta;
-                      const draft = drafts[l.variantId];
-                      const shownVariance =
-                        count.status === 'posted' ? l.postedVariance : l.variance;
-                      return (
-                        <tr key={l.id}>
-                          <td>{l.brandName ?? '—'}</td>
-                          <td>{l.groupName ?? '—'}</td>
-                          <td>{l.binCode ?? '—'}</td>
-                          <td>
-                            <code>{l.sku ?? '—'}</code>
-                          </td>
-                          <td>{l.productName}</td>
-                          <td className="num">{expected}</td>
-                          <td className="num">
-                            {live ? (
-                              <Input
-                                value={draft ?? (l.countedQty === null ? '' : String(l.countedQty))}
-                                onChange={(e) =>
-                                  setDrafts((d) => ({ ...d, [l.variantId]: e.target.value }))
-                                }
-                                inputMode="numeric"
-                                placeholder="—"
-                                aria-label={`Counted quantity for ${l.sku ?? l.productName}`}
-                                className="w-20 text-right"
-                              />
-                            ) : (
-                              (l.countedQty ?? '—')
-                            )}
-                          </td>
-                          <td
-                            className="num"
-                            style={
-                              shownVariance != null && shownVariance !== 0
-                                ? { color: 'var(--danger)', fontWeight: 600 }
-                                : undefined
-                            }
-                          >
-                            {shownVariance == null
-                              ? '—'
-                              : shownVariance > 0
-                                ? `+${shownVariance}`
-                                : shownVariance}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {cols.sorted.map((l, i) => (
+                      <tr key={l.id} data-testid="count-row">
+                        <ColumnCells list={cols} row={l} index={i} />
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
+                <ResetColumns list={cols} />
               </TableWrap>
             </Card>
 

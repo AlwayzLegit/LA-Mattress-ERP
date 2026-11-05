@@ -2799,6 +2799,11 @@ kbd.key {
 .dt td.minstock-below {
   color: var(--warn);
 }
+/* Count page: a non-zero variance line reads as shrink/overage. */
+.dt td.count-variance {
+  color: var(--danger);
+  font-weight: 600;
+}
 .dt-static th {
   position: static;
 }
