@@ -7032,3 +7032,12 @@ one shift per member per weekday; `GET /v1/schedule/master`, `POST .../master/sa
 master" and "Apply master" next to Publish; apply writes drafts (fills empty days, or overwrites on
 confirmation), then the week is adjusted and published as before. Amendment A13. Tests in
 `schedule.int.spec.ts`.
+
+### 2026-11-04 — Count page columns sort (owner screenshot)
+
+- `products/counts/[id]`: the lines table now uses the shared list columns
+  (`useListColumns('count-lines')`) — every header sorts on a click (brand,
+  group, bin, SKU, item, expected, counted, variance), the order is draggable,
+  and "Reset columns" restores it. Default order stays the API's brand → group →
+  bin → SKU. The header is `dt-static` so it doesn't slide over rows inside the
+  scrolling wrap (same fix as Min stock). The count sheet print view is unchanged.
