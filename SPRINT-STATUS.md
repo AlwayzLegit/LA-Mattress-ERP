@@ -7023,3 +7023,12 @@ inside the scrolling wrap pins to the wrap and slides 50px down) — now static.
 are columns of their own, every column sorts on click and the order drags; the min cell says
 "set to N" or "not set" beside the box, and an edited box turns amber until it saves.
 `brandName` / `groupName` on `GET /v1/inventory/min-stock`.
+
+## Master week for the staff schedule — 2026-11-04
+
+Owner: the weekly schedule is usually the same. `staff_shift_templates` (migration 0115, RLS) holds
+one shift per member per weekday; `GET /v1/schedule/master`, `POST .../master/save {week}` and
+`POST .../master/apply {week, replace?}` (`schedule.edit`). The schedule card gains "Save as
+master" and "Apply master" next to Publish; apply writes drafts (fills empty days, or overwrites on
+confirmation), then the week is adjusted and published as before. Amendment A13. Tests in
+`schedule.int.spec.ts`.

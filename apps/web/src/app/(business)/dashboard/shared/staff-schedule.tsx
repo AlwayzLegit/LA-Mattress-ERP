@@ -170,6 +170,74 @@ export function StaffSchedule({
     }
   };
 
+  // Owner 2026-11-04: the week is the same most weeks — keep a master
+  // week and stamp it onto any week, then adjust and publish as usual.
+  const [master, setMaster] = useState<{ shifts: number; people: number } | null>(null);
+  const loadMaster = useCallback(() => {
+    return api<{ shifts: number; people: number }>('/v1/schedule/master')
+      .then((m) => setMaster({ shifts: m.shifts, people: m.people }))
+      .catch(() => setMaster(null));
+  }, []);
+  useEffect(() => {
+    if (canEdit) void loadMaster();
+  }, [canEdit, loadMaster]);
+
+  const saveMaster = async () => {
+    if (!data) return;
+    const label = weekLabel(data.week.start, data.week.end);
+    if (
+      !window.confirm(
+        `Save ${label} as the master week? It replaces the current master (${
+          master?.shifts ?? 0
+        } shifts).`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await api<{ saved: number }>('/v1/schedule/master/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week: data.week.start }),
+      });
+      toast.success(`Master week saved: ${r.saved} shifts from ${label}`);
+      await loadMaster();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyMaster = async () => {
+    if (!data) return;
+    const label = weekLabel(data.week.start, data.week.end);
+    let replace = false;
+    if (stats.shifts > 0) {
+      replace = window.confirm(
+        `${label} already has ${stats.shifts} shifts.\n\nOK — overwrite them with the master week.\nCancel — keep them and only fill the empty days.`,
+      );
+    }
+    setBusy(true);
+    try {
+      const r = await api<{ applied: number; skipped: number }>('/v1/schedule/master/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week: data.week.start, replace }),
+      });
+      toast.success(
+        `Master week applied to ${label}: ${r.applied} shifts written${
+          r.skipped > 0 ? `, ${r.skipped} kept as they were` : ''
+        }. Adjust, then publish.`,
+      );
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const publish = async () => {
     if (!data) return;
     setBusy(true);
@@ -286,15 +354,41 @@ export function StaffSchedule({
                 : 'View only · Operations and the owner edit shifts'}
             </span>
             {canEdit && data && (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={busy || stats.unpublished === 0}
-                onClick={() => void publish()}
-                data-testid="sched-publish"
-              >
-                Publish week
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy || stats.shifts === 0}
+                  onClick={() => void saveMaster()}
+                  title="Keep this week as the master week"
+                  data-testid="sched-save-master"
+                >
+                  Save as master
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy || !master || master.shifts === 0}
+                  onClick={() => void applyMaster()}
+                  title={
+                    master && master.shifts > 0
+                      ? `Stamp the master week (${master.shifts} shifts, ${master.people} people) onto this week`
+                      : 'Save a week as the master first'
+                  }
+                  data-testid="sched-apply-master"
+                >
+                  Apply master
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={busy || stats.unpublished === 0}
+                  onClick={() => void publish()}
+                  data-testid="sched-publish"
+                >
+                  Publish week
+                </button>
+              </>
             )}
           </div>
           {handle}

@@ -212,6 +212,7 @@ DECLARE
     'competition_results',
     'order_change_acks',
     'staff_shifts',
+    'staff_shift_templates',
     'time_punches',
     'delivery_runs',
     'serial_units',

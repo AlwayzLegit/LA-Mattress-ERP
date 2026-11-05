@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 import postgres from 'postgres';
 import request from 'supertest';
 import { Test } from '@nestjs/testing';
@@ -23,7 +23,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import { schema } from '@jetnine/db';
 import { SYSTEM_ROLES } from '@jetnine/shared';
+import { addDays, mondayOf } from '../src/schedule/week';
 import { AppModule } from '../src/app.module';
+import { addDays, mondayOf } from '../src/schedule/week';
 
 const TEST_DB_URL =
   process.env.SCHEDULE_TEST_DATABASE_URL ??
@@ -619,5 +621,134 @@ describe('GET /v1/timeclock/activity (owner 2026-11-04, Report Time Clock Activi
     expect(csv.headers['content-type']).toMatch(/text\/csv/);
     expect(csv.text).toContain('Priya Nair');
     expect(csv.text).toContain(`${yesterday},09:00,17:00,30,7.5`);
+  });
+});
+
+describe('the master week (owner 2026-11-04)', () => {
+  const thisMonday = mondayOf(localDay());
+  const nextMonday = addDays(thisMonday, 7);
+  const shiftOf = (
+    people: { name: string; shifts: { date: string }[] }[],
+    name: string,
+    d: string,
+  ) => people.find((p) => p.name === name)?.shifts.find((s) => s.date === d);
+
+  beforeAll(async () => {
+    // Earlier blocks leave shifts in this week; start from a clean slate.
+    await withDb((db) =>
+      db
+        .delete(schema.staffShifts)
+        .where(
+          and(
+            gte(schema.staffShifts.date, thisMonday),
+            lte(schema.staffShifts.date, addDays(nextMonday, 6)),
+          ),
+        ),
+    );
+  });
+
+  it('is saved from a week and stamped onto another as drafts', async () => {
+    // Priya Tue 9–5 at A Store, Walt Wed 7–3 (no store).
+    await as('ops')
+      .put('/v1/schedule/shifts')
+      .send({
+        membershipId: members.rep,
+        date: addDays(thisMonday, 1),
+        startMinutes: 540,
+        endMinutes: 1020,
+      })
+      .expect(200);
+    await as('ops')
+      .put('/v1/schedule/shifts')
+      .send({
+        membershipId: members.wh,
+        date: addDays(thisMonday, 2),
+        startMinutes: 420,
+        endMinutes: 900,
+      })
+      .expect(200);
+
+    await as('rep').post('/v1/schedule/master/save').send({ week: thisMonday }).expect(403);
+    const saved = await as('ops')
+      .post('/v1/schedule/master/save')
+      .send({ week: thisMonday })
+      .expect(201);
+    expect(saved.body.saved).toBe(2);
+
+    const master = await as('owner').get('/v1/schedule/master').expect(200);
+    expect(master.body.shifts).toBe(2);
+    expect(master.body.people).toBe(2);
+    expect(
+      master.body.rows.map((r: { dow: number; dowLabel: string }) => [r.dow, r.dowLabel]),
+    ).toEqual(
+      expect.arrayContaining([
+        [1, 'Tue'],
+        [2, 'Wed'],
+      ]),
+    );
+    expect(master.body.hours).toBe(16);
+
+    const applied = await as('ops')
+      .post('/v1/schedule/master/apply')
+      .send({ week: nextMonday })
+      .expect(201);
+    expect(applied.body).toMatchObject({ applied: 2, skipped: 0, week: { start: nextMonday } });
+    const week = await as('ops').get(`/v1/schedule?week=${nextMonday}`).expect(200);
+    expect(shiftOf(week.body.people, 'Priya Nair', addDays(nextMonday, 1))).toMatchObject({
+      startMinutes: 540,
+      endMinutes: 1020,
+      published: false,
+    });
+    expect(shiftOf(week.body.people, 'Walt House', addDays(nextMonday, 2))).toMatchObject({
+      startMinutes: 420,
+      endMinutes: 900,
+      published: false,
+    });
+    expect(week.body.unpublishedCount).toBe(2);
+  });
+
+  it('fills only the empty days unless told to replace', async () => {
+    // Priya's Tuesday next week is adjusted by hand to 10–6.
+    await as('ops')
+      .put('/v1/schedule/shifts')
+      .send({
+        membershipId: members.rep,
+        date: addDays(nextMonday, 1),
+        startMinutes: 600,
+        endMinutes: 1080,
+      })
+      .expect(200);
+    const fill = await as('ops')
+      .post('/v1/schedule/master/apply')
+      .send({ week: nextMonday })
+      .expect(201);
+    expect(fill.body).toMatchObject({ applied: 0, skipped: 2 });
+    let week = await as('ops').get(`/v1/schedule?week=${nextMonday}`).expect(200);
+    expect(shiftOf(week.body.people, 'Priya Nair', addDays(nextMonday, 1))).toMatchObject({
+      startMinutes: 600,
+    });
+
+    const replace = await as('owner')
+      .post('/v1/schedule/master/apply')
+      .send({ week: nextMonday, replace: true })
+      .expect(201);
+    expect(replace.body).toMatchObject({ applied: 2, skipped: 0 });
+    week = await as('ops').get(`/v1/schedule?week=${nextMonday}`).expect(200);
+    expect(shiftOf(week.body.people, 'Priya Nair', addDays(nextMonday, 1))).toMatchObject({
+      startMinutes: 540,
+    });
+  });
+
+  it('is cut to a store-restricted viewer’s stores and refuses an empty master', async () => {
+    const mgr = await as('manager').get('/v1/schedule/master').expect(200);
+    // Maya (A Store only) sees Priya's A Store row, not Walt's storeless one.
+    expect(mgr.body.rows.map((r: { membershipId: string }) => r.membershipId)).toEqual([
+      members.rep,
+    ]);
+
+    await withDb((db) => db.delete(schema.staffShiftTemplates));
+    const empty = await as('ops').post('/v1/schedule/master/apply').send({ week: nextMonday });
+    expect(empty.status).toBe(400);
+    expect(empty.body.message).toMatch(/No master week/);
   });
 });
