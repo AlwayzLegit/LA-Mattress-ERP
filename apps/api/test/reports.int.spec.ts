@@ -1844,7 +1844,7 @@ describe('Store-local days (owner 2026-10-02: evening sales missing from the Z)'
   });
 });
 
-describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, goal', () => {
+describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, goal, profit', () => {
   let analystMembershipId = '';
   let bookkeeperMembershipId = '';
   let deliveredOrderId = '';
@@ -1894,11 +1894,36 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
           number: 'SA-DELIVERED',
           status: 'completed',
           completedAt: now,
+          subtotalCents: 55_000,
+          taxCents: 5_000,
           totalCents: 60_000,
           salespersonMembershipId: analystMembershipId,
         })
         .returning();
       deliveredOrderId = delivered!.id;
+      // Its FIFO cost: two units consumed at fulfilment, 10,000 each.
+      const [layer] = await db
+        .insert(schema.costLayers)
+        .values({
+          businessId,
+          variantId: variantAId,
+          locationId,
+          sourceType: 'po_receive',
+          unitCostCents: 10_000,
+          quantityReceived: 2,
+          quantityRemaining: 0,
+          receivedAt: now,
+        })
+        .returning();
+      await db.insert(schema.costConsumptions).values({
+        businessId,
+        layerId: layer!.id,
+        quantity: 2,
+        unitCostCents: 10_000,
+        referenceType: 'order_fulfill',
+        referenceId: deliveredOrderId,
+        consumedAt: now,
+      });
       await db.insert(schema.orders).values([
         {
           // Split 75/25 with the bookkeeper, delivered from the Annex.
@@ -1908,6 +1933,9 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
           number: 'SA-SPLIT',
           status: 'completed',
           completedAt: now,
+          subtotalCents: 20_000,
+          discountCents: 2_000,
+          taxCents: 2_000,
           totalCents: 20_000,
           salespersonMembershipId: analystMembershipId,
           secondSalespersonMembershipId: bookkeeperMembershipId,
@@ -1920,10 +1948,25 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
           customerId: cust!.id,
           number: 'SA-OPEN',
           status: 'confirmed',
+          subtotalCents: 18_000,
+          taxCents: 2_000,
           totalCents: 20_000,
           salespersonMembershipId: analystMembershipId,
         },
       ]);
+      const [split] = await db
+        .select({ id: schema.orders.id })
+        .from(schema.orders)
+        .where(and(eq(schema.orders.businessId, businessId), eq(schema.orders.number, 'SA-SPLIT')));
+      await db.insert(schema.orderLines).values({
+        businessId,
+        orderId: split!.id,
+        variantId: variantAId,
+        description: 'Widget',
+        quantity: 1,
+        unitPriceCents: 20_000,
+        totalCents: 20_000,
+      });
       await db.insert(schema.orderReturns).values({
         businessId,
         orderId: deliveredOrderId,
@@ -1953,17 +1996,36 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
     const ana = rowFor(res.body, analystMembershipId)!;
     expect(ana).toBeTruthy();
     expect(ana.name).toBe('Ana Lyst');
+    // Totals (with tax) as before …
     expect(ana.writtenCents).toBe(95_000); // 60,000 + 15,000 share + 20,000 open
     expect(ana.deliveredCents).toBe(75_000); // 60,000 + 15,000 share
     expect(ana.returnedCents).toBe(10_000);
     expect(ana.netDeliveredCents).toBe(65_000);
     expect(ana.openCents).toBe(20_000);
     expect(ana.openCount).toBe(1);
+    // … and (owner 2026-11-05) merchandise and tax apart from them.
+    expect(ana.writtenSubtotalCents).toBe(86_500); // 55,000 + 13,500 share + 18,000 open
+    expect(ana.writtenTaxCents).toBe(8_500); // 5,000 + 1,500 share + 2,000 open
+    expect(ana.deliveredSubtotalCents).toBe(68_500); // 55,000 + 13,500 share
+    expect(ana.deliveredTaxCents).toBe(6_500);
+    // The 10,000 refund splits like its 55,000 + 5,000 order: 9,167 goods, 833 tax.
+    expect(ana.returnedSubtotalCents).toBe(9_167);
+    expect(ana.returnedTaxCents).toBe(833);
+    expect(ana.netDeliveredSubtotalCents).toBe(59_333);
+    expect(ana.openSubtotalCents).toBe(18_000);
+    // Cost: 20,000 FIFO on SA-DELIVERED + 75% of the split order's 400 catalog cost.
+    expect(ana.costCents).toBe(20_300);
+    expect(ana.profitCents).toBe(39_033); // 59,333 − 20,300
+    expect(ana.commissionCents).toBeNull(); // no profit-share percentage asked for
+    // The goal is measured on net delivered merchandise, not the taxed total.
     expect(ana.goalCents).toBe(100_000);
-    expect(ana.toGoalCents).toBe(35_000);
-    expect(ana.pctOfGoal).toBe(65);
+    expect(ana.toGoalCents).toBe(40_667);
+    expect(ana.pctOfGoal).toBe(59.3);
     const bk = rowFor(res.body, bookkeeperMembershipId)!;
     expect(bk.deliveredCents).toBe(5_000);
+    expect(bk.deliveredSubtotalCents).toBe(4_500);
+    expect(bk.costCents).toBe(100);
+    expect(bk.profitCents).toBe(4_400);
     expect(bk.goalCents).toBeNull();
     expect(bk.toGoalCents).toBeNull();
     // Rows sort by net delivered; the analyst leads the bookkeeper.
@@ -1977,6 +2039,33 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
     );
     expect(goalSum).toBeGreaterThanOrEqual(100_000);
     expect(res.body.totals.goalCents).toBe(goalSum);
+    // Totals add up across the listed rows.
+    const rows = res.body.rows as { profitCents: number; writtenTaxCents: number }[];
+    expect(res.body.totals.profitCents).toBe(rows.reduce((t, r) => t + r.profitCents, 0));
+    expect(res.body.totals.writtenTaxCents).toBe(rows.reduce((t, r) => t + r.writtenTaxCents, 0));
+    expect(res.body.totals.commissionCents).toBeNull();
+  });
+
+  it('computes each salesperson’s commission at the profit-share percentage', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?pct=10')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(res.body.profitSharePct).toBe(10);
+    const ana = rowFor(res.body, analystMembershipId)!;
+    expect(ana.commissionCents).toBe(3_903); // 10% of 39,033
+    const bk = rowFor(res.body, bookkeeperMembershipId)!;
+    expect(bk.commissionCents).toBe(440);
+    const rows = res.body.rows as { commissionCents: number }[];
+    expect(res.body.totals.commissionCents).toBe(rows.reduce((t, r) => t + r.commissionCents, 0));
+    // Out-of-range percentages are ignored rather than applied.
+    const bad = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?pct=250')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(bad.body.profitSharePct).toBeNull();
   });
 
   it('measures the goal on written dollars when asked', async () => {
@@ -1986,8 +2075,8 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
       .set('X-Business-Id', businessId)
       .expect(200);
     const ana = rowFor(res.body, analystMembershipId)!;
-    expect(ana.toGoalCents).toBe(5_000);
-    expect(ana.pctOfGoal).toBe(95);
+    expect(ana.toGoalCents).toBe(13_500); // 100,000 − 86,500 written merchandise
+    expect(ana.pctOfGoal).toBe(86.5);
   });
 
   it('leaves the goal columns empty across a month boundary', async () => {
@@ -2013,6 +2102,8 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
     // The split order delivered from the Annex is out of scope.
     expect(ana.deliveredCents).toBe(60_000);
     expect(ana.netDeliveredCents).toBe(50_000);
+    expect(ana.netDeliveredSubtotalCents).toBe(45_833);
+    expect(ana.costCents).toBe(20_000);
     expect(rowFor(res.body, bookkeeperMembershipId)).toBeUndefined();
   });
 
@@ -2023,8 +2114,16 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
       .set('X-Business-Id', businessId)
       .expect(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    expect(res.text).toContain('Net delivered $');
+    expect(res.text).toContain('Written merchandise $');
+    expect(res.text).toContain('Profit $');
     expect(res.text).toContain('Ana Lyst');
     expect(res.text).toMatch(/\nTotal,/);
+    const withPct = await request(app.getHttpServer())
+      .get('/v1/reports/sales-analysis?format=csv&pct=10')
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId)
+      .expect(200);
+    expect(withPct.text).toContain('Commission $ (10%)');
+    expect(withPct.text).toContain('profit-share=10%');
   });
 });

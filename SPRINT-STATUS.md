@@ -7049,3 +7049,19 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   shared `sortRows` (now exported from `@/components/ui`) and prints a
   "Sorted by … ↑/↓" line under the frozen time. With no sort the sheet keeps
   the API's brand → group → bin → SKU walking order. The sheet stays blind.
+
+### 2026-11-05 — Sales Analysis: tax out, profit and commission in (owner, A14)
+
+- `GET /v1/reports/sales-analysis` rows and totals now carry `*SubtotalCents`
+  (merchandise after discounts), `*TaxCents` and the grand total for written,
+  delivered, returned and open; `netDeliveredSubtotalCents`; `costCents` (FIFO
+  consumptions keyed by order / register sale, lines × catalog cost when an
+  order has none); `profitCents`; `commissionCents` when `?pct=` (0–100) is
+  given, echoed as `profitSharePct`. Goals, `toGoalCents` and `pctOfGoal` are
+  measured on merchandise. CSV gained the matching columns.
+- `/reports/sales-analysis`: Written and Delivered each show Merch. / Tax /
+  Total; Net delivered, Cost, Profit and Commission columns; a **Profit share
+  %** box in the toolbar drives the commission column and the CSV.
+- `reports.int.spec.ts`: seeds subtotal/discount/tax and a FIFO cost on the
+  Sales Analysis orders; asserts the split, the fallback cost, profit, the
+  10% commission, and that out-of-range percentages are ignored.
