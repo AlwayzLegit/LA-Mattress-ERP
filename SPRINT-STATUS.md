@@ -7041,3 +7041,11 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   and "Reset columns" restores it. Default order stays the API's brand → group →
   bin → SKU. The header is `dt-static` so it doesn't slide over rows inside the
   scrolling wrap (same fix as Min stock). The count sheet print view is unchanged.
+
+### 2026-11-04 — Count sheet prints in the on-screen sort (owner)
+
+- The count page's **Count sheet** link carries the current sort
+  (`?sort=<column>&dir=asc|desc`); `print/counts/[id]` applies it with the
+  shared `sortRows` (now exported from `@/components/ui`) and prints a
+  "Sorted by … ↑/↓" line under the frozen time. With no sort the sheet keeps
+  the API's brand → group → bin → SKU walking order. The sheet stays blind.
