@@ -352,7 +352,7 @@ export function Barcode39({
   );
 }
 
-function StoreAddress({ addressJson }: { addressJson: unknown }) {
+export function StoreAddress({ addressJson }: { addressJson: unknown }) {
   if (!addressJson || typeof addressJson !== 'object') return null;
   const a = addressJson as Record<string, unknown>;
   const s = (k: string) => (typeof a[k] === 'string' && a[k] ? (a[k] as string) : null);
@@ -486,7 +486,7 @@ function hexRgb(hex: string): [number, number, number] {
 }
 
 /** Light wash of the accent for notice bars (mixes toward white). */
-function tint(hex: string, amount = 0.9): string {
+export function tint(hex: string, amount = 0.9): string {
   const [r, g, b] = hexRgb(hex);
   const mix = (c: number) => Math.round(c + (255 - c) * amount);
   return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
@@ -548,6 +548,14 @@ const td: React.CSSProperties = {
   verticalAlign: 'top',
   fontSize: 11,
 };
+
+/**
+ * The invoice's look, shared with the other customer-facing documents
+ * (the Exchange Ticket, owner 2026-11-05) so every paper the customer
+ * signs reads as one family: font, muted/rule greys, the card and grid
+ * styles and the print CSS.
+ */
+export const DOC_THEME = { FONT, MUTED, RULE, cardStyle, cardLabel, th, td, css: INVOICE_CSS };
 
 /** §11 Invoice / Sales Order. */
 export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; printedAt: Date }) {
@@ -974,7 +982,7 @@ export function paymentRef(ref: string): string {
   return /^\d{4}$/.test(t) ? `•••• ${t}` : t;
 }
 
-function DetailRow({ label: l, children }: { label: string; children: React.ReactNode }) {
+export function DetailRow({ label: l, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
       <span style={{ color: MUTED, width: 78, flex: 'none' }}>{l}</span>
@@ -983,7 +991,7 @@ function DetailRow({ label: l, children }: { label: string; children: React.Reac
   );
 }
 
-function TotalRow({
+export function TotalRow({
   label: l,
   value,
   bold,
