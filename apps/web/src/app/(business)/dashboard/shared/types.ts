@@ -46,6 +46,18 @@ export interface SalespersonRow {
   lastWriteUpAt: string | null;
 }
 
+/** One item sold at a store in the period (owner 2026-11-05). */
+export interface SoldItem {
+  variantId: string | null;
+  sku: string | null;
+  name: string;
+  variantName: string | null;
+  quantity: number;
+  merchandiseCents: number;
+  costCents: number;
+  profitCents: number;
+}
+
 export interface StoreCardData {
   locationId: string;
   name: string;
@@ -67,6 +79,11 @@ export interface StoreCardData {
   salespeople: SalespersonRow[];
   tenders: { method: string; cents: number; count: number }[];
   cashPayments: CashPaymentRow[];
+  sold: SoldItem[];
+  soldUnits: number;
+  soldMerchandiseCents: number;
+  soldCostCents: number;
+  profitCents: number;
 }
 
 export interface StoresResponse {
