@@ -1,5 +1,22 @@
 # Sprint Status — STORIS Cutover
 
+## Exchange Ticket in the invoice's dress — 2026-11-05
+
+- Owner QA (photo of EX-2026-000007): the exchange ticket was a bare black-box
+  sheet with one date and no detail. It now shares the invoice shell
+  (`ExchangeTicketDoc`, `apps/web/src/components/exchange-ticket.tsx`): tenant
+  logo and brand accent, the selling store's address, a Balance due / Refund due
+  / Even callout, Customer · Return · Replacement cards (RMA, who took the
+  return, how the goods come back, pickup window, replacement salesperson,
+  fulfillment, delivery date and address), a dated timeline (original invoice,
+  entered, authorized, picked up or dropped off, delivery, completed), the
+  returned lines with reasons and unit credit, the replacement lines with
+  model/brand/price/discount, payments on the replacement, full totals with
+  tax and fees netted against the credit and the restocking fee, a plain-words
+  settlement note, an acknowledgement plus signature/date lines, the footer
+  note and the print stamp. Reads the existing three endpoints; no API change.
+  The invoice's theme pieces are exported as `DOC_THEME` for shared use.
+
 ## Transfers hold stock from creation — 2026-11-02
 
 - Owner QA (screenshots 2026-11-02): a printed transfer ticket left ST-2026-000014
