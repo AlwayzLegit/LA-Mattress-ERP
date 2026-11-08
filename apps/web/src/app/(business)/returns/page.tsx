@@ -3,17 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useCursorList } from '@/lib/use-cursor-list';
-import {
-  CustomerPicker,
-  customerDisplayName,
-  type CustomerRow,
-} from '@/components/customer-picker';
 import { LoadMore } from '@/components/load-more';
 import { Money } from '@/components/money';
+import { NoOriginalReturnForm, findOrderByNumber } from '@/components/no-original-return-form';
 import { SecurityOverrideDialog } from '@/components/security-override-dialog';
 import {
   Alert,
@@ -52,30 +47,12 @@ interface ReturnRow {
   lines: { id: string; description: string | null; quantity: number; perUnitCents: number }[];
 }
 
-interface ReasonCode {
-  id: string;
-  code: string;
-  description: string;
-}
-
-interface LocationRow {
-  id: string;
-  name: string;
-  isActive: boolean;
-}
-
-interface DraftLine {
-  variantId: string;
-  description: string;
-  quantity: string;
-  refund: string;
-}
-
 /**
  * Returns register: every return document (with-order RMAs and
- * no-original returns), plus the SEC-RTN-NOORIG entry form for a
- * customer with no findable invoice. Store-credit only; goods go to
- * As-Is review; a non-manager finishes through the override dialog.
+ * no-original returns), plus the SEC-RTN-NOORIG entry form
+ * (`NoOriginalReturnForm`, shared with New Exchange) for a customer with
+ * no findable invoice. Store-credit only; goods go to As-Is review; a
+ * non-manager finishes through the override dialog.
  */
 function returnColumns(onVoid: (r: ReturnRow) => void): ColumnDef<ReturnRow>[] {
   return [
@@ -187,7 +164,7 @@ export default function ReturnsPage() {
       />
       <Stack>
         <InvoiceReturnCard />
-        <NoOriginalCard onChanged={() => list.load()} />
+        <NoOriginalReturnForm mode="return" onCreated={() => list.load()} />
         {error && <Alert tone="error">{error}</Alert>}
         {rows == null ? (
           <LoadingRows />
@@ -220,21 +197,6 @@ export default function ReturnsPage() {
   );
 }
 
-interface OrderHit {
-  id: string;
-  number: string;
-}
-
-/** The order with exactly this number (case-insensitive), or null. */
-async function findOrder(number: string): Promise<OrderHit | null> {
-  const n = number.trim();
-  if (!n) return null;
-  const page = await api<{ data: OrderHit[] }>(
-    `/v1/orders?number=${encodeURIComponent(n)}&limit=1`,
-  );
-  return page.data[0] ?? null;
-}
-
 /**
  * Return from an invoice (owner 2026-10-02: a return for WE-10021 went
  * through the no-invoice form, which has no restocking fee, pickup fee
@@ -250,7 +212,7 @@ function InvoiceReturnCard() {
     if (!number.trim() || busy) return;
     setBusy(true);
     try {
-      const hit = await findOrder(number);
+      const hit = await findOrderByNumber(number);
       if (!hit) {
         toast.error(
           `No order ${number.trim().toUpperCase()} — check the number, or use "Return without an original invoice" below.`,
@@ -295,362 +257,6 @@ function InvoiceReturnCard() {
           {busy ? 'Finding…' : 'Start return'}
         </Button>
       </Toolbar>
-    </Card>
-  );
-}
-
-function NoOriginalCard({ onChanged }: { onChanged: () => Promise<void> | void }) {
-  const [customer, setCustomer] = useState<CustomerRow | null>(null);
-  const [pickingCustomer, setPickingCustomer] = useState(false);
-  const [locations, setLocations] = useState<LocationRow[]>([]);
-  const [locationId, setLocationId] = useState('');
-  const [referenced, setReferenced] = useState('');
-  /** The claimed number is a real order — this is not a no-invoice return. */
-  const [claimedHit, setClaimedHit] = useState<OrderHit | null>(null);
-  const [reasonCodes, setReasonCodes] = useState<ReasonCode[]>([]);
-  const [reasonCodeId, setReasonCodeId] = useState('');
-  const [reason, setReason] = useState('');
-  const [lines, setLines] = useState<DraftLine[]>([]);
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<
-    { variantId: string; productName: string; variantName: string | null; sku: string | null }[]
-  >([]);
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api<LocationRow[]>('/v1/business/locations')
-      .then((locs) => {
-        const active = locs.filter((l) => l.isActive);
-        setLocations(active);
-        if (active[0]) setLocationId((prev) => prev || active[0]!.id);
-      })
-      .catch(() => setLocations([]));
-    api<ReasonCode[]>('/v1/reason-codes?usageClass=return')
-      .then(setReasonCodes)
-      .catch(() => setReasonCodes([]));
-  }, []);
-
-  async function searchVariants() {
-    if (!search.trim()) return;
-    try {
-      setResults(
-        await api<
-          {
-            variantId: string;
-            productName: string;
-            variantName: string | null;
-            sku: string | null;
-          }[]
-        >(`/v1/pos/lookup?q=${encodeURIComponent(search.trim())}&limit=200`),
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  function buildBody() {
-    return {
-      customerId: customer?.id,
-      locationId,
-      referencedOrderNumber: referenced.trim() || null,
-      reason: reason || null,
-      lines: lines.map((l) => ({
-        variantId: l.variantId,
-        quantity: Number(l.quantity),
-        unitRefundCents: Math.round(Number(l.refund) * 100),
-        ...(reasonCodeId ? { reasonCodeId } : {}),
-      })),
-    };
-  }
-
-  function validate(): boolean {
-    if (!customer) {
-      toast.error('Pick (or create) the customer — they receive the store credit.');
-      return false;
-    }
-    if (!locationId) {
-      toast.error('Pick the location taking the goods back.');
-      return false;
-    }
-    if (lines.length === 0) {
-      toast.error('Add at least one item.');
-      return false;
-    }
-    for (const l of lines) {
-      const q = Number(l.quantity);
-      const r = Math.round(Number(l.refund) * 100);
-      if (!Number.isInteger(q) || q <= 0 || !Number.isFinite(r) || r < 0) {
-        toast.error(`Enter a quantity and refund amount for ${l.description}.`);
-        return false;
-      }
-    }
-    if (reasonCodes.length > 0 && !reasonCodeId) {
-      toast.error('Select a return reason.');
-      return false;
-    }
-    return true;
-  }
-
-  function reset() {
-    setCustomer(null);
-    setReferenced('');
-    setClaimedHit(null);
-    setReason('');
-    setLines([]);
-  }
-
-  async function submit() {
-    if (!validate() || busy) return;
-    setBusy(true);
-    try {
-      const res = await api<{ rmaNumber: string; amountCents: number }>(
-        '/v1/order-returns/no-original',
-        { method: 'POST', body: JSON.stringify(buildBody()) },
-      );
-      toast.success(
-        `${res.rmaNumber} completed — ${(res.amountCents / 100).toFixed(2)} in store credit issued; goods staged in As-Is review.`,
-      );
-      reset();
-      await onChanged();
-    } catch (err) {
-      if (err instanceof ApiError && err.code === 'OVERRIDE_REQUIRED') {
-        setOverrideOpen(true);
-      } else {
-        toast.error(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const total = lines.reduce((s, l) => {
-    const cents = Math.round(Number(l.refund) * 100);
-    const q = Number(l.quantity);
-    return s + (Number.isFinite(cents) && Number.isInteger(q) ? cents * q : 0);
-  }, 0);
-
-  return (
-    <Card
-      title="Return without an original invoice"
-      description={
-        <>
-          For a customer whose invoice can&apos;t be found (pre-cutover sale, lost paperwork). If
-          there is an invoice number, use <strong>Return from an invoice</strong> above. This path
-          refunds as <strong>store credit only</strong>, stages the goods in As-Is review, and is
-          logged for loss prevention.
-        </>
-      }
-    >
-      <SecurityOverrideDialog
-        open={overrideOpen}
-        title="No-original return — manager approval needed"
-        usageClass="exception"
-        submitLabel="Approve return"
-        perform={(payload) =>
-          api('/v1/order-returns/no-original', {
-            method: 'POST',
-            body: JSON.stringify({ ...buildBody(), override: payload.override }),
-          }).then(() => undefined)
-        }
-        onClose={() => setOverrideOpen(false)}
-        onSuccess={() => {
-          reset();
-          void onChanged();
-        }}
-      />
-      {pickingCustomer && (
-        <CustomerPicker
-          onPick={(c) => {
-            setCustomer(c);
-            setPickingCustomer(false);
-          }}
-          onCancel={() => setPickingCustomer(false)}
-        />
-      )}
-
-      <FormGrid cols={2}>
-        <Field label="Customer (receives the credit)" required>
-          <Button variant="secondary" size="sm" onClick={() => setPickingCustomer(true)}>
-            {customer ? customerDisplayName(customer) : 'Pick or create customer'}
-          </Button>
-        </Field>
-        <Field label="Location" required>
-          <Select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Order # the customer claims (optional)" hint="Recorded verbatim">
-          <Input
-            value={referenced}
-            onChange={(e) => {
-              setReferenced(e.target.value);
-              setClaimedHit(null);
-            }}
-            onBlur={() => {
-              findOrder(referenced)
-                .then(setClaimedHit)
-                .catch(() => setClaimedHit(null));
-            }}
-            data-testid="noorig-claimed"
-          />
-        </Field>
-        {reasonCodes.length > 0 ? (
-          <Field label="Return reason" required>
-            <Select value={reasonCodeId} onChange={(e) => setReasonCodeId(e.target.value)}>
-              <option value="">— Pick —</option>
-              {reasonCodes.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.code} — {r.description}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ) : (
-          <Field label="Reason">
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} />
-          </Field>
-        )}
-      </FormGrid>
-
-      {claimedHit && (
-        <Alert tone="warning" data-testid="noorig-invoice-found">
-          {claimedHit.number} is in the ERP — return it from{' '}
-          <Link href={`/orders/${claimedHit.id}/full#returns`}>the order</Link> instead. That form
-          refunds against the invoice and has the restocking fee, pickup fee and driver pickup date.
-        </Alert>
-      )}
-
-      <SectionHeading as="h3" title="Items coming back" />
-      <Toolbar>
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              void searchVariants();
-            }
-          }}
-          placeholder="Add item — name, SKU, or barcode"
-          aria-label="Add item (name, SKU, or barcode)"
-        />
-        <Button variant="secondary" size="sm" onClick={() => void searchVariants()}>
-          Search
-        </Button>
-      </Toolbar>
-      {results.length === 200 && (
-        <Alert tone="info">Many items match — refine your search to find the right one.</Alert>
-      )}
-      <Stack>
-        {results.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {results.slice(0, 8).map((r) => (
-              <Button
-                key={r.variantId}
-                size="sm"
-                variant="ghost"
-                disabled={lines.some((l) => l.variantId === r.variantId)}
-                onClick={() => {
-                  setLines((prev) => [
-                    ...prev,
-                    {
-                      variantId: r.variantId,
-                      description: [r.productName, r.variantName].filter(Boolean).join(' — '),
-                      quantity: '1',
-                      refund: '0.00',
-                    },
-                  ]);
-                  setResults([]);
-                  setSearch('');
-                }}
-              >
-                + {[r.productName, r.variantName].filter(Boolean).join(' — ')}
-                {r.sku ? ` (${r.sku})` : ''}
-              </Button>
-            ))}
-          </div>
-        )}
-
-        {lines.length > 0 && (
-          <TableWrap>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th className="num">Qty</th>
-                  <th className="num">Refund each ($)</th>
-                  <th className="actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => (
-                  <tr key={l.variantId}>
-                    <td>{l.description}</td>
-                    <td className="num">
-                      <Input
-                        type="number"
-                        min={1}
-                        value={l.quantity}
-                        onChange={(e) =>
-                          setLines((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)),
-                          )
-                        }
-                        className="w-[70px]"
-                        aria-label={`Quantity for ${l.description}`}
-                      />
-                    </td>
-                    <td className="num">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        value={l.refund}
-                        onChange={(e) =>
-                          setLines((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, refund: e.target.value } : x)),
-                          )
-                        }
-                        className="w-[90px]"
-                        aria-label={`Refund each for ${l.description}`}
-                      />
-                    </td>
-                    <td className="actions">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
-                      >
-                        Remove
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableWrap>
-        )}
-      </Stack>
-
-      <FormActions
-        start={
-          total > 0 ? (
-            <span>
-              Store credit to issue: <Money cents={total} />
-            </span>
-          ) : undefined
-        }
-      >
-        <Button variant="primary" onClick={() => void submit()} disabled={busy}>
-          <Undo2 size={14} />
-          {busy ? 'Working…' : 'Complete return'}
-        </Button>
-      </FormActions>
     </Card>
   );
 }

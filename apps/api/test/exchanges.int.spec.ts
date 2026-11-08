@@ -505,6 +505,141 @@ describe('Enter an Exchange — container over a return and a replacement order'
     expect(await ledgerBalance(customerId)).toBe(0);
   });
 
+  it('pre-cutover exchange with a truck pickup: authorized no-original return, stop on the replacement, settles when the goods come back (dispatcher 2026-11-06)', async () => {
+    const ledgerBefore = await ledgerBalance(customerId);
+    const pending = await owner()
+      .post('/v1/order-returns/no-original')
+      .send({
+        customerId,
+        locationId,
+        referencedOrderNumber: '03108303',
+        reason: 'comfort exchange, STORIS invoice',
+        fulfillment: 'pickup',
+        pickupDate: '2026-11-08',
+        lines: [{ variantId: v1Id, quantity: 1, unitRefundCents: 64_000 }],
+      });
+    expect(pending.status).toBe(201);
+    expect(pending.body.status).toBe('authorized');
+    expect(pending.body.fulfillment).toBe('pickup');
+    expect(pending.body.pickupDate).toBe('2026-11-08');
+    expect(pending.body.pickupDeliveryId).toBeNull();
+    // Goods are still at the customer's: no credit, no As-Is piece yet.
+    expect(await ledgerBalance(customerId)).toBe(ledgerBefore);
+    await withDb(async (db) => {
+      const pieces = await db
+        .select()
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.referenceId, pending.body.id));
+      expect(pieces).toHaveLength(0);
+    });
+
+    // Replacement: $740 delivered, the customer pays the $100 difference up front.
+    const replacement = await owner()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        orderKind: 'exchange',
+        fulfillmentType: 'delivery',
+        confirm: true,
+        lines: [{ variantId: v2Id, quantity: 1, unitPriceCents: 64_000 }],
+        deliveryFeeCents: 10_000,
+      });
+    expect(replacement.status).toBe(201);
+    expect(replacement.body.totalCents).toBe(74_000);
+
+    // Leftover credit must stay as store credit — there is no original tender.
+    const cashBack = await owner()
+      .post('/v1/exchanges')
+      .send({ saleOrderId: replacement.body.id, returnId: pending.body.id, refundTender: 'cash' });
+    expect(cashBack.status).toBe(400);
+    expect(cashBack.body.message).toMatch(/store credit/);
+
+    const bound = await owner()
+      .post('/v1/exchanges')
+      .send({ saleOrderId: replacement.body.id, returnId: pending.body.id });
+    expect(bound.status).toBe(201);
+    expect(bound.body.referencedOrderNumber).toBe('03108303');
+    expect(bound.body.originalOrderId).toBeNull();
+    expect(bound.body.fulfillment).toBe('pickup');
+    expect(bound.body.returnStatus).toBe('authorized');
+    // Nothing settled yet — the ticket nets the credit, the order does not.
+    expect(bound.body.settlement.creditCents).toBe(64_000);
+    expect(bound.body.settlement.salePaidCents).toBe(0);
+    expect(bound.body.settlement.saleBalanceDueCents).toBe(74_000);
+
+    // The pickup is a stop on the replacement order (the truck already goes there).
+    const retDetail = await owner().get(`/v1/order-returns/${pending.body.id}`);
+    expect(retDetail.status).toBe(200);
+    expect(retDetail.body.pickupDeliveryId).toBeTruthy();
+    expect(retDetail.body.pickup.scheduledDate).toBe('2026-11-08');
+    expect(retDetail.body.pickup.status).toBe('scheduled');
+    const stops = await owner().get(`/v1/deliveries?orderId=${replacement.body.id}`);
+    expect(stops.status).toBe(200);
+    const stop = (stops.body as { id: string; kind: string; returnId: string | null }[]).find(
+      (d) => d.kind === 'return_pickup',
+    );
+    expect(stop?.id).toBe(retDetail.body.pickupDeliveryId);
+    expect(stop?.returnId).toBe(pending.body.id);
+
+    await owner()
+      .post(`/v1/orders/${replacement.body.id}/payments`)
+      .send({ method: 'cash', amountCents: 10_000, kind: 'deposit' })
+      .expect(201);
+
+    // The truck brings the goods back: the stop completes, the return is
+    // received, the credit is minted and applied — $0 left on the replacement.
+    const picked = await owner().post(`/v1/deliveries/${stop!.id}/complete`).send({});
+    expect(picked.status).toBe(201);
+    expect(picked.body.status).toBe('delivered');
+    const settled = await owner().get(`/v1/exchanges/${bound.body.id}`);
+    expect(settled.body.returnStatus).toBe('completed');
+    expect(settled.body.settlement.salePaidCents).toBe(74_000);
+    expect(settled.body.settlement.saleBalanceDueCents).toBe(0);
+    expect(await ledgerBalance(customerId)).toBe(ledgerBefore);
+    await withDb(async (db) => {
+      const pieces = await db
+        .select()
+        .from(schema.asIsItems)
+        .where(
+          and(
+            eq(schema.asIsItems.referenceType, 'order_return'),
+            eq(schema.asIsItems.referenceId, pending.body.id),
+          ),
+        );
+      expect(pieces).toHaveLength(1);
+      expect(pieces[0]!.variantId).toBe(v1Id);
+    });
+  });
+
+  it('cancelling a pre-cutover pickup exchange cancels the truck stop with the return', async () => {
+    const pending = await owner()
+      .post('/v1/order-returns/no-original')
+      .send({
+        customerId,
+        locationId,
+        referencedOrderNumber: '03100001',
+        fulfillment: 'pickup',
+        pickupDate: '2026-11-09',
+        lines: [{ variantId: v1Id, quantity: 1, unitRefundCents: 10_000 }],
+      });
+    expect(pending.status).toBe(201);
+    const replacement = await owner()
+      .post('/v1/orders')
+      .send({ locationId, customerId, confirm: true, lines: [{ variantId: v2Id, quantity: 1 }] });
+    const bound = await owner()
+      .post('/v1/exchanges')
+      .send({ saleOrderId: replacement.body.id, returnId: pending.body.id });
+    expect(bound.status).toBe(201);
+    const cancelled = await owner()
+      .post(`/v1/exchanges/${bound.body.id}/cancel`)
+      .send({ reason: 'customer kept the mattress' });
+    expect(cancelled.status).toBe(201);
+    const retDetail = await owner().get(`/v1/order-returns/${pending.body.id}`);
+    expect(retDetail.body.status).toBe('cancelled');
+    expect(retDetail.body.pickup.status).toBe('cancelled');
+  });
+
   it('the replacement must bill the return customer', async () => {
     const orig = await soldOriginal(v1Id, 50_000);
     const authorized = await owner()

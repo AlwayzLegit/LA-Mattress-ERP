@@ -221,17 +221,27 @@ export class ExchangesController {
       .limit(1);
     if (taken) throw new ConflictException('That return or order is already part of an exchange');
 
-    // Two admissible return states: an authorized with-original return
-    // (settles at goods receipt) or a completed no-original return
-    // (credit already on the ledger — settles at bind/approve).
+    // Three admissible return states: an authorized with-original return
+    // (settles at goods receipt), a completed no-original return (goods
+    // dropped off — credit already on the ledger, settles at bind/approve),
+    // or an authorized no-original return the truck is picking up
+    // (dispatcher 2026-11-06, STORIS 03109559 against a pre-cutover
+    // invoice — settles at goods receipt like a with-original pickup).
     const noOriginal = ret.orderId == null;
+    const noOriginalPickup =
+      noOriginal && ret.status === 'authorized' && ret.fulfillment === 'pickup';
     if (!noOriginal && ret.status !== 'authorized') {
       throw new BadRequestException(
         `Return ${ret.rmaNumber} is ${ret.status} — only an authorized return can join an exchange`,
       );
     }
-    if (noOriginal && ret.status !== 'completed') {
+    if (noOriginal && ret.status !== 'completed' && !noOriginalPickup) {
       throw new BadRequestException(`No-original return ${ret.rmaNumber} is ${ret.status}`);
+    }
+    if (noOriginal && refundTender !== 'store_credit') {
+      throw new BadRequestException(
+        'A pre-cutover exchange has no original tenders — leftover credit stays as store credit',
+      );
     }
 
     let originalOrder: typeof schema.orders.$inferSelect | null = null;
@@ -348,7 +358,8 @@ export class ExchangesController {
             restockingFeeCents,
             restockingFeeOverridden,
             returnSalespersonMembershipId: body.returnSalespersonMembershipId ?? null,
-            fulfillment,
+            // A no-original return already says how its goods come back.
+            fulfillment: noOriginal ? (noOriginalPickup ? 'pickup' : 'drop_off') : fulfillment,
             refundTender,
             notes: body.notes ?? null,
             createdByUserId: actor?.id ?? null,
@@ -414,9 +425,44 @@ export class ExchangesController {
       },
     });
 
-    // A no-original return's credit is already banked — apply it to the
-    // replacement now (unless held; the approve step settles then).
-    if (noOriginal && !onHold) {
+    // A no-original pickup has no order of its own to hang the truck stop
+    // on — the replacement order is the one the truck visits anyway, so
+    // the `return_pickup` stop rides it (completing the stop receives the
+    // return, which settles the credit onto the replacement).
+    if (noOriginalPickup && ret.pickupDate && !ret.pickupDeliveryId) {
+      const [stop] = await this.db
+        .insert(schema.deliveries)
+        .values({
+          businessId: tenant.businessId!,
+          locationId: ret.locationId ?? saleOrder.locationId,
+          orderId: saleOrder.id,
+          kind: 'return_pickup',
+          returnId: ret.id,
+          scheduledDate: ret.pickupDate,
+          notes: `Pickup for ${ret.rmaNumber} — exchange ${number}${ret.referencedOrderNumber ? ` (STORIS ${ret.referencedOrderNumber})` : ''}`,
+        })
+        .returning({ id: schema.deliveries.id });
+      await this.db
+        .update(schema.orderReturns)
+        .set({ pickupDeliveryId: stop!.id })
+        .where(eq(schema.orderReturns.id, ret.id));
+      await this.audit.log({
+        action: 'delivery.scheduled',
+        targetType: 'delivery',
+        targetId: stop!.id,
+        after: {
+          kind: 'return_pickup',
+          rmaNumber: ret.rmaNumber,
+          scheduledDate: ret.pickupDate,
+          exchangeNumber: number,
+        },
+      });
+    }
+
+    // A dropped-off no-original return's credit is already banked — apply
+    // it to the replacement now (unless held; the approve step settles
+    // then). A pickup settles when the truck brings the goods back.
+    if (noOriginal && !noOriginalPickup && !onHold) {
       await this.settleFromLedger(exchange.id, actor?.id ?? null, tenant.membershipId ?? null);
     }
     return this.hydrate(exchange.id);
@@ -459,13 +505,14 @@ export class ExchangesController {
       eventType: 'exchange.approved',
       payload: { exchangeId: id, number: exchange.number },
     });
-    // A held no-original exchange still owes its ledger settlement.
+    // A held no-original exchange still owes its ledger settlement — when
+    // the goods were dropped off; a pickup settles at receive.
     const [ret] = await this.db
-      .select({ orderId: schema.orderReturns.orderId })
+      .select({ orderId: schema.orderReturns.orderId, status: schema.orderReturns.status })
       .from(schema.orderReturns)
       .where(eq(schema.orderReturns.id, exchange.returnId))
       .limit(1);
-    if (ret && ret.orderId == null) {
+    if (ret && ret.orderId == null && ret.status === 'completed') {
       await this.settleFromLedger(id, actor?.id ?? null, tenant.membershipId ?? null);
     }
     return this.hydrate(id);
@@ -581,6 +628,18 @@ export class ExchangesController {
         cancelReason: reason,
       })
       .where(eq(schema.orderReturns.id, ret.id));
+    // The truck stop the bind booked for a pre-cutover pickup goes with it.
+    if (ret.orderId == null && ret.pickupDeliveryId) {
+      await this.db
+        .update(schema.deliveries)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.deliveries.id, ret.pickupDeliveryId),
+            eq(schema.deliveries.status, 'scheduled'),
+          ),
+        );
+    }
     await this.db
       .update(schema.exchanges)
       .set({ status: 'cancelled', updatedAt: new Date() })

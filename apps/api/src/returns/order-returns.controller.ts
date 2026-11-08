@@ -61,6 +61,8 @@ export interface OrderReturnRow {
   lines: {
     id: string;
     orderLineId: string | null;
+    /** The catalog variant coming back (order line, or the no-original line). */
+    variantId: string | null;
     description: string | null;
     quantity: number;
     perUnitCents: number;
@@ -147,6 +149,9 @@ export class OrderReturnsController {
         id: schema.orderReturnLines.id,
         returnId: schema.orderReturnLines.returnId,
         orderLineId: schema.orderReturnLines.orderLineId,
+        variantId: sql<
+          string | null
+        >`coalesce(${schema.orderReturnLines.variantId}, ${schema.orderLines.variantId})`,
         description: sql<
           string | null
         >`coalesce(${schema.orderLines.description}, ${schema.orderReturnLines.description})`,
@@ -170,6 +175,7 @@ export class OrderReturnsController {
       list.push({
         id: l.id,
         orderLineId: l.orderLineId,
+        variantId: l.variantId,
         description: l.description,
         quantity: l.quantity,
         perUnitCents: l.perUnitCents,
@@ -219,8 +225,14 @@ export class OrderReturnsController {
    *   - whatever order number the customer claimed is recorded
    *     verbatim, and every no-original return lands in the exception
    *     register for loss prevention.
-   * Goods are in hand by definition, so the document is written
-   * completed in one step — the RMA lifecycle endpoints don't apply.
+   * Drop-off (the default): goods are in hand, so the document is
+   * written completed in one step — the RMA lifecycle endpoints don't
+   * apply. Truck pickup (dispatcher 2026-11-06, STORIS exchange 03109559
+   * against a pre-cutover invoice): the goods are still at the
+   * customer's, so the return stays `authorized` with no credit and no
+   * As-Is pieces until the truck brings them back; the pickup stop is
+   * booked when the exchange binds it (the stop rides the replacement
+   * order — a no-original return has no order of its own).
    */
   @Post('no-original')
   @RequirePermission('pos.refund.create')
@@ -233,6 +245,10 @@ export class OrderReturnsController {
       locationId?: string;
       referencedOrderNumber?: string | null;
       reason?: string | null;
+      /** 'drop_off' (default, goods in hand) | 'pickup' (the truck collects them). */
+      fulfillment?: 'drop_off' | 'pickup';
+      /** YYYY-MM-DD; pickup only. The stop is booked when an exchange binds the return. */
+      pickupDate?: string | null;
       lines?: {
         variantId?: string;
         quantity?: number;
@@ -245,6 +261,17 @@ export class OrderReturnsController {
   ): Promise<OrderReturnRow> {
     if (!body.customerId) throw new BadRequestException('customerId is required');
     if (!body.locationId) throw new BadRequestException('locationId is required');
+    const fulfillment = body.fulfillment ?? 'drop_off';
+    if (fulfillment !== 'drop_off' && fulfillment !== 'pickup') {
+      throw new BadRequestException('fulfillment must be drop_off or pickup');
+    }
+    if (body.pickupDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(body.pickupDate)) {
+      throw new BadRequestException('pickupDate must be YYYY-MM-DD');
+    }
+    if (body.pickupDate && fulfillment !== 'pickup') {
+      throw new BadRequestException('pickupDate only applies to a truck pickup');
+    }
+    const pickup = fulfillment === 'pickup';
     if (!body.lines || body.lines.length === 0) {
       throw new BadRequestException('lines must contain at least one entry');
     }
@@ -339,15 +366,17 @@ export class OrderReturnsController {
         customerId: body.customerId,
         referencedOrderNumber: body.referencedOrderNumber?.trim() || null,
         rmaNumber,
-        status: 'completed',
-        fulfillment: 'drop_off',
+        status: pickup ? 'authorized' : 'completed',
+        fulfillment,
         refundMethod: 'store_credit',
         amountCents,
         reason: body.reason ?? null,
+        locationId: body.locationId,
+        pickupDate: pickup ? (body.pickupDate ?? null) : null,
         createdByUserId: actor?.id ?? null,
-        goodsReceivedAt: now,
-        receivedByUserId: actor?.id ?? null,
-        completedAt: now,
+        goodsReceivedAt: pickup ? null : now,
+        receivedByUserId: pickup ? null : (actor?.id ?? null),
+        completedAt: pickup ? null : now,
       })
       .returning();
     if (!ret) throw new BadRequestException('failed to create return');
@@ -366,8 +395,10 @@ export class OrderReturnsController {
       })),
     );
 
-    // Goods stage in As-Is review — one piece per unit (G10).
-    for (const r of resolved) {
+    // Goods stage in As-Is review — one piece per unit (G10) — and the
+    // credit is issued, both only once the goods are in the building: a
+    // truck pickup does this at receive (OrderReturnsService.receiveGoods).
+    for (const r of pickup ? [] : resolved) {
       const pieces = await this.db
         .insert(schema.asIsItems)
         .values(
@@ -392,7 +423,7 @@ export class OrderReturnsController {
       }
     }
 
-    if (amountCents > 0) {
+    if (amountCents > 0 && !pickup) {
       await this.storeCredit.issue(this.db, {
         businessId: tenant.businessId!,
         customerId: body.customerId,
@@ -410,10 +441,12 @@ export class OrderReturnsController {
       severity: 'warning',
       entityType: 'order_return',
       entityId: ret.id,
-      summary: `No-original return ${rmaNumber}: ${amountCents} cents in store credit${body.referencedOrderNumber ? ` — customer claimed order "${body.referencedOrderNumber}"` : ''}`,
+      summary: `No-original return ${rmaNumber}: ${amountCents} cents in store credit${pickup ? ` once the truck picks the goods up${body.pickupDate ? ` (${body.pickupDate})` : ''}` : ''}${body.referencedOrderNumber ? ` — customer claimed order "${body.referencedOrderNumber}"` : ''}`,
       metadata: {
         customerId: body.customerId,
         amountCents,
+        fulfillment,
+        pickupDate: pickup ? (body.pickupDate ?? null) : null,
         referencedOrderNumber: body.referencedOrderNumber ?? null,
         lines: resolved.map((r) => ({ variantId: r.variantId, quantity: r.quantity })),
       },
@@ -426,6 +459,8 @@ export class OrderReturnsController {
         rmaNumber,
         customerId: body.customerId,
         amountCents,
+        fulfillment,
+        pickupDate: pickup ? (body.pickupDate ?? null) : null,
         referencedOrderNumber: body.referencedOrderNumber ?? null,
         lineCount: resolved.length,
       },
@@ -457,6 +492,7 @@ export class OrderReturnsController {
       lines: resolved.map((r) => ({
         id: '',
         orderLineId: null,
+        variantId: r.variantId,
         description: r.description,
         quantity: r.quantity,
         perUnitCents: r.perUnitCents,
@@ -846,6 +882,9 @@ export class OrderReturnsController {
       .select({
         id: schema.orderReturnLines.id,
         orderLineId: schema.orderReturnLines.orderLineId,
+        variantId: sql<
+          string | null
+        >`coalesce(${schema.orderReturnLines.variantId}, ${schema.orderLines.variantId})`,
         description: sql<
           string | null
         >`coalesce(${schema.orderLines.description}, ${schema.orderReturnLines.description})`,

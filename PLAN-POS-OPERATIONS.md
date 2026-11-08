@@ -416,6 +416,22 @@ the same customer card (pinned to the original invoice's customer). Added on top
   failed later step keeps the documents already written and re-binds them on retry.
 - No draft mode and no order type (layaway / quote) in exchange mode.
 
+**Amendment (2026-11-08, dispatcher — exchange against a pre-cutover STORIS
+invoice):** when the original was sold in STORIS before the cutover there is no
+order to pick lines from. New Exchange offers _Original invoice not on file
+(STORIS)_: the no-original return is written first (STORIS invoice number as the
+claimed number, the items coming back with the credit each earns, manager
+approval, store credit only, loss-prevention exception), either dropped off
+(completed at entry, credit banked) or **picked up by the truck on a date** (the
+return stays authorized — no credit, no As-Is — until the goods are back). The
+register then opens against that return: the Return section is read-only, the
+replacement is a plain order of kind `exchange` for the same customer, and the
+bind forces store-credit tender (no original tenders exist) and books the
+`return_pickup` stop on the **replacement** order, since a no-original return has
+no order of its own and the truck visits that address anyway. Completing the stop
+receives the return and settles the credit onto the replacement. The exchange
+ticket prints the STORIS number as the original invoice, marked "not on file".
+
 **Amendment (2026-09-19, owner — five register asks):**
 
 - **Order-number recall is case-insensitive.** `GET /v1/orders?number=` compares

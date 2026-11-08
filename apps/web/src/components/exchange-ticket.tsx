@@ -194,9 +194,17 @@ export function ExchangeTicketDoc({
   const replacementWhen = sale?.scheduledDate ?? o?.requestedDate ?? null;
   const returnTakenBy = x.returnSalespersonName ?? ret?.salespersonName ?? null;
   const originalNumber = x.originalOrderNumber ?? ret?.orderNumber ?? x.referencedOrderNumber;
+  // Pre-cutover (dispatcher 2026-11-06): the original was written in
+  // STORIS, so there is no order on file — the ticket names the system
+  // the number came from instead of a date it cannot know.
+  const preCutover = !x.originalOrderNumber && !ret?.orderNumber && !!x.referencedOrderNumber;
 
   const timeline: { label: string; value: string | null; done: boolean }[] = [
-    { label: 'Original invoice', value: fmtDate(ret?.orderDate), done: true },
+    {
+      label: 'Original invoice',
+      value: preCutover ? 'STORIS (before cutover)' : fmtDate(ret?.orderDate),
+      done: true,
+    },
     { label: 'Exchange entered', value: fmtDate(x.createdAt), done: true },
     { label: 'Return authorized', value: fmtDate(ret?.authorizedAt), done: !!ret },
     x.fulfillment === 'pickup'
@@ -298,6 +306,7 @@ export function ExchangeTicketDoc({
             </div>
             <div>
               Original invoice <span style={{ color: '#111' }}>{originalNumber ?? '—'}</span>
+              {preCutover && <span> · STORIS, not on file</span>}
               {ret?.orderDate && (
                 <span>
                   {' '}

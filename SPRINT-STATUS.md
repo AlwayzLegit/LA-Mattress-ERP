@@ -17,6 +17,30 @@
   note and the print stamp. Reads the existing three endpoints; no API change.
   The invoice's theme pieces are exported as `DOC_THEME` for shared use.
 
+## Exchange against a pre-cutover STORIS invoice — 2026-11-08
+
+- Dispatcher Julio (2026-11-06) could not enter STORIS exchange 03109559 because the
+  original, invoice 03108303, was sold before the cutover and is not in the system.
+  The API already bound a completed no-original return to a replacement order, but
+  no screen did it, and the no-original form had no truck pickup date.
+- New Exchange gets a second path, **Original invoice not on file (STORIS)**: the
+  no-original return form (now `NoOriginalReturnForm`, shared with the Returns
+  page) takes the STORIS invoice number, the items coming back with the credit
+  each earns, and whether the truck picks them up on a date or the customer brought
+  them in; the register then opens against that return (`/exchanges/new?returnId=`)
+  with a read-only Return section, writes the replacement as a plain order of kind
+  `exchange`, and binds the two.
+- API: `POST /v1/order-returns/no-original` accepts `fulfillment: 'pickup'` +
+  `pickupDate` — the return stays `authorized` with no credit and no As-Is pieces
+  until the goods are back. `POST /v1/exchanges` binds that return, forces
+  store-credit tender (no original tenders exist), and books the `return_pickup`
+  stop on the **replacement** order (the truck already goes there). Receiving a
+  no-original return (stop completion, or _Receive return & settle_) stages the
+  As-Is pieces and settles the credit onto the replacement; cancelling the
+  exchange cancels the stop. The exchange ticket prints the STORIS number as the
+  original invoice, marked "not on file". Specs in `exchanges.int.spec.ts`;
+  amendment in `PLAN-POS-OPERATIONS.md` §10.
+
 ## Transfers hold stock from creation — 2026-11-02
 
 - Owner QA (screenshots 2026-11-02): a printed transfer ticket left ST-2026-000014
