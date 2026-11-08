@@ -107,6 +107,7 @@ interface CustomerHit {
   addressesJson:
     | {
         line1?: string | null;
+        line2?: string | null;
         city?: string | null;
         region?: string | null;
         postalCode?: string | null;
@@ -3837,15 +3838,21 @@ function addressPreview(c: CustomerHit): string {
   return [a.line1, a.city].filter(Boolean).join(', ');
 }
 
+/**
+ * The order's ship-to when "deliver somewhere else" is off: the
+ * customer's first address, whole. Dispatcher 2026-11-06: WE-10094's
+ * Delivery block printed without "Bldg 2 Unit 231" (and without the
+ * ZIP) because this copy dropped line 2 and the postal code.
+ */
 function addressFromCustomer(c: CustomerHit) {
   const a = c.addressesJson?.[0];
   if (!a) return undefined;
   return {
     line1: a.line1 ?? null,
-    line2: null,
+    line2: a.line2 ?? null,
     city: a.city ?? null,
     region: a.region ?? null,
-    postalCode: null,
+    postalCode: a.postalCode ?? null,
     phone: c.phone ?? null,
   };
 }
