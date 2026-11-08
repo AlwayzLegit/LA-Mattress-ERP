@@ -56,6 +56,11 @@ export const CONTACT_STATUSES = [
   'no_answer',
   'confirmed',
   'reschedule_requested',
+  // Dispatcher 2026-11-06: "please add under contact status: Text and
+  // Wrong" — the customer was texted instead of called, or the number
+  // on the order is wrong.
+  'texted',
+  'wrong_number',
 ] as const;
 export type ContactStatus = (typeof CONTACT_STATUSES)[number];
 

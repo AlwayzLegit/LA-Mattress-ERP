@@ -1653,7 +1653,8 @@ Decisions (slice 5 — Logistical Scheduling):
   special-order allocation still outstanding).
 - **D35 Contact status is a delivery field.** `deliveries.contact_status`
   (`not_contacted` | `left_message` | `no_answer` | `confirmed` |
-  `reschedule_requested`, null = never called) with `contacted_at`, set by
+  `reschedule_requested` | `texted` | `wrong_number` — the last two added
+  2026-11-06 at the dispatcher's request, null = never called) with `contacted_at`, set by
   `PATCH /v1/deliveries/:id/contact` (`deliveries.schedule`, audited with
   the call note) — inline on the Confirm schedule grid.
 
