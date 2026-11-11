@@ -23,6 +23,7 @@ import {
 } from '../catalog/product-stock';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { productFilters } from '../catalog/product-filters';
+import { variantSearchCond } from '../catalog/product-search';
 import { CostingService } from '../costing/costing.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
@@ -222,13 +223,9 @@ export class InventoryController {
     });
     const search = q?.trim();
     if (search) {
-      // Same tsvector the catalog search uses — covers product name,
-      // variant SKU, and barcode in one predicate.
-      const tsq = sql`websearch_to_tsquery('simple', ${search})`;
-      filters.push(
-        sql`(${schema.productVariants.searchTsv} @@ ${tsq}
-             OR ${schema.products.searchTsv} @@ ${tsq})`,
-      );
+      // Same words the catalog search matches — product name, variant SKU,
+      // barcode, vendor model — partial words and SKU fragments included.
+      filters.push(variantSearchCond(search));
     }
     const productCols = {
       productId: schema.products.id,
@@ -726,11 +723,7 @@ export class InventoryController {
     const filters = [];
     const query = q?.trim();
     if (query) {
-      const tsq = sql`websearch_to_tsquery('simple', ${query})`;
-      filters.push(
-        sql`(${schema.productVariants.searchTsv} @@ ${tsq}
-             OR ${schema.products.searchTsv} @@ ${tsq})`,
-      );
+      filters.push(variantSearchCond(query));
     }
     if (categoryId) {
       // Two-level tree: a parent category includes its children.

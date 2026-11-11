@@ -15,6 +15,7 @@ import {
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
+import { variantSearchCond } from './product-search';
 import { AuditService } from '../audit/audit.service';
 import { CurrentTenant } from '../auth/current-user.decorator';
 import { buildPage, clampLimit, decodeCursor, type PageResponse } from '../common/pagination';
@@ -83,11 +84,7 @@ export class VariantsController {
       filters.push(eq(schema.productVariants.priceCents, 0));
     }
     if (q && q.trim().length > 0) {
-      const tsq = sql`websearch_to_tsquery('simple', ${q})`;
-      filters.push(
-        sql`(${schema.productVariants.searchTsv} @@ ${tsq}
-             OR ${schema.products.searchTsv} @@ ${tsq})`,
-      );
+      filters.push(variantSearchCond(q));
     }
     const cursor = decodeCursor(cursorStr);
     if (cursor) {
