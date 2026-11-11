@@ -7150,3 +7150,14 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   OR-ed with a substring match on product SKU, variant SKU, barcode and
   vendor model, so "8246" and "tempur" find their products. Rank still
   orders the Products tab. Unit spec on the word splitter and pattern.
+
+### 2026-11-10 — Delivery fee changed or waived from the order page (owner, LB-10074)
+
+- The fee buckets were editable only through Actions → Order →
+  Miscellaneous Fees, which nobody found; the money card showed one "Fees in
+  total" figure. The card now lists **Delivery fee** with a Change… / Add…
+  button (live orders; disabled with a hint while the order is locked, as
+  the lock rule G9 requires), plus Installation and the labelled Other fee
+  when they are non-zero. The fees dialog gained a **Waive** button that
+  zeroes the delivery fee before saving. `PATCH /v1/orders/:id` and
+  `recomputeTotals` are unchanged.
