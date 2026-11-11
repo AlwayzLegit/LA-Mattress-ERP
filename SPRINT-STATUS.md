@@ -7150,6 +7150,7 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   OR-ed with a substring match on product SKU, variant SKU, barcode and
   vendor model, so "8246" and "tempur" find their products. Rank still
   orders the Products tab. Unit spec on the word splitter and pattern.
+
 ### 2026-11-10 — Delivery fee changed or waived from the order page (owner, LB-10074)
 
 - The fee buckets were editable only through Actions → Order →
