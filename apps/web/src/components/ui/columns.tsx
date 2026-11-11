@@ -137,6 +137,8 @@ export interface ListColumns<Row> {
   reset: () => void;
   /** True once the user has moved a column. */
   isCustom: boolean;
+  /** True when the API sorts (`sortKey`), false when rows sort here (`sortValue`). */
+  server: boolean;
 }
 
 /**
@@ -233,6 +235,7 @@ export function useListColumns<Row>(
     move,
     reset,
     isCustom: order.join() !== defaultOrder.join(),
+    server: !!opts.server,
   };
 }
 
@@ -247,7 +250,11 @@ export function ColumnHeadRow<Row>({
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
-  const server = list.ordered.some((c) => c.sortKey);
+  // Which columns sort is the list's call, not the column defs': shared
+  // column sets carry a `sortKey` for the screens the API sorts, and a
+  // client-sorted screen (Stock by location) must still sort every column
+  // that has a `sortValue`, by its id.
+  const server = list.server;
   return (
     <tr>
       {list.ordered.map((c) => {
