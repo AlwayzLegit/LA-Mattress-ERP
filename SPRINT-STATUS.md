@@ -7172,3 +7172,21 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   customers; a customer chip loads every order on file for them through
   `/v1/orders?customerId=`. An exact order number still opens the register
   straight away. No API change.
+
+### 2026-11-10 — Order changes follow the delivery (owner, A15)
+
+- `DeliverySyncService` runs after `POST /v1/orders/:id/lines`,
+  `PATCH /v1/orders/:id/lines/:lineId` and `PATCH /v1/orders/:id`
+  (promised date, fulfillment type, quote confirm): truck-bound units not
+  on a live stop join the order's open stop (same day, not a second stop),
+  counter-marked units leave it, an order with a promised date and no stop
+  gets one booked on that date, and a moved promised date moves the one
+  open stop. Audit rows `delivery.lines_joined`, `delivery.line_left`,
+  `delivery.schedule {auto:true}`, `delivery.reschedule`; ticket flags
+  demote as for any line add / date move.
+- Order page: **Book a delivery** starts on the promised date; a delivery
+  order with goods for the truck and no live stop shows a "Not on the
+  Deliveries calendar" warning with **Set promised date…**.
+- `deliveries.int.spec.ts`: added line rides the same stop (and a second
+  schedule call says nothing is left), raised quantity joins, take-with
+  leaves, promised date books then moves the stop, quote confirm books.

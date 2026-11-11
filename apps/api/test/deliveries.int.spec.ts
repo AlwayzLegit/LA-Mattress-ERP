@@ -1015,3 +1015,125 @@ describe('Delivery ticket printing from the delivery page (owner 2026-10-15)', (
     expect(crew.body.lockedAt).toBeTruthy();
   });
 });
+
+describe('Order changes follow the delivery (owner 2026-11-10)', () => {
+  const dayA = '2027-03-02';
+  const dayB = '2027-03-04';
+  const dayC = '2027-03-06';
+  let orderId = '';
+  let stopId = '';
+  let firstLineId = '';
+
+  async function stopsOn(day: string): Promise<{ id: string; lines: { quantity: number }[] }[]> {
+    const res = await ownerReq().get(`/v1/deliveries?from=${day}&to=${day}`);
+    expect(res.status).toBe(200);
+    return res.body.filter((d: { orderId: string }) => d.orderId === orderId);
+  }
+
+  it('a line added to a scheduled order rides the same stop, not a second one', async () => {
+    const res = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        requestedDate: dayA,
+        address: { line1: '9 Pier Ave', city: 'Santa Monica', region: 'CA', postalCode: '90401' },
+        lines: [{ variantId: mattressVariantId, quantity: 1 }],
+        confirm: true,
+      });
+    expect(res.status).toBe(201);
+    orderId = res.body.id;
+    firstLineId = res.body.lines[0].id;
+    const booked = await ownerReq()
+      .post(`/v1/orders/${orderId}/deliveries`)
+      .send({ scheduledDate: dayA, confirmOverCapacity: true });
+    expect(booked.status).toBe(201);
+    stopId = booked.body.id;
+    expect(booked.body.lines).toHaveLength(1);
+
+    const add = await ownerReq()
+      .post(`/v1/orders/${orderId}/lines`)
+      .send({ variantId: mattressVariantId, quantity: 1 });
+    expect(add.status).toBe(201);
+
+    const stop = await ownerReq().get(`/v1/deliveries/${stopId}`);
+    expect(stop.body.lines).toHaveLength(2);
+    expect(await stopsOn(dayA)).toHaveLength(1);
+    const again = await ownerReq()
+      .post(`/v1/orders/${orderId}/deliveries`)
+      .send({ scheduledDate: dayA, confirmOverCapacity: true });
+    expect(again.status).toBe(400);
+    expect(again.body.message).toMatch(/Nothing left to schedule/);
+  });
+
+  it('a raised quantity puts the extra unit on the stop; a take-with line leaves it', async () => {
+    const up = await ownerReq()
+      .patch(`/v1/orders/${orderId}/lines/${firstLineId}`)
+      .send({ quantity: 2 });
+    expect(up.status).toBe(200);
+    let stop = await ownerReq().get(`/v1/deliveries/${stopId}`);
+    const first = stop.body.lines.find(
+      (l: { orderLineId: string }) => l.orderLineId === firstLineId,
+    );
+    expect(first.quantity).toBe(2);
+
+    const counter = await ownerReq()
+      .patch(`/v1/orders/${orderId}/lines/${firstLineId}`)
+      .send({ fulfillmentMethod: 'take_with' });
+    expect(counter.status).toBe(200);
+    stop = await ownerReq().get(`/v1/deliveries/${stopId}`);
+    expect(
+      stop.body.lines.some((l: { orderLineId: string }) => l.orderLineId === firstLineId),
+    ).toBe(false);
+    expect(stop.body.lines).toHaveLength(1);
+  });
+
+  it('a promised date set on Order details books the stop, and moving it moves the stop', async () => {
+    const res = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        address: { line1: '9 Pier Ave', city: 'Santa Monica', region: 'CA', postalCode: '90401' },
+        lines: [{ variantId: mattressVariantId, quantity: 1 }],
+        confirm: true,
+      });
+    expect(res.status).toBe(201);
+    orderId = res.body.id;
+    expect(await stopsOn(dayB)).toHaveLength(0);
+
+    const dated = await ownerReq().patch(`/v1/orders/${orderId}`).send({ requestedDate: dayB });
+    expect(dated.status).toBe(200);
+    const onB = await stopsOn(dayB);
+    expect(onB).toHaveLength(1);
+    expect(onB[0]!.lines[0]!.quantity).toBe(1);
+
+    const moved = await ownerReq().patch(`/v1/orders/${orderId}`).send({ requestedDate: dayC });
+    expect(moved.status).toBe(200);
+    expect(await stopsOn(dayB)).toHaveLength(0);
+    const onC = await stopsOn(dayC);
+    expect(onC).toHaveLength(1);
+    expect(onC[0]!.id).toBe(onB[0]!.id);
+  });
+
+  it('confirming a quote with a promised date books the stop', async () => {
+    const quote = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        requestedDate: dayC,
+        address: { line1: '9 Pier Ave', city: 'Santa Monica', region: 'CA', postalCode: '90401' },
+        lines: [{ variantId: mattressVariantId, quantity: 1 }],
+      });
+    expect(quote.status).toBe(201);
+    orderId = quote.body.id;
+    expect(await stopsOn(dayC)).toHaveLength(0);
+    const confirmed = await ownerReq().patch(`/v1/orders/${orderId}`).send({ status: 'open' });
+    expect(confirmed.status).toBe(200);
+    expect(await stopsOn(dayC)).toHaveLength(1);
+  });
+});

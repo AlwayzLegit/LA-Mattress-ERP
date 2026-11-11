@@ -300,6 +300,11 @@ export default function OrderDetailPage() {
   const [payMonths, setPayMonths] = useState('');
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [deliveryDate, setDeliveryDate] = useState('');
+  // Book a delivery starts on the promised date (owner 2026-11-10) — the
+  // box was blank, so a stop booked from here could land on any day.
+  useEffect(() => {
+    if (order?.requestedDate) setDeliveryDate((d) => d || order.requestedDate!);
+  }, [order?.id, order?.requestedDate]);
   const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [feesOpen, setFeesOpen] = useState(false);
@@ -1670,7 +1675,41 @@ export default function OrderDetailPage() {
             }
             return (
               <Card title="Deliveries & fulfillment">
-                {deliveries.length === 0 ? (
+                {!deliveries.some(
+                  (dv) =>
+                    dv.status === 'scheduled' ||
+                    dv.status === 'loaded' ||
+                    dv.status === 'out_for_delivery',
+                ) &&
+                order.fulfillmentType === 'delivery' &&
+                live &&
+                order.status !== 'quote' &&
+                truckLines.some((l) => l.quantity - l.qtyFulfilled > 0) ? (
+                  // Owner 2026-11-10: an order with goods for the truck and
+                  // no stop is invisible to Deliveries — say so, loudly,
+                  // and point at the two ways to fix it.
+                  <Alert
+                    tone="warning"
+                    data-testid="not-on-calendar"
+                    action={
+                      !order.requestedDate && editable ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setHeaderOpen(true)}
+                          data-testid="set-promised-date"
+                        >
+                          Set promised date…
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    <strong>Not on the Deliveries calendar.</strong>{' '}
+                    {order.requestedDate
+                      ? 'The promised date has no stop booked — book the delivery below.'
+                      : 'The order has no promised date, so nothing is booked and dispatch cannot see it. Set the date in Order details, or book a date below.'}
+                  </Alert>
+                ) : deliveries.length === 0 ? (
                   <p className="muted">
                     {order.fulfillmentType === 'pickup'
                       ? 'Pickup order — hand over the goods below when the customer arrives.'
