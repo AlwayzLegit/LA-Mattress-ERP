@@ -49,7 +49,7 @@ import { ProductSearchDialog, type SearchRow } from '@/components/product-search
 import { LinkToPo, unlinkPo } from '@/components/po-links';
 import { OrderActionsMenu } from '../actions/actions-menu';
 import { OrderHeaderDialog } from '../actions/header-dialog';
-import { LineDetailsDialog } from '../actions/edit-dialogs';
+import { FeesDialog, LineDetailsDialog } from '../actions/edit-dialogs';
 import type { CostedLines, OpsLists } from '../actions/types';
 
 /**
@@ -302,6 +302,7 @@ export default function OrderDetailPage() {
   const [deliveryDate, setDeliveryDate] = useState('');
   const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
   const [unlockOpen, setUnlockOpen] = useState(false);
+  const [feesOpen, setFeesOpen] = useState(false);
   // A20 (§12.16): the STORIS Actions menu and the line display toggles.
   const [attachmentCount, setAttachmentCount] = useState(0);
   const [opsLists, setOpsLists] = useState<OpsLists>({});
@@ -2094,20 +2095,58 @@ export default function OrderDetailPage() {
                           )
                         : '—',
                   },
+                  // The fees by name, with the delivery fee editable right
+                  // here (owner 2026-11-10): "Miscellaneous Fees" sat three
+                  // clicks deep in the Actions menu and nobody found it.
                   {
-                    label: 'Fees in total',
+                    label: 'Delivery fee',
                     value: (
-                      <MoneyValue
-                        cents={
-                          (order.deliveryFeeCents ?? 0) +
-                          (order.installFeeCents ?? 0) +
-                          (order.otherFeeCents ?? 0)
-                        }
-                      />
+                      <span className="inline-flex items-center gap-2">
+                        <span data-testid="delivery-fee-value">
+                          <MoneyValue cents={order.deliveryFeeCents ?? 0} />
+                        </span>
+                        {live && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={!editable}
+                            title={editable ? undefined : 'Unlock the order to change its fees'}
+                            onClick={() => setFeesOpen(true)}
+                            data-testid="edit-fees"
+                          >
+                            {(order.deliveryFeeCents ?? 0) > 0 ? 'Change…' : 'Add…'}
+                          </Button>
+                        )}
+                      </span>
                     ),
                   },
+                  ...((order.installFeeCents ?? 0) > 0
+                    ? [
+                        {
+                          label: 'Installation fee',
+                          value: <MoneyValue cents={order.installFeeCents ?? 0} />,
+                        },
+                      ]
+                    : []),
+                  ...((order.otherFeeCents ?? 0) > 0
+                    ? [
+                        {
+                          label: order.otherFeeLabel?.trim() || 'Other fee',
+                          value: <MoneyValue cents={order.otherFeeCents ?? 0} />,
+                        },
+                      ]
+                    : []),
                 ]}
               />
+              {feesOpen && (
+                <FeesDialog
+                  order={order}
+                  onClose={() => setFeesOpen(false)}
+                  onSaved={async () => {
+                    await load();
+                  }}
+                />
+              )}
               {live &&
                 order.creditDueCents > 0 &&
                 (order.family ?? [])

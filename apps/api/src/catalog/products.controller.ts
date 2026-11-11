@@ -49,6 +49,7 @@ import {
 import { RequirePermission, TenantScoped } from '../tenancy/decorators';
 import { loadCategoryIndex } from './category-tree';
 import { productFilters } from './product-filters';
+import { prefixTsQuery, productSearchCond } from './product-search';
 import type { RequestTenantContext } from '../tenancy/request-context';
 
 /** Connector syncs write import batches under their provider name. */
@@ -439,7 +440,10 @@ export class CatalogProductsController {
 
     if (q && q.trim().length > 0) {
       // Search returns ts_rank-ordered results — single page, no cursor.
-      const tsq = sql`websearch_to_tsquery('simple', ${q})`;
+      // Partial words and SKU fragments match too (owner 2026-11-10); the
+      // rank uses the same prefix query, so a product whose own words hit
+      // sorts above one found through a variant or a SKU substring.
+      const tsq = prefixTsQuery(q) ?? sql`to_tsquery('simple', '')`;
       const data = await this.db
         .select({
           id: schema.products.id,
@@ -454,15 +458,7 @@ export class CatalogProductsController {
             // Parenthesised: without the brackets the OR binds looser than
             // the AND `and()` puts between the filters, so a variant match
             // would smuggle a row past the active / vendor / category ones.
-            // A22.2: the product's words and a variant's words (size,
-            // firmness, SKU, barcode) count together, so "queen bamboo
-            // sheets" finds the Queen variant of "BAMBOO SHEETS WHITE".
-            sql`(${schema.products.searchTsv} @@ ${tsq}
-                OR EXISTS (
-                  SELECT 1 FROM ${schema.productVariants} v
-                  WHERE v.product_id = ${schema.products.id}
-                    AND (${schema.products.searchTsv} || v.search_tsv) @@ ${tsq}
-                ))`,
+            productSearchCond(q),
           ),
         )
         .orderBy(desc(sql`ts_rank(${schema.products.searchTsv}, ${tsq})`))

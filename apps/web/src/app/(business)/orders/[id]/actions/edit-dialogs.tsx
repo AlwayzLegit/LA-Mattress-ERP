@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Paperclip, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -55,6 +55,7 @@ export function FeesDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const deliveryRef = useRef<HTMLInputElement>(null);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -82,14 +83,29 @@ export function FeesDialog({
       <form onSubmit={submit} data-testid="fees-form">
         <FormGrid cols={2}>
           <Field label="Delivery fee ($)">
-            <Input
-              name="delivery"
-              type="number"
-              step="0.01"
-              min={0}
-              defaultValue={((order.deliveryFeeCents ?? 0) / 100).toFixed(2)}
-              data-testid="fee-delivery"
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                ref={deliveryRef}
+                name="delivery"
+                type="number"
+                step="0.01"
+                min={0}
+                defaultValue={((order.deliveryFeeCents ?? 0) / 100).toFixed(2)}
+                data-testid="fee-delivery"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                title="Set the delivery fee to $0 — save to apply"
+                onClick={() => {
+                  if (deliveryRef.current) deliveryRef.current.value = '0.00';
+                }}
+                data-testid="fee-delivery-waive"
+              >
+                Waive
+              </Button>
+            </div>
           </Field>
           <Field label="Installation fee ($)">
             <Input
