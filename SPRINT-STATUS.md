@@ -7139,6 +7139,7 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   active arrow never showed on product columns whose id differs from its key.
   `useListColumns` now reports `server`; the header follows it. Drag-to-reorder
   is untouched.
+
 ### 2026-11-10 — Products search matches partial words and SKU fragments (owner)
 
 - `GET /v1/products?q=`, `/v1/inventory/levels?q=` (Stock by location),
