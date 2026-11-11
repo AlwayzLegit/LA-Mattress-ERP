@@ -26,6 +26,7 @@ import { loadCategoryIndex } from '../catalog/category-tree';
 import { qualifiesForRecyclingFee } from './recycling-fee';
 import { assertSellingScope, salesScopeCond } from '../common/sales-scope';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
+import { DeliverySyncService } from '../deliveries/delivery-sync.service';
 import { CurrentTenant, CurrentUser } from '../auth/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/current-user.decorator';
 import {
@@ -723,6 +724,7 @@ export class OrdersController {
     @Inject(PriceVarianceService) private readonly priceVariance: PriceVarianceService,
     @Inject(AutoTransfersService) private readonly autoTransfers: AutoTransfersService,
     @Inject(TicketFlagsService) private readonly ticketFlags: TicketFlagsService,
+    @Inject(DeliverySyncService) private readonly deliverySync: DeliverySyncService,
   ) {}
 
   /**
@@ -2744,6 +2746,22 @@ export class OrdersController {
         .where(eq(schema.orders.id, id));
     }
 
+    // The truck follows the header (owner 2026-11-10): a promised date set
+    // or moved here moves the order's one open stop, or books one when the
+    // order has none; confirming a quote or switching to delivery books
+    // too. Without this, a date typed on Order details never reached the
+    // Deliveries calendar.
+    if (
+      body.requestedDate !== undefined ||
+      body.fulfillmentType !== undefined ||
+      body.status === 'open'
+    ) {
+      if (body.requestedDate && body.requestedDate !== order.requestedDate) {
+        await this.deliverySync.followPromisedDate(id, body.requestedDate);
+      }
+      await this.deliverySync.sync(id);
+    }
+
     // Before and after name the same fields, and only the ones that moved
     // (owner 2026-10-13: the history read "order kind none → sales order,
     // updated at none → …, total $500.00 → none" for a date change).
@@ -2870,6 +2888,10 @@ export class OrdersController {
         actorUserId: actor?.id ?? null,
       });
     }
+
+    // The new units ride the stop the order already has, or book one on
+    // the promised date (owner 2026-11-10) — never a limbo line.
+    await this.deliverySync.sync(id);
 
     await this.audit.log({
       action: 'order.line.add',
@@ -3983,6 +4005,10 @@ export class OrdersController {
         actorUserId: actor?.id ?? null,
       });
     }
+
+    // A raised quantity or a fulfillment change follows the stop (owner
+    // 2026-11-10): extra units join it, counter-marked units leave it.
+    await this.deliverySync.sync(order.id);
 
     await this.audit.log({
       action: 'order.line.update',

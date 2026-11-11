@@ -300,6 +300,11 @@ export default function OrderDetailPage() {
   const [payMonths, setPayMonths] = useState('');
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [deliveryDate, setDeliveryDate] = useState('');
+  // Book a delivery starts on the promised date (owner 2026-11-10) — the
+  // box was blank, so a stop booked from here could land on any day.
+  useEffect(() => {
+    if (order?.requestedDate) setDeliveryDate((d) => d || order.requestedDate!);
+  }, [order?.id, order?.requestedDate]);
   const [dayCapacity, setDayCapacity] = useState<{ booked: number; cap: number } | null>(null);
   const [unlockOpen, setUnlockOpen] = useState(false);
   // A20 (§12.16): the STORIS Actions menu and the line display toggles.

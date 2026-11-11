@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CompetitionsModule } from '../competitions/competitions.module';
 import { TicketFlagsService } from '../deliveries/ticket-flags.service';
+import { DeliverySyncService } from '../deliveries/delivery-sync.service';
 import { AuditModule } from '../audit/audit.module';
 import { MoneyModule } from '../money/money.module';
 import { ReturnsModule } from '../returns/returns.module';
@@ -38,10 +39,10 @@ import { OrderCompletionService } from './order-completion.service';
     ReservationsController,
     TasksController,
   ],
-  providers: [OrdersService, OrderCompletionService, TicketFlagsService],
+  providers: [OrdersService, OrderCompletionService, TicketFlagsService, DeliverySyncService],
   // Deliveries (Day 3) reserve, release, and reprice through the same
   // service rather than reimplementing the stock math; a delivered, paid
   // order completes through OrderCompletionService (owner 2026-10-22).
-  exports: [OrdersService, OrderCompletionService],
+  exports: [OrdersService, OrderCompletionService, DeliverySyncService],
 })
 export class OrdersModule {}
