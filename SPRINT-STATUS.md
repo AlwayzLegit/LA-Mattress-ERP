@@ -7172,6 +7172,7 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   customers; a customer chip loads every order on file for them through
   `/v1/orders?customerId=`. An exact order number still opens the register
   straight away. No API change.
+
 ### 2026-11-10 — Order changes follow the delivery (owner, A15)
 
 - `DeliverySyncService` runs after `POST /v1/orders/:id/lines`,
