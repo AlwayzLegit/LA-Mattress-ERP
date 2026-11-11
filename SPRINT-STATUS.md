@@ -7161,3 +7161,14 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   when they are non-zero. The fees dialog gained a **Waive** button that
   zeroes the delivery fee before saving. `PATCH /v1/orders/:id` and
   `recomputeTotals` are unchanged.
+
+### 2026-11-10 — New exchange: find the original order by customer (owner)
+
+- The "Original order" box took an order number only (exact match on
+  `/v1/orders?number=`), so staff found the order elsewhere and pasted it.
+  It now runs `GET /v1/search?q=` — order number, legacy number, customer
+  name, phone, email, address — and lists the matching orders (number,
+  customer, status, promised date, total, "Exchange from this order") and
+  customers; a customer chip loads every order on file for them through
+  `/v1/orders?customerId=`. An exact order number still opens the register
+  straight away. No API change.
