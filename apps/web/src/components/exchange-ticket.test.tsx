@@ -284,6 +284,32 @@ describe('ExchangeTicketDoc (owner 2026-11-05: invoice dress, dates, detail)', (
     expect(html).toMatch(/Balance due[\s\S]*\$762\.83/);
   });
 
+  it('pre-cutover original (dispatcher 2026-11-06): names the STORIS invoice, no order date', () => {
+    const html = render(
+      exchange({
+        originalOrderNumber: null,
+        referencedOrderNumber: '03108303',
+        rmaNumber: 'RMA-NOORIG-3',
+        fulfillment: 'pickup',
+        returnStatus: 'authorized',
+      }),
+      ret({
+        orderNumber: null,
+        orderDate: null,
+        fulfillment: 'pickup',
+        pickupDate: '2026-11-08',
+        rmaNumber: 'RMA-NOORIG-3',
+      }),
+      sale(),
+    );
+    expect(html).toContain('03108303');
+    expect(html).toContain('STORIS, not on file');
+    expect(html).toContain('STORIS (before cutover)');
+    expect(html).toContain('RMA-NOORIG-3');
+    expect(html).toContain(new Date('2026-11-08T00:00:00').toLocaleDateString());
+    expect(html).toMatch(/Return credit[\s\S]*-\$1,354\.97/);
+  });
+
   it('uses the replacement balance once settled and still renders without the legs', () => {
     const settled = render(
       exchange({

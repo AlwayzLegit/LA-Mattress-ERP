@@ -201,6 +201,31 @@ interface ExchangeOriginal {
   locationId: string;
   lines: ReturnLine[];
 }
+/**
+ * Pre-cutover exchange (dispatcher 2026-11-06): the no-original return
+ * already written against the STORIS invoice — what comes back is fixed
+ * on it; the register only writes the replacement and binds the two.
+ */
+interface ExchangeReturnDoc {
+  id: string;
+  rmaNumber: string;
+  referencedOrderNumber: string | null;
+  status: string;
+  fulfillment: string;
+  pickupDate: string | null;
+  amountCents: number;
+  customerId: string | null;
+  locationId: string | null;
+  reason: string | null;
+  lines: {
+    id: string;
+    variantId: string | null;
+    description: string | null;
+    quantity: number;
+    perUnitCents: number;
+    reason: string | null;
+  }[];
+}
 const REFUND_TENDERS = [
   { value: 'store_credit', label: 'Store credit (stays on account)' },
   { value: 'original', label: 'Original tenders' },
@@ -224,7 +249,15 @@ const EMPTY_NEW_CUSTOMER = {
   ...EMPTY_ADDRESS,
 };
 
-export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
+export function NewSale({
+  exchangeOf,
+  exchangeReturnId,
+}: {
+  /** §10: exchange against this original order (its delivered lines come back). */
+  exchangeOf?: string;
+  /** Pre-cutover: exchange against this no-original return (STORIS invoice, no order on file). */
+  exchangeReturnId?: string;
+} = {}) {
   const router = useRouter();
 
   // --- reference data ---
@@ -256,9 +289,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     { id: string; number: string; requestedDate: string | null; deliveryDate: string | null }[]
   >([]);
   const [exchangeOriginal, setExchangeOriginal] = useState<ExchangeOriginal | null>(null);
+  const [exchangeReturn, setExchangeReturn] = useState<ExchangeReturnDoc | null>(null);
   // §10 Enter an Exchange (owner 2026-09-18): the register in exchange
   // mode carries the return leg and the settlement choices too.
-  const isExchange = Boolean(exchangeOf);
+  const isExchange = Boolean(exchangeOf || exchangeReturnId);
+  /** The return leg is known (original order loaded, or the pre-cutover return loaded). */
+  const exchangeReady = exchangeOriginal != null || exchangeReturn != null;
   const [returnQty, setReturnQty] = useState<Record<string, number>>({});
   const [returnReason, setReturnReason] = useState('');
   const [returnToId, setReturnToId] = useState(''); // '' = the order's Store
@@ -489,6 +525,36 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       stale = true;
     };
   }, [exchangeOf]);
+
+  // Pre-cutover exchange: the return is already written against the
+  // STORIS invoice (New Exchange → "Original invoice not on file"); pin
+  // its customer, read its lines, and take how the goods come back from
+  // it — a truck pickup settles when the stop completes, a drop-off is
+  // already complete and settles at bind.
+  useEffect(() => {
+    if (!exchangeReturnId) return;
+    let stale = false;
+    api<ExchangeReturnDoc>(`/v1/order-returns/${exchangeReturnId}`)
+      .then(async (r) => {
+        if (stale) return;
+        if (!r.customerId) throw new Error(`${r.rmaNumber} has no customer`);
+        if (!['authorized', 'completed'].includes(r.status)) {
+          throw new Error(`${r.rmaNumber} is ${r.status}`);
+        }
+        setExchangeReturn(r);
+        setGoodsInHand(r.fulfillment === 'drop_off');
+        setRefundTender('store_credit');
+        const c = await api<CustomerHit>(`/v1/customers/${r.customerId}`).catch(() => null);
+        if (!stale && c) setCustomer(c);
+      })
+      .catch((err) => {
+        setExchangeReturn(null);
+        setError(`Could not load the return: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [exchangeReturnId]);
 
   const loadDrafts = useCallback(() => {
     void api<{ data: DraftRow[] }>('/v1/orders?status=draft&limit=30')
@@ -766,12 +832,12 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       .filter((l) => l.lineType !== 'custom')
       .every((l) => shipsOut(effectiveFulfillment(l, fulfillment)));
   const autoTaxOff =
-    !exchangeOriginal &&
+    !isExchange &&
     goodsShipOut &&
     deliveryState != null &&
     storeState != null &&
     deliveryState !== storeState;
-  const noTax = !exchangeOriginal && (taxOff ?? autoTaxOff);
+  const noTax = !isExchange && (taxOff ?? autoTaxOff);
   const noTaxReason = !noTax
     ? null
     : taxOff === true
@@ -862,8 +928,11 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const pickedReturns = returnableLines
     .filter((l) => (returnQty[l.id] ?? 0) > 0)
     .map((l) => ({ line: l, quantity: Math.min(returnQty[l.id]!, returnableQty(l)) }));
-  const returnCredit = returnCreditCents(returnableLines, returnQty);
-  const restockingFeeCents = parseDollars(feeOverride);
+  // A pre-cutover return carries its credit (and no restocking fee) already.
+  const returnCredit = exchangeReturn
+    ? exchangeReturn.amountCents
+    : returnCreditCents(returnableLines, returnQty);
+  const restockingFeeCents = exchangeReturn ? 0 : parseDollars(feeOverride);
   const settlement = exchangeSettlement({
     replacementTotalCents: totals.totalCents,
     returnCreditCents: returnCredit,
@@ -888,7 +957,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
   const codActive = cod && codAllowed;
   const needsMoney =
     orderType !== 'quote' &&
-    !exchangeOriginal &&
+    !isExchange &&
     totals.totalCents > 0 &&
     totals.paidCents === 0 &&
     !codActive;
@@ -991,8 +1060,28 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
    * like — same quantity, at the price the customer paid.
    */
   async function sameItems() {
-    if (!exchangeOriginal || pickedReturns.length === 0) return;
-    const withVariant = pickedReturns.filter((p) => p.line.variantId);
+    // Either leg: the picked original lines, or the pre-cutover return's
+    // lines (priced at the credit the manager approved per unit).
+    const wanted: {
+      variantId: string | null;
+      description: string;
+      quantity: number;
+      unitPriceCents: number;
+    }[] = exchangeReturn
+      ? exchangeReturn.lines.map((l) => ({
+          variantId: l.variantId,
+          description: l.description ?? 'Returned item',
+          quantity: l.quantity,
+          unitPriceCents: l.perUnitCents,
+        }))
+      : pickedReturns.map((p) => ({
+          variantId: p.line.variantId,
+          description: p.line.description,
+          quantity: p.quantity,
+          unitPriceCents: p.line.unitPriceCents,
+        }));
+    if (!exchangeReady || wanted.length === 0) return;
+    const withVariant = wanted.filter((p) => p.variantId);
     if (withVariant.length === 0) {
       toast.error(
         'The returned items are not catalog products — add the replacement with Add product.',
@@ -1002,7 +1091,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     const from = defaultSourceFor(fulfillment, ctx);
     try {
       const params = new URLSearchParams({
-        variantIds: [...new Set(withVariant.map((p) => p.line.variantId!))].join(','),
+        variantIds: [...new Set(withVariant.map((p) => p.variantId!))].join(','),
         locationId: from,
         limit: '100',
       });
@@ -1010,16 +1099,16 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       const missing: string[] = [];
       const added: Line[] = [];
       for (const p of withVariant) {
-        const row = rows.find((r) => r.variantId === p.line.variantId);
+        const row = rows.find((r) => r.variantId === p.variantId);
         if (!row) {
-          missing.push(p.line.description);
+          missing.push(p.description);
           continue;
         }
         noteAvail(row, from);
         added.push({
           ...lineFromRow(row, from),
           quantity: p.quantity,
-          unitPriceCents: p.line.unitPriceCents,
+          unitPriceCents: p.unitPriceCents,
         });
       }
       if (added.length > 0) setLines((prev) => [...prev, ...added]);
@@ -1274,7 +1363,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       return;
     }
     if (
-      exchangeOriginal &&
+      exchangeReady &&
       goodsInHand &&
       collectNow &&
       settlement.customerOwesCents > 0 &&
@@ -1299,7 +1388,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     // scheduling from the exchange page, so it is not gated here.
     if (
       mode === 'complete' &&
-      !exchangeOriginal &&
+      !isExchange &&
       orderType !== 'quote' &&
       !requestedDate &&
       lines.some(
@@ -1358,7 +1447,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
 
   async function doSubmit(mode: 'complete' | 'draft') {
     if (!customer) throw new Error('Attach a customer first.');
-    if (exchangeOriginal) {
+    if (exchangeOriginal || exchangeReturn) {
       await submitExchange();
       return;
     }
@@ -1407,7 +1496,7 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
     // Take-with fully paid, all real stock, no fee lines → a plain register sale.
     const allSellable = lines.every((l) => l.lineType !== 'special_order');
     if (
-      !exchangeOriginal &&
+      !isExchange &&
       mode === 'complete' &&
       orderType === 'sales_order' &&
       fulfillment === 'take_with' &&
@@ -1611,44 +1700,52 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
    * Write exchange again binds the SAME documents instead of duplicating.
    */
   async function submitExchange() {
-    if (!exchangeOriginal || !customer) return;
+    if ((!exchangeOriginal && !exchangeReturn) || !customer) return;
     const sp = salespeople.filter(Boolean);
     let saleOrderId = createdLegs.saleOrderId;
-    let returnId = createdLegs.returnId;
+    // Pre-cutover: the return leg exists before the register opens.
+    let returnId = createdLegs.returnId ?? exchangeReturn?.id ?? null;
     try {
       if (!saleOrderId) {
-        const order = await api<{ id: string }>(`/v1/orders/${exchangeOriginal.id}/exchange`, {
-          method: 'POST',
-          body: JSON.stringify({
-            locationId,
-            fulfillmentType: fulfillment,
-            requestedDate: requestedDate || null,
-            deliveryInstructions: deliveryInstructions || null,
-            notes: notes || null,
-            address: shipDiffers
-              ? {
-                  line1: ship.line1 || null,
-                  line2: ship.line2 || null,
-                  city: ship.city || null,
-                  region: ship.region || null,
-                  postalCode: ship.postalCode || null,
-                  phone: ship.phone || null,
-                }
-              : addressFromCustomer(customer),
-            salespersonMembershipId: sp[0] || undefined,
-            secondSalespersonMembershipId: sp[1] || undefined,
-            splitBps: sp.length === 2 ? 5000 : undefined,
-            lines: expandLines(),
-            orderDiscountCents: parseDollars(orderDiscount) || undefined,
-            installFeeCents: parseDollars(installFee) || undefined,
-            deliveryFeeCents: parseDollars(deliveryFee) || undefined,
-            confirm: true,
-          }),
-        });
+        // Against an original: written as that order's exchange (orderKind
+        // 'exchange', originalOrderId). Pre-cutover: a plain order of kind
+        // 'exchange' for the same customer — there is no original to link.
+        const order = await api<{ id: string }>(
+          exchangeOriginal ? `/v1/orders/${exchangeOriginal.id}/exchange` : '/v1/orders',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              ...(exchangeOriginal ? {} : { customerId: customer.id, orderKind: 'exchange' }),
+              locationId,
+              fulfillmentType: fulfillment,
+              requestedDate: requestedDate || null,
+              deliveryInstructions: deliveryInstructions || null,
+              notes: notes || null,
+              address: shipDiffers
+                ? {
+                    line1: ship.line1 || null,
+                    line2: ship.line2 || null,
+                    city: ship.city || null,
+                    region: ship.region || null,
+                    postalCode: ship.postalCode || null,
+                    phone: ship.phone || null,
+                  }
+                : addressFromCustomer(customer),
+              salespersonMembershipId: sp[0] || undefined,
+              secondSalespersonMembershipId: sp[1] || undefined,
+              splitBps: sp.length === 2 ? 5000 : undefined,
+              lines: expandLines(),
+              orderDiscountCents: parseDollars(orderDiscount) || undefined,
+              installFeeCents: parseDollars(installFee) || undefined,
+              deliveryFeeCents: parseDollars(deliveryFee) || undefined,
+              confirm: true,
+            }),
+          },
+        );
         saleOrderId = order.id;
         setCreatedLegs((prev) => ({ ...prev, saleOrderId }));
       }
-      if (!returnId) {
+      if (!returnId && exchangeOriginal) {
         // store_credit: the exchange settlement diverts the money anyway,
         // this skips the cash-refund cap on partially-paid originals, and
         // if the exchange is later split the fallback is credit — never
@@ -1669,16 +1766,24 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
         returnId = returns.data[0].id;
         setCreatedLegs((prev) => ({ ...prev, returnId }));
       }
+      if (!returnId) throw new Error('Return leg not found');
+      // A pre-cutover return says how its goods come back and binds
+      // store-credit only (no original tenders); the server books the
+      // truck stop on the replacement when it has a pickup date.
       const exchange = await api<{ id: string; status: string }>('/v1/exchanges', {
         method: 'POST',
         body: JSON.stringify({
           saleOrderId,
           returnId,
           evenExchange,
-          fulfillment: goodsInHand ? 'drop_off' : 'pickup',
-          refundTender,
+          fulfillment: exchangeReturn
+            ? exchangeReturn.fulfillment
+            : goodsInHand
+              ? 'drop_off'
+              : 'pickup',
+          refundTender: exchangeReturn ? 'store_credit' : refundTender,
           ...(returnSalespersonId ? { returnSalespersonMembershipId: returnSalespersonId } : {}),
-          ...(feeOverride.trim() !== '' ? { restockingFeeCents } : {}),
+          ...(!exchangeReturn && feeOverride.trim() !== '' ? { restockingFeeCents } : {}),
         }),
       });
       // Goods in hand → settle now. A held (E1) exchange settles after
@@ -1686,10 +1791,15 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
       // the cashier — the exchange exists; its page has the buttons.
       if (goodsInHand && exchange.status !== 'on_hold') {
         try {
-          await api(`/v1/order-returns/${returnId}/receive`, {
-            method: 'POST',
-            body: JSON.stringify({ locationId: returnToId || locationId }),
-          });
+          // A with-original return is received here; a dropped-off
+          // pre-cutover return was completed when it was written and the
+          // bind just applied its banked credit.
+          if (exchangeOriginal) {
+            await api(`/v1/order-returns/${returnId}/receive`, {
+              method: 'POST',
+              body: JSON.stringify({ locationId: returnToId || locationId }),
+            });
+          }
           if (collectNow) {
             const settled = await api<{ settlement: { saleBalanceDueCents: number } }>(
               `/v1/exchanges/${exchange.id}`,
@@ -1924,17 +2034,25 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           ? 'Complete — COD'
           : 'Complete with balance';
   const completeHint = isExchange
-    ? !exchangeOriginal
-      ? 'Loading the original order…'
-      : pickedReturns.length === 0
+    ? !exchangeReady
+      ? exchangeReturnId
+        ? 'Loading the return…'
+        : 'Loading the original order…'
+      : !exchangeReturn && pickedReturns.length === 0
         ? 'Pick what comes back under Return'
         : lines.length === 0
           ? 'Add the replacement — Same items copies the return like for like'
           : goodsInHand
             ? collectNow
-              ? 'Receives the return, settles the credit, and collects the exact balance'
-              : 'Receives the return and settles the credit — collect from the exchange page'
-            : 'Writes the exchange now; settle when the truck brings the goods back'
+              ? exchangeReturn
+                ? 'Binds the return, applies its credit, and collects the exact balance'
+                : 'Receives the return, settles the credit, and collects the exact balance'
+              : exchangeReturn
+                ? 'Binds the return and applies its credit — collect from the exchange page'
+                : 'Receives the return and settles the credit — collect from the exchange page'
+            : exchangeReturn
+              ? `Writes the exchange and books the pickup${exchangeReturn.pickupDate ? ` for ${exchangeReturn.pickupDate}` : ''}; the credit applies when the truck brings the goods back`
+              : 'Writes the exchange now; settle when the truck brings the goods back'
     : !customer
       ? 'Add a customer to complete'
       : lines.length === 0
@@ -2062,7 +2180,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
             {isExchange
               ? exchangeOriginal
                 ? `Against original invoice ${exchangeOriginal.number}`
-                : ' '
+                : exchangeReturn
+                  ? `Against STORIS invoice ${exchangeReturn.referencedOrderNumber ?? '—'} (not on file) · ${exchangeReturn.rmaNumber}`
+                  : ' '
               : locked
                 ? `Completed ${done!.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
                 : resumedDraft
@@ -2155,7 +2275,18 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
           original order&apos;s.
         </Alert>
       )}
-      {!exchangeOriginal && openOrders.length > 0 && (
+      {exchangeReturn && (
+        <Alert tone="warning" data-testid="exchange-banner">
+          <strong>Exchange Order</strong> against STORIS invoice{' '}
+          <strong>{exchangeReturn.referencedOrderNumber ?? '—'}</strong> (sold before the cutover —
+          no order on file). What comes back is fixed on <strong>{exchangeReturn.rmaNumber}</strong>
+          ; add the replacement below and the credit nets against it when you write the exchange.
+          {exchangeReturn.fulfillment === 'pickup'
+            ? ` The truck picks the old goods up${exchangeReturn.pickupDate ? ` on ${exchangeReturn.pickupDate}` : ''}; the credit applies when they are back.`
+            : ' The goods are in hand; the credit applies now.'}
+        </Alert>
+      )}
+      {!exchangeReady && openOrders.length > 0 && (
         <Alert tone="warning" data-testid="duplicate-order-banner">
           This customer already has {openOrders.length === 1 ? 'an open order' : 'open orders'}:{' '}
           {openOrders.map((o, i) => (
@@ -2195,26 +2326,77 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   Return
                 </h2>
                 <span className="reg-count mono">
-                  {pickedReturns.length} of {returnableLines.length} line
-                  {returnableLines.length === 1 ? '' : 's'}
+                  {exchangeReturn
+                    ? `${exchangeReturn.lines.length} line${exchangeReturn.lines.length === 1 ? '' : 's'}`
+                    : `${pickedReturns.length} of ${returnableLines.length} line${returnableLines.length === 1 ? '' : 's'}`}
                 </span>
                 <span className="reg-section-note">
                   {exchangeOriginal
                     ? `From ${exchangeOriginal.number} — only delivered units can come back`
-                    : 'Loading the original order…'}
+                    : exchangeReturn
+                      ? `From STORIS invoice ${exchangeReturn.referencedOrderNumber ?? '—'} — as entered on ${exchangeReturn.rmaNumber}`
+                      : exchangeReturnId
+                        ? 'Loading the return…'
+                        : 'Loading the original order…'}
                 </span>
                 <Button
                   size="sm"
                   onClick={() => void sameItems()}
-                  disabled={locked || busy || pickedReturns.length === 0}
+                  disabled={
+                    locked ||
+                    busy ||
+                    (exchangeReturn
+                      ? !exchangeReturn.lines.some((l) => l.variantId)
+                      : pickedReturns.length === 0)
+                  }
                   title="Even exchange: replace like for like at the price paid"
                   data-testid="exchange-same-items"
                 >
                   Same items
                 </Button>
               </div>
-              {!exchangeOriginal ? (
-                <LoadingRows rows={2} height={44} what="The original order" />
+              {exchangeReturn ? (
+                <div className="reg-table-wrap">
+                  <table className="table reg-table" data-testid="precutover-return-lines">
+                    <colgroup>
+                      <col />
+                      <col style={{ width: 90 }} />
+                      <col style={{ width: 110 }} />
+                      <col style={{ width: 110 }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th className="num">Qty</th>
+                        <th className="num">Unit credit</th>
+                        <th className="num">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exchangeReturn.lines.map((l) => (
+                        <tr key={l.id || `${l.variantId}-${l.description}`}>
+                          <td>
+                            {l.description ?? 'Returned item'}
+                            {l.reason ? <span className="muted"> — {l.reason}</span> : null}
+                          </td>
+                          <td className="num mono">{l.quantity}</td>
+                          <td className="num mono">
+                            <Money cents={l.perUnitCents} />
+                          </td>
+                          <td className="num mono">
+                            <Money cents={l.perUnitCents * l.quantity} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : !exchangeOriginal ? (
+                <LoadingRows
+                  rows={2}
+                  height={44}
+                  what={exchangeReturnId ? 'The return' : 'The original order'}
+                />
               ) : returnableLines.length === 0 ? (
                 <EmptyState title="Nothing returnable">
                   Nothing on {exchangeOriginal.number} has been delivered yet — only delivered units
@@ -2310,6 +2492,13 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     </Select>
                   </Field>
                 </div>
+              )}
+              {exchangeReturn && (
+                <p className="reg-section-note" data-testid="precutover-return-note">
+                  {exchangeReturn.fulfillment === 'pickup'
+                    ? `Our truck picks these up${exchangeReturn.pickupDate ? ` on ${exchangeReturn.pickupDate}` : ''} — the stop is booked on the replacement when you write the exchange, and the credit applies when the goods are back.`
+                    : 'Goods in hand — the credit is already on the customer and applies to the replacement when you write the exchange.'}
+                </p>
               )}
             </section>
           )}
@@ -2998,9 +3187,15 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                         type="number"
                         step="0.01"
                         min={0}
-                        value={feeOverride}
+                        value={exchangeReturn ? '' : feeOverride}
                         onChange={(e) => setFeeOverride(e.target.value)}
-                        placeholder="From settings"
+                        placeholder={exchangeReturn ? 'None (pre-cutover)' : 'From settings'}
+                        disabled={!!exchangeReturn}
+                        title={
+                          exchangeReturn
+                            ? 'A pre-cutover exchange carries no restocking fee — the approved credit is the credit'
+                            : undefined
+                        }
                         className="input-num reg-cell-input"
                         data-testid="exchange-fee-override"
                       />
@@ -3008,8 +3203,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                   </div>
                   <Field label="Credit left over goes to">
                     <Select
-                      value={refundTender}
+                      value={exchangeReturn ? 'store_credit' : refundTender}
                       onChange={(e) => setRefundTender(e.target.value as RefundTender)}
+                      disabled={!!exchangeReturn}
+                      title={
+                        exchangeReturn
+                          ? 'No original tenders on a pre-cutover exchange — leftover credit stays as store credit'
+                          : undefined
+                      }
                       data-testid="exchange-refund-tender"
                     >
                       {REFUND_TENDERS.map((t) => (
@@ -3033,9 +3234,14 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                       type="checkbox"
                       checked={goodsInHand}
                       onChange={(e) => setGoodsInHand(e.target.checked)}
+                      disabled={!!exchangeReturn}
                       data-testid="exchange-goods-in-hand"
                     />
-                    Goods are in hand — settle now (uncheck for a truck pickup)
+                    {exchangeReturn
+                      ? goodsInHand
+                        ? 'Goods are in hand — the credit applies now (set on the return)'
+                        : 'Truck pickup — the credit applies when the goods are back (set on the return)'
+                      : 'Goods are in hand — settle now (uncheck for a truck pickup)'}
                   </label>
                   {goodsInHand && (
                     <label className="reg-check">
@@ -3183,9 +3389,9 @@ export function NewSale({ exchangeOf }: { exchangeOf?: string } = {}) {
                     busy ||
                     zeroBlock ||
                     !customer ||
-                    !exchangeOriginal ||
+                    !exchangeReady ||
                     lines.length === 0 ||
-                    pickedReturns.length === 0
+                    (!exchangeReturn && pickedReturns.length === 0)
                   }
                   onClick={() => void submit('complete')}
                   data-testid="create-exchange"

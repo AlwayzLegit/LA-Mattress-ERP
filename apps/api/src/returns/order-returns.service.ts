@@ -64,17 +64,26 @@ export class OrderReturnsService {
     if (ret.status !== 'authorized') {
       throw new ConflictException(`Return ${ret.rmaNumber} is already ${ret.status}`);
     }
-    if (!ret.orderId) {
-      // No-original returns are written completed in one step and never
-      // sit in 'authorized' — this is a data-integrity backstop.
-      throw new ConflictException(`Return ${ret.rmaNumber} has no order to receive against`);
+    // A no-original return (pre-cutover STORIS invoice, SEC-RTN-NOORIG)
+    // only sits in 'authorized' when the truck is picking the goods up
+    // (dispatcher 2026-11-06). It has no order: nothing to bump, no
+    // original tenders to cap or refund against — the credit is the
+    // amount the manager approved, issued now, store credit only.
+    const noOriginal = ret.orderId == null;
+    if (noOriginal && !ret.customerId) {
+      throw new ConflictException(`Return ${ret.rmaNumber} has no order and no customer`);
     }
-    const [order] = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, ret.orderId))
-      .limit(1);
-    if (!order) throw new NotFoundException('Order not found');
+    const [order] = ret.orderId
+      ? await this.db.select().from(schema.orders).where(eq(schema.orders.id, ret.orderId)).limit(1)
+      : [];
+    if (!noOriginal && !order) throw new NotFoundException('Order not found');
+    const customerId = order?.customerId ?? ret.customerId!;
+    const landingLocationId = opts.receiveLocationId ?? order?.locationId ?? ret.locationId;
+    if (!landingLocationId) {
+      throw new BadRequestException(
+        `Return ${ret.rmaNumber} has no location — name the location receiving the goods`,
+      );
+    }
 
     const returnLines = await this.db
       .select()
@@ -101,19 +110,53 @@ export class OrderReturnsService {
     // Money first — validate before any goods movement so a blocked
     // refund leaves the return untouched (still authorized).
     const toStoreCredit = ret.refundMethod === 'store_credit';
-    const payments = await this.db
-      .select()
-      .from(schema.payments)
-      .where(eq(schema.payments.orderId, ret.orderId))
-      .orderBy(desc(schema.payments.createdAt));
+    const payments = ret.orderId
+      ? await this.db
+          .select()
+          .from(schema.payments)
+          .where(eq(schema.payments.orderId, ret.orderId))
+          .orderBy(desc(schema.payments.createdAt))
+      : [];
+    if (noOriginal && !toStoreCredit) {
+      throw new ConflictException(`Return ${ret.rmaNumber} has no original tenders to refund to`);
+    }
     if (!liveExchange && !toStoreCredit && ret.amountCents > paidCents(payments)) {
       throw new BadRequestException(
-        `Refund (${ret.amountCents}) exceeds the money now collected on ${order.number} — cancel and re-authorize as store credit`,
+        `Refund (${ret.amountCents}) exceeds the money now collected on ${order!.number} — cancel and re-authorize as store credit`,
       );
     }
 
     // Goods: bump returned counters and stage everything in As-Is.
     for (const rl of returnLines) {
+      if (noOriginal) {
+        // No order line to bump; the piece references the return document
+        // itself, exactly like a drop-off no-original return does.
+        if (rl.variantId) {
+          const inserted = await this.db
+            .insert(schema.asIsItems)
+            .values(
+              Array.from({ length: rl.quantity }, () => ({
+                businessId: ret.businessId,
+                variantId: rl.variantId!,
+                locationId: landingLocationId,
+                quantity: 1,
+                source: 'return',
+                referenceType: 'order_return',
+                referenceId: ret.id,
+                reasonCodeId: rl.reasonCodeId,
+                notes: rl.reason ?? ret.reason ?? `No-original return ${ret.rmaNumber}`,
+              })),
+            )
+            .returning({ id: schema.asIsItems.id });
+          for (const piece of inserted) {
+            await this.db
+              .update(schema.asIsItems)
+              .set({ pieceNumber: `AS-${piece.id.slice(0, 8).toUpperCase()}` })
+              .where(eq(schema.asIsItems.id, piece.id));
+          }
+        }
+        continue;
+      }
       if (!rl.orderLineId) {
         throw new ConflictException(`Return line ${rl.id} has no order line`);
       }
@@ -141,7 +184,7 @@ export class OrderReturnsService {
             Array.from({ length: rl.quantity }, () => ({
               businessId: ret.businessId,
               variantId: line.variantId!,
-              locationId: opts.receiveLocationId ?? order.locationId,
+              locationId: landingLocationId,
               quantity: 1,
               source: 'return',
               // Reference the order (matching the P8 contract the As-Is
@@ -171,7 +214,9 @@ export class OrderReturnsService {
     // but-half-paid original never mints unearned credit.
     if (liveExchange) {
       const fee = liveExchange.restockingFeeCents;
-      const collected = Math.max(0, paidCents(payments));
+      // No original → nothing collected to cap against; the approved
+      // amount is the credit (the no-original path carries no fee).
+      const collected = noOriginal ? ret.amountCents : Math.max(0, paidCents(payments));
       const credit = Math.max(0, Math.min(ret.amountCents, collected) - fee);
       if (credit < ret.amountCents - fee) {
         await this.audit.log({
@@ -189,7 +234,7 @@ export class OrderReturnsService {
       if (credit > 0) {
         await this.storeCredit.issue(this.db, {
           businessId: ret.businessId,
-          customerId: order.customerId,
+          customerId,
           amountCents: credit,
           reason: `Exchange ${liveExchange.number} — return ${ret.rmaNumber}${fee > 0 ? ` (restocking fee ${fee} cents withheld)` : ''}`,
           referenceType: 'exchange',
@@ -227,7 +272,7 @@ export class OrderReturnsService {
         });
         await this.storeCredit.redeem(this.db, {
           businessId: ret.businessId,
-          customerId: order.customerId,
+          customerId,
           amountCents: applied,
           referenceType: 'exchange',
           referenceId: liveExchange.id,
@@ -242,10 +287,12 @@ export class OrderReturnsService {
       // default) leaves it spendable.
       let refundedCents = 0;
       const residual = credit - applied;
-      if (residual > 0 && liveExchange.refundTender !== 'store_credit') {
+      // A no-original exchange binds store-credit only (no original tenders
+      // exist, and a refund row needs an order) — the residual stays spendable.
+      if (residual > 0 && liveExchange.refundTender !== 'store_credit' && order) {
         await this.storeCredit.redeem(this.db, {
           businessId: ret.businessId,
-          customerId: order.customerId,
+          customerId,
           amountCents: residual,
           // Distinct reference: this credit comes back out as refund
           // payment rows on the original order, and the balance math
@@ -285,7 +332,7 @@ export class OrderReturnsService {
             method: liveExchange.refundTender,
             amountCents: -residual,
             status: 'succeeded',
-            locationId: opts.receiveLocationId ?? order.locationId,
+            locationId: landingLocationId,
             takenByMembershipId,
           });
           refundedCents = residual;
@@ -328,9 +375,13 @@ export class OrderReturnsService {
     } else if (toStoreCredit) {
       await this.storeCredit.issue(this.db, {
         businessId: ret.businessId,
-        customerId: order.customerId,
+        customerId,
         amountCents: ret.amountCents,
-        reason: ret.reason ?? `Return ${ret.rmaNumber} on ${order.number}`,
+        reason:
+          ret.reason ??
+          (order
+            ? `Return ${ret.rmaNumber} on ${order.number}`
+            : `No-original return ${ret.rmaNumber}`),
         referenceType: 'order_return',
         referenceId: ret.id,
         actorUserId,
@@ -349,7 +400,7 @@ export class OrderReturnsService {
           method: p.method,
           amountCents: -slice,
           status: 'succeeded',
-          locationId: p.locationId ?? order.locationId,
+          locationId: p.locationId ?? order!.locationId,
           takenByMembershipId,
         });
         remaining -= slice;
@@ -358,14 +409,16 @@ export class OrderReturnsService {
 
     // §9 exchange/return clawback: the salespeople give back the
     // commission on the returned fraction (no-op until the order has
-    // completed and accrued).
-    await this.commissions.reverseForOrderReturn(this.db, {
-      businessId: ret.businessId,
-      orderId: ret.orderId,
-      refundedCents: ret.amountCents,
-      orderTotalCents: order.totalCents,
-      rmaNumber: ret.rmaNumber,
-    });
+    // completed and accrued). Nothing accrued on a pre-cutover sale.
+    if (ret.orderId && order) {
+      await this.commissions.reverseForOrderReturn(this.db, {
+        businessId: ret.businessId,
+        orderId: ret.orderId,
+        refundedCents: ret.amountCents,
+        orderTotalCents: order.totalCents,
+        rmaNumber: ret.rmaNumber,
+      });
+    }
 
     const now = new Date();
     await this.db
@@ -380,8 +433,8 @@ export class OrderReturnsService {
 
     await this.audit.log({
       action: 'order.return',
-      targetType: 'order',
-      targetId: ret.orderId,
+      targetType: ret.orderId ? 'order' : 'order_return',
+      targetId: ret.orderId ?? ret.id,
       after: {
         rmaNumber: ret.rmaNumber,
         amountCents: ret.amountCents,
@@ -389,7 +442,7 @@ export class OrderReturnsService {
         fulfillment: ret.fulfillment,
         unitCount: returnLines.reduce((s, l) => s + l.quantity, 0),
         reason: ret.reason ?? null,
-        receiveLocationId: opts.receiveLocationId ?? order.locationId,
+        receiveLocationId: landingLocationId,
       },
     });
   }
