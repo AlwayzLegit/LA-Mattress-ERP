@@ -7161,6 +7161,7 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   when they are non-zero. The fees dialog gained a **Waive** button that
   zeroes the delivery fee before saving. `PATCH /v1/orders/:id` and
   `recomputeTotals` are unchanged.
+
 ### 2026-11-10 — New exchange: find the original order by customer (owner)
 
 - The "Original order" box took an order number only (exact match on
