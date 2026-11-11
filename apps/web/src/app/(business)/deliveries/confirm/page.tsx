@@ -84,6 +84,8 @@ const CONTACT_STATUSES: { key: string; label: string }[] = [
   { key: 'no_answer', label: 'No answer' },
   { key: 'confirmed', label: 'Confirmed' },
   { key: 'reschedule_requested', label: 'Reschedule requested' },
+  { key: 'texted', label: 'Texted' },
+  { key: 'wrong_number', label: 'Wrong number' },
 ];
 const FLAGS: { key: keyof Row['flags']; label: string; title: string }[] = [
   { key: 'T', label: 'T', title: 'Delivery ticket printed' },

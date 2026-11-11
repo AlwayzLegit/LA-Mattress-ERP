@@ -640,8 +640,16 @@ describe('Confirm schedule', () => {
     expect(board.body.rows[0].contactStatus).toBe('left_message');
     await as(ownerCookie)
       .patch(`/v1/deliveries/${delivery1Id}/contact`)
-      .send({ contactStatus: 'texted' })
+      .send({ contactStatus: 'carrier_pigeon' })
       .expect(400);
+    // Dispatcher 2026-11-06: Text and Wrong joined the list.
+    for (const contactStatus of ['texted', 'wrong_number']) {
+      const r = await as(ownerCookie)
+        .patch(`/v1/deliveries/${delivery1Id}/contact`)
+        .send({ contactStatus })
+        .expect(200);
+      expect(r.body.contactStatus).toBe(contactStatus);
+    }
     const cleared = await as(ownerCookie)
       .patch(`/v1/deliveries/${delivery1Id}/contact`)
       .send({ contactStatus: null })
