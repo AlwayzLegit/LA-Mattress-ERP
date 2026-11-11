@@ -1,5 +1,15 @@
 # Sprint Status — STORIS Cutover
 
+## Dispatcher's texts — 2026-11-08
+
+Three fixes from Julio's 2026-11-06 texts, one PR each:
+
+- **Dispatch gets a Time column** next to Route (from–to, edited in place; the window was a read-only column off the right edge of the phone, so "Route" looked like the only place to type the time).
+- **Confirm schedule contact status** gains `texted` ("Texted") and `wrong_number` ("Wrong number") — D35 updated.
+- **Ship-to keeps apt/unit and ZIP**: New Sale copied the customer's first address onto the order with line 2 and the postal code blanked, so WE-10094's Delivery block lost "Bldg 2 Unit 231".
+
+Open, not built: an exchange whose original invoice predates the cutover (Julio, 03109559 against STORIS 03108303). The API binds a completed no-original return to a replacement order, but no screen does it — New Exchange needs an order on file, and the no-original return form has no truck pickup date. Workaround for now: no-invoice return on the Returns page (store credit), replacement sale paid with that credit, pickup noted in the delivery instructions.
+
 ## Exchange Ticket in the invoice's dress — 2026-11-05
 
 - Owner QA (photo of EX-2026-000007): the exchange ticket was a bare black-box

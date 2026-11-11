@@ -489,7 +489,7 @@ function DispatchInner() {
       render: (r) => (
         <Input
           defaultValue={r.route ?? ''}
-          placeholder="—"
+          placeholder="Route"
           aria-label="Route"
           disabled={!(r.status === 'scheduled' || r.status === 'loaded')}
           data-testid="route-input"
@@ -500,6 +500,46 @@ function DispatchInner() {
           className="w-28"
         />
       ),
+    },
+    {
+      // Dispatcher 2026-11-06: "where do I enter the delivery time?" —
+      // the window used to be a read-only column off the right edge, so
+      // Route looked like the only place to type it. Now it is a Time
+      // column right after Route, edited in place like the stop number.
+      id: 'window',
+      label: 'Time',
+      className: 'nowrap',
+      sortValue: (r) => r.windowStart,
+      render: (r) => {
+        const editable = r.status === 'scheduled' || r.status === 'loaded';
+        const save = (field: 'windowStart' | 'windowEnd', value: string) => {
+          const next = value || null;
+          if (next !== (r[field]?.slice(0, 5) ?? null)) void patch(r.id, { [field]: next });
+        };
+        return (
+          <span className="inline-flex items-center gap-1">
+            <Input
+              type="time"
+              aria-label="Delivery time from"
+              data-testid="window-start-input"
+              defaultValue={r.windowStart?.slice(0, 5) ?? ''}
+              disabled={!editable}
+              onBlur={(e) => save('windowStart', e.target.value)}
+              className="w-28"
+            />
+            <span className="muted">–</span>
+            <Input
+              type="time"
+              aria-label="Delivery time to"
+              data-testid="window-end-input"
+              defaultValue={r.windowEnd?.slice(0, 5) ?? ''}
+              disabled={!editable}
+              onBlur={(e) => save('windowEnd', e.target.value)}
+              className="w-28"
+            />
+          </span>
+        );
+      },
     },
     {
       id: 'order',
@@ -525,16 +565,6 @@ function DispatchInner() {
           {r.addressPhone && <div className="muted">{formatPhone(r.addressPhone)}</div>}
         </>
       ),
-    },
-    {
-      id: 'window',
-      label: 'Window',
-      className: 'nowrap',
-      sortValue: (r) => r.windowStart,
-      render: (r) =>
-        r.windowStart && r.windowEnd
-          ? `${r.windowStart.slice(0, 5)}–${r.windowEnd.slice(0, 5)}`
-          : '—',
     },
     {
       id: 'items',
@@ -594,7 +624,7 @@ function DispatchInner() {
             </span>
           ) : undefined
         }
-        sub="Stops for the day by route. Edit a route label or stop number in place; drivers work off the printed tickets."
+        sub="Stops for the day by route. Edit the stop number, route label or delivery time in place; drivers work off the printed tickets."
         actions={
           <>
             <Input
