@@ -7128,3 +7128,14 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   three columns (best seller first, totals row, scrolls past ~12 rows).
 - `store-dashboard.int.spec.ts`: the three live A Store orders → 3 units,
   $3,400 sold, $1,500 cost, $1,900 profit; noise orders stay out.
+
+### 2026-11-10 — Delivery fee changed or waived from the order page (owner, LB-10074)
+
+- The fee buckets were editable only through Actions → Order →
+  Miscellaneous Fees, which nobody found; the money card showed one "Fees in
+  total" figure. The card now lists **Delivery fee** with a Change… / Add…
+  button (live orders; disabled with a hint while the order is locked, as
+  the lock rule G9 requires), plus Installation and the labelled Other fee
+  when they are non-zero. The fees dialog gained a **Waive** button that
+  zeroes the delivery fee before saving. `PATCH /v1/orders/:id` and
+  `recomputeTotals` are unchanged.
