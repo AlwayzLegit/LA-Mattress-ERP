@@ -7129,6 +7129,16 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
 - `store-dashboard.int.spec.ts`: the three live A Store orders → 3 units,
   $3,400 sold, $1,500 cost, $1,900 profit; noise orders stay out.
 
+### 2026-11-10 — Stock by location: every column sorts (owner screenshot)
+
+- `ColumnHeadRow` decided "the API sorts this list" by looking for a `sortKey`
+  on any column, not by whether the list was given a server sort. The shared
+  product columns carry `sortKey`s for the Products book, so on the
+  client-sorted Stock by location page the store columns (barcode, on hand,
+  reserved, floor, available, bin, location) drew no sort button, and the
+  active arrow never showed on product columns whose id differs from its key.
+  `useListColumns` now reports `server`; the header follows it. Drag-to-reorder
+  is untouched.
 ### 2026-11-10 — Order changes follow the delivery (owner, A15)
 
 - `DeliverySyncService` runs after `POST /v1/orders/:id/lines`,
