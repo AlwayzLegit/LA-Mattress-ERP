@@ -7139,3 +7139,14 @@ confirmation), then the week is adjusted and published as before. Amendment A13.
   active arrow never showed on product columns whose id differs from its key.
   `useListColumns` now reports `server`; the header follows it. Drag-to-reorder
   is untouched.
+
+### 2026-11-10 — Products search matches partial words and SKU fragments (owner)
+
+- `GET /v1/products?q=`, `/v1/inventory/levels?q=` (Stock by location),
+  `/v1/variants?q=` and the inventory velocity list matched whole tokens
+  only (`websearch_to_tsquery`), so "univer" found one stray row and
+  "universal" found 21. `catalog/product-search.ts` now builds a prefix
+  tsquery per word (`univer:* & blk:*`) over the product + variant vectors,
+  OR-ed with a substring match on product SKU, variant SKU, barcode and
+  vendor model, so "8246" and "tempur" find their products. Rank still
+  orders the Products tab. Unit spec on the word splitter and pattern.
