@@ -21,6 +21,7 @@ describe('catalog search words', () => {
   });
 
   it('escapes LIKE wildcards in the substring pattern', () => {
-    expect(likePattern(' 50%_off ')).toBe('%50\%\_off%');
+    expect(likePattern(' 50%_off ')).toBe('%50\\%\\_off%');
+    expect(likePattern('a\\b')).toBe('%a\\\\b%');
   });
 });

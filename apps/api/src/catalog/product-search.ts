@@ -28,7 +28,7 @@ export function prefixTsQuery(q: string): SQL | null {
 
 /** `%q%` with the LIKE wildcards escaped, for a substring match. */
 export function likePattern(q: string): string {
-  return `%${q.trim().replace(/[\%_]/g, '\$&')}%`;
+  return `%${q.trim().replace(/[\\%_]/g, '\\$&')}%`;
 }
 
 /**
