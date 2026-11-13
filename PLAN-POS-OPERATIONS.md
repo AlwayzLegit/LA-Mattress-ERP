@@ -417,6 +417,19 @@ the same customer card (pinned to the original invoice's customer). Added on top
   failed later step keeps the documents already written and re-binds them on retry.
 - No draft mode and no order type (layaway / quote) in exchange mode.
 
+**Amendment (2026-11-12, owner — the replacement nets the return credit from
+bind):** an exchange whose return comes back on the truck is settled at the
+counter the day it is written, as the STORIS exchange order always was: the
+replacement's balance due is `total − paid − returns settled − pending exchange
+credit`, where the pending credit is the return amount less the restocking fee of
+every open exchange whose return is still authorized. The customer pays the net;
+the invoice and the order page print the credit as "Exchange credit (return on its
+way back)". When the goods are received the credit is minted and applied as the
+store-credit tender against the balance _before_ that term, so nothing is left on
+the ledger; cancelling or splitting the exchange removes the term and the order
+asks for the full amount again. The register offers _Collect the net now_ for a
+pickup exchange too.
+
 **Amendment (2026-11-08, dispatcher — exchange against a pre-cutover STORIS
 invoice):** when the original was sold in STORIS before the cutover there is no
 order to pick lines from. New Exchange offers _Original invoice not on file

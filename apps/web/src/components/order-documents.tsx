@@ -54,6 +54,8 @@ export interface OrderDocumentPayload {
     totalCents: number;
     paidCents: number;
     balanceDueCents: number;
+    /** Credit an open exchange owes this replacement (netted; settles when the return comes back). */
+    exchangeCreditPendingCents?: number;
     creditDueCents: number;
     deliveryFeeCents: number;
     installFeeCents: number;
@@ -932,6 +934,12 @@ export function InvoiceDoc({ doc, printedAt }: { doc: OrderDocumentPayload; prin
               />
               <TotalRow label={`Total ${title}`} value={usd(money.totalCents)} bold rule />
               <TotalRow label="Amount paid" value={usd(money.paidCents)} />
+              {!fam && (o.exchangeCreditPendingCents ?? 0) > 0 && (
+                <TotalRow
+                  label="Exchange credit (return on its way back)"
+                  value={`-${usd(o.exchangeCreditPendingCents ?? 0)}`}
+                />
+              )}
               {creditDue ? (
                 <TotalRow
                   label="Credit due"

@@ -468,6 +468,11 @@ describe('Enter an Exchange — container over a return and a replacement order'
     const bound = await owner().post('/v1/exchanges').send({ saleOrderId, returnId });
     expect(bound.status).toBe(201);
 
+    // While open, the replacement nets the credit on its way back…
+    const before = await owner().get(`/v1/orders/${saleOrderId}`);
+    expect(before.body.exchangeCreditPendingCents).toBe(50_000);
+    expect(before.body.balanceDueCents).toBe(10_000);
+
     const cancelled = await owner()
       .post(`/v1/exchanges/${bound.body.id}/cancel`)
       .send({ reason: 'Customer changed their mind' });
@@ -476,6 +481,10 @@ describe('Enter an Exchange — container over a return and a replacement order'
 
     const returns = await owner().get(`/v1/order-returns?orderId=${orig.orderId}`);
     expect(returns.body.data[0].status).toBe('cancelled');
+    // …and asks for the full amount again once the exchange is voided.
+    const after = await owner().get(`/v1/orders/${saleOrderId}`);
+    expect(after.body.exchangeCreditPendingCents).toBe(0);
+    expect(after.body.balanceDueCents).toBe(60_000);
   });
 
   it('no-original (pre-cutover) exchange applies the banked credit at bind', async () => {
@@ -563,10 +572,15 @@ describe('Enter an Exchange — container over a return and a replacement order'
     expect(bound.body.originalOrderId).toBeNull();
     expect(bound.body.fulfillment).toBe('pickup');
     expect(bound.body.returnStatus).toBe('authorized');
-    // Nothing settled yet — the ticket nets the credit, the order does not.
+    // Nothing minted yet, but the replacement already nets the credit the
+    // truck is bringing back (owner 2026-11-12): the counter collects the
+    // net the day the exchange is written.
     expect(bound.body.settlement.creditCents).toBe(64_000);
     expect(bound.body.settlement.salePaidCents).toBe(0);
-    expect(bound.body.settlement.saleBalanceDueCents).toBe(74_000);
+    expect(bound.body.settlement.saleBalanceDueCents).toBe(10_000);
+    const replacementNow = await owner().get(`/v1/orders/${replacement.body.id}`);
+    expect(replacementNow.body.exchangeCreditPendingCents).toBe(64_000);
+    expect(replacementNow.body.balanceDueCents).toBe(10_000);
 
     // The pickup is a stop on the replacement order (the truck already goes there).
     const retDetail = await owner().get(`/v1/order-returns/${pending.body.id}`);
@@ -586,6 +600,9 @@ describe('Enter an Exchange — container over a return and a replacement order'
       .post(`/v1/orders/${replacement.body.id}/payments`)
       .send({ method: 'cash', amountCents: 10_000, kind: 'deposit' })
       .expect(201);
+    const paidNet = await owner().get(`/v1/orders/${replacement.body.id}`);
+    expect(paidNet.body.balanceDueCents).toBe(0);
+    expect(paidNet.body.paidCents).toBe(10_000);
 
     // The truck brings the goods back: the stop completes, the return is
     // received, the credit is minted and applied — $0 left on the replacement.
@@ -999,15 +1016,35 @@ describe('New Exchange stress test', () => {
     const { saleOrderId, returnId } = await legsFor(orig.orderId, orig.lineId, v2Id);
     const bound = await owner().post('/v1/exchanges').send({ saleOrderId, returnId });
     expect(bound.status).toBe(201);
-    // No receive yet — nothing has moved.
+    // No receive yet — nothing has moved on the ledger, but the replacement
+    // already nets the credit on the truck (owner 2026-11-12, EX-2026-000014:
+    // the customer paid the $1,034.37 net at the counter and the order kept
+    // asking for the full $1,974.25 until the pickup).
     const waiting = await owner().get(`/v1/exchanges/${bound.body.id}`);
     expect(waiting.body.settlement.salePaidCents).toBe(0);
+    expect(waiting.body.settlement.saleBalanceDueCents).toBe(10_000);
     expect(await ledgerBalance(customerId)).toBe(0);
-    // The truck brings it back → settlement fires.
+    const replacement = await owner().get(`/v1/orders/${saleOrderId}`);
+    expect(replacement.body.exchangeCreditPendingCents).toBe(50_000);
+    expect(replacement.body.balanceDueCents).toBe(10_000);
+    // The counter collects the net; the order reads paid in full.
+    await owner()
+      .post(`/v1/orders/${saleOrderId}/payments`)
+      .send({ method: 'cash', amountCents: 10_000, kind: 'balance' })
+      .expect(201);
+    const paidNet = await owner().get(`/v1/orders/${saleOrderId}`);
+    expect(paidNet.body.balanceDueCents).toBe(0);
+    // The truck brings it back → settlement fires against the balance the
+    // credit was promised for, not the netted one: nothing is left on the
+    // ledger and the credit lands as the store-credit tender.
     await owner().post(`/v1/order-returns/${returnId}/receive`).send({}).expect(201);
     const settled = await owner().get(`/v1/exchanges/${bound.body.id}`);
-    expect(settled.body.settlement.salePaidCents).toBe(50_000);
+    expect(settled.body.settlement.salePaidCents).toBe(60_000);
+    expect(settled.body.settlement.saleBalanceDueCents).toBe(0);
     expect(await ledgerBalance(customerId)).toBe(0);
+    const done = await owner().get(`/v1/orders/${saleOrderId}`);
+    expect(done.body.exchangeCreditPendingCents).toBe(0);
+    expect(done.body.balanceDueCents).toBe(0);
   });
 
   it('S12 — receiving the return twice cannot double the credit', async () => {

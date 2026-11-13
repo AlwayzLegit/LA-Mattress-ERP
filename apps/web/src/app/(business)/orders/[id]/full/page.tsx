@@ -137,6 +137,7 @@ interface OrderDetail {
   balanceDueCents: number;
   /** Value of completed returns settled on the order (refunded to its tenders). */
   returnedCents?: number;
+  exchangeCreditPendingCents?: number;
   creditDueCents: number;
   /** Why the order charges no sales tax; null = taxed normally. */
   taxExemptReason?: string | null;
@@ -2081,6 +2082,14 @@ export default function OrderDetailPage() {
                         {
                           label: 'Returned',
                           value: <MoneyValue cents={-(order.returnedCents ?? 0)} />,
+                        },
+                      ]
+                    : []),
+                  ...((order.exchangeCreditPendingCents ?? 0) > 0
+                    ? [
+                        {
+                          label: 'Exchange credit (return on its way back)',
+                          value: <MoneyValue cents={-(order.exchangeCreditPendingCents ?? 0)} />,
                         },
                       ]
                     : []),

@@ -252,10 +252,13 @@ export class OrderReturnsService {
         .select()
         .from(schema.payments)
         .where(eq(schema.payments.orderId, saleOrder.id));
+      // The balance before this exchange's own pending credit: the order
+      // has netted it since bind (order-balance.ts), and this is the step
+      // that turns the promise into a store-credit tender.
       const balanceDue = balanceDueCents(
         saleOrder.totalCents,
         salePayments,
-        await loadReturnsSettled(this.db, saleOrder.id),
+        await loadReturnsSettled(this.db, saleOrder.id, { excludeExchangeId: liveExchange.id }),
       );
       const applied = Math.min(credit, balanceDue);
       if (applied > 0) {

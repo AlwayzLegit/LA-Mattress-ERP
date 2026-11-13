@@ -64,7 +64,12 @@ import {
   type FulfillmentRequest,
   type OrderStatus,
 } from './order-math';
-import { balanceDueCentsSql, loadReturnsSettled, loadReturnsSettledByOrder } from './order-balance';
+import {
+  balanceDueCentsSql,
+  loadPendingExchangeCredit,
+  loadReturnsSettled,
+  loadReturnsSettledByOrder,
+} from './order-balance';
 import { OrdersService } from './orders.service';
 import { OrderCompletionService } from './order-completion.service';
 import { businessTimeZone } from '../common/business-today';
@@ -459,6 +464,14 @@ interface OrderDetail extends OrderListRow {
    * balance still owed. Store-credit refunds settle nothing here.
    */
   returnedCents: number;
+  /**
+   * Derived (owner 2026-11-12): credit an open exchange still owes this
+   * replacement order — the return is on its way back on the truck. The
+   * balance nets it from bind so the counter collects the net the day
+   * the exchange is written; it becomes a store-credit tender when the
+   * goods are received.
+   */
+  exchangeCreditPendingCents: number;
   /** Derived (§10 exchanges): paid - total, floored at zero. */
   creditDueCents: number;
   addressLine1: string | null;
@@ -6164,7 +6177,10 @@ export class OrdersController {
       .from(schema.payments)
       .where(eq(schema.payments.orderId, id))
       .orderBy(schema.payments.createdAt);
-    const returnedCents = await loadReturnsSettled(this.db, id);
+    const returnedCents = await loadReturnsSettled(this.db, id, {
+      includePendingExchangeCredit: false,
+    });
+    const exchangeCreditPendingCents = await loadPendingExchangeCredit(this.db, id);
 
     // Split family (base number + letter suffixes), so the page can link
     // the pieces and offer to move credit between them.
@@ -6240,8 +6256,13 @@ export class OrdersController {
       taxCents: order.taxCents,
       totalCents: order.totalCents,
       paidCents: paidCents(payments),
-      balanceDueCents: balanceDueCents(order.totalCents, payments, returnedCents),
+      balanceDueCents: balanceDueCents(
+        order.totalCents,
+        payments,
+        returnedCents + exchangeCreditPendingCents,
+      ),
       returnedCents,
+      exchangeCreditPendingCents,
       creditDueCents: Math.max(0, paidCents(payments) - order.totalCents),
       depositRequiredCents: order.depositRequiredCents,
       fulfillmentType: order.fulfillmentType,

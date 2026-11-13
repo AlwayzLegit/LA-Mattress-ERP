@@ -160,17 +160,33 @@ export function ExchangeTicketDoc({
   const businessName = sale?.business.name ?? ret?.businessName ?? '';
   const storeName = sale?.location?.name ?? ret?.locationName ?? null;
   const s = x.settlement;
-  const settled = x.status === 'completed';
+  // Settled = the credit has been applied to the replacement: the return
+  // is completed (goods received, or a dropped-off pre-cutover return
+  // written as completed) or the whole exchange is. Reading only the
+  // exchange status left a pickup exchange whose goods were back but
+  // whose replacement was not yet delivered counting the store-credit
+  // tender as a second credit and printing a refund (owner 2026-11-12).
+  const settled =
+    x.status === 'completed' || x.returnStatus === 'completed' || ret?.status === 'completed';
   const o = sale?.order ?? null;
 
   // What the customer still owes (or is owed) once the return credit is
-  // netted against the replacement. Before settlement the credit is not
-  // on the replacement yet, so it is subtracted here; after settlement
-  // it has been applied as a store-credit payment and the replacement's
-  // own balance is the truth.
+  // netted against the replacement. Before settlement the credit is not a
+  // tender on the replacement yet (the order nets it as a pending credit),
+  // so it is subtracted here; after settlement it has been applied as a
+  // store-credit payment and the replacement's own balance is the truth.
+  // Tenders exclude that store-credit row so "Paid on replacement" never
+  // counts the credit a second time.
+  const tenderPaidCents = o
+    ? o.payments
+        .filter((p) => p.status === 'succeeded' && p.method !== 'store_credit')
+        .reduce((n, p) => n + p.amountCents, 0)
+    : settled
+      ? Math.max(0, s.salePaidCents - s.creditCents)
+      : s.salePaidCents;
   const netRaw = settled
     ? s.saleBalanceDueCents
-    : s.saleTotalCents - s.creditCents - s.salePaidCents;
+    : s.saleTotalCents - s.creditCents - tenderPaidCents;
   const refundCents = settled ? 0 : Math.max(0, -netRaw);
   const balanceCents = Math.max(0, netRaw);
   const callout =
@@ -620,7 +636,8 @@ export function ExchangeTicketDoc({
           <div className="inv-card" style={cardStyle} data-testid="exchange-terms">
             <div style={cardLabel}>How this exchange settles</div>
             <div style={{ fontSize: 10.5, color: '#374151' }}>
-              The return credit is applied to the replacement once the returned goods are back
+              The return credit is netted against the replacement now — the customer pays the net
+              exchange. The credit is confirmed once the returned goods are back
               {x.fulfillment === 'pickup' ? ' on our truck' : ' at the store'}.
               {s.restockingFeeCents > 0 &&
                 ` A restocking fee of ${usd(s.restockingFeeCents)} is withheld from the credit.`}
@@ -680,8 +697,8 @@ export function ExchangeTicketDoc({
                 bold
                 rule
               />
-              {s.salePaidCents > 0 && (
-                <TotalRow label="Paid on replacement" value={`-${usd(s.salePaidCents)}`} />
+              {tenderPaidCents > 0 && (
+                <TotalRow label="Paid on replacement" value={`-${usd(tenderPaidCents)}`} />
               )}
               <TotalRow
                 label={callout.label}
