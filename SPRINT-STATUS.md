@@ -27,6 +27,31 @@ Open, not built: an exchange whose original invoice predates the cutover (Julio,
   note and the print stamp. Reads the existing three endpoints; no API change.
   The invoice's theme pieces are exported as `DOC_THEME` for shared use.
 
+## Exchange: the replacement nets the return credit from bind — 2026-11-12
+
+- Owner, EX-2026-000014 (KO-10173 against KO-10130, truck pickup): the customer
+  paid the $1,034.37 net at the counter — exactly what the STORIS exchange order
+  asked — but the replacement kept printing _Amount due $1,974.25_ and "Balance
+  due" on the order page until the pickup stop completed, because the credit only
+  reached the order as a store-credit tender at goods receipt.
+- Balance math (`order-balance.ts`, SQL and TypeScript twins) gains a term:
+  **pending exchange credit** — `max(0, return amount − restocking fee)` of every
+  open / on-hold exchange whose return is still `authorized` and whose replacement
+  is this order. Every balance reader nets it (order page, invoice, orders list,
+  COD on the day sheet, close-out). `receiveGoods` and the ledger settlement take
+  the balance _without_ their own exchange's term, so the credit still lands as the
+  store-credit tender for the full promised amount; the return flips to
+  `completed` and the term drops to zero. Cancel / split removes it (the order asks
+  for the full amount again). `OrderDetail.exchangeCreditPendingCents` prints as
+  "Exchange credit (return on its way back)" on the invoice and the order page.
+- Register: _Collect the net now_ is offered for a truck pickup too (the exact net
+  the server computes); the exchange ticket reads a return as settled once it is
+  `completed` (not only when the exchange is), so a pickup exchange whose goods
+  are back but whose replacement is not yet delivered no longer prints a bogus
+  refund, and "Paid on replacement" counts tenders only, never the store-credit
+  row. Specs: S11, cancel, pre-cutover pickup in `exchanges.int.spec.ts`;
+  `exchange-ticket.test.tsx`.
+
 ## Exchange against a pre-cutover STORIS invoice — 2026-11-08
 
 - Dispatcher Julio (2026-11-06) could not enter STORIS exchange 03109559 because the

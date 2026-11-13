@@ -11,9 +11,11 @@
  *    hand.
  *
  * Both compute: greatest(0, total − Σ succeeded payments − Σ completed
- * returns settled on the order), where a return's settled value is its
- * refund amount less what left as store credit (see `returnsSettledCents`
- * in order-math.ts for the reasoning and the owner amendment).
+ * returns settled on the order − credit an open exchange still owes the
+ * order), where a return's settled value is its refund amount less what
+ * left as store credit (see `returnsSettledCents` in order-math.ts for
+ * the reasoning and the owner amendment), and the exchange term is
+ * `pendingExchangeCreditCentsSql` below.
  *
  * All money is integer cents; nothing here is stored.
  */
@@ -53,35 +55,98 @@ export function returnsSettledCentsSql(orderId: SQL): SQL<number> {
     where r.order_id = ${orderId} and r.status = 'completed'), 0)::int`;
 }
 
-/** greatest(0, total − paid − returns settled). */
+/**
+ * Credit an open exchange has promised this (replacement) order but not
+ * minted yet (owner 2026-11-12, EX-2026-000014): the returned goods ride
+ * the truck back, so the return is still `authorized`, while the
+ * customer pays the net at the counter the day the exchange is written —
+ * what the STORIS exchange order always did. The replacement therefore
+ * nets the credit from bind, not from the day the goods come back. When
+ * they do, `receiveGoods` issues the credit and redeems it as a
+ * store-credit tender, the return flips to `completed`, and this term
+ * drops to zero as the payment row takes its place; cancel or split the
+ * exchange and the term goes with it. `excludeExchangeId` is for that
+ * settlement itself, which needs the balance *before* its own credit.
+ */
+export function pendingExchangeCreditCentsSql(
+  orderId: SQL,
+  excludeExchangeId?: string | null,
+): SQL<number> {
+  const exclude = excludeExchangeId ? sql` and e.id <> ${excludeExchangeId}` : sql``;
+  return sql<number>`coalesce((select sum(greatest(0, r.amount_cents - e.restocking_fee_cents))
+    from exchanges e
+    join order_returns r on r.id = e.return_id
+    where e.sale_order_id = ${orderId}
+      and e.status in ('open', 'on_hold')
+      and r.status = 'authorized'${exclude}), 0)::int`;
+}
+
+/** greatest(0, total − paid − returns settled − pending exchange credit). */
 export function balanceDueCentsSql(orderId: SQL, totalCents: SQL): SQL<number> {
-  return sql<number>`greatest(0, ${totalCents} - ${paidCentsSql(orderId)} - ${returnsSettledCentsSql(orderId)})::int`;
+  return sql<number>`greatest(0, ${totalCents} - ${paidCentsSql(orderId)} - ${returnsSettledCentsSql(orderId)} - ${pendingExchangeCreditCentsSql(orderId)})::int`;
+}
+
+export interface ReturnsSettledOptions {
+  /**
+   * Leave out one exchange's pending credit — for the settlement that
+   * mints and applies that very credit, which must see the balance the
+   * credit is about to cover.
+   */
+  excludeExchangeId?: string | null;
+  /** False = completed returns only (the "Returned" row on the order page). */
+  includePendingExchangeCredit?: boolean;
 }
 
 /**
- * Settled-return value per order for code paths that compute the
- * balance in TypeScript. Orders with no completed return are simply
+ * Everything already credited against each order, for code paths that
+ * compute the balance in TypeScript: completed returns settled on it plus
+ * the credit an open exchange still owes it (see
+ * `pendingExchangeCreditCentsSql`). Orders with neither are simply
  * absent from the map (read as 0).
  */
 export async function loadReturnsSettledByOrder(
   db: PostgresJsDatabase,
   orderIds: readonly string[],
+  opts: ReturnsSettledOptions = {},
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (orderIds.length === 0) return out;
+  const pending =
+    opts.includePendingExchangeCredit === false
+      ? sql`0`
+      : pendingExchangeCreditCentsSql(sql`o.id`, opts.excludeExchangeId);
   const rows = await db.execute<{ order_id: string; settled: number }>(sql`
-    select r.order_id, sum(greatest(0, r.amount_cents - ${creditOutCentsSql(sql`r.id`)}))::int as settled
-    from order_returns r
-    where r.order_id in ${orderIds} and r.status = 'completed'
-    group by r.order_id`);
+    select o.id as order_id,
+      (coalesce((select sum(greatest(0, r.amount_cents - ${creditOutCentsSql(sql`r.id`)}))
+         from order_returns r
+         where r.order_id = o.id and r.status = 'completed'), 0)
+       + ${pending})::int as settled
+    from orders o
+    where o.id in ${orderIds}`);
   for (const r of rows as unknown as { order_id: string; settled: number }[]) {
-    out.set(String(r.order_id), Number(r.settled));
+    if (Number(r.settled) > 0) out.set(String(r.order_id), Number(r.settled));
   }
   return out;
 }
 
 /** Convenience for the single-order case. */
-export async function loadReturnsSettled(db: PostgresJsDatabase, orderId: string): Promise<number> {
-  const m = await loadReturnsSettledByOrder(db, [orderId]);
+export async function loadReturnsSettled(
+  db: PostgresJsDatabase,
+  orderId: string,
+  opts: ReturnsSettledOptions = {},
+): Promise<number> {
+  const m = await loadReturnsSettledByOrder(db, [orderId], opts);
   return m.get(orderId) ?? 0;
+}
+
+/** The pending exchange credit alone, for the order page and the invoice. */
+export async function loadPendingExchangeCredit(
+  db: PostgresJsDatabase,
+  orderId: string,
+): Promise<number> {
+  const rows = await db.execute<{ pending: number }>(
+    sql`select ${pendingExchangeCreditCentsSql(sql`${orderId}::uuid`)} as pending`,
+  );
+  const row = (rows as unknown as { pending: number }[])[0];
+  return Number(row?.pending ?? 0);
 }

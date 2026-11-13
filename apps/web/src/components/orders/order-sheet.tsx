@@ -78,6 +78,7 @@ interface OrderDetail {
   totalCents: number;
   paidCents: number;
   balanceDueCents: number;
+  exchangeCreditPendingCents?: number;
   creditDueCents: number;
   addressLine1: string | null;
   addressLine2: string | null;
@@ -421,6 +422,9 @@ export function OrderSheet({ id }: { id: string }) {
       : order.creditDueCents > 0
         ? `${formatMoney(order.creditDueCents)} credit due`
         : 'Paid in full';
+  // An exchange whose return is still on the truck: the balance above is
+  // already net of the credit, say so (owner 2026-11-12, EX-2026-000014).
+  const pendingCredit = cancelled ? 0 : (order.exchangeCreditPendingCents ?? 0);
 
   return (
     <SlideOver
@@ -924,6 +928,11 @@ export function OrderSheet({ id }: { id: string }) {
           >
             {balanceLine}
           </div>
+          {pendingCredit > 0 && (
+            <div className="osh-muted" data-testid="exchange-credit-pending">
+              after {formatMoney(pendingCredit)} exchange credit · settles at pickup
+            </div>
+          )}
         </div>
       </div>
 

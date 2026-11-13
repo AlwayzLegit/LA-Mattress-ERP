@@ -1364,7 +1364,6 @@ export function NewSale({
     }
     if (
       exchangeReady &&
-      goodsInHand &&
       collectNow &&
       settlement.customerOwesCents > 0 &&
       isCardMethod(payMethod) &&
@@ -1786,15 +1785,19 @@ export function NewSale({
           ...(!exchangeReturn && feeOverride.trim() !== '' ? { restockingFeeCents } : {}),
         }),
       });
-      // Goods in hand → settle now. A held (E1) exchange settles after
-      // approval instead, and a receive or payment hiccup must not strand
-      // the cashier — the exchange exists; its page has the buttons.
-      if (goodsInHand && exchange.status !== 'on_hold') {
+      // Goods in hand → settle now; either way the net can be collected
+      // now, because the replacement nets the return credit from bind
+      // (owner 2026-11-12 — the customer pays the net the day the exchange
+      // is written, the truck confirms the credit when it brings the goods
+      // back). A held (E1) exchange settles after approval instead, and a
+      // receive or payment hiccup must not strand the cashier — the
+      // exchange exists; its page has the buttons.
+      if (exchange.status !== 'on_hold') {
         try {
-          // A with-original return is received here; a dropped-off
+          // A with-original return in hand is received here; a dropped-off
           // pre-cutover return was completed when it was written and the
           // bind just applied its banked credit.
-          if (exchangeOriginal) {
+          if (goodsInHand && exchangeOriginal) {
             await api(`/v1/order-returns/${returnId}/receive`, {
               method: 'POST',
               body: JSON.stringify({ locationId: returnToId || locationId }),
@@ -2050,9 +2053,13 @@ export function NewSale({
               : exchangeReturn
                 ? 'Binds the return and applies its credit — collect from the exchange page'
                 : 'Receives the return and settles the credit — collect from the exchange page'
-            : exchangeReturn
-              ? `Writes the exchange and books the pickup${exchangeReturn.pickupDate ? ` for ${exchangeReturn.pickupDate}` : ''}; the credit applies when the truck brings the goods back`
-              : 'Writes the exchange now; settle when the truck brings the goods back'
+            : collectNow
+              ? exchangeReturn
+                ? `Writes the exchange, books the pickup${exchangeReturn.pickupDate ? ` for ${exchangeReturn.pickupDate}` : ''} and collects the net now`
+                : 'Writes the exchange and collects the net now; the truck confirms the credit when it brings the goods back'
+              : exchangeReturn
+                ? `Writes the exchange and books the pickup${exchangeReturn.pickupDate ? ` for ${exchangeReturn.pickupDate}` : ''}; collect the net from the order page`
+                : 'Writes the exchange now; collect the net from the order page, the truck confirms the credit'
     : !customer
       ? 'Add a customer to complete'
       : lines.length === 0
@@ -3243,18 +3250,18 @@ export function NewSale({
                         : 'Truck pickup — the credit applies when the goods are back (set on the return)'
                       : 'Goods are in hand — settle now (uncheck for a truck pickup)'}
                   </label>
-                  {goodsInHand && (
-                    <label className="reg-check">
-                      <input
-                        type="checkbox"
-                        checked={collectNow}
-                        onChange={(e) => setCollectNow(e.target.checked)}
-                        data-testid="collect-balance-now"
-                      />
-                      Collect the balance now — the exact amount due after the credit applies
-                    </label>
-                  )}
-                  {goodsInHand && collectNow && (
+                  <label className="reg-check">
+                    <input
+                      type="checkbox"
+                      checked={collectNow}
+                      onChange={(e) => setCollectNow(e.target.checked)}
+                      data-testid="collect-balance-now"
+                    />
+                    {goodsInHand
+                      ? 'Collect the balance now — the exact amount due after the credit applies'
+                      : 'Collect the net now — replacement less the return credit; the truck confirms the credit when it brings the goods back'}
+                  </label>
+                  {collectNow && (
                     <>
                       <Field label="Method">
                         <Select

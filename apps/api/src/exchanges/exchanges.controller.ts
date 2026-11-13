@@ -735,7 +735,7 @@ export class ExchangesController {
     const balanceDue = balanceDueCents(
       saleOrder.totalCents,
       salePayments,
-      await loadReturnsSettled(this.db, saleOrder.id),
+      await loadReturnsSettled(this.db, saleOrder.id, { excludeExchangeId: exchange.id }),
     );
     const ledger = await this.storeCredit.balanceCents(this.db, ret.customerId);
     const applied = Math.min(ret.amountCents, balanceDue, ledger);

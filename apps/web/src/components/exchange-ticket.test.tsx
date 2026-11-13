@@ -204,6 +204,56 @@ describe('ExchangeTicketDoc (owner 2026-11-05: invoice dress, dates, detail)', (
     expect(html).toContain('Gate code 4411');
   });
 
+  it('goods back, replacement not yet delivered: the store-credit tender is the credit, not a second payment (owner 2026-11-12)', () => {
+    // EX-2026-000014: the customer paid the net at the counter, the truck
+    // picked the old mattress up, the replacement still rides tomorrow's
+    // truck. The exchange is open, the return completed, the replacement
+    // paid in full by card + the store-credit tender the receipt minted.
+    const s = sale();
+    s.order.paidCents = 201780;
+    s.order.balanceDueCents = 0;
+    s.order.payments = [
+      {
+        id: 'p1',
+        method: 'card',
+        amountCents: 66283,
+        status: 'succeeded',
+        createdAt: '2026-11-05T18:20:00.000Z',
+        cardBrand: 'visa',
+      },
+      {
+        id: 'p2',
+        method: 'store_credit',
+        amountCents: 135497,
+        status: 'succeeded',
+        createdAt: '2026-11-06T18:20:00.000Z',
+      },
+    ];
+    const html = render(
+      exchange({
+        fulfillment: 'pickup',
+        returnStatus: 'completed',
+        settlement: {
+          returnCents: 135497,
+          restockingFeeCents: 0,
+          creditCents: 135497,
+          saleTotalCents: 201780,
+          salePaidCents: 201780,
+          saleBalanceDueCents: 0,
+        },
+      }),
+      ret({
+        fulfillment: 'pickup',
+        status: 'completed',
+        goodsReceivedAt: '2026-11-06T18:20:00.000Z',
+      }),
+      s,
+    );
+    expect(html).toMatch(/Paid on replacement[\s\S]*-\$662\.83/);
+    expect(html).not.toContain('Refund due');
+    expect(html).toContain('Settled — nothing due');
+  });
+
   it('lays out the dates: original invoice, entered, authorized, goods back, delivery, completed', () => {
     const html = render(exchange(), ret(), sale());
     expect(html).toContain('Original invoice');
