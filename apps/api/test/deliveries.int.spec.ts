@@ -1137,3 +1137,93 @@ describe('Order changes follow the delivery (owner 2026-11-10)', () => {
     expect(await stopsOn(dayC)).toHaveLength(1);
   });
 });
+
+describe('One stop per order per day (owner 2026-11-13, LB-10085)', () => {
+  const day = '2027-04-06';
+  let orderId = '';
+  let stopId = '';
+  let secondLineId = '';
+
+  async function stopsOn(d: string): Promise<{ id: string; lines: { quantity: number }[] }[]> {
+    const res = await ownerReq().get(`/v1/deliveries?from=${d}&to=${d}`);
+    expect(res.status).toBe(200);
+    return res.body.filter((x: { orderId: string }) => x.orderId === orderId);
+  }
+
+  it('scheduling the leftover units on the day the order already has a stop joins that stop', async () => {
+    const res = await ownerReq()
+      .post('/v1/orders')
+      .send({
+        locationId,
+        customerId,
+        fulfillmentType: 'delivery',
+        requestedDate: day,
+        address: {
+          line1: '12 Long Beach Blvd',
+          city: 'Long Beach',
+          region: 'CA',
+          postalCode: '90802',
+        },
+        lines: [
+          { variantId: mattressVariantId, quantity: 1 },
+          { variantId: mattressVariantId, quantity: 1 },
+        ],
+        confirm: true,
+      });
+    expect(res.status).toBe(201);
+    orderId = res.body.id;
+    const [first, second] = res.body.lines as { id: string }[];
+    secondLineId = second!.id;
+
+    // The pillows go on the truck first; the mattress is booked afterwards
+    // for the same day — it joins the stop instead of opening a second one.
+    const booked = await ownerReq()
+      .post(`/v1/orders/${orderId}/deliveries`)
+      .send({
+        scheduledDate: day,
+        confirmOverCapacity: true,
+        lines: [{ orderLineId: first!.id, quantity: 1 }],
+      });
+    expect(booked.status).toBe(201);
+    stopId = booked.body.id;
+    expect(booked.body.lines).toHaveLength(1);
+
+    const rest = await ownerReq()
+      .post(`/v1/orders/${orderId}/deliveries`)
+      .send({ scheduledDate: day, confirmOverCapacity: true });
+    expect(rest.status).toBe(201);
+    expect(rest.body.id).toBe(stopId);
+    expect(rest.body.lines).toHaveLength(2);
+    expect(await stopsOn(day)).toHaveLength(1);
+  });
+
+  it('the nightly sweep puts units that missed the stop back on it', async () => {
+    // An order edited before the edit paths synced the stop: the line is
+    // on the order, not on the truck.
+    const sql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    const db = drizzle(sql);
+    await db
+      .delete(schema.deliveryLines)
+      .where(
+        and(
+          eq(schema.deliveryLines.deliveryId, stopId),
+          eq(schema.deliveryLines.orderLineId, secondLineId),
+        ),
+      );
+    await sql.end();
+    const before = await ownerReq().get(`/v1/deliveries/${stopId}`);
+    expect(before.body.lines).toHaveLength(1);
+
+    const run = await ownerReq().post('/v1/jobs/run').send({ businessDate: '2027-04-05' });
+    expect(run.status).toBe(201);
+    const step = (
+      run.body.results as { jobId: string; status: string; recordsAffected: number }[]
+    ).find((r) => r.jobId === 'delivery_sync');
+    expect(step?.status).toBe('succeeded');
+    expect(step?.recordsAffected).toBeGreaterThanOrEqual(1);
+
+    const after = await ownerReq().get(`/v1/deliveries/${stopId}`);
+    expect(after.body.lines).toHaveLength(2);
+    expect(await stopsOn(day)).toHaveLength(1);
+  });
+});

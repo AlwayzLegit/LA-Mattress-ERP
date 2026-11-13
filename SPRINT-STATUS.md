@@ -1,5 +1,21 @@
 # Sprint Status — STORIS Cutover
 
+## One stop per order per day — 2026-11-13 (LB-10085)
+
+- Owner: LB-10085 was "scheduled normally and only the pillows are scheduled" — the
+  system was "breaking up deliveries". Change history: Julio wrote the sale at 7:00 PM
+  on Nov 8 (two pillows, a Queen Signature Hybrid Firm), then at 7:55 swapped the Firm
+  for the Medium. The stop had been booked at the sale; nothing put the Medium on it
+  (#277's sync landed Nov 11), so the warehouse booked the mattress as a second stop.
+- `POST /v1/orders/:id/deliveries` on a day the order already has an open stop (not
+  loaded, not on a run) adds the units to that stop and returns it, instead of opening
+  a second one. No new stop, so the stop cap does not apply.
+- Nightly job `delivery_sync` ("Deliveries follow their orders"): every open delivery
+  order is synced the way an edit syncs it — units join the open stop, or a stop is
+  booked on a promised date still to come; never a stop in the past, never a loaded
+  truck. Orders edited before #277 catch up overnight, or at once with _Run now_ on
+  the Jobs page. Specs in `deliveries.int.spec.ts`.
+
 ## Dispatcher's texts — 2026-11-08
 
 Three fixes from Julio's 2026-11-06 texts, one PR each:

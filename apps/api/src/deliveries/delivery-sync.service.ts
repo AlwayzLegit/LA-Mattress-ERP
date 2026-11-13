@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -31,6 +31,12 @@ import { TicketFlagsService } from './ticket-flags.service';
  *    stop they were on.
  * A split (`Split order…`) stays the one way to put lines on different
  * days: it writes a sibling order with its own promised date.
+ *
+ * The nightly `delivery_sync` job runs the same sync over every open
+ * delivery order (owner 2026-11-13, LB-10085: a mattress swapped onto the
+ * order an hour after the sale, three days before this sync existed, left
+ * the stop carrying only the pillows). Orders edited before the sync was
+ * wired up catch up overnight — or at once from the Jobs page.
  */
 
 type Line = {
@@ -48,6 +54,24 @@ export type DeliverySyncResult =
   | { kind: 'joined'; deliveryId: string; scheduledDate: string; units: number }
   | { kind: 'booked'; deliveryId: string; scheduledDate: string; units: number }
   | { kind: 'left'; deliveryId: string; units: number };
+
+export interface DeliverySyncOptions {
+  /**
+   * Never book a new stop on a promised date before this (YYYY-MM-DD).
+   * An order edit books on the promised date whatever it is — the writer
+   * is looking at it — but the nightly sweep must not drop stops onto
+   * days that have passed.
+   */
+  minBookingDate?: string;
+}
+
+export interface DeliverySweepOutcome {
+  orders: number;
+  joined: number;
+  booked: number;
+  left: number;
+  changed: string[];
+}
 
 const LIVE_STOP = ['scheduled', 'loaded', 'out_for_delivery'] as const;
 
@@ -68,7 +92,7 @@ export class DeliverySyncService {
    * after any order mutation: a quote, draft, closed or non-delivery order
    * is left alone, and an order whose stops already match is untouched.
    */
-  async sync(orderId: string): Promise<DeliverySyncResult[]> {
+  async sync(orderId: string, opts: DeliverySyncOptions = {}): Promise<DeliverySyncResult[]> {
     const [order] = await this.db
       .select({
         id: schema.orders.id,
@@ -157,6 +181,7 @@ export class DeliverySyncService {
         pending.set(line.id, (pending.get(line.id) ?? 0) - row.quantity);
         results.push({ kind: 'left', deliveryId: stop.id, units: row.quantity });
         await this.audit.log({
+          businessId: order.businessId,
           action: 'delivery.line_left',
           targetType: 'delivery',
           targetId: stop.id,
@@ -221,6 +246,7 @@ export class DeliverySyncService {
           units,
         });
         await this.audit.log({
+          businessId: order.businessId,
           action: 'delivery.lines_joined',
           targetType: 'delivery',
           targetId: stopId,
@@ -250,6 +276,9 @@ export class DeliverySyncService {
 
     if (!order.requestedDate) {
       return results.length ? results : [{ kind: 'skipped', reason: 'no promised date' }];
+    }
+    if (opts.minBookingDate && order.requestedDate < opts.minBookingDate) {
+      return results.length ? results : [{ kind: 'skipped', reason: 'promised date passed' }];
     }
 
     // 3. No stop at all: book one on the promised date.
@@ -292,6 +321,7 @@ export class DeliverySyncService {
       })),
     );
     await this.audit.log({
+      businessId: order.businessId,
       action: 'delivery.schedule',
       targetType: 'delivery',
       targetId: delivery!.id,
@@ -315,6 +345,48 @@ export class DeliverySyncService {
       units,
     });
     return results;
+  }
+
+  /**
+   * The nightly sweep: sync every open delivery order of the business the
+   * way an edit syncs it. Idempotent — an order whose stops already match
+   * is untouched — and it never books a stop before `minBookingDate`.
+   */
+  async syncBusiness(
+    businessId: string,
+    opts: { minBookingDate: string },
+  ): Promise<DeliverySweepOutcome> {
+    const candidates = await this.db
+      .select({ id: schema.orders.id, number: schema.orders.number })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.businessId, businessId),
+          eq(schema.orders.fulfillmentType, 'delivery'),
+          inArray(schema.orders.status, ['open', 'partially_fulfilled']),
+          isNull(schema.orders.completedAt),
+          isNull(schema.orders.cancelledAt),
+        ),
+      )
+      .orderBy(schema.orders.createdAt);
+    const out: DeliverySweepOutcome = {
+      orders: candidates.length,
+      joined: 0,
+      booked: 0,
+      left: 0,
+      changed: [],
+    };
+    for (const o of candidates) {
+      const results = await this.sync(o.id, opts);
+      let touched = false;
+      for (const r of results) {
+        if (r.kind === 'joined') ((out.joined += r.units), (touched = true));
+        else if (r.kind === 'booked') ((out.booked += r.units), (touched = true));
+        else if (r.kind === 'left') ((out.left += r.units), (touched = true));
+      }
+      if (touched) out.changed.push(o.number);
+    }
+    return out;
   }
 
   /**

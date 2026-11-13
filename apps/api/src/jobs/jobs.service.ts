@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { schema, withDrizzleTenantContext } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
 import { ExceptionsService } from '../controls/exceptions.service';
+import { DeliverySyncService } from '../deliveries/delivery-sync.service';
 import { GlDerivationService } from '../gl/gl-derivation.service';
 import { ROOT_DRIZZLE } from '../database/database.module';
 import { computeReorderSuggestions } from '../purchasing/replenishment';
@@ -36,6 +37,17 @@ export interface JobDefinition {
 }
 
 export const JOB_REGISTRY: JobDefinition[] = [
+  {
+    id: 'delivery_sync',
+    name: 'Deliveries follow their orders',
+    description:
+      'Puts truck-bound units that are not on a stop onto the order’s open stop, or books a stop ' +
+      'on a promised date still to come — the same sync an order edit runs. Never moves a loaded ' +
+      'truck or a stop on a run, and never books a stop in the past.',
+    order: 20,
+    dependsOn: [],
+    destructive: false,
+  },
   {
     id: 'task_overdue_reminders',
     name: 'Overdue team tasks',
@@ -133,6 +145,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ExceptionsService) private readonly exceptions: ExceptionsService,
     @Inject(GlDerivationService) private readonly glDerivation: GlDerivationService,
+    @Inject(DeliverySyncService) private readonly deliverySync: DeliverySyncService,
   ) {}
 
   onModuleInit() {
@@ -306,6 +319,8 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
 
   private dispatch(jobId: string, businessId: string, businessDate: string): Promise<JobOutcome> {
     switch (jobId) {
+      case 'delivery_sync':
+        return this.deliverySyncSweep(businessId);
       case 'task_overdue_reminders':
         return remindOverdueTasks(this.rootDb, businessId).then((sent) => ({
           recordsAffected: sent,
@@ -675,6 +690,18 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       recordsAffected: archived,
       detail: { scheduled: defs.length, archived, errors },
     };
+  }
+
+  /**
+   * Owner 2026-11-13 (LB-10085): orders edited before the edit paths
+   * synced the stop — and anything that slips past them — catch up here.
+   * Today business-local is the floor for booking: a promised date that
+   * has passed is the dispatcher's call from the order page.
+   */
+  private async deliverySyncSweep(businessId: string): Promise<JobOutcome> {
+    const { date } = await this.localNow(businessId);
+    const out = await this.deliverySync.syncBusiness(businessId, { minBookingDate: date });
+    return { recordsAffected: out.joined + out.booked + out.left, detail: { ...out } };
   }
 
   private async transferAging(businessId: string, businessDate: string): Promise<JobOutcome> {
