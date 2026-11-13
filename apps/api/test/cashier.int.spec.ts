@@ -607,8 +607,11 @@ describe('My Day', () => {
 
   it('card 5 — balance due computed from the ledger, due-now first', () => {
     // Today's $1,000 order ($300 down, due today) leads; last week's
-    // $500 order with nothing paid follows (no date). Paid-in-full
-    // orders, the quote, and the rival's half-paid ticket stay out.
+    // $500 order with nothing paid follows (no date). It is the
+    // replacement on the open exchange EX-MD-001, whose $100 return is
+    // still authorized, so it nets that pending credit (owner
+    // 2026-11-12): $400 due. Paid-in-full orders, the quote, and the
+    // rival's half-paid ticket stay out.
     expect(body.balanceDue.rows.map((r: { orderId: string }) => r.orderId)).toEqual([
       fx.depositOrderId,
       fx.lastWeekOrderId,
@@ -617,9 +620,9 @@ describe('My Day', () => {
     expect(row.paidCents).toBe(30_000);
     expect(row.balanceCents).toBe(70_000);
     expect(row.dueNow).toBe(true);
-    expect(body.balanceDue.rows[1].balanceCents).toBe(50_000);
+    expect(body.balanceDue.rows[1].balanceCents).toBe(40_000);
     expect(body.balanceDue.rows[1].dueNow).toBe(false);
-    expect(body.balanceDue.totalCents).toBe(120_000);
+    expect(body.balanceDue.totalCents).toBe(110_000);
   });
 
   it('card 6 — pickups waiting at this store with readiness and ownership', () => {
