@@ -1337,6 +1337,7 @@ describe('Nightly batch runner (EOD-001 / JOB-002)', () => {
     const jobs = res.body as { id: string; order: number; destructive: boolean }[];
     expect(jobs.map((j) => j.id)).toEqual([
       'po_overdue_sweep',
+      'delivery_sync',
       'auto_replenishment',
       'sales_rate_replenishment',
       'transfer_aging',
