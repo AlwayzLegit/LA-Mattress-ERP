@@ -380,9 +380,11 @@ export class DeliverySyncService {
       const results = await this.sync(o.id, opts);
       let touched = false;
       for (const r of results) {
-        if (r.kind === 'joined') ((out.joined += r.units), (touched = true));
-        else if (r.kind === 'booked') ((out.booked += r.units), (touched = true));
-        else if (r.kind === 'left') ((out.left += r.units), (touched = true));
+        if (r.kind === 'joined') out.joined += r.units;
+        else if (r.kind === 'booked') out.booked += r.units;
+        else if (r.kind === 'left') out.left += r.units;
+        else continue;
+        touched = true;
       }
       if (touched) out.changed.push(o.number);
     }
