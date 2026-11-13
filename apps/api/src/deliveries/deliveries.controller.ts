@@ -11,7 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { AuditService } from '../audit/audit.service';
@@ -419,6 +419,77 @@ export class DeliveriesController {
     }
     const plan = planFulfillment(schedulable, requests);
     if (plan.errors.length > 0) throw new BadRequestException(plan.errors.join('; '));
+
+    // One stop per order per day (owner 2026-11-13, LB-10085). Booking the
+    // leftover units on a day the order already has an open stop puts them
+    // on that stop. The warehouse used to end up with the same order twice
+    // on the calendar — pillows on one stop, the mattress on the other —
+    // because the mattress was swapped onto the order after the sale and
+    // the only way to get it on a truck was a second "Schedule delivery".
+    // No new stop, so the stop cap does not apply; the day's load is the
+    // dispatcher's to move.
+    const [openStop] = await this.db
+      .select()
+      .from(schema.deliveries)
+      .where(
+        and(
+          eq(schema.deliveries.orderId, orderId),
+          eq(schema.deliveries.kind, 'delivery'),
+          eq(schema.deliveries.scheduledDate, body.scheduledDate),
+          eq(schema.deliveries.status, 'scheduled'),
+          isNull(schema.deliveries.runId),
+        ),
+      )
+      .orderBy(asc(schema.deliveries.createdAt))
+      .limit(1);
+    if (openStop) {
+      const onStop = await this.db
+        .select({
+          id: schema.deliveryLines.id,
+          orderLineId: schema.deliveryLines.orderLineId,
+          quantity: schema.deliveryLines.quantity,
+        })
+        .from(schema.deliveryLines)
+        .where(eq(schema.deliveryLines.deliveryId, openStop.id));
+      for (const s of plan.steps) {
+        const existing = onStop.find((r) => r.orderLineId === s.orderLineId);
+        if (existing) {
+          await this.db
+            .update(schema.deliveryLines)
+            .set({ quantity: existing.quantity + s.quantity })
+            .where(eq(schema.deliveryLines.id, existing.id));
+        } else {
+          await this.db.insert(schema.deliveryLines).values({
+            businessId: tenant.businessId!,
+            deliveryId: openStop.id,
+            orderLineId: s.orderLineId,
+            quantity: s.quantity,
+          });
+        }
+      }
+      await this.audit.log({
+        action: 'delivery.lines_joined',
+        targetType: 'delivery',
+        targetId: openStop.id,
+        after: {
+          orderId,
+          orderNumber: order.number,
+          scheduledDate: body.scheduledDate,
+          units: plan.steps.reduce((n, s) => n + s.quantity, 0),
+          lines: plan.steps.map((s) => ({ orderLineId: s.orderLineId, quantity: s.quantity })),
+          scheduledByHand: true,
+        },
+      });
+      // R8: the printed ticket no longer lists everything on the stop.
+      await this.ticketFlags.applyEdit(
+        orderId,
+        { kind: 'header_change', field: 'line_added' },
+        'delivery.lines_joined',
+      );
+      const joined = await this.hydrate(await this.load(openStop.id));
+      this.fireEvent('delivery.scheduled', tenant.businessId!, joined);
+      return joined;
+    }
 
     // §7/G12 soft cap, now multi-dimensional: stops always, pieces and
     // capacity units when ops sets budgets. The refusal names WHICH
