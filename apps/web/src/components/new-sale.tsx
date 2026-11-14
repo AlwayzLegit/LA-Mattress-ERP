@@ -1959,8 +1959,12 @@ export function NewSale({
 
   function printReceipt() {
     if (!done) return;
+    // Owner 2026-11-14: a register sale prints the same Sales Order
+    // document as an order, not the till receipt.
     const href =
-      done.kind === 'sale' ? `/sales/${done.id}` : `/print/orders/${done.id}/invoice?scope=order`;
+      done.kind === 'sale'
+        ? `/print/sales/${done.id}/invoice`
+        : `/print/orders/${done.id}/invoice?scope=order`;
     window.open(href, '_blank', 'noopener');
   }
 

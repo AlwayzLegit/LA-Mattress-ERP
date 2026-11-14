@@ -599,6 +599,7 @@ describe('Register sales pass the price-variance monitor (QA D2 / A10)', () => {
 describe('Invoice lookup — GET /v1/sales?q=', () => {
   let customerId = '';
   let lookupNumber = '';
+  let lookupSaleId = '';
 
   it('Seeds a customer sale to search for', async () => {
     const customer = await request(app.getHttpServer())
@@ -633,6 +634,35 @@ describe('Invoice lookup — GET /v1/sales?q=', () => {
       });
     expect(sale.status).toBe(201);
     lookupNumber = sale.body.number as string;
+    lookupSaleId = sale.body.id as string;
+  });
+
+  it('prints as a Sales Order document: Sold To, taken-with, salesperson, model, tenders (owner 2026-11-14)', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/v1/sales/${lookupSaleId}/document`)
+      .set('Cookie', ownerCookie)
+      .set('X-Business-Id', businessId);
+    expect(res.status).toBe(200);
+    const doc = res.body;
+    expect(doc.order.number).toBe(lookupNumber);
+    expect(doc.order.orderKind).toBe('sales_order');
+    expect(doc.order.fulfillmentType).toBe('take_with');
+    expect(doc.customer.name).toBe('Zelda Lookupson');
+    expect(doc.customer.phone).toBe('3105550000');
+    expect(doc.location.name).toBeTruthy();
+    expect(doc.salespersonName).toBeTruthy();
+    expect(doc.scheduledDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(doc.lines).toHaveLength(1);
+    expect(doc.lines[0].model).toBe('LOOKUP-1-A');
+    expect(doc.lines[0].fulfillmentMethod).toBe('take_with');
+    expect(doc.lines[0].qtyFulfilled).toBe(1);
+    expect(doc.order.subtotalCents).toBe(5000);
+    expect(doc.order.totalCents).toBe(5500);
+    expect(doc.order.paidCents).toBe(5500);
+    expect(doc.order.balanceDueCents).toBe(0);
+    expect(doc.order.payments).toHaveLength(1);
+    expect(doc.order.payments[0].method).toBe('cash');
+    expect(doc.familyInvoice).toBeNull();
   });
 
   it('Finds the sale by full invoice number (the scanned-barcode path)', async () => {
