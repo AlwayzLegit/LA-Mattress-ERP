@@ -50,7 +50,7 @@ import { WebhookDispatcher } from '../webhooks/webhook-dispatcher.service';
 import { computeTotals, reconstructOrderDiscountShares, refundUnitCents } from './totals';
 import { PriceVarianceService } from '../controls/price-variance.service';
 import type { OverrideCredentials } from '../controls/security-override.service';
-import { businessTimeZone } from '../common/business-today';
+import { businessTimeZone, ymdInTimeZone } from '../common/business-today';
 import { parseDayRange, zonedBounds } from '../common/date-range';
 
 interface LookupRow {
@@ -190,6 +190,96 @@ interface RefundRow {
   amountCents: number;
   reason: string | null;
   createdAt: Date;
+}
+
+/**
+ * A register sale shaped like an order document, so the web's Sales
+ * Order print (`InvoiceDoc`) renders it unchanged — owner 2026-11-14: a
+ * take-with sale prints the same paper as a delivery order, not a till
+ * receipt. Mirrors the web's `OrderDocumentPayload`; fields an order has
+ * and a sale never does (fees, ship-to, exchange credit) read as empty.
+ */
+interface SaleDocument {
+  business: {
+    name: string;
+    logoUrl: string | null;
+    accentColor: string | null;
+    invoiceHeaderNote: string | null;
+    invoiceFooterNote: string | null;
+  };
+  location: { name: string; orderPrefix: string | null; addressJson: unknown } | null;
+  customer: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    address: {
+      line1: string | null;
+      line2: string | null;
+      city: string | null;
+      region: string | null;
+      postalCode: string | null;
+    } | null;
+  } | null;
+  salespersonName: string | null;
+  secondSalespersonName: null;
+  originalOrderNumber: null;
+  /** The day the goods went out the door, in the store's clock. */
+  scheduledDate: string | null;
+  order: {
+    id: string;
+    number: string;
+    status: string;
+    orderKind: 'sales_order';
+    fulfillmentType: 'take_with';
+    subtotalCents: number;
+    discountCents: number;
+    orderDiscountCents: 0;
+    taxCents: number;
+    totalCents: number;
+    paidCents: number;
+    balanceDueCents: number;
+    creditDueCents: number;
+    deliveryFeeCents: 0;
+    installFeeCents: 0;
+    otherFeeCents: 0;
+    otherFeeLabel: null;
+    addressLine1: null;
+    addressLine2: null;
+    addressCity: null;
+    addressRegion: null;
+    addressPostalCode: null;
+    addressPhone: null;
+    deliveryInstructions: null;
+    notes: string | null;
+    lockedAt: null;
+    createdAt: Date;
+    payments: {
+      id: string;
+      method: string;
+      amountCents: number;
+      status: string;
+      createdAt: Date;
+      processorRef: string | null;
+      cardBrand: string | null;
+    }[];
+  };
+  lines: {
+    id: string;
+    description: string;
+    quantity: number;
+    qtyReserved: 0;
+    qtyFulfilled: number;
+    lineType: 'standard';
+    unitPriceCents: number;
+    discountCents: number;
+    totalCents: number;
+    fulfillmentMethod: 'take_with';
+    model: string | null;
+    brand: string | null;
+    bin: null;
+  }[];
+  familyInvoice: null;
 }
 
 interface SaleDetail extends Omit<SaleListRow, 'customerName'> {
@@ -781,6 +871,216 @@ export class SalesController {
         reason: r.reason,
         createdAt: r.createdAt,
       })),
+    };
+  }
+
+  /**
+   * Everything the printed Sales Order needs for a register sale, in the
+   * shape the order document uses (owner 2026-11-14: a take-with sale
+   * prints the same invoice layout as a delivery order — Sold To, the
+   * taken-with block, salesperson, the line grid with model and brand,
+   * totals and tenders — not a till receipt).
+   */
+  @Get('sales/:id/document')
+  @RequirePermission('sales.view')
+  async document(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+  ): Promise<SaleDocument> {
+    const [sale] = await this.db
+      .select()
+      .from(schema.sales)
+      .where(eq(schema.sales.id, id))
+      .limit(1);
+    if (!sale) throw new NotFoundException('Sale not found');
+
+    const [biz] = await this.db
+      .select({
+        name: schema.businesses.name,
+        brandingJson: schema.businesses.brandingJson,
+        opsSettingsJson: schema.businesses.opsSettingsJson,
+      })
+      .from(schema.businesses)
+      .where(eq(schema.businesses.id, tenant.businessId!))
+      .limit(1);
+    const branding = (biz?.brandingJson ?? {}) as {
+      logoUrl?: string;
+      publicName?: string;
+      accentColor?: string;
+    };
+    const ops = (biz?.opsSettingsJson ?? {}) as {
+      invoiceHeaderNote?: string;
+      invoiceFooterNote?: string;
+    };
+
+    const [location] = await this.db
+      .select({
+        name: schema.locations.name,
+        orderPrefix: schema.locations.orderPrefix,
+        addressJson: schema.locations.addressJson,
+        timezone: schema.locations.timezone,
+      })
+      .from(schema.locations)
+      .where(eq(schema.locations.id, sale.locationId))
+      .limit(1);
+
+    const [customer] = sale.customerId
+      ? await this.db
+          .select({
+            id: schema.customers.id,
+            firstName: schema.customers.firstName,
+            lastName: schema.customers.lastName,
+            email: schema.customers.email,
+            phone: schema.customers.phone,
+            addressesJson: schema.customers.addressesJson,
+          })
+          .from(schema.customers)
+          .where(eq(schema.customers.id, sale.customerId))
+          .limit(1)
+      : [];
+    // SOLD TO: the billing entry wins, else the first address on file —
+    // the same rule the order document applies.
+    const customerAddress = (() => {
+      const list = Array.isArray(customer?.addressesJson)
+        ? (customer.addressesJson as Record<string, unknown>[])
+        : [];
+      const a = list.find((x) => x?.label === 'billing') ?? list[0];
+      if (!a) return null;
+      const s = (k: string) => (typeof a[k] === 'string' && a[k] ? (a[k] as string) : null);
+      return {
+        line1: s('line1'),
+        line2: s('line2'),
+        city: s('city'),
+        region: s('region'),
+        postalCode: s('postalCode'),
+      };
+    })();
+
+    const [associate] = sale.associateUserId
+      ? await this.db
+          .select({ name: schema.users.name, email: schema.users.email })
+          .from(schema.users)
+          .where(eq(schema.users.id, sale.associateUserId))
+          .limit(1)
+      : [];
+
+    const lines = await this.db
+      .select()
+      .from(schema.saleLines)
+      .where(eq(schema.saleLines.saleId, id));
+    const variantIds = [...new Set(lines.map((l) => l.variantId).filter(Boolean))] as string[];
+    const lineMeta = new Map<string, { model: string | null; brand: string | null }>();
+    if (variantIds.length > 0) {
+      const rows = await this.db
+        .select({
+          variantId: schema.productVariants.id,
+          model: schema.productVariants.sku,
+          brandName: schema.brands.name,
+          vendorName: schema.vendors.name,
+        })
+        .from(schema.productVariants)
+        .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+        .leftJoin(schema.brands, eq(schema.brands.id, schema.products.brandId))
+        .leftJoin(schema.vendors, eq(schema.vendors.id, schema.productVariants.preferredVendorId))
+        .where(inArray(schema.productVariants.id, variantIds));
+      for (const r of rows)
+        lineMeta.set(r.variantId, { model: r.model, brand: r.brandName ?? r.vendorName });
+    }
+
+    const payments = await this.db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.saleId, id))
+      .orderBy(schema.payments.createdAt);
+    const paidCents = payments
+      .filter((p) => p.status === 'succeeded')
+      .reduce((n, p) => n + p.amountCents, 0);
+
+    const takenAt = sale.completedAt ?? sale.createdAt;
+    const tz = location?.timezone ?? (await businessTimeZone(this.db, tenant.businessId!));
+
+    return {
+      business: {
+        name: branding.publicName ?? biz?.name ?? '',
+        logoUrl: branding.logoUrl ?? null,
+        accentColor: branding.accentColor ?? null,
+        invoiceHeaderNote: ops.invoiceHeaderNote ?? null,
+        invoiceFooterNote: ops.invoiceFooterNote ?? null,
+      },
+      location: location
+        ? {
+            name: location.name,
+            orderPrefix: location.orderPrefix ?? null,
+            addressJson: location.addressJson ?? null,
+          }
+        : null,
+      customer: customer
+        ? {
+            id: customer.id,
+            name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || '(no name)',
+            email: customer.email,
+            phone: customer.phone,
+            address: customerAddress,
+          }
+        : null,
+      salespersonName: associate?.name?.trim() || associate?.email || null,
+      secondSalespersonName: null,
+      originalOrderNumber: null,
+      scheduledDate: ymdInTimeZone(takenAt, tz),
+      order: {
+        id: sale.id,
+        number: sale.number,
+        status: sale.status,
+        orderKind: 'sales_order',
+        fulfillmentType: 'take_with',
+        subtotalCents: sale.subtotalCents,
+        discountCents: sale.discountCents,
+        orderDiscountCents: 0,
+        taxCents: sale.taxCents,
+        totalCents: sale.totalCents,
+        paidCents,
+        balanceDueCents: Math.max(0, sale.totalCents - paidCents),
+        creditDueCents: 0,
+        deliveryFeeCents: 0,
+        installFeeCents: 0,
+        otherFeeCents: 0,
+        otherFeeLabel: null,
+        addressLine1: null,
+        addressLine2: null,
+        addressCity: null,
+        addressRegion: null,
+        addressPostalCode: null,
+        addressPhone: null,
+        deliveryInstructions: null,
+        notes: sale.notes,
+        lockedAt: null,
+        createdAt: sale.createdAt,
+        payments: payments.map((p) => ({
+          id: p.id,
+          method: p.method,
+          amountCents: p.amountCents,
+          status: p.status,
+          createdAt: p.createdAt,
+          processorRef: p.processorRef,
+          cardBrand: p.cardBrand ?? null,
+        })),
+      },
+      lines: lines.map((l) => ({
+        id: l.id,
+        description: l.description,
+        quantity: l.quantity,
+        qtyReserved: 0,
+        qtyFulfilled: l.quantity,
+        lineType: 'standard',
+        unitPriceCents: l.unitPriceCents,
+        discountCents: l.discountCents,
+        totalCents: l.totalCents,
+        fulfillmentMethod: 'take_with',
+        model: l.variantId ? (lineMeta.get(l.variantId)?.model ?? null) : null,
+        brand: l.variantId ? (lineMeta.get(l.variantId)?.brand ?? null) : null,
+        bin: null,
+      })),
+      familyInvoice: null,
     };
   }
 

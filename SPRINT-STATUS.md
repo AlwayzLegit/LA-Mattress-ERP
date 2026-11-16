@@ -1,5 +1,19 @@
 # Sprint Status — STORIS Cutover
 
+## A register sale prints as a Sales Order — 2026-11-14
+
+- Owner: a take-with sale (INV-2026-000028, rung through the register as a
+  plain sale) printed the till receipt; it must print the same Sales Order
+  document a delivery order prints — Sold To, the taken-with block, the
+  salesperson, the line grid with model and brand, totals and tenders.
+- `GET /v1/sales/:id/document` shapes a sale like the order document
+  (`fulfillmentType: take_with`, the sale day as the scheduled date, no
+  fees or ship-to); `/print/sales/[id]/invoice` renders `InvoiceDoc` from it.
+  The sale page's primary button is now _Print invoice_ (the till receipt
+  stays as _Receipt_); the register's P key / _Print receipt_ after a sale
+  opens the same document. Specs: `sales.int.spec.ts` document test,
+  `order-documents.test.tsx` take-with case.
+
 ## One stop per order per day — 2026-11-13 (LB-10085)
 
 - Owner: LB-10085 was "scheduled normally and only the pillows are scheduled" — the

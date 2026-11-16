@@ -182,13 +182,20 @@ export default function SaleDetailPage() {
         meta={<StatusBadge status={sale.status} />}
         sub={new Date(sale.completedAt ?? sale.createdAt).toLocaleString()}
         actions={
-          <Button
-            variant="primary"
-            className="inline-flex items-center gap-1.5"
-            onClick={() => window.print()}
-          >
-            <Printer size={14} /> Print receipt
-          </Button>
+          <>
+            {/* Owner 2026-11-14: a take-with sale prints the same Sales
+                Order document as a delivery order; the till receipt
+                stays as the secondary option. */}
+            <Button
+              variant="primary"
+              className="inline-flex items-center gap-1.5"
+              onClick={() => window.open(`/print/sales/${sale.id}/invoice`, '_blank', 'noopener')}
+              data-testid="print-sale-invoice"
+            >
+              <Printer size={14} /> Print invoice
+            </Button>
+            <Button onClick={() => window.print()}>Receipt</Button>
+          </>
         }
       />
       <PrintableReceipt

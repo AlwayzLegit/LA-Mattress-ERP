@@ -198,3 +198,49 @@ describe('InvoiceDoc (§11, modern layout)', () => {
     expect(html).toContain('#0f2057');
   });
 });
+
+describe('a register sale prints as a Sales Order (owner 2026-11-14)', () => {
+  it('take-with sale: Sales Order title, Taken with block on the sale day, paid in full', () => {
+    const doc = payload({
+      number: 'INV-2026-000028',
+      status: 'completed',
+      fulfillmentType: 'take_with',
+      subtotalCents: 20000,
+      taxCents: 2050,
+      totalCents: 22050,
+      paidCents: 22050,
+      balanceDueCents: 0,
+      payments: [
+        {
+          id: 'p1',
+          method: 'card',
+          amountCents: 22050,
+          status: 'succeeded',
+          createdAt: '2026-11-14T19:55:42.000Z',
+          cardBrand: 'visa',
+        },
+      ],
+    });
+    doc.scheduledDate = '2026-11-14';
+    doc.lines = [
+      {
+        ...doc.lines[0]!,
+        description: 'QUEEN BREEZE PROHI 2.0 PILLOW',
+        quantity: 1,
+        qtyFulfilled: 1,
+        unitPriceCents: 20000,
+        totalCents: 20000,
+        fulfillmentMethod: 'take_with',
+      },
+    ];
+    const html = renderToStaticMarkup(<InvoiceDoc doc={doc} printedAt={new Date()} />);
+    expect(html).toContain('Sales Order');
+    expect(html).toContain('INV-2026-000028');
+    expect(html).toContain('Taken with');
+    expect(html).toContain('Taken Sat, Nov 14, 2026');
+    expect(html).toContain('Chloe McAuley');
+    expect(html).toContain('QUEEN BREEZE PROHI 2.0 PILLOW');
+    expect(html).toContain('Paid in full');
+    expect(html).not.toContain('Amount due $');
+  });
+});
