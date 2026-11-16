@@ -648,7 +648,7 @@ describe('Invoice lookup — GET /v1/sales?q=', () => {
     expect(doc.order.orderKind).toBe('sales_order');
     expect(doc.order.fulfillmentType).toBe('take_with');
     expect(doc.customer.name).toBe('Zelda Lookupson');
-    expect(doc.customer.phone).toBe('3105550000');
+    expect(doc.customer.phone).toBe('310-555-0000');
     expect(doc.location.name).toBeTruthy();
     expect(doc.salespersonName).toBeTruthy();
     expect(doc.scheduledDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
