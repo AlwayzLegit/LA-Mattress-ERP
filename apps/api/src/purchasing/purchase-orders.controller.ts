@@ -176,6 +176,8 @@ interface PoDetail extends PoListRow {
   vendorContactName: string | null;
   vendorEmail: string | null;
   vendorPhone: string | null;
+  /** Owner 2026-11-17 (STORIS PO): the Vendor box prints the address. */
+  vendorAddressJson: unknown;
   /** Letterhead for the printed / emailed document. */
   businessName: string | null;
   businessLogoUrl: string | null;
@@ -201,6 +203,8 @@ interface PoLinkedOrder {
   allocationId: string;
   orderId: string;
   orderNumber: string;
+  /** Owner 2026-11-17 (STORIS PO): "Reserved for Order # …, CUSTOMER". */
+  customerName: string | null;
   orderLineId: string;
   quantity: number;
   /** 'ordered' | 'received' */
@@ -1792,6 +1796,7 @@ export class PurchaseOrdersController {
         vendorContactName: schema.vendors.contactName,
         vendorEmail: schema.vendors.email,
         vendorPhone: schema.vendors.phone,
+        vendorAddressJson: schema.vendors.addressJson,
         locationId: schema.purchaseOrders.locationId,
         locationName: schema.locations.name,
         locationAddressJson: schema.locations.addressJson,
@@ -1863,6 +1868,9 @@ export class PurchaseOrdersController {
           orderLineId: schema.orderLines.id,
           orderId: schema.orderLines.orderId,
           orderNumber: schema.orders.number,
+          customerFirst: schema.customers.firstName,
+          customerLast: schema.customers.lastName,
+          customerCompany: schema.customers.businessName,
         })
         .from(schema.poLineAllocations)
         .innerJoin(
@@ -1870,6 +1878,7 @@ export class PurchaseOrdersController {
           eq(schema.orderLines.id, schema.poLineAllocations.orderLineId),
         )
         .innerJoin(schema.orders, eq(schema.orders.id, schema.orderLines.orderId))
+        .leftJoin(schema.customers, eq(schema.customers.id, schema.orders.customerId))
         .where(
           and(
             inArray(schema.poLineAllocations.poLineId, lineIds),
@@ -1883,6 +1892,10 @@ export class PurchaseOrdersController {
           allocationId: a.allocationId,
           orderId: a.orderId,
           orderNumber: a.orderNumber,
+          customerName:
+            [a.customerFirst, a.customerLast].filter(Boolean).join(' ').trim() ||
+            a.customerCompany ||
+            null,
           orderLineId: a.orderLineId,
           quantity: a.quantity,
           status: a.status,

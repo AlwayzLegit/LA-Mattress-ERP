@@ -151,6 +151,11 @@ function ownerReq() {
         .post(url)
         .set('Cookie', ownerCookie)
         .set('X-Business-Id', businessId),
+    patch: (url: string) =>
+      request(app.getHttpServer())
+        .patch(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
     delete: (url: string) =>
       request(app.getHttpServer())
         .delete(url)
@@ -361,11 +366,32 @@ describe('PO builder pre-load: sold-not-in-stock lines carry the SO # (P6)', () 
       expect.objectContaining({
         orderId: order.body.id,
         orderNumber: order.body.number,
+        // Owner 2026-11-17 (STORIS PO): "Reserved for Order # …, CUSTOMER".
+        customerName: 'Sam Waits',
         orderLineId,
         quantity: 1,
         status: 'ordered',
       }),
     ]);
+
+    // Owner 2026-11-17: the vendor's address prints in the PO's Vendor box.
+    const vendAddr = await ownerReq()
+      .patch(`/v1/vendors/${vendorId}`)
+      .send({
+        addressJson: {
+          line1: '825 Ajax Ave',
+          city: 'Rowland Heights',
+          region: 'CA',
+          postalCode: '91748',
+        },
+      });
+    expect(vendAddr.status).toBe(200);
+    const poDoc = await ownerReq().get(`/v1/purchase-orders/${po.body.id}`);
+    expect(poDoc.body.vendorAddressJson).toMatchObject({
+      line1: '825 Ajax Ave',
+      city: 'Rowland Heights',
+    });
+    expect(poDoc.body.locationName).toBe('Dock');
 
     // Accepting the unit commits it to the customer (allocation flips).
     const received = await ownerReq()

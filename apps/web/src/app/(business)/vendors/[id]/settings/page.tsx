@@ -73,6 +73,31 @@ interface Vendor {
   remitTo: string | null;
   notes: string | null;
   isActive: boolean;
+  /** Owner 2026-11-17: prints in the Vendor box of the purchase order. */
+  addressJson?: VendorAddress | null;
+}
+interface VendorAddress {
+  line1?: string | null;
+  line2?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postalCode?: string | null;
+}
+const ADDRESS_FIELDS: { key: keyof VendorAddress; label: string }[] = [
+  { key: 'line1', label: 'Street address' },
+  { key: 'line2', label: 'Suite / line 2' },
+  { key: 'city', label: 'City' },
+  { key: 'region', label: 'State' },
+  { key: 'postalCode', label: 'ZIP' },
+];
+/** Trimmed address, or null when every part is blank. */
+function cleanAddress(a: VendorAddress | null | undefined): VendorAddress | null {
+  const out: VendorAddress = {};
+  for (const { key } of ADDRESS_FIELDS) {
+    const v = a?.[key]?.trim();
+    if (v) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 interface Advanced {
   vendor: Vendor;
@@ -267,6 +292,7 @@ function GeneralTab({
           remitTo: form.remitTo,
           notes: form.notes,
           isActive: form.isActive,
+          addressJson: cleanAddress(form.addressJson),
         }),
       });
       onSaved(v);
@@ -327,6 +353,21 @@ function GeneralTab({
               data-testid="vendor-phone"
             />
           </Field>
+          {ADDRESS_FIELDS.map(({ key, label }) => (
+            <Field key={key} label={label}>
+              <Input
+                value={form.addressJson?.[key] ?? ''}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    addressJson: { ...(f.addressJson ?? {}), [key]: e.target.value },
+                  }))
+                }
+                style={{ width: '100%' }}
+                data-testid={`vendor-address-${key}`}
+              />
+            </Field>
+          ))}
           {text('remitTo', 'Remit-to (payments go here)')}
           <Field label="Status">
             <Select

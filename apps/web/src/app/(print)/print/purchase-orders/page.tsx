@@ -127,7 +127,7 @@ function BatchPoPrintInner() {
               {p.lastPrintedAt ? `, last ${new Date(p.lastPrintedAt).toLocaleString()}` : ''}
             </div>
           )}
-          <PrintablePurchaseOrder po={p} />
+          <PrintablePurchaseOrder po={p} mode="page" />
         </div>
       ))}
     </div>

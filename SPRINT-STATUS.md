@@ -1,5 +1,29 @@
 # Sprint Status — STORIS Cutover
 
+## Purchase order prints like the STORIS PO — 2026-11-17
+
+- Owner: the printed PO should look like the STORIS one (PO 21185,
+  Tempur-Sealy): letterhead top left, barcode and boxed PO number with
+  Date / Document Date top right, tabbed Vendor and Ship To boxes with
+  addresses, a Ship Via / Terms / Remarks strip, the grey-headed grid
+  (Model, Vendor Model, Description, Qty, Price, Amount) with "Reserved for
+  Order # …, CUSTOMER" under lines bought for a sale, and the totals block.
+- `PrintablePurchaseOrder` rebuilt in that layout. Letterhead and Ship To
+  use the receiving location's address (there is no business-level
+  address); Date = expected date, Document Date = placed/created. PO notes
+  print under Remarks; Ship Via and Terms print blank (no such fields yet).
+  Freight, when set, adds a line and goes into Total Order Amount.
+- `GET /v1/purchase-orders/:id` adds `vendorAddressJson` and
+  `linkedOrders[].customerName`. Vendor settings → General gains Street,
+  Suite, City, State, ZIP fields (the API already stored `addressJson`; no
+  screen could set it).
+- Batch print (`/print/purchase-orders`) now shows the documents on screen
+  and prints them in flow, one page each (before, every PO was positioned
+  at the top of the page). Specs: `printable-purchase-order.test.tsx`,
+  `special-orders.int.spec.ts` (customer name + vendor address).
+- Even exchanges keep counting as a return on the salesperson's numbers
+  (owner 2026-11-17) — already the behavior; no change.
+
 ## A register sale prints as a Sales Order — 2026-11-14
 
 - Owner: a take-with sale (INV-2026-000028, rung through the register as a
