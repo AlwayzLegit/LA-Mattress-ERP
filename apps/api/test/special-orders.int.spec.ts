@@ -151,6 +151,11 @@ function ownerReq() {
         .post(url)
         .set('Cookie', ownerCookie)
         .set('X-Business-Id', businessId),
+    patch: (url: string) =>
+      request(app.getHttpServer())
+        .patch(url)
+        .set('Cookie', ownerCookie)
+        .set('X-Business-Id', businessId),
     delete: (url: string) =>
       request(app.getHttpServer())
         .delete(url)
