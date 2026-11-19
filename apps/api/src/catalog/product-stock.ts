@@ -37,6 +37,8 @@ export interface StockTotals {
   asIsOnHand: number;
   asIsAvailable: number;
   asIsNonSellable: number;
+  /** Owner 2026-10-30: pieces held by an order line or a draft transfer (STORIS "As-Is reserved"). */
+  asIsReserved: number;
   layawayReserved: number;
   onOrderReserved: number;
 }
@@ -77,6 +79,7 @@ export const EMPTY_TOTALS: StockTotals = {
   asIsOnHand: 0,
   asIsAvailable: 0,
   asIsNonSellable: 0,
+  asIsReserved: 0,
   layawayReserved: 0,
   onOrderReserved: 0,
 };
@@ -157,13 +160,16 @@ async function loadCells(
       locationId: schema.asIsItems.locationId,
       asIsOnHand: sql<number>`sum(${schema.asIsItems.quantity})::int`,
       asIsNonSellable: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${schema.asIsItems.condition} in ('damaged', 'parts')), 0)::int`,
+      // Owner 2026-10-30: a committed piece is still in the building but
+      // spoken for — on hand, not available.
+      asIsReserved: sql<number>`coalesce(sum(${schema.asIsItems.quantity}) filter (where ${schema.asIsItems.status} = 'committed'), 0)::int`,
     })
     .from(schema.asIsItems)
     .where(
       and(
         eq(schema.asIsItems.businessId, businessId),
         inArray(schema.asIsItems.variantId, variantIds),
-        eq(schema.asIsItems.status, 'pending_review'),
+        inArray(schema.asIsItems.status, ['pending_review', 'committed']),
         locationId ? eq(schema.asIsItems.locationId, locationId) : undefined,
       ),
     )
@@ -260,7 +266,7 @@ export async function loadProductStockTotals(
 }
 
 function finish(t: StockTotals): StockTotals {
-  return { ...t, asIsAvailable: t.asIsOnHand - t.asIsNonSellable };
+  return { ...t, asIsAvailable: Math.max(0, t.asIsOnHand - t.asIsNonSellable - t.asIsReserved) };
 }
 
 /**

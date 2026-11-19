@@ -29,6 +29,13 @@ const toLoc = alias(schema.locations, 'to_loc');
 import { AuditService } from '../audit/audit.service';
 import { CostingService } from '../costing/costing.service';
 import { TransferShipService } from './transfer-ship.service';
+import {
+  arrivePiece,
+  commitPieceToTransferLine,
+  loadFreePiece,
+  piecesByLine,
+  releasePiece,
+} from '../returns/as-is-pieces';
 import { ExceptionsService } from '../controls/exceptions.service';
 import {
   SecurityOverrideService,
@@ -53,6 +60,12 @@ interface TransferLineInput {
   quantityOrdered?: number;
   /** J3 (XFR-040): the specific serial pieces riding this line. */
   serialIds?: string[];
+  /**
+   * Owner 2026-10-30: move this specific As-Is piece (in review at the
+   * origin) to the destination's As-Is queue. Quantity must be 1; no
+   * held remainder; stock levels never move for it.
+   */
+  asIsItemId?: string | null;
 }
 
 const TRANSFER_TYPES = ['replenishment', 'floor_sample', 'customer', 'as_is', 'auto'] as const;
@@ -141,6 +154,16 @@ interface LineRow {
   onHandAtFrom: number;
   reservedAtFrom: number;
   availableAtFrom: number;
+  /** Owner 2026-10-30: the As-Is piece this line moves, when it is an as-is line. */
+  asIsItemId: string | null;
+  asIs: {
+    pieceNumber: string | null;
+    condition: string | null;
+    asIsPriceCents: number | null;
+    storageLocation: string | null;
+    status: string;
+    locationId: string;
+  } | null;
   /** Owner 2026-10-28: the PO lines earmarked for this line (live links). */
   poLinks: {
     allocationId: string;
@@ -474,6 +497,33 @@ export class TransfersController {
       throw new NotFoundException('One or more variants not found');
     }
 
+    // Owner 2026-10-30: an as-is line names one piece in review at the
+    // origin — one unit, no hold, no fan-out, and the piece must be free.
+    const anyAsIs = body.lines.some((l) => l.asIsItemId);
+    if (anyAsIs && destinations.length > 1) {
+      throw new BadRequestException('As-Is lines cannot fan out to several destinations');
+    }
+    const seenPieces = new Set<string>();
+    for (const l of body.lines) {
+      if (!l.asIsItemId) continue;
+      if (l.quantity !== 1 || (l.quantityOrdered != null && l.quantityOrdered !== 1)) {
+        throw new BadRequestException('An As-Is line moves one piece — lines[].quantity must be 1');
+      }
+      if ((l.serialIds ?? []).length > 0) {
+        throw new BadRequestException('An As-Is line names its piece, not serials');
+      }
+      if (seenPieces.has(l.asIsItemId)) {
+        throw new BadRequestException('The same As-Is piece is on two lines');
+      }
+      seenPieces.add(l.asIsItemId);
+      await loadFreePiece(this.db, {
+        businessId: tenant.businessId!,
+        pieceId: l.asIsItemId,
+        variantId: l.variantId,
+        locationId: body.fromLocationId,
+      });
+    }
+
     // J3: named pieces must be real, in stock at the origin, unclaimed,
     // and of the line's variant — validated before anything is written.
     const anySerials = body.lines.some((l) => (l.serialIds ?? []).length > 0);
@@ -536,6 +586,7 @@ export class TransfersController {
             quantity,
             quantityOrdered: ordered != null && ordered > quantity ? ordered : null,
             serialIds: l.serialIds ?? [],
+            asIsItemId: l.asIsItemId ?? null,
           };
         })
         .filter((l) => l.quantity > 0);
@@ -582,12 +633,17 @@ export class TransfersController {
             quantityShipped: l.quantity,
             quantityOrdered: l.quantityOrdered,
             serialIdsJson: l.serialIds.length > 0 ? l.serialIds : null,
+            asIsItemId: l.asIsItemId,
           })),
         )
         .returning({
           id: schema.stockTransferLines.id,
           quantityShipped: schema.stockTransferLines.quantityShipped,
+          asIsItemId: schema.stockTransferLines.asIsItemId,
         });
+      for (const l of insertedLines) {
+        if (l.asIsItemId) await commitPieceToTransferLine(this.db, l.asIsItemId, l.id);
+      }
 
       if (ship) {
         await this.shipSvc.deductOrigin(
@@ -595,20 +651,26 @@ export class TransfersController {
           actor.id,
           transfer.id,
           transfer.fromLocationId,
-          dest.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+          dest.lines
+            .filter((l) => !l.asIsItemId)
+            .map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
           body.notes ?? null,
         );
         await this.shipSvc.markSerialsInTransit(transfer.id);
+        await this.shipSvc.markAsIsInTransit(transfer.id);
       } else {
-        // A10: the transfer is live from the moment it exists — its units
+        // A10: the transfer is live from the moment it exists � its units
         // are held at the origin like an open sales order's, so the
         // register, other transfers and As-Is moves see them as taken.
+        // An As-Is piece line is held by the piece itself, not by stock.
         await reserveTransferOrigin(this.db, {
           businessId: tenant.businessId!,
           actorUserId: actor.id,
           transferId: transfer.id,
           fromLocationId: transfer.fromLocationId,
-          lines: dest.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+          lines: dest.lines
+            .filter((l) => !l.asIsItemId)
+            .map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
         });
       }
 
@@ -713,6 +775,16 @@ export class TransfersController {
     // as-is review disposition.
     const stagesAsIs = transfer.transferType === 'as_is';
     for (const v of validated) {
+      // Owner 2026-10-30: an as-is piece joins the destination's As-Is
+      // queue — no level, ledger or cost layer, it was never in stock.
+      if (v.line.asIsItemId) {
+        await arrivePiece(this.db, v.line.asIsItemId, transfer.toLocationId);
+        await this.db
+          .update(schema.stockTransferLines)
+          .set({ quantityReceived: v.line.quantityReceived + v.qty })
+          .where(eq(schema.stockTransferLines.id, v.line.id));
+        continue;
+      }
       if (!stagesAsIs) {
         // Ledger entry at the destination.
         await this.db.insert(schema.inventoryMovements).values({
@@ -943,8 +1015,16 @@ export class TransfersController {
         .limit(1);
       const unitCost = variant?.costCents ?? 0;
       totalCostCents += unitCost * x.missing;
+      // Owner 2026-10-30: a lost as-is piece leaves the queue as scrapped.
+      if (x.line.asIsItemId) {
+        await this.db
+          .update(schema.asIsItems)
+          .set({ status: 'scrapped', transferLineId: null, reviewedAt: new Date() })
+          .where(eq(schema.asIsItems.id, x.line.asIsItemId));
+      }
       await this.db.insert(schema.writeOffs).values({
         businessId: tenant.businessId!,
+        asIsItemId: x.line.asIsItemId ?? null,
         variantId: x.line.variantId,
         locationId: transfer.fromLocationId,
         quantity: x.missing,
@@ -1016,6 +1096,13 @@ export class TransfersController {
         'This transfer is on a manifest — remove it from the manifest before canceling.',
       );
     }
+    // Owner 2026-10-30: a canceled draft hands its as-is pieces back.
+    const held = await this.db
+      .select({ asIsItemId: schema.stockTransferLines.asIsItemId })
+      .from(schema.stockTransferLines)
+      .where(eq(schema.stockTransferLines.transferId, id));
+    for (const h of held) if (h.asIsItemId) await releasePiece(this.db, h.asIsItemId);
+
     await this.db
       .update(schema.stockTransfers)
       .set({ status: 'canceled', canceledAt: new Date(), updatedAt: new Date() })
@@ -1029,7 +1116,12 @@ export class TransfersController {
         quantity: schema.stockTransferLines.quantityShipped,
       })
       .from(schema.stockTransferLines)
-      .where(eq(schema.stockTransferLines.transferId, id));
+      .where(
+        and(
+          eq(schema.stockTransferLines.transferId, id),
+          isNull(schema.stockTransferLines.asIsItemId),
+        ),
+      );
     await releaseTransferOrigin(this.db, {
       businessId: transfer.businessId,
       actorUserId: actor.id,
@@ -1227,6 +1319,7 @@ export class TransfersController {
         quantityShipped: schema.stockTransferLines.quantityShipped,
         quantityReceived: schema.stockTransferLines.quantityReceived,
         quantityOrdered: schema.stockTransferLines.quantityOrdered,
+        asIsItemId: schema.stockTransferLines.asIsItemId,
       })
       .from(schema.stockTransferLines)
       .innerJoin(
@@ -1235,6 +1328,10 @@ export class TransfersController {
       )
       .innerJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
       .where(eq(schema.stockTransferLines.transferId, id));
+    const asIsByPiece = await piecesByLine(
+      this.db,
+      lines.map((l) => l.asIsItemId).filter((x): x is string => !!x),
+    );
 
     const poLinks = new Map<string, LineRow['poLinks']>();
     if (lines.length > 0) {
@@ -1315,9 +1412,21 @@ export class TransfersController {
         // units it has already claimed count as available to it — the
         // stock pill asks "would Ship find my units", not "what is left
         // for everyone else".
-        const ownHold = row.status === 'draft' ? l.quantityShipped : 0;
+        const ownHold = row.status === 'draft' && !l.asIsItemId ? l.quantityShipped : 0;
+        const piece = l.asIsItemId ? asIsByPiece.get(l.asIsItemId) : undefined;
         return {
           ...l,
+          asIsItemId: l.asIsItemId ?? null,
+          asIs: piece
+            ? {
+                pieceNumber: piece.pieceNumber,
+                condition: piece.condition,
+                asIsPriceCents: piece.asIsPriceCents,
+                storageLocation: piece.storageLocation,
+                status: piece.status,
+                locationId: piece.locationId,
+              }
+            : null,
           productName: l.productName ?? '(deleted)',
           quantityHeld: Math.max(0, (l.quantityOrdered ?? l.quantityShipped) - l.quantityShipped),
           onHandAtFrom: lv.onHand,

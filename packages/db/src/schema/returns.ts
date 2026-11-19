@@ -35,8 +35,21 @@ export const asIsItems = pgTable(
      * sellable stock by the Stock Adjustment dialog — the level dropped).
      */
     source: text('source').notNull().default('return'),
-    /** 'pending_review' | 'restocked' | 'vendor_return' | 'scrapped' | 'voided' (A22: removed by an as-is adjustment) */
+    /**
+     * 'pending_review' | 'restocked' | 'vendor_return' | 'scrapped' |
+     * 'voided' (A22: removed by an as-is adjustment) | 'committed'
+     * (owner 2026-10-30: held by an order line or a draft transfer line)
+     * | 'in_transit' (riding a transfer) | 'sold' (fulfilled on an order).
+     */
     status: text('status').notNull().default('pending_review'),
+    /**
+     * Owner 2026-10-30: who holds the piece while it is committed /
+     * in transit / sold — the order line that sells it or the transfer
+     * line that moves it. Plain ids (no FK) so the schema's two line
+     * tables and this one need not import each other in a loop.
+     */
+    orderLineId: uuid('order_line_id'),
+    transferLineId: uuid('transfer_line_id'),
     /** What produced it: 'refund' | 'order' | 'manual' | 'stock_transfer' + the row's id. */
     referenceType: text('reference_type'),
     referenceId: uuid('reference_id'),
@@ -78,6 +91,8 @@ export const asIsItems = pgTable(
     statusIdx: index('as_is_items_status_idx').on(t.businessId, t.status),
     variantIdx: index('as_is_items_variant_id_idx').on(t.variantId),
     locationIdx: index('as_is_items_location_id_idx').on(t.locationId),
+    orderLineIdx: index('as_is_items_order_line_id_idx').on(t.orderLineId),
+    transferLineIdx: index('as_is_items_transfer_line_id_idx').on(t.transferLineId),
     quantityPositive: check('as_is_items_quantity_positive', sql`${t.quantity} > 0`),
   }),
 );
