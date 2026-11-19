@@ -78,7 +78,50 @@ const FIELD: Record<string, string> = {
   taxRateBps: 'tax rate',
   depositRequiredCents: 'deposit due',
   customerId: 'customer',
+  // Owner 2026-11-19: "make it more detailed so we don't need to
+  // investigate" — every field Order details can save gets a name.
+  orderKind: 'order type',
+  pickupLocationId: 'pickup store',
+  stockLocationId: 'stock from',
+  deliveryStatus: 'delivery status',
+  deliveryInstructions: 'delivery instructions',
+  internalNotes: 'internal notes',
+  exceptionNotes: 'exception notes',
+  marketingCode: 'marketing code',
+  marketingCode2: 'marketing code 2',
+  orderSource: 'order source',
+  paymentTerminal: 'payment terminal',
+  addressLine1: 'delivery address',
+  addressLine2: 'apt / unit',
+  addressCity: 'delivery city',
+  addressRegion: 'delivery state',
+  addressPostalCode: 'delivery ZIP',
+  addressPhone: 'delivery phone',
+  billingAddressJson: 'billing address',
+  customInfoJson: 'custom info',
+  tradeDesignerJson: 'trade designer',
+  deliveryFeeCents: 'delivery fee',
+  installFeeCents: 'install fee',
+  otherFeeCents: 'other fee',
+  otherFeeLabel: 'other fee name',
+  orderDiscountCents: 'order discount',
+  asIsItemId: 'As-Is piece',
+  lineType: 'line type',
+  assigneeMembershipId: 'assigned to',
+  dueAt: 'due',
+  priority: 'priority',
+  title: 'title',
 };
+
+/** Free text shows in quotes, cut to a readable length. */
+const TEXT_FIELDS = new Set([
+  'notes',
+  'internalNotes',
+  'exceptionNotes',
+  'deliveryInstructions',
+  'description',
+  'title',
+]);
 
 export function money(cents: unknown): string {
   if (typeof cents !== 'number' || !Number.isFinite(cents)) return '';
@@ -108,9 +151,31 @@ export function actorOf(row: OrderAuditRow): string {
   return 'System';
 }
 
+/** "1 Main St, Apt 2, Los Angeles, CA 90004" or "key: value, …" for a JSON field. */
+function objectText(v: Record<string, unknown>, names: Record<string, string>): string {
+  const str = (k: string) => (typeof v[k] === 'string' && (v[k] as string).trim()) || '';
+  const line1 = str('line1') || str('address1') || str('street');
+  if (line1) {
+    const region = [str('region') || str('state'), str('postalCode') || str('zip')]
+      .filter(Boolean)
+      .join(' ');
+    return [line1, str('line2') || str('address2'), str('city'), region].filter(Boolean).join(', ');
+  }
+  const parts = Object.entries(v)
+    .filter(([, x]) => x != null && x !== '' && typeof x !== 'object')
+    .map(([k, x]) => `${humanise(k)}: ${value(k, x, names)}`);
+  return parts.length > 0 ? parts.join(', ') : 'none';
+}
+
 /** One field value, readable: money, names for ids, dates, labels. */
 function value(key: string, v: unknown, names: Record<string, string>): string {
   if (v == null || v === '') return 'none';
+  if (Array.isArray(v)) return v.length === 0 ? 'none' : `${v.length} entries`;
+  if (typeof v === 'object') return objectText(v as Record<string, unknown>, names);
+  if (typeof v === 'string' && TEXT_FIELDS.has(key)) {
+    const t = v.replace(/\s+/g, ' ').trim();
+    return `“${t.length > 80 ? `${t.slice(0, 79)}…` : t}”`;
+  }
   if (/Cents$/.test(key)) return money(v);
   if (/Bps$/.test(key) && typeof v === 'number') return `${v / 100}%`;
   if (typeof v === 'string') {
@@ -122,7 +187,7 @@ function value(key: string, v: unknown, names: Record<string, string>): string {
   }
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
   if (typeof v === 'number') return String(v);
-  return '…';
+  return String(v);
 }
 
 /** "price $1,049.00 → $999.00, quantity 1 → 2" for the keys that changed. */
@@ -135,12 +200,10 @@ function changes(
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
     (k) =>
       !skip.includes(k) &&
-      (!/Id$/.test(k) || k in FIELD) &&
-      JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null) &&
-      (typeof (after[k] ?? before[k]) !== 'object' || (after[k] ?? before[k]) === null),
+      (!/Id$/.test(k) || k in FIELD || named(after[k] ?? before[k], names)) &&
+      JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null),
   );
   return keys
-    .slice(0, 4)
     .map((k) => {
       const label = FIELD[k] ?? humanise(k);
       return k in before
@@ -148,6 +211,10 @@ function changes(
         : `${label} ${value(k, after[k], names)}`;
     })
     .join(', ');
+}
+
+function named(v: unknown, names: Record<string, string>): boolean {
+  return typeof v === 'string' && !!names[v.toLowerCase()];
 }
 
 function item(id: unknown, names: Record<string, string>, fallback = 'an item'): string {
@@ -171,6 +238,10 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
   });
   const lineName = (src: Record<string, unknown>) =>
     item(src.variantId, names, '') || item(src.lineId, names);
+  // The line id rides in "before" only; "after" carries lineId: null, so a
+  // spread of before and after lost the product name ("changed an item").
+  const lineOf = () =>
+    lineName({ variantId: b.variantId ?? a.variantId, lineId: b.lineId ?? a.lineId });
   const qty = (n: unknown) => (typeof n === 'number' && n > 0 ? `${n} × ` : '');
 
   switch (row.action) {
@@ -196,13 +267,13 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
     case 'order.line.remove':
       return say(`removed ${qty(b.quantity)}${lineName(b)}`, 'muted');
     case 'order.line.update': {
-      const what = changes(b, a, names, ['lineId']);
-      const name = lineName({ ...b, ...a });
+      const what = changes(b, a, names, ['lineId', 'variantId']);
+      const name = lineOf();
       return say(what ? `changed ${name}: ${what}` : `edited ${name}`);
     }
     case 'order.line.line_type':
       return say(
-        `changed ${lineName(b)} to ${LINE_TYPE[String(a.lineType)] ?? String(a.lineType ?? '').replace(/_/g, ' ')}`,
+        `changed ${lineOf()} to ${LINE_TYPE[String(a.lineType)] ?? String(a.lineType ?? '').replace(/_/g, ' ')}`,
       );
     case 'order.line.release':
       return say(
@@ -235,7 +306,11 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
       const after = Object.fromEntries(Object.entries(a).filter(([k]) => k in b || legacy));
       const before = Object.fromEntries(Object.entries(b).filter(([k]) => k in after));
       const what = changes(before, after, names, ['updatedAt', ...(legacy ? ['orderKind'] : [])]);
-      return say(what ? `updated the order: ${what}` : 'updated the order');
+      // Owner 2026-11-19 (WE-10091): a Save that moved nothing read as
+      // "updated the order" and sent the owner looking for a change.
+      return what
+        ? say(`updated the order: ${what}`)
+        : say('saved Order details with no changes', 'muted');
     }
     case 'order.fee_charged': {
       const fee = `${String(a.label ?? 'a fee')} ${money(a.amountCents)}`.trim();
@@ -250,7 +325,10 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
         `moved the sale from ${String(b.locationName ?? 'one store')} to ${String(a.locationName ?? 'another')}${a.reason ? ` — ${String(a.reason)}` : ''}`,
       );
     case 'order.lock':
-      return say('printed the delivery ticket — order locked', 'scheduled');
+      return say(
+        `printed the delivery ticket${typeof m.copyNumber === 'number' && m.copyNumber > 1 ? ` (copy ${m.copyNumber})` : ''} — order locked`,
+        'scheduled',
+      );
     case 'order.unlock':
       return say(
         `unlocked the order${a.reason || a.reasonText ? ` — ${String(a.reason ?? a.reasonText)}` : ''}`,
@@ -266,18 +344,36 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
         'muted',
       );
     }
-    case 'order.reserve':
-      return say('reserved stock', 'scheduled');
+    case 'order.reserve': {
+      const n = typeof a.reserved === 'number' ? a.reserved : null;
+      const short = typeof a.short === 'number' && a.short > 0 ? `, ${a.short} still short` : '';
+      return say(
+        n != null ? `reserved ${plural(n, 'unit')} of stock${short}` : 'reserved stock',
+        'scheduled',
+      );
+    }
     case 'order.release':
-      return say('released the reserved stock', 'waiting');
+      return say(
+        typeof a.released === 'number'
+          ? `released ${plural(a.released, 'reserved unit')}`
+          : 'released the reserved stock',
+        'waiting',
+      );
     case 'order.auto_stock_release':
       return { text: 'Reserved stock was released automatically', who, tone: 'waiting' };
     case 'order.allocate_pending':
       return { text: 'A line is short of stock at its ship-from store', who, tone: 'waiting' };
     case 'order.price_adjustment':
-      return say(`adjusted the price by ${money(a.amountCents)}`, 'waiting');
+      return say(
+        `adjusted the price by ${money(a.amountCents)}${a.reason ? ` — ${String(a.reason)}` : ''}`,
+        'waiting',
+      );
     case 'order.note.add':
-      return say('added a note');
+      return say(
+        typeof a.preview === 'string' && a.preview.trim()
+          ? `added a note: ${value('notes', a.preview, names)}`
+          : 'added a note',
+      );
     case 'order.fulfill':
       return say(
         `handed over ${typeof a.units === 'number' ? plural(a.units, 'unit') : 'the goods'}`,
@@ -312,14 +408,45 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
       return say(
         `created this exchange order${m.originalNumber ? ` from ${String(m.originalNumber)}` : ''}`,
       );
-    case 'order.task.create':
-      return say('added a task');
-    case 'order.task.update':
-      return say('updated a task');
+    case 'order.task.create': {
+      const parts = [
+        typeof a.title === 'string'
+          ? `added a task ${value('title', a.title, names)}`
+          : 'added a task',
+        named(a.assigneeMembershipId, names) ? `for ${item(a.assigneeMembershipId, names)}` : '',
+        typeof a.dueAt === 'string' ? `due ${a.dueAt.slice(0, 10)}` : '',
+      ].filter(Boolean);
+      return say(parts.join(' '));
+    }
+    case 'order.task.update': {
+      const title = String(b.title ?? m.taskTitle ?? a.title ?? '').trim();
+      const what = changes(b, a, names, ['taskId']);
+      const task = title ? `task ${value('title', title, names)}` : 'a task';
+      return say(what ? `updated ${task}: ${what}` : `updated ${task}`);
+    }
     case 'order.attachment.add':
-      return say('attached a file');
+      return say(typeof a.name === 'string' ? `attached ${a.name}` : 'attached a file');
     case 'order.attachment.remove':
-      return say('removed an attachment', 'muted');
+      return say(
+        typeof b.name === 'string' ? `removed the attachment ${b.name}` : 'removed an attachment',
+        'muted',
+      );
+    case 'delivery.ticket_flags': {
+      const list = Array.isArray(m.transitions) ? (m.transitions as Record<string, unknown>[]) : [];
+      const FLAG: Record<string, string> = { P: 'printed', R: 'needs a reprint' };
+      const flag = (f: unknown) => (typeof f === 'string' && FLAG[f]) || 'not printed';
+      const parts = list.map((t) => {
+        const what = t.record === 'header' ? 'ticket' : item(t.record, names);
+        return `${what} ${String(t.date ?? '')}: ${flag(t.from)} → ${flag(t.to)}`;
+      });
+      const why = typeof m.reason === 'string' ? ` (${m.reason.replace(/_/g, ' ')})` : '';
+      return say(
+        parts.length > 0
+          ? `updated the delivery ticket flags${why}: ${parts.join('; ')}`
+          : `updated the delivery ticket flags${why}`,
+        'scheduled',
+      );
+    }
     case 'order.share_link_created':
       return say('created a customer share link');
     default: {

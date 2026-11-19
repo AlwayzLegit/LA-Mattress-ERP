@@ -1,5 +1,29 @@
 # Sprint Status — STORIS Cutover
 
+## Order details kept the salesperson; change history spells everything out — 2026-11-19
+
+Owner (WE-10091): Elyse changed the delivery date and an item, then could not find her order. The
+history read "Elyse updated the order: delivery date 2026-11-14 → 2026-11-13, salesperson Elyse → none",
+then "changed an item" and a bare "Elyse updated the order".
+
+- **Cause:** the Order details dialog loads the staff list after it opens, and its Salesperson /
+  2nd salesperson pickers were uncontrolled `<select defaultValue>`s, which settle on "— none —"
+  while no option matches. Any Save (a date change) cleared the salesperson, so the order left her
+  "My orders". The pickers are now controlled, keep an option for the current pick even before the
+  list arrives (or if that member is inactive), and the salesperson fields are only sent when
+  someone changed them.
+- **History detail** (`order-history.ts`): line changes name the product (the "after" carries
+  `lineId: null`, which hid the name); every changed field shows (no 4-field cap) with labels for
+  pickup store, stock from, delivery address / apt / city / state / ZIP / phone, billing address,
+  custom info, trade designer, fees, marketing codes, order source, payment terminal, instructions
+  and notes (quoted); a Save that moved nothing reads "saved Order details with no changes" (muted);
+  notes show their text, tasks their title / assignee / due date / what changed (the task title now
+  rides in the audit metadata), attachments their file name, reserve / release their unit counts,
+  price adjustments their reason, ticket prints their copy number, and delivery ticket flags which
+  line moved to printed / needs a reprint and why.
+- WE-10091 itself: the 3:27 PM entry has no before/after in the audit log — it was a Save with no
+  changes. Its salesperson is still empty in production; set Elyse back on Order details.
+
 ## Purchase order prints like the STORIS PO — 2026-11-17
 
 - Owner: the printed PO should look like the STORIS one (PO 21185,

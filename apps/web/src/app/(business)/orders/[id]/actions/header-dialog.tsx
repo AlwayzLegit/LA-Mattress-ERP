@@ -74,6 +74,21 @@ export function OrderHeaderDialog({
       .catch(() => setMembers([]));
   }, []);
   const memberLabel = (m: MemberRow) => m.name || m.email;
+  // Owner 2026-11-19 (WE-10091): the staff list arrives after the dialog
+  // opens, and an uncontrolled <select defaultValue> settles on "— none —"
+  // while it has no matching option — so any Save (a date change) wiped
+  // the salesperson and the order left their "My orders". The picks are
+  // controlled, the current ones always have an option, and the
+  // salesperson fields only travel when someone changed them.
+  const [salesperson, setSalesperson] = useState(order.salespersonMembershipId ?? '');
+  const [second, setSecond] = useState(order.secondSalespersonMembershipId ?? '');
+  const memberOptions = (current: string | null | undefined) => {
+    const rows = members.map((m) => ({ id: m.membershipId, label: memberLabel(m) }));
+    if (current && !rows.some((r) => r.id === current)) {
+      rows.unshift({ id: current, label: members.length > 0 ? 'Current (not active)' : 'Current' });
+    }
+    return rows;
+  };
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -89,8 +104,21 @@ export function OrderHeaderDialog({
     };
     const body: Record<string, unknown> = { ...meta };
     if (editable) {
-      const second = s('secondSalesperson');
       const split = String(d.get('splitPct') ?? '').trim();
+      const primary = salesperson || null;
+      const secondPick = second || null;
+      const salesChanged =
+        primary !== (order.salespersonMembershipId ?? null) ||
+        secondPick !== (order.secondSalespersonMembershipId ?? null) ||
+        (secondPick != null &&
+          Math.round(Number(split || '50') * 100) !== (order.splitBps ?? 5000));
+      if (salesChanged) {
+        Object.assign(body, {
+          salespersonMembershipId: primary,
+          secondSalespersonMembershipId: secondPick,
+          splitBps: secondPick ? Math.round(Number(split || '50') * 100) : null,
+        });
+      }
       Object.assign(body, {
         orderKind: s('orderKind') ?? order.orderKind,
         fulfillmentType: s('fulfillmentType') ?? order.fulfillmentType,
@@ -98,9 +126,6 @@ export function OrderHeaderDialog({
         pickupLocationId: s('pickupLocationId'),
         deliveryStatus: s('deliveryStatus'),
         requestedDate: s('requestedDate'),
-        salespersonMembershipId: s('salesperson'),
-        secondSalespersonMembershipId: second,
-        splitBps: second ? Math.round(Number(split || '50') * 100) : null,
         depositRequiredCents: Math.round(Number(String(d.get('deposit') ?? '0') || 0) * 100),
       });
     }
@@ -160,14 +185,15 @@ export function OrderHeaderDialog({
           <Field label="Salesperson">
             <Select
               name="salesperson"
-              defaultValue={order.salespersonMembershipId ?? ''}
+              value={salesperson}
+              onChange={(e) => setSalesperson(e.target.value)}
               disabled={!editable}
               data-testid="hdr-salesperson"
             >
               <option value="">— none —</option>
-              {members.map((m) => (
-                <option key={m.membershipId} value={m.membershipId}>
-                  {memberLabel(m)}
+              {memberOptions(order.salespersonMembershipId).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
                 </option>
               ))}
             </Select>
@@ -175,13 +201,15 @@ export function OrderHeaderDialog({
           <Field label="2nd salesperson">
             <Select
               name="secondSalesperson"
-              defaultValue={order.secondSalespersonMembershipId ?? ''}
+              value={second}
+              onChange={(e) => setSecond(e.target.value)}
               disabled={!editable}
+              data-testid="hdr-second-salesperson"
             >
               <option value="">— none —</option>
-              {members.map((m) => (
-                <option key={m.membershipId} value={m.membershipId}>
-                  {memberLabel(m)}
+              {memberOptions(order.secondSalespersonMembershipId).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
                 </option>
               ))}
             </Select>

@@ -309,6 +309,9 @@ export class TasksController {
         assigneeMembershipId: task.assigneeMembershipId,
         dueAt: task.dueAt,
       },
+      // The diff keeps only moved fields; the title names the task in the
+      // order's history even when it did not change (owner 2026-11-19).
+      metadata: { taskTitle: task.title },
     });
     await notifyMembers(this.db, {
       businessId: tenant.businessId!,

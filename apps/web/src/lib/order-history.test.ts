@@ -174,3 +174,129 @@ describe('describeOrderEvent (the KO-10117 history, owner 2026-10-13)', () => {
     ).toBe('Elyse charged Redelivery fee $75.00 on KO-10117-FEE (this order was closed)');
   });
 });
+
+describe('more detail so the owner need not investigate (WE-10091, owner 2026-11-19)', () => {
+  const LUCILLE = '35731b17-17a8-40d6-ad08-d10d55ece0c4';
+  const ELYSE = '51e34602-d0ed-4cc9-827a-5ff4639e5939';
+  const KOREATOWN = 'f2bf921b-9898-499f-b06d-5a3fc909b400';
+  const elyse = (over: Partial<OrderAuditRow>) => row({ actorName: 'Elyse', ...over });
+
+  it('names the item on a line change (the after carries lineId: null)', () => {
+    const e = describeOrderEvent(
+      elyse({
+        action: 'order.line.update',
+        changesJson: {
+          before: { lineId: LUCILLE, fulfillmentMethod: null },
+          after: { lineId: null, fulfillmentMethod: 'delivery' },
+        },
+        names: { [LUCILLE]: 'E KING LUCILLE 2.0 LUXE FIRM' },
+      }),
+    );
+    expect(e.text).toBe('Elyse changed E KING LUCILLE 2.0 LUXE FIRM: fulfillment none → delivery');
+  });
+
+  it('says a Save that changed nothing changed nothing', () => {
+    const e = describeOrderEvent(elyse({ action: 'order.update', changesJson: null }));
+    expect(e.text).toBe('Elyse saved Order details with no changes');
+    expect(e.tone).toBe('muted');
+  });
+
+  it('shows every field that moved, with addresses, stores and notes spelled out', () => {
+    const e = describeOrderEvent(
+      elyse({
+        action: 'order.update',
+        changesJson: {
+          before: {
+            requestedDate: '2026-11-14',
+            salespersonMembershipId: ELYSE,
+            pickupLocationId: null,
+            addressLine1: '1 Main St',
+            billingAddressJson: null,
+            deliveryInstructions: null,
+            orderSource: 'walk-in',
+          },
+          after: {
+            requestedDate: '2026-11-13',
+            salespersonMembershipId: null,
+            pickupLocationId: KOREATOWN,
+            addressLine1: '22 Oak Ave',
+            billingAddressJson: {
+              line1: '9 Pine Rd',
+              city: 'Los Angeles',
+              region: 'CA',
+              postalCode: '90004',
+            },
+            deliveryInstructions: 'Call   before\narrival',
+            orderSource: 'phone',
+          },
+        },
+        names: { [ELYSE]: 'Elyse', [KOREATOWN]: 'Koreatown' },
+      }),
+    );
+    expect(e.text).toBe(
+      'Elyse updated the order: delivery date 2026-11-14 → 2026-11-13, salesperson Elyse → none, ' +
+        'pickup store none → Koreatown, delivery address 1 Main St → 22 Oak Ave, ' +
+        'billing address none → 9 Pine Rd, Los Angeles, CA 90004, ' +
+        'delivery instructions none → “Call before arrival”, order source walk-in → phone',
+    );
+  });
+
+  it('reads notes, tasks, attachments and stock moves in full', () => {
+    const say = (over: Partial<OrderAuditRow>) => describeOrderEvent(elyse(over)).text;
+    expect(
+      say({ action: 'order.note.add', changesJson: { after: { preview: 'Customer wants AM' } } }),
+    ).toBe('Elyse added a note: “Customer wants AM”');
+    expect(
+      say({
+        action: 'order.task.create',
+        changesJson: {
+          after: {
+            title: 'Confirm address',
+            assigneeMembershipId: ELYSE,
+            dueAt: '2026-11-12T08:00:00Z',
+          },
+        },
+        names: { [ELYSE]: 'Elyse' },
+      }),
+    ).toBe('Elyse added a task “Confirm address” for Elyse due 2026-11-12');
+    expect(
+      say({
+        action: 'order.task.update',
+        changesJson: {
+          before: { taskId: 't1', status: 'open' },
+          after: { status: 'done' },
+          metadata: { taskTitle: 'Confirm address' },
+        },
+      }),
+    ).toBe('Elyse updated task “Confirm address”: status open → done');
+    expect(
+      say({ action: 'order.attachment.add', changesJson: { after: { name: 'receipt.pdf' } } }),
+    ).toBe('Elyse attached receipt.pdf');
+    expect(
+      say({ action: 'order.reserve', changesJson: { after: { reserved: 3, short: 1 } } }),
+    ).toBe('Elyse reserved 3 units of stock, 1 still short');
+  });
+
+  it('spells out delivery ticket flag moves', () => {
+    const e = describeOrderEvent(
+      row({
+        actorName: 'Henry',
+        action: 'delivery.ticket_flags',
+        changesJson: {
+          metadata: {
+            reason: 'header_change',
+            transitions: [
+              { record: 'header', date: '2026-11-13', from: 'P', to: 'R', rule: 'r1' },
+              { record: LUCILLE, date: '2026-11-13', from: null, to: 'P', rule: 'print' },
+            ],
+          },
+        },
+        names: { [LUCILLE]: 'E KING LUCILLE 2.0 LUXE FIRM' },
+      }),
+    );
+    expect(e.text).toBe(
+      'Henry updated the delivery ticket flags (header change): ticket 2026-11-13: printed → needs a reprint; ' +
+        'E KING LUCILLE 2.0 LUXE FIRM 2026-11-13: not printed → printed',
+    );
+  });
+});
