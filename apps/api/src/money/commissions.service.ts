@@ -3,6 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { DRIZZLE } from '../database/database.module';
+import { loadReturnsSettled } from '../orders/order-balance';
 
 /**
  * Commission accrual (STORIS cutover G5). Entries are written at the
@@ -133,7 +134,13 @@ export class CommissionsService {
    */
   async accrueForOrder(
     db: PostgresJsDatabase,
-    args: { businessId: string; orderId: string },
+    args: {
+      businessId: string;
+      orderId: string;
+      /** Share of the order still sold, in bps (a re-accrual after returns). */
+      keepBps?: number;
+      notes?: string;
+    },
   ): Promise<void> {
     const [order] = await db
       .select({
@@ -174,15 +181,84 @@ export class CommissionsService {
         plan.basis === 'percent_of_margin'
           ? this.marginCents(order.totalCents, lines)
           : order.totalCents;
-      const basis = Math.round((fullBasis * share) / 10000);
+      const basis = Math.round((((fullBasis * share) / 10000) * (args.keepBps ?? 10000)) / 10000);
       await this.write(db, {
         businessId: args.businessId,
         membershipId,
         orderId: args.orderId,
         basisCents: basis,
         rateBps: plan.rateBps,
+        notes: args.notes,
       });
     }
+  }
+
+  /**
+   * Salesperson correction (owner 2026-11-19, WE-10091): the order's
+   * commission follows its corrected salespeople. Whatever the order has
+   * accrued nets to zero per member with offsetting entries (paid entries
+   * included — the next payout claws them back, as a return would), then
+   * a completed order accrues again to the new salespeople on the share
+   * of the order that was not returned. Orders not yet completed accrue at
+   * completion as usual. Entries stay append-only, so the history shows
+   * both the reversal and the new accrual.
+   */
+  async reattributeOrder(
+    db: PostgresJsDatabase,
+    args: { businessId: string; orderId: string; reason: string },
+  ): Promise<void> {
+    const entries = await db
+      .select()
+      .from(schema.commissionEntries)
+      .where(
+        and(
+          eq(schema.commissionEntries.orderId, args.orderId),
+          inArray(schema.commissionEntries.status, ['pending', 'approved', 'paid']),
+        ),
+      );
+    const net = new Map<string, { basis: number; amount: number; rateBps: number }>();
+    for (const e of entries) {
+      const n = net.get(e.membershipId) ?? { basis: 0, amount: 0, rateBps: e.rateBps };
+      n.basis += e.basisCents;
+      n.amount += e.amountCents;
+      if (e.amountCents > 0) n.rateBps = e.rateBps;
+      net.set(e.membershipId, n);
+    }
+    const note = `salesperson corrected — ${args.reason}`.slice(0, 500);
+    for (const [membershipId, n] of net) {
+      if (n.amount === 0) continue;
+      await db.insert(schema.commissionEntries).values({
+        businessId: args.businessId,
+        membershipId,
+        orderId: args.orderId,
+        basisCents: -n.basis,
+        amountCents: -n.amount,
+        rateBps: n.rateBps,
+        period: this.period(),
+        notes: note,
+      });
+    }
+
+    const [order] = await db
+      .select({ status: schema.orders.status, totalCents: schema.orders.totalCents })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, args.orderId))
+      .limit(1);
+    if (!order || order.status !== 'completed') return;
+    const returned = await loadReturnsSettled(db, args.orderId, {
+      includePendingExchangeCredit: false,
+    });
+    const keepBps =
+      order.totalCents > 0
+        ? Math.max(0, Math.round(((order.totalCents - returned) / order.totalCents) * 10000))
+        : 0;
+    if (keepBps === 0) return;
+    await this.accrueForOrder(db, {
+      businessId: args.businessId,
+      orderId: args.orderId,
+      keepBps,
+      notes: note,
+    });
   }
 
   /**

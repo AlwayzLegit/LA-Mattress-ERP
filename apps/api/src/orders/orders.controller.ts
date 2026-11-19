@@ -16,11 +16,16 @@ import {
   Query,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { isCardBrand, isCardMethod, isFinancingMethod, isFinancingTerm } from '@jetnine/shared';
-import { sellingStoreCorrectionSchema, type SellingStoreCorrection } from '@jetnine/shared';
+import {
+  salespersonCorrectionSchema,
+  sellingStoreCorrectionSchema,
+  type SalespersonCorrection,
+  type SellingStoreCorrection,
+} from '@jetnine/shared';
 import { AuditService } from '../audit/audit.service';
 import { loadCategoryIndex } from '../catalog/category-tree';
 import { qualifiesForRecyclingFee } from './recycling-fee';
@@ -2487,6 +2492,122 @@ export class OrdersController {
       siblings.push({ ...sibling, requestedDate: date });
     }
     return siblings;
+  }
+
+  /**
+   * Owner 2026-11-19 (WE-10091): the salespeople on an order, corrected
+   * by the owner on any order — finished and locked ones too, since
+   * attribution never touches the goods, the truck or the money owed.
+   * Commission follows (CommissionsService.reattributeOrder).
+   */
+  @Patch('orders/:id/salesperson')
+  @RequirePermission('orders.update')
+  async correctSalesperson(
+    @CurrentTenant() tenant: RequestTenantContext,
+    @Param('id') id: string,
+    @Body() input: SalespersonCorrection,
+  ): Promise<OrderDetail> {
+    if (
+      !tenant.userId ||
+      tenant.apiKeyId ||
+      !tenant.businessId ||
+      tenant.dataScope !== 'all' ||
+      (!tenant.isSuperAdmin && tenant.roleName !== 'Owner')
+    ) {
+      throw new ForbiddenException('Only the owner can correct an order’s salesperson');
+    }
+    const parsed = salespersonCorrectionSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Choose the salespeople and enter a reason (up to 1,000 characters)',
+      );
+    }
+    const body = parsed.data;
+    const primary = body.salespersonMembershipId;
+    const second = primary ? body.secondSalespersonMembershipId : null;
+    if (second && second === primary) {
+      throw new BadRequestException('The 2nd salesperson must be a different member');
+    }
+    const splitBps = second ? (body.splitBps ?? 5000) : null;
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, id), eq(schema.orders.businessId, tenant.businessId)))
+      .for('update');
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.importedAt)
+      throw new BadRequestException('Imported order history cannot be reassigned');
+    if ((order.salespersonMembershipId ?? null) !== body.expectedSalespersonMembershipId) {
+      throw new ConflictException('The salesperson changed. Reload the order before correcting it');
+    }
+    const picked = [primary, second].filter((m): m is string => !!m);
+    if (picked.length > 0) {
+      const found = await this.db
+        .select({ id: schema.memberships.id })
+        .from(schema.memberships)
+        .where(
+          and(
+            inArray(schema.memberships.id, picked),
+            eq(schema.memberships.businessId, tenant.businessId),
+            ne(schema.memberships.status, 'removed'),
+          ),
+        );
+      if (found.length !== new Set(picked).size) {
+        throw new BadRequestException('Choose salespeople from this business');
+      }
+    }
+    if (
+      (order.salespersonMembershipId ?? null) === primary &&
+      (order.secondSalespersonMembershipId ?? null) === second &&
+      (second ? order.splitBps : null) === splitBps
+    ) {
+      return this.loadDetail(id);
+    }
+    await this.db
+      .update(schema.orders)
+      .set({
+        salespersonMembershipId: primary,
+        secondSalespersonMembershipId: second,
+        splitBps,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.orders.id, id));
+    const reason = body.reason.trim();
+    await this.commissions.reattributeOrder(this.db, {
+      businessId: tenant.businessId,
+      orderId: id,
+      reason,
+    });
+    await this.audit.log({
+      action: 'order.salesperson.correct',
+      targetType: 'order',
+      targetId: id,
+      before: {
+        salespersonMembershipId: order.salespersonMembershipId ?? null,
+        secondSalespersonMembershipId: order.secondSalespersonMembershipId ?? null,
+        splitBps: order.secondSalespersonMembershipId ? order.splitBps : null,
+      },
+      after: {
+        salespersonMembershipId: primary,
+        secondSalespersonMembershipId: second,
+        splitBps,
+      },
+      metadata: { reason, status: order.status },
+    });
+    void this.webhooks.fire({
+      businessId: tenant.businessId,
+      eventType: 'order.salesperson_corrected',
+      payload: {
+        orderId: id,
+        number: order.number,
+        previousSalespersonMembershipId: order.salespersonMembershipId ?? null,
+        salespersonMembershipId: primary,
+        secondSalespersonMembershipId: second,
+        splitBps,
+        reason,
+      },
+    });
+    return this.loadDetail(id);
   }
 
   /** Attribution correction only: never move stock or rewrite the invoice. */

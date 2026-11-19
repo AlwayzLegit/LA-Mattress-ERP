@@ -1,5 +1,26 @@
 # Sprint Status — STORIS Cutover
 
+## Owner corrects the salesperson on any order; commission follows — 2026-11-19
+
+Owner (WE-10091): the order was delivered with no salesperson (the #284 bug), and Order details is
+read-only on a finished order, so Elyse could not be put back.
+
+- `PATCH /v1/orders/:id/salesperson` (owner only, like the selling-store correction): salesperson,
+  2nd salesperson and split on **any** order — finished and locked ones too, since attribution never
+  touches the goods, the truck or the balance. Needs a reason and the salesperson the screen showed
+  (409 if it changed). Imported history is refused. Audit `order.salesperson.correct` (reason in
+  metadata), webhook `order.salesperson_corrected`.
+- Commission (`CommissionsService.reattributeOrder`): what the order accrued nets to zero per member
+  with offsetting entries (paid ones too — the next payout claws them back, as a return does); a
+  completed order then accrues to the new salespeople on the share not returned, in the current
+  period. Open orders accrue at completion as usual.
+- Order details dialog: on a locked or finished order the owner can still pick the salespeople and
+  must give a reason; saving calls the correction. The history reads "corrected the salespeople:
+  salesperson none → Elyse — <reason>".
+- `store-dashboard.int.spec`: owner-only, reason required, stale edit 409, a locked completed order
+  takes the correction and accrues 10%, moving it on nets the first member to zero, audit has the
+  reason.
+
 ## Order details kept the salesperson; change history spells everything out — 2026-11-19
 
 Owner (WE-10091): Elyse changed the delivery date and an item, then could not find her order. The
