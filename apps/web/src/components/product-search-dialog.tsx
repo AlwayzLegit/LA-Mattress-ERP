@@ -5,6 +5,7 @@ import { FIRMNESS_LEVELS, MATTRESS_SIZES } from '@jetnine/shared';
 import { api } from '@/lib/api';
 import { Money } from '@/components/money';
 import { Button, Dialog, Field, Input, Kbd, LoadingRows, Select, rowKeys } from '@/components/ui';
+import { AsIsPieceDialog, type AsIsPiece } from '@/components/as-is-piece-dialog';
 
 /**
  * Add Product (redesign Phase 5, README §3.1, canvas 4c): a real dialog
@@ -41,6 +42,9 @@ export interface SearchRow {
   categoryPath?: string | null;
   availableHere: number;
   availableTotal: number;
+  /** Owner 2026-10-30: sellable As-Is pieces at From / everywhere. */
+  asIsHere?: number;
+  asIsTotal?: number;
   atpDate: string | null;
   /** Product's own rate at the store (0 = untaxed), null = the store rate applies. */
   taxRateBps?: number | null;
@@ -67,7 +71,8 @@ export function ProductSearchDialog({
   locations: ProductSearchLocation[];
   storeId: string;
   onChangeLocation: (id: string) => void;
-  onAdd: (row: SearchRow) => void;
+  /** With a piece, the caller adds the row as an as-is line selling that piece. */
+  onAdd: (row: SearchRow, asIs?: AsIsPiece) => void;
   onClose: () => void;
   /** Why the footer's source is what it is: "the default; take-with lines switch to the store". */
   sourceNote?: string;
@@ -78,6 +83,9 @@ export function ProductSearchDialog({
   const [size, setSize] = useState('');
   const [firmness, setFirmness] = useState('');
   const [inStockFirst, setInStockFirst] = useState(true);
+  /** Owner 2026-10-30: only items with a sellable As-Is piece at From. */
+  const [asIsOnly, setAsIsOnly] = useState(false);
+  const [asIsFor, setAsIsFor] = useState<SearchRow | null>(null);
   const [rows, setRows] = useState<SearchRow[] | null>(null);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
   const [brands, setBrands] = useState<VendorRow[]>([]);
@@ -116,6 +124,7 @@ export function ProductSearchDialog({
       if (firmness) params.set('firmness', firmness);
       params.set('locationId', locationId);
       params.set('limit', '100');
+      if (asIsOnly) params.set('asIs', '1');
       void api<SearchRow[]>(`/v1/pos/product-search?${params.toString()}`)
         .then((r) => {
           setRows(r);
@@ -123,7 +132,7 @@ export function ProductSearchDialog({
         })
         .catch(() => setRows([]));
     }, 220);
-  }, [q, maker, size, firmness, locationId]);
+  }, [q, maker, size, firmness, locationId, asIsOnly]);
 
   const makers = useMemo(
     () =>
@@ -273,6 +282,15 @@ export function ProductSearchDialog({
             />
             In stock first
           </label>
+          <label className="picker-check">
+            <input
+              type="checkbox"
+              checked={asIsOnly}
+              onChange={(e) => setAsIsOnly(e.target.checked)}
+              data-testid="as-is-filter"
+            />
+            As-is only
+          </label>
         </div>
 
         <div className="picker-list" ref={listRef}>
@@ -290,6 +308,11 @@ export function ProductSearchDialog({
                   <th>Firmness</th>
                   <th className="num">Price</th>
                   <th className="num">At {fromName}</th>
+                  <th className="num">
+                    <abbr title="As-Is pieces at this location that can be sold as-is — pick one with the As-is button">
+                      As-is
+                    </abbr>
+                  </th>
                   <th className="num">All stores</th>
                   <th className="num">
                     <abbr title="Available to promise: on hand minus reserved, plus units on open purchase orders">
@@ -333,6 +356,12 @@ export function ProductSearchDialog({
                     >
                       {r.availableHere}
                     </td>
+                    <td
+                      className={`num mono picker-asis${(r.asIsHere ?? 0) > 0 ? ' is-in' : ''}`}
+                      data-testid="result-as-is"
+                    >
+                      {r.asIsHere ?? 0}
+                    </td>
                     <td className="num mono">{r.availableTotal}</td>
                     <td className="num mono">
                       {r.availableTotal > 0
@@ -342,6 +371,22 @@ export function ProductSearchDialog({
                           : '—'}
                     </td>
                     <td className="actions">
+                      {(r.asIsHere ?? 0) > 0 && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="row-action mr-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAsIsFor(r);
+                          }}
+                          aria-label={`Add ${r.productName} as-is`}
+                          title="Pick one of the As-Is pieces at this location"
+                          data-testid="result-add-as-is"
+                        >
+                          As-is
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         className="row-action"
@@ -358,7 +403,7 @@ export function ProductSearchDialog({
                 ))}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="table-empty">
+                    <td colSpan={10} className="table-empty">
                       <div style={{ fontWeight: 600, color: 'var(--text)' }}>
                         Nothing matches {q.trim() ? `“${q.trim()}”` : 'these filters'}
                       </div>
@@ -392,6 +437,21 @@ export function ProductSearchDialog({
           </span>
         </div>
       </div>
+      {asIsFor && (
+        <AsIsPieceDialog
+          variantId={asIsFor.variantId}
+          locationId={locationId}
+          locationName={fromName}
+          productName={[asIsFor.productName, asIsFor.variantName].filter(Boolean).join(' — ')}
+          listPriceCents={asIsFor.priceCents}
+          onPick={(piece) => {
+            const row = asIsFor;
+            setAsIsFor(null);
+            onAdd(row, piece);
+          }}
+          onClose={() => setAsIsFor(null)}
+        />
+      )}
     </Dialog>
   );
 }

@@ -63,6 +63,8 @@ interface AsIsRow {
     fromName: string | null;
     documentDate: string | null;
   } | null;
+  /** Owner 2026-10-30: the order or transfer holding, moving or having sold the piece. */
+  holder: { kind: 'order' | 'stock_transfer'; documentId: string; documentNumber: string } | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -70,6 +72,9 @@ const STATUS_LABELS: Record<string, string> = {
   restocked: 'restocked',
   vendor_return: 'vendor return',
   scrapped: 'scrapped',
+  committed: 'on an order or transfer',
+  in_transit: 'in transit',
+  sold: 'sold as-is',
 };
 
 /** Where the piece came from, with the invoice / document clickable. */
@@ -254,7 +259,24 @@ export default function AsIsPage() {
       id: 'status',
       label: 'Status',
       sortValue: (r) => r.status,
-      render: (r) => <StatusBadge status={r.status} />,
+      render: (r) => (
+        <>
+          <StatusBadge status={r.status} />
+          {r.holder && (
+            <div className="text-xs" data-testid="as-is-holder">
+              <Link
+                href={
+                  r.holder.kind === 'stock_transfer'
+                    ? `/transfers/${r.holder.documentId}`
+                    : `/orders/${r.holder.documentId}`
+                }
+              >
+                {r.holder.documentNumber}
+              </Link>
+            </div>
+          )}
+        </>
+      ),
     },
     {
       id: 'actions',
@@ -329,7 +351,7 @@ export default function AsIsPage() {
     <div>
       <PageHeader
         title="As-Is review"
-        sub="Returned, warranty, and defect units. Nothing here is sellable until a review restocks it."
+        sub="Returned, warranty, and defect units. Restock a piece into new stock, or sell it as-is by picking it on a sales order — the As-is button in Add product."
       />
 
       <Toolbar>
@@ -339,6 +361,9 @@ export default function AsIsPage() {
           aria-label="Filter by status"
         >
           <option value="pending_review">Pending review</option>
+          <option value="committed">On an order or transfer</option>
+          <option value="in_transit">In transit</option>
+          <option value="sold">Sold as-is</option>
           <option value="restocked">Restocked</option>
           <option value="vendor_return">Vendor returns</option>
           <option value="scrapped">Scrapped</option>

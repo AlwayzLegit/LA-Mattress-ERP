@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { schema } from '@jetnine/db';
 import { CostingService } from '../costing/costing.service';
 import { DRIZZLE } from '../database/database.module';
 import { computeTotals } from '../sales/totals';
+import { commitPieceToOrderLine, releasePiece, sellPiece } from '../returns/as-is-pieces';
 import {
   planReleases,
   planReservations,
@@ -77,6 +78,8 @@ export class OrdersService {
       inArray(schema.orders.status, ['open', 'partially_fulfilled']),
       sql`${schema.orders.lockedAt} IS NULL`,
       eq(schema.orderLines.lineType, 'stock'),
+      // Owner 2026-10-30: an as-is line holds its piece, never stock.
+      isNull(schema.orderLines.asIsItemId),
       sql`${need} > 0`,
     ];
     if (args.variantIds && args.variantIds.length > 0) {
@@ -233,6 +236,20 @@ export class OrdersService {
     );
   }
 
+  /** Which of these lines hold an As-Is piece (line id → piece id). */
+  private async asIsLineMap(
+    db: PostgresJsDatabase,
+    lineIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    const ids = [...new Set(lineIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await db
+      .select({ id: schema.orderLines.id, asIsItemId: schema.orderLines.asIsItemId })
+      .from(schema.orderLines)
+      .where(inArray(schema.orderLines.id, ids));
+    return new Map(rows.filter((r) => r.asIsItemId).map((r) => [r.id, r.asIsItemId as string]));
+  }
+
   /**
    * Commit units to an order: bump `inventory_levels.reserved`, bump the
    * line's `qty_reserved`, and write an `order_reserve` movement per line
@@ -252,7 +269,14 @@ export class OrdersService {
       reservations: readonly Reservation[];
     },
   ): Promise<void> {
+    const asIsLines = await this.asIsLineMap(
+      db,
+      args.reservations.map((r) => r.orderLineId),
+    );
     for (const r of args.reservations) {
+      // Owner 2026-10-30: an as-is line's hold is its piece (reserveOrder
+      // commits it); it never counts against the stock level.
+      if (asIsLines.has(r.orderLineId)) continue;
       await db
         .update(schema.orderLines)
         .set({ qtyReserved: sql`${schema.orderLines.qtyReserved} + ${r.quantity}` })
@@ -313,6 +337,10 @@ export class OrdersService {
     },
   ): Promise<void> {
     const updateLines = args.updateLines ?? true;
+    const asIsLines = await this.asIsLineMap(
+      db,
+      args.releases.map((r) => r.orderLineId),
+    );
     for (const r of args.releases) {
       if (updateLines) {
         await db
@@ -321,6 +349,14 @@ export class OrdersService {
             qtyReserved: sql`GREATEST(0, ${schema.orderLines.qtyReserved} - ${r.quantity})`,
           })
           .where(eq(schema.orderLines.id, r.orderLineId));
+      }
+
+      // Owner 2026-10-30: releasing an as-is line hands its piece back to
+      // the As-Is queue; the stock level never held it.
+      const pieceId = asIsLines.get(r.orderLineId);
+      if (pieceId) {
+        await releasePiece(db, pieceId);
+        continue;
       }
 
       await db
@@ -360,7 +396,7 @@ export class OrdersService {
     db: PostgresJsDatabase,
     args: { businessId: string; orderId: string; locationId: string; actorUserId: string | null },
   ): Promise<{ reservations: Reservation[]; shortfalls: Shortfall[] }> {
-    const lines = await db
+    const allLines = await db
       .select({
         id: schema.orderLines.id,
         variantId: schema.orderLines.variantId,
@@ -368,9 +404,36 @@ export class OrdersService {
         qtyReserved: schema.orderLines.qtyReserved,
         lineType: schema.orderLines.lineType,
         sourceLocationId: schema.orderLines.sourceLocationId,
+        asIsItemId: schema.orderLines.asIsItemId,
       })
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, args.orderId));
+    const merged = { reservations: [] as Reservation[], shortfalls: [] as Shortfall[] };
+
+    // Owner 2026-10-30: an as-is line reserves by committing its piece —
+    // the piece is the unit, so the line is either fully held or short.
+    const lines = allLines.filter((l) => !l.asIsItemId);
+    for (const l of allLines) {
+      if (!l.asIsItemId || !l.variantId) continue;
+      const need = l.quantity - l.qtyReserved;
+      if (need <= 0) continue;
+      const [piece] = await db
+        .select({ id: schema.asIsItems.id, status: schema.asIsItems.status })
+        .from(schema.asIsItems)
+        .where(eq(schema.asIsItems.id, l.asIsItemId))
+        .limit(1)
+        .for('update');
+      if (piece && piece.status === 'pending_review') {
+        await commitPieceToOrderLine(db, piece.id, l.id);
+        await db
+          .update(schema.orderLines)
+          .set({ qtyReserved: l.quantity })
+          .where(eq(schema.orderLines.id, l.id));
+        merged.reservations.push({ orderLineId: l.id, variantId: l.variantId, quantity: need });
+      } else {
+        merged.shortfalls.push({ orderLineId: l.id, variantId: l.variantId, quantity: need });
+      }
+    }
 
     // Per-line fulfill-from: each line reserves at its own source
     // (line override, else args.locationId — the order's default). Lines
@@ -381,7 +444,6 @@ export class OrdersService {
       if (!groups.has(loc)) groups.set(loc, []);
       groups.get(loc)!.push(l);
     }
-    const merged = { reservations: [] as Reservation[], shortfalls: [] as Shortfall[] };
     for (const [loc, group] of groups) {
       const variantIds = group.map((l) => l.variantId).filter((id): id is string => Boolean(id));
       const levels = await this.stockLevels(db, loc, variantIds, { lock: true });
@@ -651,6 +713,10 @@ export class OrdersService {
       .from(schema.orderLines)
       .where(eq(schema.orderLines.orderId, args.orderId));
     const sourceOf = new Map(sourceRows.map((r) => [r.id, r.sourceLocationId]));
+    const asIsLines = await this.asIsLineMap(
+      db,
+      args.steps.map((s) => s.orderLineId),
+    );
 
     for (const step of args.steps) {
       const stepLocationId = sourceOf.get(step.orderLineId) ?? args.locationId;
@@ -663,6 +729,14 @@ export class OrdersService {
         .where(eq(schema.orderLines.id, step.orderLineId));
 
       if (!step.variantId) continue; // free-text line: no stock to move
+
+      // Owner 2026-10-30: an as-is piece leaves the As-Is queue as sold —
+      // it was never in the stock level, so nothing else moves.
+      const pieceId = asIsLines.get(step.orderLineId);
+      if (pieceId) {
+        await sellPiece(db, pieceId, step.orderLineId);
+        continue;
+      }
 
       await db
         .insert(schema.inventoryLevels)

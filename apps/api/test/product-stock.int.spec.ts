@@ -466,6 +466,7 @@ describe('GET /v1/products/:id — stock block and STORIS fields', () => {
       asIsOnHand: 3,
       asIsAvailable: 2,
       asIsNonSellable: 1,
+      asIsReserved: 0,
       layawayReserved: 1,
       onOrderReserved: 0,
     });
