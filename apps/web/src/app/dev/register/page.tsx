@@ -270,19 +270,6 @@ function installStub() {
         }));
       return json(rows);
     }
-    if (p === '/v1/search') {
-      const digits = (q.get('q') ?? '').replace(/\D/g, '');
-      const hit = CUSTOMERS.find(
-        (c) => digits.length >= 7 && (c.phone ?? '').replace(/\D/g, '').includes(digits),
-      );
-      return json({
-        customers: hit
-          ? [{ id: hit.id, name: `${hit.firstName} ${hit.lastName}`, phone: hit.phone }]
-          : [],
-        orders: [],
-        sales: [],
-      });
-    }
     return json({}, 404);
   };
 }

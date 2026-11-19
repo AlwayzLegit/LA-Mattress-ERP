@@ -317,6 +317,7 @@ export function NewSale({
   const [custOpen, setCustOpen] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [creatingBusy, setCreatingBusy] = useState(false);
+  const [dupeChecking, setDupeChecking] = useState(false);
   const [newCust, setNewCust] = useState(EMPTY_NEW_CUSTOMER);
   const [dupeWarn, setDupeWarn] = useState<{
     id: string;
@@ -326,6 +327,7 @@ export function NewSale({
   const [billDiffers, setBillDiffers] = useState(false);
   const [newBill, setNewBill] = useState(EMPTY_ADDRESS);
   const custTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const custSeq = useRef(0);
   const customerInput = useRef<HTMLInputElement>(null);
 
   // --- ship to ---
@@ -421,20 +423,37 @@ export function NewSale({
 
   // ---------------------------------------------------------------- effects
 
+  // Owner 2026-10-16: the duplicate check used the all-records search and
+  // took 66 s on a busy night, so Create went through before the warning
+  // showed and a customer was made twice. It now asks the indexed customer
+  // search, and Create waits until the answer is in.
   useEffect(() => {
     const digits = newCust.phone.replace(/\D/g, '');
     if (!creatingCustomer || digits.length < 7) {
       setDupeWarn(null);
+      setDupeChecking(false);
       return;
     }
+    let stale = false;
+    setDupeChecking(true);
     const t = setTimeout(() => {
-      void api<{ customers: { id: string; name: string; phone: string | null }[] }>(
-        `/v1/search?q=${encodeURIComponent(digits)}`,
-      )
-        .then((r) => setDupeWarn(r.customers[0] ?? null))
-        .catch(() => setDupeWarn(null));
+      void api<{ data: CustomerHit[] }>(`/v1/customers?q=${encodeURIComponent(digits)}&limit=1`)
+        .then((r) => {
+          if (stale) return;
+          const c = r.data[0];
+          setDupeWarn(c ? { id: c.id, name: customerName(c), phone: c.phone } : null);
+        })
+        .catch(() => {
+          if (!stale) setDupeWarn(null);
+        })
+        .finally(() => {
+          if (!stale) setDupeChecking(false);
+        });
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
   }, [creatingCustomer, newCust.phone]);
 
   // §7: while writing a delivery sale, show how many stops the chosen day has left.
@@ -617,6 +636,7 @@ export function NewSale({
   // Universal customer search — debounced.
   useEffect(() => {
     if (custTimer.current) clearTimeout(custTimer.current);
+    const seq = ++custSeq.current;
     const q = custQuery.trim();
     if (q.length < 2) {
       setCustHits([]);
@@ -627,15 +647,18 @@ export function NewSale({
         `/v1/customers?q=${encodeURIComponent(q)}&limit=20`,
       )
         .then((r) => {
+          // A slow answer for "310" must not replace the one for the full number.
+          if (seq !== custSeq.current) return;
           setCustHits(r.data);
           setCustMore(r.nextCursor != null || r.data.length >= 20);
           setCustOpen(true);
         })
         .catch(() => {
+          if (seq !== custSeq.current) return;
           setCustHits([]);
           setCustMore(false);
         });
-    }, 250);
+    }, 400);
   }, [custQuery]);
 
   // Sourcing: untouched lines follow the order's fulfillment / store / default.
@@ -2040,6 +2063,14 @@ export function NewSale({
         : codActive && totals.paidCents === 0
           ? 'Complete — COD'
           : 'Complete with balance';
+  // Owner 2026-10-16: a new customer typed into the form but never saved
+  // left Complete greyed out behind a small grey hint, and the register
+  // looked frozen. Name them and say which button finishes the job.
+  const unsavedCustomerName =
+    !customer && creatingCustomer
+      ? `${newCust.firstName} ${newCust.lastName}`.trim() ||
+        (newCust.phone.trim() ? formatPhone(newCust.phone) : '')
+      : '';
   const completeHint = isExchange
     ? !exchangeReady
       ? exchangeReturnId
@@ -2065,7 +2096,9 @@ export function NewSale({
                 ? `Writes the exchange and books the pickup${exchangeReturn.pickupDate ? ` for ${exchangeReturn.pickupDate}` : ''}; collect the net from the order page`
                 : 'Writes the exchange now; collect the net from the order page, the truck confirms the credit'
     : !customer
-      ? 'Add a customer to complete'
+      ? unsavedCustomerName
+        ? `Click Create customer to finish adding ${unsavedCustomerName}`
+        : 'Add a customer to complete'
       : lines.length === 0
         ? ' '
         : needsMoney
@@ -2661,6 +2694,7 @@ export function NewSale({
                 dupeWarn={dupeWarn}
                 onUseExisting={(id) => void attachExistingCustomer(id)}
                 busy={creatingBusy}
+                checking={dupeChecking}
                 onCancel={() => {
                   setCreatingCustomer(false);
                   clearNewCustomer();
@@ -3447,7 +3481,13 @@ export function NewSale({
                   </div>
                 </>
               )}
-              <div className="reg-hint">{completeHint}</div>
+              {unsavedCustomerName && !isExchange ? (
+                <Alert tone="warning" data-testid="unsaved-customer-warning">
+                  {completeHint}
+                </Alert>
+              ) : (
+                <div className="reg-hint">{completeHint}</div>
+              )}
             </section>
           ) : (
             <section className="reg-card reg-done" aria-label="Sale complete">
@@ -3813,6 +3853,7 @@ function NewCustomerForm({
   dupeWarn,
   onUseExisting,
   busy,
+  checking,
   onCancel,
   onCreate,
 }: {
@@ -3830,6 +3871,8 @@ function NewCustomerForm({
   dupeWarn: { id: string; name: string; phone: string | null } | null;
   onUseExisting: (id: string) => void;
   busy: boolean;
+  /** The duplicate-phone check is still out — Create waits for it. */
+  checking: boolean;
   onCancel: () => void;
   onCreate: () => void;
 }) {
@@ -4010,8 +4053,13 @@ function NewCustomerForm({
         <Button disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
-        <Button variant="primary" data-testid="create-customer" disabled={busy} onClick={onCreate}>
-          {busy ? 'Creating…' : 'Create'}
+        <Button
+          variant="primary"
+          data-testid="create-customer"
+          disabled={busy || checking}
+          onClick={onCreate}
+        >
+          {busy ? 'Creating…' : checking ? 'Checking phone…' : 'Create customer'}
         </Button>
       </div>
     </div>
