@@ -7291,7 +7291,7 @@ Create went through before "already exists — use them instead?" could show. Th
 database is Render basic_256mb (0.1 CPU) and was running near its limit; every phone search did a
 `regexp_replace` over every customer row.
 
-- Migration 0112: `pg_trgm` + GIN trigram indexes on the same digits-only phone / phone2
+- Migration 0116: `pg_trgm` + GIN trigram indexes on the same digits-only phone / phone2
   expressions the customer search uses, so `LIKE '%<digits>%'` is an index lookup.
 - Register duplicate check now asks the indexed `/v1/customers?q=<digits>&limit=1`, and **Create
   customer** is disabled ("Checking phone…") until the answer is in.
