@@ -324,6 +324,11 @@ export function describeOrderEvent(row: OrderAuditRow): OrderEvent {
       return say(
         `moved the sale from ${String(b.locationName ?? 'one store')} to ${String(a.locationName ?? 'another')}${a.reason ? ` — ${String(a.reason)}` : ''}`,
       );
+    case 'order.salesperson.correct': {
+      const what = changes(b, a, names);
+      const why = typeof m.reason === 'string' && m.reason.trim() ? ` — ${m.reason.trim()}` : '';
+      return say(`corrected the salespeople${what ? `: ${what}` : ''}${why}`);
+    }
     case 'order.lock':
       return say(
         `printed the delivery ticket${typeof m.copyNumber === 'number' && m.copyNumber > 1 ? ` (copy ${m.copyNumber})` : ''} — order locked`,

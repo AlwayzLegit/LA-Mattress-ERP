@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { useOptionalActingStore } from '@/lib/acting-store';
 import { Alert, Button, Field, FormGrid, Input, Select } from '@/components/ui';
 import { ActionDialog, errorText } from './dialog';
 import type { ActionOrder, OpsLists } from './types';
@@ -80,6 +81,12 @@ export function OrderHeaderDialog({
   // the salesperson and the order left their "My orders". The picks are
   // controlled, the current ones always have an option, and the
   // salesperson fields only travel when someone changed them.
+  // Owner 2026-11-19: a finished or locked order still takes an owner's
+  // salesperson correction (PATCH /salesperson, with a reason; commission
+  // follows) — WE-10091 was delivered with nobody on it.
+  const acting = useOptionalActingStore();
+  const canCorrect = !editable && acting?.me?.roleName === 'Owner';
+  const salesEditable = editable || canCorrect;
   const [salesperson, setSalesperson] = useState(order.salespersonMembershipId ?? '');
   const [second, setSecond] = useState(order.secondSalespersonMembershipId ?? '');
   const memberOptions = (current: string | null | undefined) => {
@@ -103,32 +110,66 @@ export function OrderHeaderDialog({
       notes: s('notes'),
     };
     const body: Record<string, unknown> = { ...meta };
-    if (editable) {
-      const split = String(d.get('splitPct') ?? '').trim();
-      const primary = salesperson || null;
-      const secondPick = second || null;
-      const salesChanged =
-        primary !== (order.salespersonMembershipId ?? null) ||
-        secondPick !== (order.secondSalespersonMembershipId ?? null) ||
-        (secondPick != null &&
-          Math.round(Number(split || '50') * 100) !== (order.splitBps ?? 5000));
-      if (salesChanged) {
-        Object.assign(body, {
-          salespersonMembershipId: primary,
-          secondSalespersonMembershipId: secondPick,
-          splitBps: secondPick ? Math.round(Number(split || '50') * 100) : null,
-        });
+    const split = String(d.get('splitPct') ?? '').trim();
+    const primary = salesperson || null;
+    const secondPick = second || null;
+    const salesChanged =
+      primary !== (order.salespersonMembershipId ?? null) ||
+      secondPick !== (order.secondSalespersonMembershipId ?? null) ||
+      (secondPick != null && Math.round(Number(split || '50') * 100) !== (order.splitBps ?? 5000));
+    if (!editable) {
+      const correctionReason = String(d.get('salesReason') ?? '').trim();
+      if (salesChanged && !correctionReason) {
+        setError('Enter a reason for the salesperson correction');
+        return;
       }
+      const metaChanged = (Object.keys(meta) as (keyof typeof meta)[]).some(
+        (k) => meta[k] !== ((order as unknown as Record<string, unknown>)[k] ?? null),
+      );
+      setSaving(true);
+      setError(null);
+      try {
+        if (salesChanged) {
+          await api(`/v1/orders/${order.id}/salesperson`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              salespersonMembershipId: primary,
+              secondSalespersonMembershipId: primary ? secondPick : null,
+              splitBps: primary && secondPick ? Math.round(Number(split || '50') * 100) : null,
+              expectedSalespersonMembershipId: order.salespersonMembershipId ?? null,
+              reason: correctionReason,
+            }),
+          });
+        }
+        if (metaChanged) {
+          await api(`/v1/orders/${order.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        }
+        await onSaved();
+        toast.success(salesChanged ? 'Salesperson corrected' : 'Order details saved');
+        onClose();
+      } catch (err) {
+        setError(errorText(err));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (salesChanged) {
       Object.assign(body, {
-        orderKind: s('orderKind') ?? order.orderKind,
-        fulfillmentType: s('fulfillmentType') ?? order.fulfillmentType,
-        stockLocationId: s('stockLocationId'),
-        pickupLocationId: s('pickupLocationId'),
-        deliveryStatus: s('deliveryStatus'),
-        requestedDate: s('requestedDate'),
-        depositRequiredCents: Math.round(Number(String(d.get('deposit') ?? '0') || 0) * 100),
+        salespersonMembershipId: primary,
+        secondSalespersonMembershipId: secondPick,
+        splitBps: secondPick ? Math.round(Number(split || '50') * 100) : null,
       });
     }
+    Object.assign(body, {
+      orderKind: s('orderKind') ?? order.orderKind,
+      fulfillmentType: s('fulfillmentType') ?? order.fulfillmentType,
+      stockLocationId: s('stockLocationId'),
+      pickupLocationId: s('pickupLocationId'),
+      deliveryStatus: s('deliveryStatus'),
+      requestedDate: s('requestedDate'),
+      depositRequiredCents: Math.round(Number(String(d.get('deposit') ?? '0') || 0) * 100),
+    });
     setSaving(true);
     setError(null);
     try {
@@ -155,6 +196,8 @@ export function OrderHeaderDialog({
           <Alert tone="warning">
             This order is locked or finished: attribution, source, terminal, instructions and
             printed notes still save; the rest is read-only.
+            {canCorrect &&
+              ' As the owner you can still correct the salespeople — give a reason; their commission moves with them.'}
           </Alert>
         )}
         <strong>Basic information</strong>
@@ -187,7 +230,7 @@ export function OrderHeaderDialog({
               name="salesperson"
               value={salesperson}
               onChange={(e) => setSalesperson(e.target.value)}
-              disabled={!editable}
+              disabled={!salesEditable}
               data-testid="hdr-salesperson"
             >
               <option value="">— none —</option>
@@ -203,7 +246,7 @@ export function OrderHeaderDialog({
               name="secondSalesperson"
               value={second}
               onChange={(e) => setSecond(e.target.value)}
-              disabled={!editable}
+              disabled={!salesEditable}
               data-testid="hdr-second-salesperson"
             >
               <option value="">— none —</option>
@@ -222,9 +265,19 @@ export function OrderHeaderDialog({
               max={100}
               step="1"
               defaultValue={order.splitBps != null ? String(order.splitBps / 100) : '50'}
-              disabled={!editable}
+              disabled={!salesEditable}
             />
           </Field>
+          {canCorrect && (
+            <Field label="Reason for the salesperson correction">
+              <Input
+                name="salesReason"
+                maxLength={1000}
+                placeholder="e.g. Saved without the salesperson by mistake"
+                data-testid="hdr-sales-reason"
+              />
+            </Field>
+          )}
           <Field label="Fulfillment method">
             <Select
               name="fulfillmentType"

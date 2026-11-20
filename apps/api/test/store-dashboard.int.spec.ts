@@ -1396,3 +1396,102 @@ describe('owner cash hand-off', () => {
     await as('owner').delete(`/v1/dashboard/cash-pickups/${legacy!.id}/owner-received`).expect(409);
   });
 });
+
+describe('owner salesperson corrections (WE-10091, owner 2026-11-19)', () => {
+  it('puts the salesperson on a completed order, moves the commission, and audits it', async () => {
+    const { orderId, planId } = await withDb(async (db) => {
+      const [plan] = await db
+        .insert(schema.commissionPlans)
+        .values({ businessId, name: 'SP correction 10%', basis: 'percent_of_sale', rateBps: 1000 })
+        .returning();
+      await db
+        .update(schema.memberships)
+        .set({ commissionPlanId: plan!.id })
+        .where(eq(schema.memberships.id, members.rep.membershipId));
+      const [order] = await db
+        .insert(schema.orders)
+        .values({
+          businessId,
+          locationId: aStoreId,
+          number: 'SO-SP-001',
+          status: 'completed',
+          completedAt: new Date(),
+          lockedAt: new Date(),
+          customerId,
+          salespersonMembershipId: null,
+          subtotalCents: 100_000,
+          totalCents: 100_000,
+        })
+        .returning();
+      return { orderId: order!.id, planId: plan!.id };
+    });
+    const commissions = () =>
+      withDb((db) =>
+        db
+          .select({
+            membershipId: schema.commissionEntries.membershipId,
+            amountCents: schema.commissionEntries.amountCents,
+          })
+          .from(schema.commissionEntries)
+          .where(eq(schema.commissionEntries.orderId, orderId)),
+      );
+    const fix = {
+      salespersonMembershipId: members.rep.membershipId,
+      expectedSalespersonMembershipId: null,
+      reason: 'Saved without the salesperson by mistake',
+    };
+
+    await as('manager').patch(`/v1/orders/${orderId}/salesperson`).send(fix).expect(403);
+    await as('rep').patch(`/v1/orders/${orderId}/salesperson`).send(fix).expect(403);
+    await as('owner')
+      .patch(`/v1/orders/${orderId}/salesperson`)
+      .send({ ...fix, reason: ' ' })
+      .expect(400);
+    await as('owner')
+      .patch(`/v1/orders/${orderId}/salesperson`)
+      .send({ ...fix, expectedSalespersonMembershipId: members.manager.membershipId })
+      .expect(409);
+
+    // Finished and locked: the correction still lands, and the 10% plan accrues.
+    const fixed = await as('owner')
+      .patch(`/v1/orders/${orderId}/salesperson`)
+      .send(fix)
+      .expect(200);
+    expect(fixed.body).toMatchObject({
+      status: 'completed',
+      salespersonMembershipId: members.rep.membershipId,
+    });
+    expect(await commissions()).toEqual([
+      { membershipId: members.rep.membershipId, amountCents: 10_000 },
+    ]);
+
+    // Moving it on reverses the rep's commission; the manager has no plan.
+    await as('owner')
+      .patch(`/v1/orders/${orderId}/salesperson`)
+      .send({
+        ...fix,
+        salespersonMembershipId: members.manager.membershipId,
+        expectedSalespersonMembershipId: members.rep.membershipId,
+      })
+      .expect(200);
+    const after = await commissions();
+    expect(after).toHaveLength(2);
+    expect(after.reduce((s, e) => s + e.amountCents, 0)).toBe(0);
+
+    const history = await as('owner')
+      .get(`/v1/audit-logs?targetType=order&targetId=${orderId}&action=order.salesperson.correct`)
+      .expect(200);
+    const rows = (history.body.data ?? history.body) as {
+      changesJson: { metadata?: { reason?: string } };
+    }[];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.changesJson.metadata?.reason).toBe(fix.reason);
+
+    await withDb((db) =>
+      db
+        .update(schema.memberships)
+        .set({ commissionPlanId: null })
+        .where(eq(schema.memberships.commissionPlanId, planId)),
+    );
+  });
+});
