@@ -57,7 +57,7 @@ export const NAV: NavGroup[] = [
       { href: '/sales', label: 'Sales' },
       { href: '/shifts', label: 'Shifts' },
       { href: '/reports', label: 'Reports' },
-      { href: '/commissions', label: 'Commissions' },
+      { href: '/bonuses', label: 'Bonuses' },
       { href: '/gl', label: 'General ledger' },
     ],
   },
@@ -135,7 +135,8 @@ export const GO_KEYS: Record<string, { href: string; label: string }> = {
 
 /** The groups a member sees: role-trimmed, then minus the owner's hidden tabs. */
 export function navFor(roleName: string | null | undefined, hiddenNav: string[]): NavGroup[] {
-  const hidden = new Set(hiddenNav);
+  // Commissions became Bonuses (owner 2026-11-20); a tab hidden under the old path stays hidden.
+  const hidden = new Set(hiddenNav.map((h) => (h === '/commissions' ? '/bonuses' : h)));
   const base = roleName === 'Cashier' ? CASHIER_NAV : NAV;
   return base
     .map((g) => ({ ...g, items: g.items.filter((i) => !hidden.has(i.href)) }))

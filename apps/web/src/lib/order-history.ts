@@ -74,7 +74,7 @@ const FIELD: Record<string, string> = {
   size: 'size',
   salespersonMembershipId: 'salesperson',
   secondSalespersonMembershipId: 'second salesperson',
-  splitBps: 'commission split',
+  splitBps: 'bonus split',
   taxRateBps: 'tax rate',
   depositRequiredCents: 'deposit due',
   customerId: 'customer',

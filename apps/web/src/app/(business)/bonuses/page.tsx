@@ -106,7 +106,7 @@ const STATEMENT_COLUMNS: ColumnDef<StatementEntry>[] = [
   },
   {
     id: 'commission',
-    label: 'Commission',
+    label: 'Bonus',
     num: true,
     sortValue: (e) => e.amountCents,
     render: (e) => (
@@ -254,7 +254,7 @@ export default function CommissionsPage() {
   return (
     <div>
       <PageHeader
-        title="Commissions"
+        title="Bonuses"
         sub="Monthly accruals per associate. Open a statement for the payroll-day paper trail."
       />
       <Stack>
@@ -290,7 +290,7 @@ export default function CommissionsPage() {
                 <tbody>
                   {report.bySalesperson.length === 0 && (
                     <TableEmpty colSpan={accrualCols.ordered.length}>
-                      No commission entries for {period}.
+                      No bonus entries for {period}.
                     </TableEmpty>
                   )}
                   {accrualCols.sorted.map((r) => (
@@ -476,8 +476,8 @@ function CommissionPlansCard() {
   return (
     <>
       <Card
-        title="Commission plans"
-        description="Commission accrues at completion only for salespeople who are on a plan. Nobody on a plan means nothing accrues."
+        title="Bonus plans"
+        description="Bonus accrues at completion only for salespeople who are on a plan. Nobody on a plan means nothing accrues."
         className="no-print"
       >
         {plans === null ? (
@@ -545,7 +545,7 @@ function CommissionPlansCard() {
       {members.length > 0 && (plans?.length ?? 0) > 0 && (
         <Card
           title="Who is on a plan"
-          description="Pick a plan per salesperson; leave blank for anyone not on commission."
+          description="Pick a plan per salesperson; leave blank for anyone not on a bonus plan."
           className="no-print"
         >
           <TableWrap>
@@ -567,7 +567,7 @@ function CommissionPlansCard() {
                         disabled={busy}
                         onChange={(e) => void assign(m.membershipId, e.target.value)}
                       >
-                        <option value="">Not on commission</option>
+                        <option value="">Not on a bonus plan</option>
                         {plans!.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.name}

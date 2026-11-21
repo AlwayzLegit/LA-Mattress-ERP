@@ -97,7 +97,7 @@ export function SummaryView({ report }: { report: Report }) {
 
       <Card
         title="By salesperson"
-        description="A split sale is credited by its split, the way commissions are."
+        description="A split sale is credited by its split, the way bonuses are."
         flush
         data-testid="ws-summary-people"
       >

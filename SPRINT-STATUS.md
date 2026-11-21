@@ -1,5 +1,16 @@
 # Sprint Status — STORIS Cutover
 
+## The ERP says Bonus, never Commission — 2026-11-20
+
+Owner: "we can not use commission wording, it must be bonus". Every place the word shows now says
+Bonus: the nav tab and page (Bonuses, Bonus plans, "Not on a bonus plan"), My Day's Bonus card and
+KPI, the order's Price/Spiff/Bonus Table, Order details ("Primary's share of bonus"), the sales
+analysis Bonus column, tooltip and CSV header, the written-sales note, the product cost note, order
+history ("bonus split"), the Order changes feed, permission names in the role editor, and API error
+messages. The page moved to `/bonuses`; `/commissions` redirects there and a tab hidden under the old
+path stays hidden. Internal names (tables, API paths, permission keys, code) still say commission —
+nobody sees them, and renaming them would need data migrations.
+
 ## Owner corrects the salesperson on any order; commission follows — 2026-11-19
 
 Owner (WE-10091): the order was delivered with no salesperson (the #284 bug), and Order details is

@@ -197,7 +197,7 @@ export function OrderHeaderDialog({
             This order is locked or finished: attribution, source, terminal, instructions and
             printed notes still save; the rest is read-only.
             {canCorrect &&
-              ' As the owner you can still correct the salespeople — give a reason; their commission moves with them.'}
+              ' As the owner you can still correct the salespeople — give a reason; their bonus moves with them.'}
           </Alert>
         )}
         <strong>Basic information</strong>
@@ -257,7 +257,7 @@ export function OrderHeaderDialog({
               ))}
             </Select>
           </Field>
-          <Field label="Primary's share of commission (%)">
+          <Field label="Primary's share of bonus (%)">
             <Input
               name="splitPct"
               type="number"

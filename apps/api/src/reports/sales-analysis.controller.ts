@@ -612,7 +612,7 @@ export class SalesAnalysisController {
         'Net delivered total $',
         'Cost $',
         'Profit $',
-        `Commission $${profitSharePct == null ? '' : ` (${profitSharePct}%)`}`,
+        `Bonus $${profitSharePct == null ? '' : ` (${profitSharePct}%)`}`,
         'Open merchandise $',
         'Open total $',
         'Open #',

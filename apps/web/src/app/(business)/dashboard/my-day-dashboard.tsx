@@ -322,7 +322,7 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
             }
           />
           <StatTile
-            label={`Commission · ${commission.period}`}
+            label={`Bonus · ${commission.period}`}
             data-testid="md-kpi-commission"
             value={<Money cents={commission.accruedCents} />}
             sub={
@@ -525,7 +525,7 @@ export default function MyDayDashboardView({ userName }: { userName: string }) {
 
         <div className="grid gap-4 lg:grid-cols-3">
           {/* Card 7 */}
-          <Card title={`Commission — ${commission.period}`} data-testid="md-commission">
+          <Card title={`Bonus — ${commission.period}`} data-testid="md-commission">
             <KeyValue
               rows={[
                 { label: 'Accrued this period', value: <Money cents={commission.accruedCents} /> },

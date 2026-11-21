@@ -670,7 +670,7 @@ export function EditProductForm({
 
         <Card
           title="Price & cost"
-          description="Cost is what one unit costs you from the vendor. It fills in new purchase orders and is the cost behind margin and commission. Stock already received keeps the cost it came in at."
+          description="Cost is what one unit costs you from the vendor. It fills in new purchase orders and is the cost behind margin and bonus. Stock already received keeps the cost it came in at."
           flush
           data-testid="edit-pricing"
         >

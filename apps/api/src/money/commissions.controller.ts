@@ -87,7 +87,7 @@ export class CommissionsController {
         .from(schema.commissionPlans)
         .where(eq(schema.commissionPlans.id, body.planId))
         .limit(1);
-      if (!plan) throw new NotFoundException('Commission plan not found');
+      if (!plan) throw new NotFoundException('Bonus plan not found');
     }
     const [m] = await this.db
       .update(schema.memberships)
@@ -225,7 +225,7 @@ export class CommissionsController {
     const membershipId = membershipIdParam ?? own?.id;
     if (!membershipId) throw new ForbiddenException('No membership in this business');
     if (membershipId !== own?.id && !tenant.permissions.has('commissions.view_all')) {
-      throw new ForbiddenException('commissions.view_all required for other statements');
+      throw new ForbiddenException('You can only see your own bonus statement');
     }
 
     const [member] = await this.db

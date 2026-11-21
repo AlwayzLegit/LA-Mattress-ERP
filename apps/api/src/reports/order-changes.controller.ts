@@ -254,7 +254,7 @@ export function describeChange(action: string, changes: Changes, ctx: DescribeCt
           moneyRelated: true,
           was: ctx.memberName(before.salespersonMembershipId),
           now: ctx.memberName(after.salespersonMembershipId) ?? 'unassigned',
-          reason: 'commission follows the new salesperson',
+          reason: 'bonus follows the new salesperson',
         };
       }
       if (
