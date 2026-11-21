@@ -271,7 +271,7 @@ export default function SalesAnalysisPage() {
                 placeholder="e.g. 10"
                 className="w-24 text-right"
                 aria-label="Profit share percentage"
-                title="Commission = profit × this percentage"
+                title="Bonus = profit × this percentage"
                 data-testid="sa-pct"
               />
             </Field>
@@ -328,7 +328,7 @@ export default function SalesAnalysisPage() {
                   {pctNum != null ? (
                     <>
                       {' '}
-                      · commission <Money cents={commission(t.profitCents) ?? 0} /> at {pctNum}%
+                      · bonus <Money cents={commission(t.profitCents) ?? 0} /> at {pctNum}%
                     </>
                   ) : null}
                 </>
@@ -413,7 +413,7 @@ export default function SalesAnalysisPage() {
                     <th className="num">Merch.</th>
                     <th className="num">Cost</th>
                     <th className="num">Profit</th>
-                    <th className="num">Commission</th>
+                    <th className="num">Bonus</th>
                     <th className="num">Open</th>
                     <th className="num">Goal</th>
                     <th className="num">To go</th>

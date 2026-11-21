@@ -348,7 +348,7 @@ export function OrderActionsMenu(props: ActionsMenuProps) {
           testId: 'act-scratchpad',
         },
         {
-          label: 'Price/Spiff/Commission Table',
+          label: 'Price/Spiff/Bonus Table',
           run: () => go({ kind: 'commission' }),
           testId: 'act-commission',
         },

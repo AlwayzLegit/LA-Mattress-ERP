@@ -204,7 +204,7 @@ export function CommissionTableDialog({
   const { data, error } = useFetch<CommissionTable>(`/v1/orders/${order.id}/commission-table`);
   const cell = (c: number | null) => (c == null ? '—' : money(c));
   return (
-    <ActionDialog title={`Price / Spiff / Commission — ${order.number}`} onClose={onClose} wide>
+    <ActionDialog title={`Price / Spiff / Bonus — ${order.number}`} onClose={onClose} wide>
       {error && <Alert tone="error">{error}</Alert>}
       {!data && !error && <LoadingRows rows={4} what="This order" />}
       {data && (
@@ -221,7 +221,7 @@ export function CommissionTableDialog({
                     } · ${sp.shareBps / 100}% share · basis ${cell(sp.basisCents)} → ${cell(
                       sp.commissionCents,
                     )}`
-                  : 'No commission plan assigned',
+                  : 'No bonus plan assigned',
               }))}
             />
           )}
@@ -277,8 +277,8 @@ export function CommissionTableDialog({
             </table>
           </TableWrap>
           <p className="muted" style={{ marginTop: 8 }}>
-            Projected the way commission accrues at completion (§9): the order total — minus catalog
-            cost on a margin plan — split by share, at today&apos;s plan rate, spread over the
+            Projected the way bonus accrues at completion (§9): the order total — minus catalog cost
+            on a margin plan — split by share, at today&apos;s plan rate, spread over the
             merchandise lines. Spiffs are not modeled.
           </p>
         </>

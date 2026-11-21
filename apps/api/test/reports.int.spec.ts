@@ -2123,7 +2123,7 @@ describe('Sales Analysis (owner 2026-11-04) — written, delivered, returned, go
       .set('Cookie', ownerCookie)
       .set('X-Business-Id', businessId)
       .expect(200);
-    expect(withPct.text).toContain('Commission $ (10%)');
+    expect(withPct.text).toContain('Bonus $ (10%)');
     expect(withPct.text).toContain('profit-share=10%');
   });
 });

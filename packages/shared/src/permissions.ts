@@ -91,9 +91,9 @@ export const PERMISSIONS = {
   'payment_plans.view': 'View layaway / in-house payment plans',
   'payment_plans.manage': 'Create plans and take installment payments',
 
-  'commissions.view_own': 'View own commission entries',
-  'commissions.view_all': 'View all commission entries',
-  'commissions.manage': 'Manage commission plans, approve and mark entries paid',
+  'commissions.view_own': 'View own bonus entries',
+  'commissions.view_all': 'View all bonus entries',
+  'commissions.manage': 'Manage bonus plans, approve and mark entries paid',
 
   'service_orders.view': 'View service orders',
   'service_orders.create': 'Intake service orders',
@@ -159,7 +159,7 @@ export const PERMISSIONS = {
   'warehouse.dashboard.view':
     'See the warehouse dashboard — inbound POs, the dock, load-out, pickups, transfers',
   'cashier.dashboard.view':
-    'See the My Day dashboard — own sales, drawer, call-backs, balances due, commission',
+    'See the My Day dashboard — own sales, drawer, call-backs, balances due, bonus',
 
   // Staff schedule + time clock (owner hand-off 2026-09-10, step 2).
   'schedule.view': 'See the staff schedule',
@@ -232,7 +232,7 @@ const GROUP_DEFS: { key: string; label: string; prefixes: string[] }[] = [
   { key: 'vendors', label: 'Vendors & payables', prefixes: ['vendors', 'vendor_invoices'] },
   { key: 'pricing', label: 'Discounts & gift cards', prefixes: ['discounts', 'gift_cards'] },
   { key: 'plans', label: 'Payment plans', prefixes: ['payment_plans'] },
-  { key: 'commissions', label: 'Commissions', prefixes: ['commissions'] },
+  { key: 'commissions', label: 'Bonuses', prefixes: ['commissions'] },
   { key: 'competitions', label: 'Sales competitions', prefixes: ['competitions'] },
   { key: 'service', label: 'Service', prefixes: ['service_orders'] },
   { key: 'reports', label: 'Reports', prefixes: ['reports'] },

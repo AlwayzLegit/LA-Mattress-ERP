@@ -28,6 +28,8 @@ const nextConfig = {
       { source: '/inventory/counts', destination: '/products/counts', permanent: true },
       { source: '/inventory/counts/:id', destination: '/products/counts/:id', permanent: true },
       { source: '/inventory/receive', destination: '/products/receive', permanent: true },
+      // Owner 2026-11-20: the ERP says Bonus, never Commission.
+      { source: '/commissions', destination: '/bonuses', permanent: true },
     ];
   },
   async rewrites() {
